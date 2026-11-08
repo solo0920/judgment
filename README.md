@@ -290,9 +290,26 @@ uv run judgment-import-judgments \
 - 匯入前會先將解壓縮後的每個 JSON 物件寫入 `parquet/raw_judgments/.../raw.parquet`；`raw_json` 保留原始文字內容，且包含未命中金融法規的判決，作為不可變的原始備份。
 - 未命中的判決不會寫入資料庫，但會保留在原始 Parquet 備份與原始 `.rar` 中。
 
-### DuckDB 候選篩選（Phase 1）
+### DuckDB 候選篩選（Phase 1 + Phase 2）
 
-PostgreSQL 匯入階段現在使用 DuckDB 掃描原始 Parquet：
+DuckDB 現在同時負責原始備份的前置候選篩選與 PostgreSQL 匯入的候選掃描；Python Regex 只做精確引用解析。
+
+原始 Parquet 建立流程：
+
+1. 邊解壓縮邊寫入 base raw Parquet（`raw_json` 保持原文）
+2. DuckDB 讀取 base Parquet，移除空白後以法規名稱做寬鬆候選篩選：
+   ```sql
+   WHERE regexp_matches(
+     regexp_replace(json_extract_string(raw_json, '$.JFULL'), '[\s\p{Z}\x{000B}\x{001C}-\x{001F}\x{0085}]+', '', 'g'),
+     '<法規名稱 alternation>'
+   )
+   ```
+3. Python 只對 DuckDB 候選執行精確的法規名稱＋條號解析
+4. 將 base 欄位與精確匹配結果合併成最終 `raw.parquet`
+
+DuckDB 候選 Regex 會把每個法規名稱字元展開成所有 NFKC 等價字元（例如 `U+F9BE` 會對應到「料」），避免判決全文使用相容異體字時漏掉候選；Python 端仍以 NFKC 正規化後的精確解析為準。
+
+PostgreSQL 匯入階段：
 
 ```sql
 SELECT ...
@@ -300,10 +317,11 @@ FROM read_parquet('raw.parquet')
 WHERE citation_count > 0 AND jid <> ''
 ```
 
-- DuckDB 負責 2,485,151 筆 Parquet 的大量掃描與候選篩選。
-- Python 只接收命中候選，組裝 `judgment_documents` row，不再重跑 2,485,151 筆 Regex。
-- `judgment_import_runs.scanned_count` 保留原始 Parquet 筆數；匯入摘要新增 `candidate_count`，代表 DuckDB 候選數。
-- 原始 Parquet 建立時仍由 Python Regex 產生 `matched_laws`、`citations`、`citation_count`；完整把第一層篩選移到 DuckDB（Phase 2）尚未實作，需重新 backfill 原始 Parquet。
+- DuckDB 掃描 2,485,151 筆原始 Parquet，只保留 `citation_count > 0` 且 `jid` 非空的精確命中資料。
+- Python 只接收這些候選，組裝 `judgment_documents` row，不再重跑 2,485,151 筆 Regex。
+- 原始 Parquet manifest 的 `candidate_count` 是 DuckDB 寬鬆預篩候選數；匯入摘要的 `candidate_count` 則是 PostgreSQL 匯入候選數（`citation_count > 0 AND jid <> ''`）。兩者定義不同。
+- DuckDB 預篩使用寬鬆的法規名稱比對，避免漏資料；Python 精確解析仍是最終判斷。例如只提到「銀行法」但沒有條號的判決會是 DuckDB 候選，但不會寫入 PostgreSQL。
+- 以 `202602--(20261016Update).rar` 為例：74,719 筆原始資料 → 44,253 筆 DuckDB 候選 → 22,593 筆精確命中。
 
 收錄欄位包含：案號、年度／字別／號碼、裁判日期、法院、正規化法院、案由、判決全文、PDF 連結、來源壓縮檔、命中法規清單、引用條號、引用數與內容雜湊。
 

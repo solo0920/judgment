@@ -11,12 +11,34 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 from uuid import uuid4
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 logger = logging.getLogger(__name__)
 
-RAW_SCHEMA_VERSION = 2
+RAW_SCHEMA_VERSION = 3
+MIN_READABLE_RAW_VERSION = 2
+CANDIDATE_WHITESPACE_PATTERN = r"[\s\p{Z}\x{000B}\x{001C}-\x{001F}\x{0085}]+"
+
+RAW_BASE_JUDGMENT_SCHEMA = pa.schema(
+    [
+        pa.field("source_archive", pa.string()),
+        pa.field("entry_index", pa.int64()),
+        pa.field("jid", pa.string()),
+        pa.field("jyear", pa.string()),
+        pa.field("jcase", pa.string()),
+        pa.field("jno", pa.string()),
+        pa.field("jdate", pa.string()),
+        pa.field("court", pa.string()),
+        pa.field("court_normalized", pa.string()),
+        pa.field("title", pa.string()),
+        pa.field("pdf_url", pa.string()),
+        pa.field("content_hash", pa.string()),
+        pa.field("full_text_length", pa.int32()),
+        pa.field("raw_json", pa.string()),
+    ]
+)
 
 RAW_JUDGMENT_SCHEMA = pa.schema(
     [
@@ -122,6 +144,15 @@ def find_reusable_raw_parquet(
     return None
 
 
+def _empty_match_fields() -> Dict[str, Any]:
+    return {
+        "matched_laws": [],
+        "matched_laws_text": "\n\n",
+        "citations": "[]",
+        "citation_count": 0,
+    }
+
+
 def write_archive_raw_parquet(
     archive: Path,
     data_dir: Path,
@@ -131,12 +162,17 @@ def write_archive_raw_parquet(
     batch_size: int = 5000,
     row_progress: Optional[RowProgress] = None,
     entry_transform: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    match_transform: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    candidate_regex: str = "",
+    match_progress: Optional[Callable[[int, int], None]] = None,
+    match_batch_size: int = 5000,
 ) -> Dict[str, Any]:
-    """Write every extracted JSON object to an immutable raw Parquet file.
+    """Write a raw Parquet backup with a DuckDB candidate prefilter.
 
-    ``raw_json`` is the exact JSON text read from the archive; it is not
-    re-serialized from the parsed object, so the backup does not rewrite or
-    normalize the source content.
+    The first pass writes only base fields and the exact ``raw_json`` text.
+    DuckDB then scans that file and applies a broad law-name regex. Python
+    receives only those candidates for exact citation parsing. The final file
+    keeps the existing query schema, so callers do not need to change.
     """
 
     try:
@@ -155,6 +191,7 @@ def write_archive_raw_parquet(
         / f"{now.strftime('%H%M%S')}-{token}"
     )
     destination = destination_dir / "raw.parquet"
+    base_path = destination_dir / "base.parquet"
     destination_dir.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(
         f".{destination.name}.{os.getpid()}.{uuid4().hex[:6]}.tmp"
@@ -162,12 +199,17 @@ def write_archive_raw_parquet(
 
     started = time.perf_counter()
     write_seconds = 0.0
+    match_seconds = 0.0
     rows = 0
-    writer: Optional[pq.ParquetWriter] = None
-    batch: list[Dict[str, Any]] = []
+    candidate_rows = 0
+    base_writer: Optional[pq.ParquetWriter] = None
+    final_writer: Optional[pq.ParquetWriter] = None
+    base_batch: list[Dict[str, Any]] = []
     try:
-        writer = pq.ParquetWriter(temporary, RAW_JUDGMENT_SCHEMA, compression="snappy")
-        allowed = set(RAW_JUDGMENT_SCHEMA.names)
+        base_writer = pq.ParquetWriter(
+            base_path, RAW_BASE_JUDGMENT_SCHEMA, compression="snappy"
+        )
+        allowed = set(RAW_BASE_JUDGMENT_SCHEMA.names)
         for entry_index, (obj, raw_json) in enumerate(entries, start=1):
             row = {
                 "source_archive": archive.name,
@@ -179,39 +221,128 @@ def write_archive_raw_parquet(
                 extra = entry_transform(obj)
                 if isinstance(extra, dict):
                     row.update(extra)
-            batch.append({key: value for key, value in row.items() if key in allowed})
+            base_batch.append(
+                {key: value for key, value in row.items() if key in allowed}
+            )
             rows += 1
-            if len(batch) >= max(1, int(batch_size)):
+            if len(base_batch) >= max(1, int(batch_size)):
                 write_started = time.perf_counter()
-                writer.write_table(
-                    pa.Table.from_pylist(batch, schema=RAW_JUDGMENT_SCHEMA)
+                base_writer.write_table(
+                    pa.Table.from_pylist(base_batch, schema=RAW_BASE_JUDGMENT_SCHEMA)
                 )
                 write_seconds += time.perf_counter() - write_started
-                batch = []
+                base_batch = []
                 if row_progress is not None:
                     row_progress(rows)
-        if batch:
+        if base_batch:
             write_started = time.perf_counter()
-            writer.write_table(pa.Table.from_pylist(batch, schema=RAW_JUDGMENT_SCHEMA))
+            base_writer.write_table(
+                pa.Table.from_pylist(base_batch, schema=RAW_BASE_JUDGMENT_SCHEMA)
+            )
             write_seconds += time.perf_counter() - write_started
-            batch = []
+            base_batch = []
         elif rows == 0:
-            writer.write_table(pa.Table.from_pylist([], schema=RAW_JUDGMENT_SCHEMA))
-        writer.close()
-        writer = None
+            base_writer.write_table(
+                pa.Table.from_pylist([], schema=RAW_BASE_JUDGMENT_SCHEMA)
+            )
+        base_writer.close()
+        base_writer = None
+
+        matches: Dict[int, Dict[str, Any]] = {}
+        match_started = time.perf_counter()
+        if match_transform is not None:
+            connection = duckdb.connect()
+            try:
+                where = ""
+                parameters: List[Any] = [str(base_path)]
+                if candidate_regex:
+                    where = (
+                        "WHERE regexp_matches("
+                        "regexp_replace(coalesce(json_extract_string(raw_json, '$.JFULL'), ''), "
+                        f"'{CANDIDATE_WHITESPACE_PATTERN}', '', 'g'), ?)"
+                    )
+                    parameters.append(candidate_regex)
+                count_row = connection.execute(
+                    f"SELECT count(*) FROM read_parquet(?) {where}",
+                    parameters,
+                ).fetchone()
+                candidate_rows = int(count_row[0] if count_row else 0)
+                cursor = connection.execute(
+                    f"""
+                    SELECT entry_index, raw_json
+                    FROM read_parquet(?)
+                    {where}
+                    ORDER BY entry_index
+                    """,
+                    parameters,
+                )
+                processed = 0
+                while True:
+                    candidate_batch = cursor.fetchmany(max(1, int(match_batch_size)))
+                    if not candidate_batch:
+                        break
+                    for entry_index, raw_json in candidate_batch:
+                        try:
+                            obj = json.loads(raw_json)
+                        except ValueError:
+                            continue
+                        if not isinstance(obj, dict):
+                            continue
+                        extra = match_transform(obj)
+                        if isinstance(extra, dict):
+                            matches[int(entry_index)] = extra
+                    processed += len(candidate_batch)
+                    if match_progress is not None:
+                        match_progress(processed, candidate_rows)
+            finally:
+                connection.close()
+        match_seconds = time.perf_counter() - match_started
+
+        final_writer = pq.ParquetWriter(
+            temporary, RAW_JUDGMENT_SCHEMA, compression="snappy"
+        )
+        with pq.ParquetFile(base_path) as base_file:
+            for batch in base_file.iter_batches(
+                batch_size=max(1, int(batch_size)),
+                columns=RAW_BASE_JUDGMENT_SCHEMA.names,
+            ):
+                final_rows = batch.to_pylist()
+                for row in final_rows:
+                    row.update(
+                        matches.get(
+                            int(row.get("entry_index") or 0),
+                            _empty_match_fields(),
+                        )
+                    )
+                write_started = time.perf_counter()
+                final_writer.write_table(
+                    pa.Table.from_pylist(final_rows, schema=RAW_JUDGMENT_SCHEMA)
+                )
+                write_seconds += time.perf_counter() - write_started
+        if rows == 0:
+            final_writer.write_table(
+                pa.Table.from_pylist([], schema=RAW_JUDGMENT_SCHEMA)
+            )
+        final_writer.close()
+        final_writer = None
         os.replace(temporary, destination)
+        try:
+            base_path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("failed to remove base raw parquet %s", base_path)
     except BaseException:
-        if writer is not None:
-            try:
-                writer.close()
-            except Exception:
-                logger.exception("failed to close raw parquet writer")
-            writer = None
-        if temporary.exists():
-            try:
-                temporary.unlink()
-            except OSError:
-                logger.exception("failed to remove temporary raw parquet %s", temporary)
+        for writer in (base_writer, final_writer):
+            if writer is not None:
+                try:
+                    writer.close()
+                except Exception:
+                    logger.exception("failed to close raw parquet writer")
+        for path in (temporary, base_path):
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    logger.exception("failed to remove temporary raw parquet %s", path)
         raise
 
     compressed_bytes = destination.stat().st_size if destination.exists() else 0
@@ -223,6 +354,7 @@ def write_archive_raw_parquet(
         "archive_size_bytes": size_bytes,
         "archive_mtime_ns": mtime_ns,
         "row_count": rows,
+        "candidate_count": candidate_rows,
         "compressed_bytes": compressed_bytes,
         "raw_path": str(destination),
         "run_token": token,
@@ -251,10 +383,12 @@ def write_archive_raw_parquet(
         "path": destination,
         "manifest_path": manifest_path,
         "rows": rows,
+        "candidate_rows": candidate_rows,
         "size_bytes": compressed_bytes,
         "reused": False,
         "duration_ms": duration_ms,
-        "write_ms": int(write_seconds * 1000),
+        "write_ms": int((write_seconds + match_seconds) * 1000),
+        "match_ms": int(match_seconds * 1000),
     }
 
 
@@ -294,7 +428,7 @@ def _latest_manifests(data_dir: Path) -> List[Dict[str, Any]]:
             continue
         if not isinstance(payload, dict):
             continue
-        if int(payload.get("version") or 0) < RAW_SCHEMA_VERSION:
+        if int(payload.get("version") or 0) < MIN_READABLE_RAW_VERSION:
             continue
         raw_path = manifest_path.parent / "raw.parquet"
         if not raw_path.is_file():
@@ -351,6 +485,7 @@ def count_raw_manifests(data_dir: Path) -> int:
 
 
 __all__ = [
+    "RAW_BASE_JUDGMENT_SCHEMA",
     "RAW_JUDGMENT_SCHEMA",
     "RAW_SCHEMA_VERSION",
     "count_raw_manifests",

@@ -14,6 +14,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Tuple
 
@@ -109,6 +110,47 @@ def load_law_list(path: Path) -> LawList:
 def build_citation_pattern(law_list: LawList) -> re.Pattern[str]:
     alternatives = "|".join(re.escape(name) for name in law_list.names)
     return re.compile(rf"({alternatives}){ARTICLE_PATTERN}")
+
+
+@lru_cache(maxsize=8)
+def _nfkc_variants(characters: str) -> Dict[str, Tuple[str, ...]]:
+    """Map each character to every code point that NFKC-normalizes to it."""
+
+    wanted = set(characters)
+    variants: Dict[str, List[str]] = {character: [] for character in wanted}
+    for code_point in range(0x110000):
+        candidate = chr(code_point)
+        normalized = unicodedata.normalize("NFKC", candidate)
+        if len(normalized) == 1 and normalized in variants:
+            variants[normalized].append(candidate)
+    return {key: tuple(values) for key, values in variants.items()}
+
+
+def build_candidate_regex(law_list: LawList) -> str:
+    """Build a broad DuckDB prefilter that still understands NFKC variants.
+
+    Python parses citations after NFKC normalization. A plain law-name regex
+    would miss compatibility ideographs (for example U+F9BE -> 料), so each
+    character is expanded to all code points with the same NFKC form.
+    """
+
+    characters = "".join(law_list.names)
+    if not characters:
+        return ""
+    variants = _nfkc_variants(characters)
+    alternatives = []
+    for name in law_list.names:
+        alternatives.append(
+            "".join(
+                "(?:"
+                + "|".join(
+                    re.escape(item) for item in variants.get(character, (character,))
+                )
+                + ")"
+                for character in name
+            )
+        )
+    return "|".join(alternatives)
 
 
 def extract_citations(full_text: str, pattern: re.Pattern[str]) -> CitationResult:
@@ -305,29 +347,34 @@ def _judgment_base_fields(
     }
 
 
-def _raw_judgment_fields(
+def _raw_base_fields(
     obj: Dict[str, Any],
     *,
     archive: Path,
-    pattern: re.Pattern[str],
 ) -> Dict[str, Any]:
     row = _judgment_base_fields(obj, archive=archive)
-    full_text = str(row.pop("full_text", ""))
-    citations: List[Dict[str, str]] = []
-    matched_laws: List[str] = []
-    if row["jid"] and full_text.strip():
-        citation_result = extract_citations(full_text, pattern)
-        matched_laws = list(citation_result.matched_laws)
-        citations = [dict(item) for item in citation_result.citations]
-    row.update(
-        {
-            "matched_laws": matched_laws,
-            "matched_laws_text": "\n" + "\n".join(matched_laws) + "\n",
-            "citations": json.dumps(citations, ensure_ascii=False),
-            "citation_count": len(citations),
-        }
-    )
+    row.pop("full_text", None)
     return row
+
+
+def _raw_match_fields(
+    obj: Dict[str, Any],
+    *,
+    pattern: re.Pattern[str],
+) -> Dict[str, Any]:
+    full_text = str(obj.get("JFULL") or "")
+    matched_laws: List[str] = []
+    citations: List[Dict[str, str]] = []
+    if str(obj.get("JID") or "").strip() and full_text.strip():
+        result = extract_citations(full_text, pattern)
+        matched_laws = list(result.matched_laws)
+        citations = [dict(item) for item in result.citations]
+    return {
+        "matched_laws": matched_laws,
+        "matched_laws_text": "\n" + "\n".join(matched_laws) + "\n",
+        "citations": json.dumps(citations, ensure_ascii=False),
+        "citation_count": len(citations),
+    }
 
 
 def _row_from_duckdb_candidate(
@@ -412,6 +459,7 @@ def import_judgments(
     source_list = Path(law_list_path or settings.judgment_law_list).expanduser().resolve()
     law_list = load_law_list(source_list)
     pattern = build_citation_pattern(law_list)
+    candidate_regex = build_candidate_regex(law_list)
 
     if archives is None:
         if not source_dir.is_dir():
@@ -685,15 +733,46 @@ def import_judgments(
                         message=f"已寫入 {raw_total_rows + written_rows:,} 筆原始 JSON。",
                     )
 
+                def on_match_progress(
+                    processed: int,
+                    total: int,
+                    *,
+                    archive=archive,
+                ) -> None:
+                    if state is None or state_run_id is None:
+                        return
+                    message = (
+                        f"DuckDB 候選 {processed:,}/{total:,}；"
+                        "Python 精析法規引用。"
+                    )
+                    state.update_archive_stage(
+                        state_run_id,
+                        archive.name,
+                        "raw_parquet",
+                        status="running",
+                        message=message,
+                    )
+                    state.update_stage(
+                        state_run_id,
+                        "raw_parquet",
+                        duration_ms=raw_total_ms,
+                        message=f"{archive.name}：{message}",
+                    )
+
                 raw_result = write_archive_raw_parquet(
                     archive,
                     raw_data_dir,
                     iter_archive_json_with_raw(archive, progress=on_raw_bytes),
                     run_token=str(run_id) if run_id else "",
                     row_progress=on_raw_rows,
-                    entry_transform=lambda obj, archive=archive: _raw_judgment_fields(
-                        obj, archive=archive, pattern=pattern
+                    entry_transform=lambda obj, archive=archive: _raw_base_fields(
+                        obj, archive=archive
                     ),
+                    match_transform=lambda obj: _raw_match_fields(
+                        obj, pattern=pattern
+                    ),
+                    candidate_regex=candidate_regex,
+                    match_progress=on_match_progress,
                 )
                 raw_result["bytes_read"] = archive_bytes_read or int(
                     archive_total_bytes or 0

@@ -327,3 +327,73 @@ def test_raw_only_backs_up_without_filtering_or_database(tmp_path: Path) -> None
         assert session.scalar(select(func.count()).select_from(JudgmentDocument)) == 0
         assert session.scalar(select(func.count()).select_from(JudgmentImportRun)) == 0
     engine.dispose()
+
+
+@pytest.mark.skipif(shutil.which("bsdtar") is None, reason="bsdtar not installed")
+def test_raw_phase2_duckdb_prefilter_then_python_exact_match(tmp_path: Path) -> None:
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n個人資料保護法\n", encoding="utf-8")
+    archive = tmp_path / "202604--phase2.rar"
+    _write_archive(
+        archive,
+        [
+            _judgment("P1", "臺灣臺北地方法院民事判決\n依銀行法規定辦理。"),
+            _judgment("P2", "臺灣臺北地方法院民事判決\n依銀行法第1條規定。"),
+            _judgment(
+                "P3",
+                "臺灣臺北地方法院民事判決\n依個人資\uf9be保護法第19條規定。",
+            ),
+            _judgment(
+                "P4",
+                "臺灣臺北地方法院民事判決\n依個人資\u2009料保護法第20條規定。",
+            ),
+        ],
+    )
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+
+    summary = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        raw_only=True,
+        session_factory=session_factory,
+    )
+
+    raw_path = Path(summary["raw_parquet_paths"][0])
+    manifest = json.loads((raw_path.parent / "manifest.json").read_text())
+    assert summary["raw_parquet_rows"] == 4
+    assert manifest["version"] == 3
+    assert manifest["candidate_count"] == 4
+
+    rows = {
+        row["jid"]: row
+        for row in pq.read_table(raw_path).to_pylist()
+    }
+    assert rows["P1"]["matched_laws"] == []
+    assert rows["P1"]["citation_count"] == 0
+    assert rows["P2"]["matched_laws"] == ["銀行法"]
+    assert rows["P2"]["citation_count"] == 1
+    assert rows["P3"]["matched_laws"] == ["個人資料保護法"]
+    assert rows["P3"]["citation_count"] == 1
+    assert rows["P4"]["matched_laws"] == ["個人資料保護法"]
+    assert rows["P4"]["citation_count"] == 1
+    engine.dispose()

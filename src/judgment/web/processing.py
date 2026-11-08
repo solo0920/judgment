@@ -782,6 +782,11 @@ def _branch_stage_nodes(
                     raw_stats.append(
                         {"label": "最新備份", "value": f"{latest_rows:,} 筆"}
                     )
+                latest_candidates = _safe_int(latest_raw.get("candidate_count"))
+                if latest_candidates is not None:
+                    raw_stats.append(
+                        {"label": "最新 DuckDB 候選", "value": f"{latest_candidates:,} 筆"}
+                    )
                 raw_rows = _safe_int(
                     (focus_run or {}).get("counts", {}).get("raw_parquet_rows")
                 )

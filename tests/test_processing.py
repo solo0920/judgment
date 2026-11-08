@@ -469,6 +469,47 @@ def test_snapshot_reports_raw_parquet_backups(
     assert {"label": "最新備份", "value": "123 筆"} in raw_stage["stats"]
 
 
+def test_snapshot_reports_duckdb_candidate_count(
+    tmp_path: Path, monkeypatch, session_factory
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    settings = _settings(tmp_path)
+    raw_dir = (
+        settings.judgment_data_dir
+        / "parquet"
+        / "raw_judgments"
+        / "202601--demo"
+        / "20261108"
+        / "120000-demo"
+    )
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "raw.parquet").write_bytes(b"stub")
+    (raw_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "row_count": 123,
+                "candidate_count": 90,
+                "created_at": "2026-11-08T12:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _add_judgment(session_factory, source_archive="202601.rar")
+
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+
+    judgment = snapshot["branches"][0]
+    raw_stage = next(stage for stage in judgment["stages"] if stage["key"] == "raw_parquet")
+    assert {"label": "最新備份", "value": "123 筆"} in raw_stage["stats"]
+    assert {"label": "最新 DuckDB 候選", "value": "90 筆"} in raw_stage["stats"]
+
+
 def test_raw_only_state_does_not_mark_archive_as_imported(
     tmp_path: Path, monkeypatch, session_factory
 ) -> None:
