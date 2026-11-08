@@ -12,6 +12,7 @@ from .config import Settings
 from .embeddings import EmbeddingError, OllamaEmbedder
 from .judgment_index import index_coverage
 from .law_rag import (
+    build_insurance_responsibility_framework,
     extract_stat_entity,
     is_article_count_question,
     is_citation_stats_question,
@@ -351,8 +352,9 @@ def _build_llm_prompt(
         f"問題：{question}\n\n參考資料（法規、命令與判決）：\n"
         + "\n\n".join(blocks)
         + "\n\n請直接回答問題，不要重複參考資料原文、案號清單或標題；"
-        "使用 2 到 3 句繁體中文，每個結論後標註對應的 [n]，"
-        "並提醒這不是法律意見。"
+        "使用 2 到 3 句繁體中文，每個結論後標註對應的 [n]；"
+        "[n] 是參考資料來源編號，不是法律條號，條號請寫「第15條」。"
+        "不要自行創造多個問題，並提醒這不是法律意見。"
     )
 
 
@@ -363,14 +365,23 @@ def generate_answer_with_model(
     question: str,
     contexts: Sequence[Dict[str, Any]],
     timeout: Optional[float],
+    strict: bool = False,
 ) -> str:
     """Generate one grounded answer with an explicit model and timeout.
 
     Test mode passes ``timeout=None`` so a slow local model is not cut off.
+    ``strict`` is used for one retry when the first answer omitted citation
+    markers.
     """
     if not settings.llm_url or not model:
         raise RuntimeError("LLM_URL 或 LLM_MODEL 未設定")
     user_prompt = _build_llm_prompt(question=question, contexts=contexts)
+    system_prompt = SYSTEM_PROMPT
+    if strict:
+        system_prompt += (
+            " 你上一次的回答缺少有效引用標記；這次每個結論後都必須加上 "
+            "對應的 [n]，不得省略，也不得使用未提供的來源。"
+        )
     with trace_segment(
         "rag.llm_request",
         module=__name__,
@@ -392,7 +403,7 @@ def generate_answer_with_model(
             json={
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 "stream": False,
@@ -433,6 +444,7 @@ def _generate_answer(
     settings: Settings,
     question: str,
     contexts: Sequence[Dict[str, Any]],
+    strict: bool = False,
 ) -> str:
     if not settings.llm_url or not settings.llm_model:
         raise RuntimeError("LLM_URL 或 LLM_MODEL 未設定")
@@ -442,6 +454,7 @@ def _generate_answer(
         question=question,
         contexts=contexts,
         timeout=settings.llm_timeout_seconds,
+        strict=strict,
     )
 
 
@@ -766,6 +779,12 @@ def answer_question(
 
     assign_law_indexes(law_sources, start=len(citations) + 1)
     law_answer = _law_answer_summary(law_sources)
+    law_framework = build_insurance_responsibility_framework(
+        question=question,
+        session_factory=session_factory,
+        law_data_dir=settings.law_data_dir,
+        law_sources=law_sources,
+    )
     law_contexts = [
         {**source, "text": law_source_text(source)} for source in law_sources
     ]
@@ -773,14 +792,23 @@ def answer_question(
     citation_total = len(law_sources) + len(citations)
     llm_configured = bool(settings.llm_url and settings.llm_model)
     if llm_configured:
-        try:
-            answer = _generate_answer(
-                settings=settings,
-                question=question,
-                contexts=contexts,
-            )
-            if not _valid_citation_markers(answer, citation_total):
-                raise RuntimeError("LLM 回答缺少有效引用標記")
+        answer: Optional[str] = None
+        last_error: Optional[Exception] = None
+        for strict in (False, True):
+            try:
+                candidate = _generate_answer(
+                    settings=settings,
+                    question=question,
+                    contexts=contexts,
+                    strict=strict,
+                )
+                if not _valid_citation_markers(candidate, citation_total):
+                    raise RuntimeError("LLM 回答缺少有效引用標記")
+                answer = candidate
+                break
+            except Exception as exc:
+                last_error = exc
+        if answer is not None:
             status = "operational"
             if law_sources and citations:
                 notice = (
@@ -797,11 +825,13 @@ def answer_question(
                     "回答只根據檢索到的判決片段生成，引用編號可對應下方判決。"
                     "這不是法律意見。"
                 )
-        except Exception as exc:
+        else:
             answer = _retrieval_answer(citations, law_sources)
             status = "retrieval_only"
             notice = (
-                f"LLM 無法產生可驗證的回答（{exc.__class__.__name__}: {exc}），"
+                "LLM 無法產生可驗證的回答"
+                f"（{last_error.__class__.__name__ if last_error else 'Error'}: "
+                f"{last_error or '未知錯誤'}），"
                 "已改為只顯示檢索結果，不生成推測內容。"
             )
     else:
@@ -822,6 +852,7 @@ def answer_question(
         "judgments": citations,
         "law_sources": law_sources,
         "law_answer": law_answer,
+        "law_framework": law_framework,
         "matched_terms": terms,
         "answer_source": "llm" if llm_configured and status == "operational" else "retrieval",
         "llm_model": settings.llm_model if llm_configured else None,

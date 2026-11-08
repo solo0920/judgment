@@ -423,20 +423,71 @@ function renderAnswer(question, payload, processHtml = "") {
     .join(" · ");
   const structuredAnswer = payload.answer_source === "structured";
   const lawAnswer = String(payload.law_answer || "").trim();
-  const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer;
+  const framework = payload.law_framework || null;
+  const frameworkRows = Array.isArray(framework?.rows) ? framework.rows : [];
+  const frameworkSources = Array.isArray(framework?.sources)
+    ? framework.sources
+    : [];
+  const hasFramework = frameworkRows.length > 0;
+  const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer && !hasFramework;
   const llmBlockTitle =
     payload.answer_source === "llm" ? "LLM 綜合回答" : "檢索結果摘要";
-  const modelChip = llmModel
-    ? `<span class="answer-model" title="${escapeHtml(modelTitle)}">${icon(
-        "brain",
-        11,
-      )}${escapeHtml(llmModel)}</span>`
-    : structuredAnswer
-      ? `<span class="answer-model" title="由 PostgreSQL metadata、Parquet 條文與判決引用統計直接整理">${icon(
-          "database",
+  const frameworkBlock = hasFramework
+    ? `<div class="answer-block law-framework-block">
+        <div class="answer-block-head">
+          <span>${escapeHtml(framework.title || "相關法規的責任架構")}</span>
+          <span>${frameworkRows.length} 條</span>
+        </div>
+        <div class="table-wrap law-framework-table-wrap">
+          <table class="data-table is-compact law-framework-table">
+            <thead>
+              <tr><th scope="col">法規</th><th scope="col">條文</th><th scope="col">規範重點</th></tr>
+            </thead>
+            <tbody>
+              ${frameworkRows
+                .map(
+                  (row) => `<tr>
+                    <td>${escapeHtml(row.law_name || "—")}</td>
+                    <td class="cell-number">${escapeHtml(row.article_no || "—")}</td>
+                    <td>${escapeHtml(row.focus || "—")}</td>
+                  </tr>`,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+        ${
+          frameworkSources.length
+            ? `<div class="law-framework-sources">
+                <span>法規來源</span>
+                ${frameworkSources
+                  .map(
+                    (source) => `<span class="chip">${escapeHtml(
+                      source.law_name || source,
+                    )}${
+                      source && source.index !== null && source.index !== undefined
+                        ? ` [${escapeHtml(source.index)}]`
+                        : ""
+                    }</span>`,
+                  )
+                  .join("")}
+              </div>`
+            : ""
+        }
+      </div>`
+    : "";
+  const modelChip =
+    payload.answer_source === "llm" && llmModel
+      ? `<span class="answer-model" title="${escapeHtml(modelTitle)}">${icon(
+          "brain",
           11,
-        )}法規資料庫</span>`
-      : "";
+        )}${escapeHtml(llmModel)}</span>`
+      : structuredAnswer
+        ? `<span class="answer-model" title="由 PostgreSQL metadata、Parquet 條文與判決引用統計直接整理">${icon(
+            "database",
+            11,
+          )}法規資料庫</span>`
+        : "";
   const testRunBlock = testRun
     ? `<div class="test-run-summary">
         <div class="test-run-summary-head">
@@ -466,6 +517,7 @@ function renderAnswer(question, payload, processHtml = "") {
       ${processHtml}
     </div>
     <div class="answer-body">
+      ${frameworkBlock}
       ${
         showLawAnswer
           ? `<div class="answer-block law-answer-block">
@@ -479,7 +531,7 @@ function renderAnswer(question, payload, processHtml = "") {
       }
       <div class="answer-block">
         ${
-          showLawAnswer
+          showLawAnswer || hasFramework
             ? `<div class="answer-block-head">
                 <span>${escapeHtml(llmBlockTitle)}</span>
                 <span>${escapeHtml(modelChip ? llmModel || "structured" : "retrieval")}</span>

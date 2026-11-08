@@ -371,6 +371,71 @@ def select_law_articles(
     return selected
 
 
+def build_insurance_responsibility_framework(
+    *,
+    question: str,
+    session_factory,
+    law_data_dir: Path,
+    law_sources: Sequence[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Build a curated responsibility table for insurance sales questions.
+
+    The table is only emitted when the question is about insurance sales
+    conduct and the required articles exist in the current law Parquet. It
+    does not infer legal conclusions beyond the listed provisions.
+    """
+
+    if not is_insurance_responsibility_question(question):
+        return None
+    records = _records_by_names(session_factory, _INSURANCE_RESPONSIBILITY_SOURCES)
+    contents = load_law_contents(law_data_dir, records)
+    by_name = {record.law_name: record for record in records}
+    source_index = {
+        str(source.get("law_name") or ""): source.get("index")
+        for source in law_sources
+    }
+    rows: List[Dict[str, Any]] = []
+    for law_name, article_no, focus in _INSURANCE_RESPONSIBILITY_RULES:
+        record = by_name.get(law_name)
+        if record is None:
+            continue
+        content = contents.get((record.source_type, record.law_name)) or {}
+        target = _article_key(article_no)
+        article = next(
+            (
+                item
+                for item in (content.get("law_articles") or [])
+                if _article_key(item.get("article_no")) == target
+            ),
+            None,
+        )
+        if article is None:
+            continue
+        rows.append(
+            {
+                "law_name": law_name,
+                "article_no": article.get("article_no") or article_no,
+                "focus": focus,
+                "index": source_index.get(law_name),
+            }
+        )
+    if not rows:
+        return None
+    sources = [
+        {
+            "law_name": name,
+            "index": source_index.get(name),
+        }
+        for name in _INSURANCE_RESPONSIBILITY_SOURCES
+        if name in by_name
+    ]
+    return {
+        "title": "相關法規的責任架構",
+        "rows": rows,
+        "sources": sources,
+    }
+
+
 def _source_label(source_type: str) -> str:
     return _SOURCE_LABELS.get(str(source_type or ""), "法規")
 
@@ -494,6 +559,44 @@ LAW_TERM_EXPANSIONS = {
     "產險": ["財產保險", "保險法"],
     "證券營業員": ["證券營業員", "證券業務員"],
 }
+
+_INSURANCE_RESPONSIBILITY_TERMS = (
+    "業務員",
+    "招攬",
+    "不當招攬",
+    "適合度",
+    "風險揭露",
+    "責任",
+)
+
+_INSURANCE_RESPONSIBILITY_RULES = (
+    ("保險業務員管理規則", "第15條", "業務員招攬及公司連帶責任"),
+    ("保險業務員管理規則", "第19條", "不當招攬及停止招攬"),
+    ("金融消費者保護法", "第8條", "禁止不實、詐欺、隱匿招攬"),
+    ("金融消費者保護法", "第9條", "商品適合度義務"),
+    ("金融消費者保護法", "第10條", "商品說明及風險揭露"),
+    ("金融消費者保護法", "第11條", "損害賠償責任"),
+    ("金融消費者保護法", "第11-3條", "懲罰性賠償"),
+)
+
+_INSURANCE_RESPONSIBILITY_SOURCES = (
+    "保險法",
+    "金融消費者保護法",
+    "保險業務員管理規則",
+)
+
+
+def is_insurance_responsibility_question(question: str) -> bool:
+    text = _normalize(question)
+    return "保險" in text and any(
+        term in text for term in _INSURANCE_RESPONSIBILITY_TERMS
+    )
+
+
+def responsibility_related_law_names(question: str) -> List[str]:
+    if not is_insurance_responsibility_question(question):
+        return []
+    return ["金融消費者保護法", "保險業務員管理規則"]
 
 _RELATED_LAW_RE = re.compile(r"哪些|那些|相關|有關|列出|清單")
 
@@ -726,6 +829,17 @@ def law_sources_for_question(
             records = find_related_law_records(
                 session_factory, question, limit=effective_limit
             )
+
+    related_names = responsibility_related_law_names(question)
+    if related_names:
+        existing_names = {record.law_name for record in records}
+        extras = _records_by_names(
+            session_factory,
+            [name for name in related_names if name not in existing_names],
+        )
+        if extras:
+            records = list(records) + extras
+            effective_limit = max(effective_limit, len(records))
     if not records:
         return []
     contents = load_law_contents(law_data_dir, records)

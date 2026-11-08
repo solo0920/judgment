@@ -21,6 +21,10 @@ from judgment.rag import (
     answer_question,
     extract_excerpt,
 )
+from judgment.law_rag import (
+    build_insurance_responsibility_framework,
+    law_sources_for_question,
+)
 
 
 def _settings(**overrides) -> Settings:
@@ -329,6 +333,75 @@ def test_llm_answer_includes_law_retrieval_summary(monkeypatch, tmp_path: Path) 
     assert payload["answer_source"] == "llm"
 
 
+def test_insurance_responsibility_framework(monkeypatch, tmp_path: Path) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    question = "保險法對於業務員不當招攬的責任規定？"
+    contents = {
+        ("order", "保險業務員管理規則"): {
+            "law_articles": [
+                {"article_no": "第 15 條", "article_content": "招攬連帶責任"},
+                {"article_no": "第 19 條", "article_content": "不當招攬處分"},
+            ]
+        },
+        ("law", "金融消費者保護法"): {
+            "law_articles": [
+                {"article_no": "第 8 條", "article_content": "不實招攬"},
+                {"article_no": "第 9 條", "article_content": "適合度"},
+                {"article_no": "第 10 條", "article_content": "說明揭露"},
+                {"article_no": "第 11 條", "article_content": "損害賠償"},
+                {"article_no": "第 11-3 條", "article_content": "懲罰性賠償"},
+            ]
+        },
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    sources = law_sources_for_question(
+        session_factory, tmp_path, question
+    )
+    assert [source["law_name"] for source in sources] == [
+        "保險法",
+        "金融消費者保護法",
+        "保險業務員管理規則",
+    ]
+    for index, source in enumerate(sources, start=1):
+        source["index"] = index
+
+    framework = build_insurance_responsibility_framework(
+        question=question,
+        session_factory=session_factory,
+        law_data_dir=tmp_path,
+        law_sources=sources,
+    )
+    assert framework is not None
+    assert framework["title"] == "相關法規的責任架構"
+    assert [row["article_no"] for row in framework["rows"]] == [
+        "第 15 條",
+        "第 19 條",
+        "第 8 條",
+        "第 9 條",
+        "第 10 條",
+        "第 11 條",
+        "第 11-3 條",
+    ]
+    assert [row["focus"] for row in framework["rows"]] == [
+        "業務員招攬及公司連帶責任",
+        "不當招攬及停止招攬",
+        "禁止不實、詐欺、隱匿招攬",
+        "商品適合度義務",
+        "商品說明及風險揭露",
+        "損害賠償責任",
+        "懲罰性賠償",
+    ]
+    assert framework["sources"] == [
+        {"law_name": "保險法", "index": 1},
+        {"law_name": "金融消費者保護法", "index": 2},
+        {"law_name": "保險業務員管理規則", "index": 3},
+    ]
+
+
 def test_answer_question_without_qdrant_degrades_to_preview() -> None:
     session_factory = _session_factory()
     _seed_judgments(session_factory)
@@ -383,6 +456,13 @@ def _seed_laws(session_factory) -> None:
                         "1.中華民國二十年三月二十八日國民政府制定公布全文 51 條\n"
                         "2.中華民國三十六年九月一日修正公布全文 119 條"
                     ),
+                    **common,
+                ),
+                LawDocument(
+                    source_type="law",
+                    law_key="FCP",
+                    law_name="金融消費者保護法",
+                    article_count=30,
                     **common,
                 ),
                 LawDocument(
