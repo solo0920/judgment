@@ -1431,6 +1431,141 @@ samp {
   font-size: 10.5px;
 }
 
+/* --------------------------------------------------------- data quality */
+.quality-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quality-check {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.quality-check.is-ok {
+  border-left-color: var(--success);
+}
+
+.quality-check.is-danger {
+  border-left-color: var(--danger);
+}
+
+.quality-check.is-warn {
+  border-left-color: var(--warning);
+}
+
+.quality-check.is-info {
+  border-left-color: var(--info);
+}
+
+.quality-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quality-check-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quality-check-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.quality-check-value strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.quality-check-value span {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.quality-check-value em {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.quality-check-desc {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.quality-check-track {
+  height: 4px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--surface-2);
+}
+
+.quality-check-track span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--success);
+}
+
+.quality-check.is-danger .quality-check-track span {
+  background: var(--danger);
+}
+
+.quality-check.is-warn .quality-check-track span {
+  background: var(--warning);
+}
+
+.quality-check.is-info .quality-check-track span {
+  background: var(--info);
+}
+
+.quality-dist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quality-archive-table .cell-jid {
+  max-width: 260px;
+  white-space: normal;
+}
+
+.quality-archive-table .cell-jid .chip {
+  margin-left: 6px;
+}
+
+@media (max-width: 980px) {
+  .quality-checks,
+  .quality-dist-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quality-coverage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* ------------------------------------------------------------ empty state */
 .empty-state {
   display: flex;

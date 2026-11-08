@@ -468,6 +468,7 @@ def test_static_console_is_served(web_client) -> None:
     assert 'id="header-status"' in page.text
     assert 'role="switch"' in page.text
     assert 'data-route="performance"' in page.text
+    assert 'data-route="quality"' in page.text
 
     css = web_client.get("/assets/styles.css")
     assert css.status_code == 200
@@ -512,6 +513,25 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
         "data",
         "ai",
     ]
+
+
+def test_quality_endpoint_reports_raw_parquet(web_client) -> None:
+    response = web_client.get("/api/quality")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["available"] is True
+    assert payload["source"]["engine"] == "duckdb"
+    assert payload["source"]["raw_files"] == 1
+    assert payload["totals"]["rows"] == 2
+    assert payload["totals"]["unique_jids"] == 2
+    assert payload["totals"]["matched_rows"] == 2
+    assert len(payload["archives"]) == 1
+    assert payload["archives"][0]["archive"] == "202601.rar"
+    assert payload["coverage"]["postgres_judgments"] == 2
+    assert payload["coverage"]["postgres_diff"] == 0
+    assert payload["status"] == "operational"
+    assert any("v2" in warning for warning in payload["warnings"])
 
 
 def test_catalog_exposes_law_and_judgment_categories(web_client) -> None:
@@ -1357,6 +1377,7 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     assert '<script type="module"' not in index
     assert 'href="/assets/' not in index
     assert 'src="/assets/' not in index
+    assert 'data-route="quality"' in index
 
     config = (frontend / "config.js").read_text(encoding="utf-8")
     assert "window.JUDGMENT_CONFIG" in config

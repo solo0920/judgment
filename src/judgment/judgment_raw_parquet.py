@@ -448,6 +448,10 @@ def _latest_manifests(data_dir: Path) -> List[Dict[str, Any]]:
     ]
 
 
+def latest_raw_manifests(data_dir: Path) -> List[Dict[str, Any]]:
+    return _latest_manifests(data_dir)
+
+
 def raw_judgment_files(data_dir: Path) -> List[Path]:
     return [item["path"] for item in _latest_manifests(data_dir)]
 
@@ -492,6 +496,7 @@ __all__ = [
     "find_reusable_raw_parquet",
     "iter_raw_judgment_json",
     "latest_raw_manifest",
+    "latest_raw_manifests",
     "raw_judgment_files",
     "raw_judgment_totals",
     "raw_judgment_root",

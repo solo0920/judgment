@@ -45,6 +45,7 @@ from .processing import (
     build_processing_plan,
     build_processing_snapshot,
 )
+from .quality import build_quality_snapshot
 from .query import (
     get_judgment_detail,
     get_law_detail,
@@ -177,6 +178,7 @@ def create_app(
             not path.startswith("/api/")
             or path.startswith("/api/performance")
             or path.startswith("/api/processing")
+            or path.startswith("/api/quality")
             or path.startswith("/api/test-")
             or path in {"/api/health", "/api/docs", "/api/openapi.json"}
             or request.method == "OPTIONS"
@@ -316,6 +318,19 @@ def create_app(
             return app.state.processing_manager.stop_update()
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/quality")
+    def quality_snapshot() -> Dict[str, Any]:
+        try:
+            return build_quality_snapshot(
+                settings=settings,
+                session_factory=app.state.session_factory,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"資料品質掃描失敗：{exc.__class__.__name__}: {exc}",
+            ) from exc
 
     @app.get("/api/catalog")
     def catalog() -> Dict[str, Any]:

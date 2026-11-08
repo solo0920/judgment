@@ -17,12 +17,14 @@ import * as ragPage from "./pages/rag.js";
 import * as dataPage from "./pages/data.js";
 import * as performancePage from "./pages/performance.js";
 import * as processingPage from "./pages/processing.js";
+import * as qualityPage from "./pages/quality.js";
 import * as statusPage from "./pages/status.js";
 
 const DEFAULT_ROUTE = "rag";
 const ROUTES = {
   rag: { page: ragPage, title: "RAG 提問 · Judgment RAG Console" },
   data: { page: dataPage, title: "資料庫查詢 · Judgment RAG Console" },
+  quality: { page: qualityPage, title: "資料品質 · Judgment RAG Console" },
   performance: { page: performancePage, title: "效能報表 · Judgment RAG Console" },
   processing: { page: processingPage, title: "資料處理 · Judgment RAG Console" },
   status: { page: statusPage, title: "系統狀態 · Judgment RAG Console" },

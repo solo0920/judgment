@@ -445,6 +445,13 @@ export const api = {
     });
   },
 
+  quality() {
+    return request("/api/quality", {
+      timeout: 180000,
+      trackClient: false,
+    });
+  },
+
   processing() {
     return request("/api/processing", {
       timeout: 45000,

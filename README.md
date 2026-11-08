@@ -323,6 +323,20 @@ WHERE citation_count > 0 AND jid <> ''
 - DuckDB 預篩使用寬鬆的法規名稱比對，避免漏資料；Python 精確解析仍是最終判斷。例如只提到「銀行法」但沒有條號的判決會是 DuckDB 候選，但不會寫入 PostgreSQL。
 - 以 `202602--(20261016Update).rar` 為例：74,719 筆原始資料 → 44,253 筆 DuckDB 候選 → 22,593 筆精確命中。
 
+### DuckDB 資料品質與統計（Phase 3）
+
+`GET /api/quality` 會用 DuckDB 掃描最新 manifest 指向的原始 `raw.parquet`，只讀取查詢欄位，不重新解析全文：
+
+- 總量與唯一性：原始筆數、唯一 JID、重複 JID、缺少 JID。
+- 內容品質：全文為空、全文過短、缺少內容雜湊、重複內容雜湊。
+- 中繼資料：缺少法院、法院未正規化、缺少裁判日期、日期格式異常、缺少案由、缺少 PDF。
+- 引用一致性：`citation_count > 0` 但沒有命中法規，或 `citation_count = 0` 但引用陣列非空。
+- 分布：法院、裁判年份、熱門法規（提及判決數）、熱門案由。
+- 檔案明細：每個 archive 的筆數、DuckDB 候選數、精確命中、命中率、過短、缺少中繼資料、重複內容與日期範圍。
+- 收錄覆蓋：PostgreSQL `judgment_documents` 筆數與 `judgment_vector_index` 覆蓋率；數值即時查詢，不從 Parquet 推估。
+
+品質頁面位於 `#/quality`，會標示每項檢查的通過／注意／需處理狀態與比例；資料不足或查詢失敗時顯示「—」或錯誤訊息，不以推測值補齊。實測 24 個 archive（2,485,151 筆）DuckDB 掃描約 0.6–0.8 秒。
+
 收錄欄位包含：案號、年度／字別／號碼、裁判日期、法院、正規化法院、案由、判決全文、PDF 連結、來源壓縮檔、命中法規清單、引用條號、引用數與內容雜湊。
 
 ### 原始判決 Parquet 與原判決連結
@@ -377,6 +391,7 @@ uv run judgment-normalize-courts --all
 | --- | --- | --- |
 | `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、LLM 引用回答、索引覆蓋率、判決引用與瀏覽器端提問紀錄。 |
 | `#/data` | 資料庫查詢 | 先切換「法規命令／判決」，再選擇資料庫；側欄提供「查詢／Schema」切換，Schema 模式列出該資料庫的資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
+| `#/quality` | 資料品質 | DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。無法取得的數值顯示「—」。 |
 | `#/performance` | 效能報表 | 上方測試流程圖表顯示目前／歷史模型測試進度；中段「索引效能」面板顯示當次執行筆數、平均每秒筆數、耗時、平均每批時間與吞吐／時間組成／進度圖表；下方記錄每次執行按鈕的完整 Flow、模組、函式、參數、模型與區段耗時；可展開時間軸、篩選、分頁與匯出。 |
 | `#/processing` | 資料處理 | 判決、法規、命令三條即時流程圖；判決壓縮檔逐檔進度；RAR 解壓縮、原始 Parquet 備份、金融法規篩選、PostgreSQL metadata、Qdrant 各階段子進度與顏色；依實際階段耗時組成的整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
 | `#/status` | 系統狀態 | 核心與 AI 服務健康、判決索引覆蓋率、資料量、前後端架構圖、API 端點、最新版本與最近下載執行。 |
@@ -388,6 +403,7 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/health` | 存活檢查，回傳版本。 |
 | `GET` | `/api/status` | 服務狀態、資料筆數、架構、最近版本與下載執行。 |
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
+| `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
 | `GET` | `/api/law` | 依 `law_key`（可加 `source_type`）取得單一法規的 metadata、沿革、附件與最新 Parquet 條文。 |
 | `GET` | `/api/judgment` | 依 `jid` 取得單一判決的 metadata、命中法規、引用與判決全文；`source=parquet` 改從原始判決 Parquet 讀取。 |
@@ -893,7 +909,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：87 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：112 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。

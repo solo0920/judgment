@@ -513,6 +513,7 @@ def build_status(
             {"method": "POST", "path": "/api/query", "label": "資料查詢"},
             {"method": "GET", "path": "/api/law", "label": "單一法規完整報表"},
             {"method": "GET", "path": "/api/judgment", "label": "判決原文報表"},
+            {"method": "GET", "path": "/api/quality", "label": "資料品質與統計"},
             {"method": "GET", "path": "/api/performance", "label": "效能報表"},
             {"method": "POST", "path": "/api/rag/query", "label": "RAG 問答"},
         ],
