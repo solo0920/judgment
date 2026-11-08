@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="nvidia">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Judgment RAG Console — 法規資料瀏覽、查詢報表與服務狀態"
+    />
+    <meta name="theme-color" content="#000000" id="theme-color-meta" />
+    <title>Judgment RAG Console</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/themes.css" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("judgment.theme");
+          var allowed = [
+            "vercel",
+            "apple",
+            "meta",
+            "nvidia",
+            "ibm",
+            "stripe",
+            "linear",
+            "figma",
+            "notion",
+            "openai",
+          ];
+          if (theme && allowed.indexOf(theme) !== -1) {
+            document.documentElement.dataset.theme = theme;
+          }
+        } catch (error) {
+          /* localStorage may be unavailable */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#app-main">跳至主要內容</a>
+    <div class="app-shell">
+      <header class="app-header">
+        <a class="brand" href="#/rag" aria-label="Judgment RAG Console 首頁">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M8 5h8.5v14.2c0 4.1-2.4 6.8-6.5 6.8H7v-4h2.3c1.5 0 2.4-.9 2.4-2.7V9H8V5Z" fill="currentColor"/>
+              <path d="M18.5 22.5 25 5h4l-6.5 17.5h-4Z" fill="currentColor" opacity=".55"/>
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <strong>JUDGMENT</strong>
+            <span>RAG CONSOLE</span>
+          </span>
+        </a>
+
+        <nav class="primary-nav" aria-label="主要導覽">
+          <a class="nav-link" data-route="rag" href="#/rag">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a8.5 8.5 0 0 1-8.5 8.5H6l-3 2 1.3-4.2A8.5 8.5 0 1 1 21 12Z"/>
+              <path d="m12 8 .9 2.1L15 11l-2.1.9L12 14l-.9-2.1L9 11l2.1-.9L12 8Z"/>
+            </svg>
+            <span>RAG 提問</span>
+          </a>
+          <a class="nav-link" data-route="data" href="#/data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <ellipse cx="12" cy="5.5" rx="7.5" ry="3"/>
+              <path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/>
+              <path d="M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/>
+            </svg>
+            <span>資料庫</span>
+          </a>
+          <a class="nav-link" data-route="performance" href="#/performance">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 19V5"/>
+              <path d="M4 19h16"/>
+              <path d="M8 16V9"/>
+              <path d="M12 16V6"/>
+              <path d="M16 16v-4"/>
+            </svg>
+            <span>效能報表</span>
+          </a>
+          <a class="nav-link" data-route="processing" href="#/processing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h6l2 3h10"/>
+              <path d="M3 18h6l2-3h10"/>
+              <circle cx="18" cy="6" r="2"/>
+              <circle cx="18" cy="18" r="2"/>
+            </svg>
+            <span>資料處理</span>
+          </a>
+          <a class="nav-link" data-route="status" href="#/status">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12h4l2.2-5 4.1 10 2.2-5H21"/>
+            </svg>
+            <span>系統狀態</span>
+          </a>
+        </nav>
+
+        <div class="header-actions">
+          <button
+            class="api-trigger"
+            type="button"
+            id="api-config-trigger"
+            aria-haspopup="dialog"
+            aria-controls="api-dialog"
+            aria-expanded="false"
+            title="設定後端 API 位址"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.1 0l1.4-1.4a5 5 0 0 0-7.1-7.1L10.2 5.7"/>
+              <path d="M14 11a5 5 0 0 0-7.1 0l-1.4 1.4a5 5 0 0 0 7.1 7.1l1.2-1.2"/>
+            </svg>
+            <span class="api-trigger-label">API</span>
+          </button>
+          <button
+            class="header-status header-power"
+            id="header-status"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-label="測試模式開關"
+            title="測試模式：開啟後 RAG 提問會執行所有可用模型，且不設逾時"
+            disabled
+          >
+            <span class="header-status-label header-power-label">…</span>
+            <span class="header-power-knob" aria-hidden="true"></span>
+          </button>
+          <div class="style-picker" id="style-picker">
+            <button
+              type="button"
+              class="style-trigger"
+              id="style-trigger"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="style-menu"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h4a5 5 0 0 0 0-10h-4Z"/>
+                <circle cx="7.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/>
+                <circle cx="10" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
+                <circle cx="14.5" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
+              </svg>
+              <span class="style-trigger-copy">
+                <span>STYLE</span>
+                <strong id="theme-label">NVIDIA</strong>
+              </span>
+              <span class="style-swatches" id="theme-swatches" aria-hidden="true"></span>
+              <svg class="style-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+            <div class="style-menu" id="style-menu" role="menu" aria-label="選擇首頁風格" hidden></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="app-main" id="app-main" tabindex="-1">
+        <div class="page-loading" aria-live="polite">
+          <div class="skeleton skeleton-title"></div>
+          <div class="skeleton skeleton-subtitle"></div>
+          <div class="skeleton-grid">
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+          </div>
+        </div>
+      </main>
+
+      <footer class="app-footer">
+        <span>Judgment RAG Console</span>
+        <span class="footer-dot" aria-hidden="true"></span>
+        <span>法規資料僅供檢索與研究參考，不構成法律意見</span>
+        <span class="footer-spacer"></span>
+        <a href="https://getdesign.md/" target="_blank" rel="noopener noreferrer">
+          Design references: getdesign.md
+        </a>
+      </footer>
+    </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div id="dialog-root"></div>
+    <script src="./config.js"></script>
+    <script src="./assets/js/app.js"></script>
+  </body>
+</html>

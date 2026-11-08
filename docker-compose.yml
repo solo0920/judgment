@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: judgment-postgres
+    environment:
+      POSTGRES_USER: judgment
+      POSTGRES_PASSWORD: judgment
+      POSTGRES_DB: judgment
+    ports:
+      - "5432:5432"
+    volumes:
+      - judgment_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U judgment -d judgment"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    container_name: judgment-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - judgment_qdrant:/qdrant/storage
+
+volumes:
+  judgment_pgdata:
+  judgment_qdrant:

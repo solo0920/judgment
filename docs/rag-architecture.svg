@@ -1,0 +1,349 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1720" height="1240" viewBox="0 0 1720 1240" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">Judgment RAG 引擎架構：從使用者提問到前端引用</title>
+  <desc id="diagram-desc">使用者在前端輸入問題，FastAPI 驗證後交由 RAG 管線；RAG 先比對 PostgreSQL law_documents 與法規 Parquet 中的法規／命令名稱、簡稱、條文與沿革，並可依 metadata 或判決引用統計直接回答；判決端再讀取索引覆蓋率、檢查 Qdrant、以 Ollama bge-m3 產生查詢向量、從 Qdrant 檢索 top_k=4、從 PostgreSQL 取回判決全文並擷取片段，最後由 Ollama gemma3:4b 產生回答，經引用編號驗證後回傳前端顯示判決與法規／命令引用卡片。離線索引流程另行建立 Qdrant points 與 judgment_vector_index。</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4d7c0f"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d97706"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="soft" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+    <style>
+      text { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Helvetica Neue", Arial, sans-serif; }
+      .title { font-size: 27px; font-weight: 700; fill: #0f172a; letter-spacing: 0.4px; }
+      .subtitle { font-size: 13px; fill: #64748b; }
+      .lane-title { font-size: 13px; font-weight: 700; letter-spacing: 1.2px; }
+      .box-title { font-size: 13px; font-weight: 700; fill: #0f172a; }
+      .box-sub { font-size: 11px; fill: #475569; }
+      .box-sub2 { font-size: 10.5px; fill: #64748b; }
+      .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 10.5px; fill: #334155; }
+      .lbl { font-size: 10px; fill: #475569; }
+      .lbl-strong { font-size: 10.5px; font-weight: 600; fill: #334155; }
+      .flow { stroke: #334155; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .flow-both { stroke: #334155; stroke-width: 1.8; fill: none; marker-start: url(#arrow); marker-end: url(#arrow); }
+      .flow-green { stroke: #4d7c0f; stroke-width: 2; fill: none; marker-end: url(#arrow-green); }
+      .branch { stroke: #d97706; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; marker-end: url(#arrow-orange); }
+      .offline { stroke: #94a3b8; stroke-width: 1.6; stroke-dasharray: 6 4; fill: none; marker-end: url(#arrow-slate); }
+      .card { fill: #ffffff; filter: url(#soft); }
+      .divider { stroke: #e2e8f0; stroke-width: 1; }
+      .dot-ok { fill: #65a30d; }
+      .dot-warn { fill: #d97706; }
+      .dot-preview { fill: #ea580c; }
+      .dot-idle { fill: #94a3b8; }
+    </style>
+  </defs>
+
+  <rect width="1720" height="1240" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="42" y="48" class="title">Judgment RAG 引擎架構</text>
+  <text x="42" y="76" class="subtitle">目前實作 · 使用者提問 → 法規／命令比對 → Qdrant 判決檢索 → PostgreSQL 取全文 → Ollama 生成 → 前端引用卡片</text>
+  <text x="1678" y="48" class="lbl" text-anchor="end">實線：提問請求路徑　·　虛線：降級／離線索引</text>
+  <text x="1678" y="68" class="lbl" text-anchor="end">資料狀態：2026-11-07 · 10,372 / 244,330 筆（4.2%）</text>
+
+  <!-- Lanes -->
+  <rect x="36" y="104" width="330" height="956" rx="14" fill="#f7faf1" stroke="#d9e6c5"/>
+  <rect x="36" y="104" width="330" height="38" rx="14" fill="#e7f2d6"/>
+  <rect x="36" y="128" width="330" height="14" fill="#e7f2d6"/>
+  <text x="201" y="129" class="lane-title" fill="#4d6b1f" text-anchor="middle">FRONTEND · VANILLA JS</text>
+
+  <rect x="396" y="104" width="280" height="956" rx="14" fill="#f5f8fe" stroke="#d6e1f5"/>
+  <rect x="396" y="104" width="280" height="38" rx="14" fill="#e4edfc"/>
+  <rect x="396" y="128" width="280" height="14" fill="#e4edfc"/>
+  <text x="536" y="129" class="lane-title" fill="#2f5ba8" text-anchor="middle">FASTAPI · 127.0.0.1:9200</text>
+
+  <rect x="706" y="104" width="450" height="956" rx="14" fill="#faf7ff" stroke="#e4d8f6"/>
+  <rect x="706" y="104" width="450" height="38" rx="14" fill="#eee7fc"/>
+  <rect x="706" y="128" width="450" height="14" fill="#eee7fc"/>
+  <text x="931" y="129" class="lane-title" fill="#6741a8" text-anchor="middle">RAG PIPELINE · judgment.rag</text>
+
+  <rect x="1186" y="104" width="500" height="956" rx="14" fill="#fffbf4" stroke="#f0e1cc"/>
+  <rect x="1186" y="104" width="500" height="38" rx="14" fill="#fbeed9"/>
+  <rect x="1186" y="128" width="500" height="14" fill="#fbeed9"/>
+  <text x="1436" y="129" class="lane-title" fill="#a86717" text-anchor="middle">DATA &amp; MODEL SERVICES</text>
+
+  <!-- Frontend cards -->
+  <g>
+    <rect class="card" x="56" y="166" width="290" height="84" rx="10" stroke="#c3da9d"/>
+    <rect x="56" y="166" width="5" height="84" rx="2.5" fill="#76b900"/>
+    <text x="74" y="190" class="box-title"><tspan fill="#4d7c0f">01</tspan>　使用者提問</text>
+    <text x="74" y="212" class="box-sub">textarea <tspan class="mono">#rag-question</tspan>（≤ 500 字）</text>
+    <text x="74" y="232" class="box-sub2">Enter 送出 · Shift+Enter 換行</text>
+  </g>
+  <g>
+    <rect class="card" x="56" y="282" width="290" height="84" rx="10" stroke="#c3da9d"/>
+    <rect x="56" y="282" width="5" height="84" rx="2.5" fill="#76b900"/>
+    <text x="74" y="306" class="box-title"><tspan fill="#4d7c0f">02</tspan>　api.rag(question)</text>
+    <text x="74" y="328" class="mono">POST /api/rag/query</text>
+    <text x="74" y="348" class="box-sub2">AbortController timeout 300s</text>
+  </g>
+  <g>
+    <rect class="card" x="56" y="500" width="290" height="100" rx="10" stroke="#c3da9d"/>
+    <rect x="56" y="500" width="5" height="100" rx="2.5" fill="#76b900"/>
+    <text x="74" y="524" class="box-title"><tspan fill="#4d7c0f">14</tspan>　renderAnswer()</text>
+    <text x="74" y="546" class="box-sub">狀態徽章 · 回答文字 · notice</text>
+    <text x="74" y="566" class="box-sub2">operational／retrieval_only／preview</text>
+    <text x="74" y="584" class="box-sub2">duration_ms · 命中詞彙</text>
+  </g>
+  <g>
+    <rect class="card" x="56" y="632" width="290" height="150" rx="10" stroke="#c3da9d"/>
+    <rect x="56" y="632" width="5" height="150" rx="2.5" fill="#76b900"/>
+    <text x="74" y="656" class="box-title"><tspan fill="#4d7c0f">15</tspan>　引用判決卡</text>
+    <text x="74" y="678" class="box-sub">[1]–[6] 對應回答中的引用編號</text>
+    <text x="74" y="698" class="box-sub2">案號 · 法院 · 裁判日期 · 相似度</text>
+    <text x="74" y="716" class="box-sub2">命中法規 · 判決片段 · PDF 連結</text>
+    <line x1="74" y1="732" x2="328" y2="732" class="divider"/>
+    <text x="74" y="750" class="box-sub2">citations 為空時改顯示法規 metadata</text>
+    <text x="74" y="768" class="box-sub2">（preview fallback 才會使用）</text>
+  </g>
+  <g>
+    <rect x="56" y="830" width="290" height="150" rx="10" fill="#fbfdf7" stroke="#c3da9d" stroke-dasharray="5 4"/>
+    <text x="74" y="854" class="box-title">側欄 · 平行載入</text>
+    <text x="74" y="876" class="box-sub">GET /api/status</text>
+    <text x="74" y="895" class="box-sub2">判決總數／已索引／覆蓋率／points</text>
+    <text x="74" y="913" class="box-sub2">Qdrant · Embedding · LLM 狀態</text>
+    <line x1="74" y1="928" x2="328" y2="928" class="divider"/>
+    <text x="74" y="946" class="box-sub">IndexedDB（瀏覽器）</text>
+    <text x="74" y="964" class="box-sub2">最近提問與來源數，不上傳伺服器</text>
+  </g>
+
+  <!-- API cards -->
+  <g>
+    <rect class="card" x="416" y="166" width="240" height="84" rx="10" stroke="#bcd0f1"/>
+    <rect x="416" y="166" width="5" height="84" rx="2.5" fill="#3b82f6"/>
+    <text x="434" y="190" class="box-title"><tspan fill="#2563eb">03</tspan>　FastAPI 端點</text>
+    <text x="434" y="212" class="mono">POST /api/rag/query</text>
+    <text x="434" y="232" class="box-sub2">app.py · rag_query()</text>
+  </g>
+  <g>
+    <rect class="card" x="416" y="282" width="240" height="84" rx="10" stroke="#bcd0f1"/>
+    <rect x="416" y="282" width="5" height="84" rx="2.5" fill="#3b82f6"/>
+    <text x="434" y="306" class="box-title">RagRequest 驗證</text>
+    <text x="434" y="328" class="box-sub">question：1–500 字</text>
+    <text x="434" y="348" class="box-sub2">空白 → ValueError → HTTP 400</text>
+  </g>
+  <g>
+    <rect class="card" x="416" y="392" width="240" height="84" rx="10" stroke="#bcd0f1"/>
+    <rect x="416" y="392" width="5" height="84" rx="2.5" fill="#3b82f6"/>
+    <text x="434" y="416" class="box-title"><tspan fill="#2563eb">04</tspan>　answer_question()</text>
+    <text x="434" y="438" class="mono">settings · session_factory</text>
+    <text x="434" y="458" class="box-sub2">注入 QdrantStore / OllamaEmbedder</text>
+  </g>
+  <g>
+    <rect x="416" y="520" width="240" height="120" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="434" y="544" class="box-title">例外與逾時</text>
+    <text x="434" y="566" class="box-sub">空白問題 → 400</text>
+    <text x="434" y="585" class="box-sub">未預期例外 → 500</text>
+    <text x="434" y="604" class="box-sub">前端請求：300 秒</text>
+    <text x="434" y="623" class="box-sub">後端 LLM：180 秒</text>
+  </g>
+
+  <!-- RAG cards -->
+  <g>
+    <rect class="card" x="726" y="166" width="430" height="62" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="166" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="190" class="box-title"><tspan fill="#7c3aed">05</tspan>　index_coverage()</text>
+    <text x="744" y="212" class="box-sub">PostgreSQL 索引統計：total / indexed / latest_indexed_at</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="252" width="430" height="62" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="252" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="276" class="box-title"><tspan fill="#7c3aed">06</tspan>　Qdrant 前置檢查</text>
+    <text x="744" y="298" class="box-sub">QDRANT_URL → collection_info() → collection 存在？</text>
+    <text x="1090" y="298" class="lbl" fill="#d97706">失敗 → preview</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="338" width="430" height="62" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="338" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="362" class="box-title"><tspan fill="#7c3aed">07</tspan>　embed_query(question)</text>
+    <text x="744" y="384" class="box-sub">Ollama bge-m3 → 1,024 維查詢向量</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="424" width="430" height="70" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="424" width="5" height="70" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="448" class="box-title"><tspan fill="#7c3aed">08</tspan>　Qdrant 向量檢索</text>
+    <text x="744" y="470" class="box-sub">collection judgment_documents · top_k = 4 · score ≥ 0.35</text>
+    <text x="744" y="486" class="box-sub2">Cosine 相似度；payload 取 jid / court / title / jdate / matched_laws</text>
+  </g>
+  <g>
+    <rect x="726" y="512" width="430" height="62" rx="10" fill="#fff8e8" stroke="#ecc46f"/>
+    <rect x="726" y="512" width="5" height="62" rx="2.5" fill="#d97706"/>
+    <text x="744" y="536" class="box-title"><tspan fill="#b45309">09</tspan>　有命中？</text>
+    <text x="744" y="558" class="box-sub">0 hits → retrieval_only：不呼叫 LLM，直接回傳無結果說明</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="600" width="430" height="62" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="600" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="624" class="box-title"><tspan fill="#7c3aed">10</tspan>　PostgreSQL 取回判決全文</text>
+    <text x="744" y="646" class="box-sub">WHERE jid IN (hit jids) → 只保留仍存在於資料庫的判決</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="688" width="430" height="70" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="688" width="5" height="70" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="712" class="box-title"><tspan fill="#7c3aed">11</tspan>　片段與引用組裝</text>
+    <text x="744" y="734" class="box-sub">extract_excerpt：以問題詞彙挑選段落（每筆上限 1,000–1,600 字）</text>
+    <text x="744" y="752" class="box-sub2">建立 contexts [1]–[6] 與前端 citation metadata</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="784" width="430" height="70" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="784" width="5" height="70" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="808" class="box-title"><tspan fill="#7c3aed">12</tspan>　LLM 生成</text>
+    <text x="744" y="830" class="box-sub">Ollama gemma3:4b · temperature 0.1 · num_ctx 4,096</text>
+    <text x="744" y="848" class="box-sub2">系統提示：只能依片段回答，每個結論標註 [n]</text>
+  </g>
+  <g>
+    <rect x="726" y="876" width="430" height="62" rx="10" fill="#fff8e8" stroke="#ecc46f"/>
+    <rect x="726" y="876" width="5" height="62" rx="2.5" fill="#d97706"/>
+    <text x="744" y="900" class="box-title"><tspan fill="#b45309">13</tspan>　引用驗證</text>
+    <text x="744" y="922" class="box-sub">[n] 必須在 1..N；拒答不得含虛構案號；失敗 → retrieval_only</text>
+  </g>
+  <g>
+    <rect class="card" x="726" y="962" width="430" height="62" rx="10" stroke="#d4c2f0"/>
+    <rect x="726" y="962" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
+    <text x="744" y="986" class="box-title"><tspan fill="#7c3aed">16</tspan>　組裝回應 JSON</text>
+    <text x="744" y="1008" class="box-sub">status · answer · notice · judgments · retrieval · coverage · duration_ms</text>
+  </g>
+
+  <!-- Service cards -->
+  <g>
+    <rect class="card" x="1206" y="150" width="460" height="95" rx="10" stroke="#edcf9f"/>
+    <rect x="1206" y="150" width="5" height="95" rx="2.5" fill="#d97706"/>
+    <text x="1224" y="174" class="box-title">PostgreSQL · judgment_vector_index</text>
+    <text x="1224" y="196" class="box-sub">索引追蹤：jid · collection · model · content_hash · dimensions</text>
+    <text x="1224" y="216" class="box-sub2">10,372 筆已索引 · latest_indexed_at 2026-11-07T02:56Z</text>
+    <text x="1224" y="233" class="lbl" fill="#64748b">RAG 每次提問都會先讀取此表計算 coverage</text>
+  </g>
+  <g>
+    <rect class="card" x="1206" y="240" width="460" height="85" rx="10" stroke="#edcf9f"/>
+    <rect x="1206" y="240" width="5" height="85" rx="2.5" fill="#d97706"/>
+    <text x="1224" y="264" class="box-title">Qdrant · judgment_documents ①</text>
+    <text x="1224" y="286" class="box-sub">collection_info()：存在性、points_count、向量維度</text>
+    <text x="1224" y="306" class="box-sub2">未設定／離線／collection 不存在 → preview fallback</text>
+  </g>
+  <g>
+    <rect class="card" x="1206" y="325" width="460" height="90" rx="10" stroke="#edcf9f"/>
+    <rect x="1206" y="325" width="5" height="90" rx="2.5" fill="#d97706"/>
+    <text x="1224" y="349" class="box-title">Ollama · bge-m3</text>
+    <text x="1224" y="371" class="mono">POST /api/embed</text>
+    <text x="1224" y="391" class="box-sub2">1,024 維 · 與索引使用相同 embedding 模型</text>
+    <text x="1224" y="407" class="box-sub2">EMBEDDING_URL · EMBEDDING_TIMEOUT_SECONDS=120</text>
+  </g>
+  <g>
+    <rect class="card" x="1206" y="415" width="460" height="90" rx="10" stroke="#edcf9f"/>
+    <rect x="1206" y="415" width="5" height="90" rx="2.5" fill="#d97706"/>
+    <text x="1224" y="439" class="box-title">Qdrant · judgment_documents ②</text>
+    <text x="1224" y="461" class="mono">POST /collections/judgment_documents/points/search</text>
+    <text x="1224" y="481" class="box-sub2">10,372 points · cosine · 只回傳 score ≥ 0.35 的結果</text>
+    <text x="1224" y="497" class="box-sub2">payload.snippet 為索引視窗預覽，不是 RAG 引用片段</text>
+  </g>
+  <g>
+    <rect class="card" x="1206" y="585" width="460" height="95" rx="10" stroke="#edcf9f"/>
+    <rect x="1206" y="585" width="5" height="95" rx="2.5" fill="#d97706"/>
+    <text x="1224" y="609" class="box-title">PostgreSQL · judgment_documents</text>
+    <text x="1224" y="631" class="box-sub">244,330 筆金融法規判決全文（full_text）</text>
+    <text x="1224" y="651" class="box-sub2">RAG 以 jid 取回全文，再依問題詞彙挑選段落</text>
+    <text x="1224" y="668" class="box-sub2">court_normalized · matched_laws · citations · pdf_url</text>
+  </g>
+  <g>
+    <rect class="card" x="1206" y="770" width="460" height="95" rx="10" stroke="#edcf9f"/>
+    <rect x="1206" y="770" width="5" height="95" rx="2.5" fill="#d97706"/>
+    <text x="1224" y="794" class="box-title">Ollama · gemma3:4b</text>
+    <text x="1224" y="816" class="mono">POST /api/chat</text>
+    <text x="1224" y="836" class="box-sub2">temperature 0.1 · num_ctx 4,096 · num_predict 384</text>
+    <text x="1224" y="853" class="box-sub2">LLM_URL／LLM_MODEL 未設定 → retrieval_only</text>
+  </g>
+  <g>
+    <rect x="1206" y="890" width="460" height="140" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="1224" y="914" class="box-title">回應狀態（status）</text>
+    <circle cx="1230" cy="934" r="4" class="dot-ok"/>
+    <text x="1242" y="938" class="box-sub"><tspan class="mono">operational</tspan>：有有效 [n] 引用，回答可用</text>
+    <circle cx="1230" cy="956" r="4" class="dot-warn"/>
+    <text x="1242" y="960" class="box-sub"><tspan class="mono">retrieval_only</tspan>：0 hits／LLM 未設定／驗證失敗</text>
+    <circle cx="1230" cy="978" r="4" class="dot-preview"/>
+    <text x="1242" y="982" class="box-sub"><tspan class="mono">preview</tspan>：Qdrant 未設定、離線、collection 不存在</text>
+    <circle cx="1230" cy="1000" r="4" class="dot-idle"/>
+    <text x="1242" y="1004" class="box-sub2">retrieval.status：not_configured／unavailable／not_indexed／degraded</text>
+  </g>
+
+  <!-- Flow: frontend -> API -->
+  <path class="flow" d="M 346 324 H 372 V 208 H 416"/>
+  <text x="374" y="282" class="lbl" transform="rotate(-90 374 282)" text-anchor="middle">問題 JSON</text>
+
+  <!-- Flow: API -> RAG coverage -->
+  <path class="flow" d="M 656 434 H 681 V 197 H 726"/>
+
+  <!-- API internal -->
+  <path class="flow" d="M 536 250 V 282"/>
+  <path class="flow" d="M 536 366 V 392"/>
+
+  <!-- RAG internal arrows -->
+  <path class="flow" d="M 941 228 V 252"/>
+  <path class="flow" d="M 941 314 V 338"/>
+  <path class="flow" d="M 941 400 V 424"/>
+  <path class="flow" d="M 941 494 V 512"/>
+  <path class="flow" d="M 941 574 V 600"/>
+  <text x="950" y="590" class="lbl-strong" fill="#4d7c0f">有命中</text>
+  <path class="flow" d="M 941 662 V 688"/>
+  <path class="flow" d="M 941 758 V 784"/>
+  <path class="flow" d="M 941 854 V 876"/>
+  <path class="flow" d="M 941 938 V 962"/>
+
+  <!-- RAG -> services (all double-headed calls) -->
+  <path class="flow-both" d="M 1156 197 H 1206"/>
+  <path class="flow-both" d="M 1156 283 H 1206"/>
+  <path class="flow-both" d="M 1156 369 H 1206"/>
+  <path class="flow-both" d="M 1156 459 H 1206"/>
+  <path class="flow-both" d="M 1156 631 H 1206"/>
+  <path class="flow-both" d="M 1156 819 H 1206"/>
+
+  <!-- Degradation branches to response -->
+  <path class="branch" d="M 726 543 H 691 V 1008 H 726"/>
+  <path class="branch" d="M 726 907 H 691"/>
+  <circle cx="691" cy="907" r="2.5" fill="#d97706"/>
+  <path class="branch" d="M 726 283 H 671 V 244 H 656"/>
+  <text x="664" y="262" class="lbl" fill="#d97706" text-anchor="end">preview</text>
+
+  <!-- Response: RAG -> API -> frontend -->
+  <path class="flow" d="M 726 993 H 701 V 214 H 656"/>
+  <text x="708" y="640" class="lbl" transform="rotate(-90 708 640)" text-anchor="middle">response JSON</text>
+  <path class="flow" d="M 416 236 H 380 V 550 H 346"/>
+  <text x="387" y="430" class="lbl" transform="rotate(-90 387 430)" text-anchor="middle">HTTP 200 · JSON</text>
+
+  <!-- Frontend internal -->
+  <path class="flow-green" d="M 201 250 V 282"/>
+  <path class="flow-green" d="M 201 366 V 500"/>
+  <path class="flow" d="M 201 600 V 632"/>
+
+  <!-- Indexing band -->
+  <rect x="36" y="1084" width="1650" height="126" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="7 5"/>
+  <text x="56" y="1110" class="box-title">離線索引（建置期，不是提問請求路徑）</text>
+  <text x="1662" y="1110" class="lbl" text-anchor="end">索引完成後，Qdrant 與 PostgreSQL 才是 RAG 的資料來源</text>
+  <g>
+    <rect x="56" y="1122" width="430" height="60" rx="8" fill="#ffffff" stroke="#d7dee8"/>
+    <text x="72" y="1144" class="box-title">01　建置指令</text>
+    <text x="72" y="1166" class="mono">uv run judgment-index-vectors --stride 24 --batch-size 16</text>
+  </g>
+  <path class="offline" d="M 486 1152 H 526"/>
+  <g>
+    <rect x="526" y="1122" width="520" height="60" rx="8" fill="#ffffff" stroke="#d7dee8"/>
+    <text x="542" y="1144" class="box-title">02　文字與向量</text>
+    <text x="542" y="1166" class="box-sub">PostgreSQL 取全文 → head/tail 1,600 字 → bge-m3（1,024 維）</text>
+  </g>
+  <path class="offline" d="M 1046 1152 H 1086"/>
+  <g>
+    <rect x="1086" y="1122" width="580" height="60" rx="8" fill="#ffffff" stroke="#d7dee8"/>
+    <text x="1102" y="1144" class="box-title">03　寫入索引</text>
+    <text x="1102" y="1166" class="box-sub">Qdrant upsert（point id = UUID5(jid)）＋ PostgreSQL judgment_vector_index</text>
+  </g>
+  <text x="56" y="1200" class="box-sub2">目前 10,372 / 244,330 筆（4.2%）· 本批 10,172 筆耗時 23.4 分鐘（7.2 筆／秒）· 重跑時 content_hash 未變更會跳過，可中斷續跑</text>
+</svg>
