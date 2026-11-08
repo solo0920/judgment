@@ -112,6 +112,46 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 
 `judgment-web` 啟動時會自動在 `127.0.0.1:9201` 建立本機電源控制器，供 `./up.sh`／`./down.sh` 與電源 API 使用；header 右上角現在是**測試模式開關**，不再控制電源。設定 `JUDGMENT_POWER_AGENT=0` 可停用控制器。
 
+### 完整環境備份與還原
+
+`backup.sh` 會將完整狀態匯出到指定的 USB 目錄：
+
+```bash
+./backup.sh --dest /Volumes/USB/judgment-backups
+```
+
+內容包含：
+
+- `data/`：判決 RAR、原始判決 Parquet、法規／命令原始資料
+- `postgres/judgment.dump`：`pg_dump -Fc`，含判決、法規 metadata 與 `judgment_vector_index`
+- `qdrant/`：`judgment_documents` collection snapshot
+- `config/`：`.env`、`docker-compose.yml`、`pyproject.toml`、`uv.lock`
+- `manifest.json`、checksums、`restore.sh` 與還原說明
+
+備份會建立 timestamp 子目錄，不會覆蓋既有備份。偵測到索引／匯入／下載程序執行中時會中止，避免 PostgreSQL 與 Qdrant 進度不一致；只有確定只備份部分資料時才使用 `--allow-running`。
+
+在新電腦上，先將專案 clone 到相同 commit，再從專案或備份目錄執行：
+
+```bash
+./restore.sh \
+  --backup-dir /Volumes/USB/judgment-backups/judgment-backup-YYYYmmdd-HHMMSS \
+  --project-dir /path/to/judgment
+```
+
+還原流程會：
+
+1. 停止目前後端與 Docker 服務
+2. 還原 `.env`、PostgreSQL dump 與 Qdrant collection snapshot
+3. 將 `data/judgments`、`data/laws` 複製回 `.env` 指定的位置
+4. 執行 `uv sync`（可用 `--no-deps` 略過）
+5. 執行 `./up.sh` 啟動後端（可用 `--no-start` 略過）
+
+可用 `--dry-run` 先檢查備份內容與目標路徑。`restore.sh` 會覆蓋 PostgreSQL schema 與 Qdrant collection，執行前會要求輸入 `YES` 確認；自動化環境可加 `--yes`。
+
+> PostgreSQL 的 `judgment_vector_index` 必須與 Qdrant collection 一起還原。若只還原 PostgreSQL、Qdrant 是空的，索引器會誤以為部分索引已完成；此時必須先 `DELETE FROM judgment_vector_index;` 再重新索引。若只還原 Qdrant、PostgreSQL 是空的，則會重新 embedding 全部判決。
+
+以目前資料量估算，完整備份約需 16–18 GB 以上空間（`data/` 約 13 GB、PostgreSQL dump 約 2 GB、Qdrant snapshot 約 1.5 GB，索引越大會再增加）；建議使用 32 GB 以上的 USB，並加密保存，因為 `config/.env` 可能包含資料庫密碼。
+
 ## 設定
 
 | 環境變數 | 預設值 | 說明 |
