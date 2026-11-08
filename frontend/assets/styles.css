@@ -1939,6 +1939,7 @@ button.chip:hover {
 
 .answer-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -2008,12 +2009,17 @@ button.chip:hover {
   white-space: pre-wrap;
 }
 
-.answer-card > .rag-process {
-  margin: 18px 20px 22px;
+.answer-head > .rag-process {
+  flex: 1 0 100%;
+  margin: 10px 0 0;
 }
 
-.answer-body .rag-process {
-  margin: 18px 0 0;
+.answer-head > .rag-process > summary {
+  padding: 6px 0;
+}
+
+.answer-head > .rag-process .rag-process-list {
+  padding: 5px 0 7px;
 }
 
 .rag-process {

@@ -186,13 +186,13 @@ function answerLoading(question, testMode = false) {
         <span class="answer-head-title">檢索中</span>
       </div>
       <div class="answer-head-meta"><span class="spinner"></span></div>
+      ${testMode ? "" : processPanelMarkup()}
     </div>
     <div class="answer-body">
       <p class="answer-text">${detail}「${escapeHtml(question)}」</p>
       <div class="skeleton skeleton-line" style="margin-top:22px;width:92%"></div>
       <div class="skeleton skeleton-line" style="width:76%"></div>
       <div class="skeleton skeleton-line" style="width:84%"></div>
-      ${testMode ? "" : processPanelMarkup()}
     </div>`;
 }
 
@@ -339,7 +339,7 @@ function lawSourceCard(source, index) {
   </article>`;
 }
 
-function renderAnswer(question, payload) {
+function renderAnswer(question, payload, processHtml = "") {
   const citations = Array.isArray(payload.citations) ? payload.citations : [];
   const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
   const lawSources = Array.isArray(payload.law_sources) ? payload.law_sources : [];
@@ -459,6 +459,7 @@ function renderAnswer(question, payload) {
         <span>${Number(payload.duration_ms || 0)} ms</span>
         ${modelChip}
       </div>
+      ${processHtml}
     </div>
     <div class="answer-body">
       <p class="answer-text">${escapeHtml(payload.answer || "目前沒有可顯示的回答。")}</p>
@@ -473,11 +474,12 @@ function renderAnswer(question, payload) {
     </div>`;
 }
 
-function renderAnswerError(error) {
+function renderAnswerError(error, processHtml = "") {
   return `<div class="answer-head">
       <div class="answer-head-left">${icon("alert", 16)}
         <span class="answer-head-title">無法完成檢索</span>
       </div>
+      ${processHtml}
     </div>
     <div class="answer-body">
       ${notice({
@@ -1166,8 +1168,7 @@ export async function render(root) {
       if (disposed) return;
       stopFlowPoll();
       const processHtml = processController?.finish(true) || "";
-      answerCard.innerHTML = renderAnswer(trimmed, payload);
-      if (processHtml) answerCard.insertAdjacentHTML("beforeend", processHtml);
+      answerCard.innerHTML = renderAnswer(trimmed, payload, processHtml);
       if (payload.test_run?.run_id) {
         await loadExactTestFlow(payload.test_run.run_id);
       } else {
@@ -1192,8 +1193,7 @@ export async function render(root) {
       stopFlowPoll();
       if (disposed) return;
       const processHtml = processController?.finish(false) || "";
-      answerCard.innerHTML = renderAnswerError(error);
-      if (processHtml) answerCard.insertAdjacentHTML("beforeend", processHtml);
+      answerCard.innerHTML = renderAnswerError(error, processHtml);
       toast(error.message || "檢索失敗。", "danger");
     } finally {
       stopFlowPoll();
