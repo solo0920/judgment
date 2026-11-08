@@ -3,25 +3,18 @@
 # Back up the complete Judgment environment to a removable disk.
 #
 # Usage:
-#   ./backup.sh /Volumes/USB/judgment-backups
-#   ./backup.sh --dest /Volumes/USB/judgment-backups
-#   ./backup.sh --dest /Volumes/USB --skip-qdrant
+#   ./backup.sh -s /path/to/judgment -d /Volumes/USB/judgment-backup
+#   ./backup.sh -d /Volumes/USB/judgment-backup
 #
-# The destination receives a timestamped directory containing:
-#   data/                  raw RARs, raw Parquet, law/order artifacts
-#   postgres/judgment.dump PostgreSQL custom-format dump
-#   qdrant/               Qdrant collection snapshot
-#   config/               .env, docker-compose.yml, project metadata
-#   manifest.json         restore instructions and checksums
-#   restore.sh            copy of the restore script
+# The target directory is the backup directory itself. It must be empty.
+# restore.sh is copied into it automatically.
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
 
-DEST=""
-NAME=""
+SOURCE_DIR=""
+TARGET_DIR=""
 SKIP_DATA=0
 SKIP_POSTGRES=0
 SKIP_QDRANT=0
@@ -31,28 +24,25 @@ DRY_RUN=0
 usage() {
   cat <<'EOF'
 用法：
-  ./backup.sh --dest <USB目錄> [選項]
-  ./backup.sh <USB目錄>
+  ./backup.sh -s <專案目錄> -d <備份目錄>
+  ./backup.sh -d <備份目錄>
 
 選項：
-  --dest DIR           備份根目錄（必填；會在其下建立 timestamp 子目錄）
-  --name NAME          自訂備份子目錄名稱
+  -s, --source DIR     Judgment 專案目錄（預設：backup.sh 所在目錄）
+  -d, --dest DIR       備份目錄；必須是空目錄或不存在（必填）
   --skip-data          不複製 data/
   --skip-postgres      不匯出 PostgreSQL
-  --skip-qdrant        不匯出 Qdrant collection snapshot
+  --skip-qdrant        不匯出 Qdrant snapshot
   --allow-running      允許在資料處理程序執行中備份（不建議）
-  --dry-run            只顯示計畫，不寫入檔案
+  --dry-run            只檢查環境並顯示計畫，不寫入備份
   -h, --help           顯示說明
 
-環境變數：
-  JUDGMENT_DATA_DIR    default: ./data/judgments
-  LAW_DATA_DIR         default: ./data/laws
-  QDRANT_URL           default: http://127.0.0.1:6333
-  JUDGMENT_VECTOR_COLLECTION  default: judgment_documents
-  JUDGMENT_PG_SERVICE  default: postgres
-  JUDGMENT_PG_USER     default: judgment
-  JUDGMENT_PG_DB       default: judgment
-  JUDGMENT_PG_PASSWORD default: judgment
+backup.sh 會先檢查：
+  - 專案是否包含 pyproject.toml、docker-compose.yml、restore.sh
+  - JUDGMENT_DATA_DIR 與 LAW_DATA_DIR 是否存在
+  - Docker daemon、PostgreSQL、Qdrant collection 是否可用
+  - 目標目錄是否可寫入、是否為空、空間是否足夠
+  - 是否有索引／匯入／下載程序仍在執行
 EOF
 }
 
@@ -70,7 +60,7 @@ need() {
 }
 
 abs_path() {
-  python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$1"
+  python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$1"
 }
 
 file_size() {
@@ -96,10 +86,10 @@ sha256_file() {
 }
 
 load_env() {
-  if [[ -f "$SCRIPT_DIR/.env" ]]; then
+  if [[ -f "$PROJECT_ROOT/.env" ]]; then
     set -a
     # shellcheck disable=SC1091
-    . "$SCRIPT_DIR/.env"
+    . "$PROJECT_ROOT/.env"
     set +a
   fi
 }
@@ -121,14 +111,14 @@ copy_tree() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dest)
-      [[ $# -ge 2 ]] || die "--dest 需要一個目錄"
-      DEST="$2"
+    -s|--source)
+      [[ $# -ge 2 ]] || die "$1 需要一個目錄"
+      SOURCE_DIR="$2"
       shift 2
       ;;
-    --name)
-      [[ $# -ge 2 ]] || die "--name 需要一個名稱"
-      NAME="$2"
+    -d|--dest|--target)
+      [[ $# -ge 2 ]] || die "$1 需要一個目錄"
+      TARGET_DIR="$2"
       shift 2
       ;;
     --skip-data)
@@ -155,18 +145,13 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    -*)
-      die "未知選項：$1"
-      ;;
     *)
-      [[ -z "$DEST" ]] || die "只能指定一個備份目錄"
-      DEST="$1"
-      shift
+      die "未知參數：$1"
       ;;
   esac
 done
 
-[[ -n "$DEST" ]] || {
+[[ -n "$TARGET_DIR" ]] || {
   usage
   exit 2
 }
@@ -176,8 +161,27 @@ need curl
 need docker
 docker compose version >/dev/null 2>&1 || die "找不到 docker compose"
 
-load_env
+# Resolve source: accept either the project root or its data/ directory.
+if [[ -z "$SOURCE_DIR" ]]; then
+  SOURCE_DIR="$SCRIPT_DIR"
+fi
+SOURCE_DIR="$(abs_path "$SOURCE_DIR")"
+[[ -d "$SOURCE_DIR" ]] || die "找不到來源目錄：$SOURCE_DIR"
 
+if [[ -f "$SOURCE_DIR/pyproject.toml" ]]; then
+  PROJECT_ROOT="$SOURCE_DIR"
+elif [[ -f "$SOURCE_DIR/../pyproject.toml" && -d "$SOURCE_DIR/judgments" ]]; then
+  PROJECT_ROOT="$(abs_path "$SOURCE_DIR/..")"
+  echo "偵測到 data 目錄，專案根目錄為：$PROJECT_ROOT"
+else
+  die "來源目錄不像 Judgment 專案：$SOURCE_DIR（需含 pyproject.toml，或為含 judgments/ 的 data 目錄）"
+fi
+
+cd "$PROJECT_ROOT"
+[[ -f "$PROJECT_ROOT/docker-compose.yml" ]] || die "找不到 docker-compose.yml：$PROJECT_ROOT"
+[[ -f "$PROJECT_ROOT/restore.sh" ]] || die "找不到 restore.sh：$PROJECT_ROOT"
+
+load_env
 JUDGMENT_DATA_DIR="${JUDGMENT_DATA_DIR:-./data/judgments}"
 LAW_DATA_DIR="${LAW_DATA_DIR:-./data/laws}"
 QDRANT_URL="${QDRANT_URL:-http://127.0.0.1:6333}"
@@ -189,9 +193,58 @@ JUDGMENT_PG_PASSWORD="${JUDGMENT_PG_PASSWORD:-judgment}"
 
 JUDGMENT_DATA_ABS="$(abs_path "$JUDGMENT_DATA_DIR")"
 LAW_DATA_ABS="$(abs_path "$LAW_DATA_DIR")"
-if [[ "$DRY_RUN" == "1" ]]; then
-  JUDGMENT_DATA_ABS="$(python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$JUDGMENT_DATA_DIR")"
-  LAW_DATA_ABS="$(python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$LAW_DATA_DIR")"
+
+info "環境預檢"
+[[ -f "$PROJECT_ROOT/pyproject.toml" ]] || die "找不到 pyproject.toml"
+if [[ "$SKIP_DATA" != "1" ]]; then
+  [[ -d "$JUDGMENT_DATA_ABS" ]] || die "找不到判決資料目錄：$JUDGMENT_DATA_ABS"
+  [[ -d "$LAW_DATA_ABS" ]] || die "找不到法規資料目錄：$LAW_DATA_ABS"
+  [[ -n "$(find "$JUDGMENT_DATA_ABS" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]] \
+    || die "判決資料目錄是空的：$JUDGMENT_DATA_ABS"
+fi
+if ! docker info >/dev/null 2>&1; then
+  die "Docker daemon 沒有執行，請先啟動 OrbStack／Docker Desktop"
+fi
+
+info "啟動並檢查資料庫"
+START_SERVICES=()
+if [[ "$SKIP_POSTGRES" != "1" ]]; then
+  START_SERVICES+=(postgres)
+fi
+if [[ "$SKIP_QDRANT" != "1" ]]; then
+  START_SERVICES+=(qdrant)
+fi
+if [[ ${#START_SERVICES[@]} -gt 0 ]]; then
+  docker compose up -d "${START_SERVICES[@]}"
+fi
+
+if [[ "$SKIP_POSTGRES" != "1" ]]; then
+  for _ in {1..60}; do
+    if docker compose exec -T "$JUDGMENT_PG_SERVICE" \
+      env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+      pg_isready -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if ! docker compose exec -T "$JUDGMENT_PG_SERVICE" \
+    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+    pg_isready -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" >/dev/null 2>&1; then
+    die "PostgreSQL 未就緒"
+  fi
+  docker compose exec -T "$JUDGMENT_PG_SERVICE" \
+    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+    psql -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" -tAc \
+    'select 1 from judgment_documents limit 1;' >/dev/null 2>&1 \
+    || die "PostgreSQL 沒有可用的 judgment_documents 資料表"
+fi
+
+if [[ "$SKIP_QDRANT" != "1" ]]; then
+  if ! curl -fsS --max-time 3 "$QDRANT_URL/collections" >/dev/null 2>&1; then
+    die "Qdrant 無法連線：$QDRANT_URL"
+  fi
+  curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION" >/dev/null 2>&1 \
+    || die "找不到 Qdrant collection：$JUDGMENT_VECTOR_COLLECTION（尚未建立索引時可用 --skip-qdrant）"
 fi
 
 if [[ "$ALLOW_RUNNING" != "1" ]]; then
@@ -200,20 +253,30 @@ if [[ "$ALLOW_RUNNING" != "1" ]]; then
   fi
 fi
 
-STAMP="$(date '+%Y%m%d-%H%M%S')"
-if [[ -n "$NAME" ]]; then
-  BACKUP_DIR="$DEST/$NAME"
-else
-  BACKUP_DIR="$DEST/judgment-backup-$STAMP"
+TARGET_DIR="$(abs_path "$TARGET_DIR")"
+if [[ -e "$TARGET_DIR" && ! -d "$TARGET_DIR" ]]; then
+  die "目標不是目錄：$TARGET_DIR"
 fi
+if [[ -d "$TARGET_DIR" && -n "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+  die "備份目錄不是空的：$TARGET_DIR（請指定新的空目錄）"
+fi
+mkdir -p "$TARGET_DIR"
+[[ -w "$TARGET_DIR" ]] || die "備份目錄不可寫入：$TARGET_DIR"
 
 JUDGMENT_BYTES="$(dir_size "$JUDGMENT_DATA_ABS")"
 LAW_BYTES="$(dir_size "$LAW_DATA_ABS")"
 TOTAL_BYTES=$((JUDGMENT_BYTES + LAW_BYTES))
+if [[ "$SKIP_DATA" != "1" ]]; then
+  AVAILABLE_BYTES="$(df -Pk "$TARGET_DIR" | awk 'NR==2 {print $4 * 1024}')"
+  REQUIRED_BYTES=$((TOTAL_BYTES + 4 * 1024 * 1024 * 1024))
+  if [[ -n "$AVAILABLE_BYTES" && "$AVAILABLE_BYTES" -lt "$REQUIRED_BYTES" ]]; then
+    die "備份空間不足：需要約 $((REQUIRED_BYTES / 1024 / 1024 / 1024)) GB，可用 $((AVAILABLE_BYTES / 1024 / 1024 / 1024)) GB"
+  fi
+fi
 
 info "備份計畫"
-printf '專案目錄：%s\n' "$SCRIPT_DIR"
-printf '備份目錄：%s\n' "$BACKUP_DIR"
+printf '專案目錄：%s\n' "$PROJECT_ROOT"
+printf '備份目錄：%s\n' "$TARGET_DIR"
 printf '判決資料：%s（%s bytes）\n' "$JUDGMENT_DATA_ABS" "$JUDGMENT_BYTES"
 printf '法規資料：%s（%s bytes）\n' "$LAW_DATA_ABS" "$LAW_BYTES"
 printf 'PostgreSQL：%s / %s\n' "$JUDGMENT_PG_DB" "$JUDGMENT_PG_USER"
@@ -223,18 +286,14 @@ printf '略過 data：%s；略過 PostgreSQL：%s；略過 Qdrant：%s\n' \
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo
-  echo "dry-run：未寫入任何檔案。"
+  echo "dry-run：環境檢查通過，未寫入任何檔案。"
   exit 0
 fi
 
-if [[ -e "$BACKUP_DIR" ]]; then
-  die "備份目錄已存在：$BACKUP_DIR"
-fi
-
-mkdir -p "$DEST"
-mkdir -p "$BACKUP_DIR"/{postgres,qdrant,data,config}
-INFO_TMP="$(mktemp)"
-trap 'rm -f "$INFO_TMP"' EXIT
+mkdir -p "$TARGET_DIR"/{postgres,qdrant,data,config}
+cp "$PROJECT_ROOT/restore.sh" "$TARGET_DIR/restore.sh"
+chmod +x "$TARGET_DIR/restore.sh"
+echo "已複製 restore.sh 到 $TARGET_DIR/restore.sh"
 
 PG_DUMP_REL=""
 PG_DUMP_SHA=""
@@ -244,43 +303,24 @@ QDRANT_POINTS=""
 QDRANT_COLLECTION_SNAPSHOT=""
 
 if [[ "$SKIP_POSTGRES" != "1" ]]; then
-  info "啟動 PostgreSQL 並匯出 dump"
-  docker compose up -d "$JUDGMENT_PG_SERVICE" >/dev/null
-  for _ in {1..60}; do
-    if docker compose exec -T "$JUDGMENT_PG_SERVICE" \
-      env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
-      pg_isready -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
+  info "匯出 PostgreSQL"
   PG_DUMP_REL="postgres/judgment.dump"
   if ! docker compose exec -T "$JUDGMENT_PG_SERVICE" \
     env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
     pg_dump -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" -Fc \
-    > "$BACKUP_DIR/$PG_DUMP_REL"; then
-    rm -f "$BACKUP_DIR/$PG_DUMP_REL"
+    > "$TARGET_DIR/$PG_DUMP_REL"; then
+    rm -f "$TARGET_DIR/$PG_DUMP_REL"
     die "pg_dump 失敗"
   fi
-  [[ -s "$BACKUP_DIR/$PG_DUMP_REL" ]] || die "pg_dump 產生空檔案"
-  PG_DUMP_SHA="$(sha256_file "$BACKUP_DIR/$PG_DUMP_REL")"
-  printf '%s  %s\n' "$PG_DUMP_SHA" "$PG_DUMP_REL" >> "$BACKUP_DIR/checksums.sha256"
-  printf 'PostgreSQL dump：%s bytes\n' "$(file_size "$BACKUP_DIR/$PG_DUMP_REL")"
+  [[ -s "$TARGET_DIR/$PG_DUMP_REL" ]] || die "pg_dump 產生空檔案"
+  PG_DUMP_SHA="$(sha256_file "$TARGET_DIR/$PG_DUMP_REL")"
+  printf '%s  %s\n' "$PG_DUMP_SHA" "$PG_DUMP_REL" >> "$TARGET_DIR/checksums.sha256"
+  printf 'PostgreSQL dump：%s bytes\n' "$(file_size "$TARGET_DIR/$PG_DUMP_REL")"
 fi
 
 if [[ "$SKIP_QDRANT" != "1" ]]; then
-  info "建立 Qdrant collection snapshot"
-  if ! docker compose up -d qdrant >/dev/null 2>&1; then
-    :
-  fi
-  for _ in {1..60}; do
-    if curl -fsS --max-time 2 "$QDRANT_URL/collections" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
-  COLLECTION_INFO="$(curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION")" \
-    || die "找不到 Qdrant collection：$JUDGMENT_VECTOR_COLLECTION（若尚未建立索引，請用 --skip-qdrant）"
+  info "建立 Qdrant snapshot"
+  COLLECTION_INFO="$(curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION")"
   QDRANT_POINTS="$(printf '%s' "$COLLECTION_INFO" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("result") or {}).get("points_count") or 0)')"
   SNAPSHOT_RESPONSE="$(curl -fsS -X POST "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots")" \
     || die "建立 Qdrant snapshot 失敗"
@@ -289,54 +329,42 @@ if [[ "$SKIP_QDRANT" != "1" ]]; then
   ENCODED_SNAPSHOT="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$QDRANT_COLLECTION_SNAPSHOT")"
   QDRANT_SNAPSHOT_REL="qdrant/$QDRANT_COLLECTION_SNAPSHOT"
   curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots/$ENCODED_SNAPSHOT" \
-    -o "$BACKUP_DIR/$QDRANT_SNAPSHOT_REL" || die "下載 Qdrant snapshot 失敗"
-  [[ -s "$BACKUP_DIR/$QDRANT_SNAPSHOT_REL" ]] || die "Qdrant snapshot 是空檔案"
-  QDRANT_SNAPSHOT_SHA="$(sha256_file "$BACKUP_DIR/$QDRANT_SNAPSHOT_REL")"
-  printf '%s  %s\n' "$QDRANT_SNAPSHOT_SHA" "$QDRANT_SNAPSHOT_REL" >> "$BACKUP_DIR/checksums.sha256"
+    -o "$TARGET_DIR/$QDRANT_SNAPSHOT_REL" || die "下載 Qdrant snapshot 失敗"
+  [[ -s "$TARGET_DIR/$QDRANT_SNAPSHOT_REL" ]] || die "Qdrant snapshot 是空檔案"
+  QDRANT_SNAPSHOT_SHA="$(sha256_file "$TARGET_DIR/$QDRANT_SNAPSHOT_REL")"
+  printf '%s  %s\n' "$QDRANT_SNAPSHOT_SHA" "$QDRANT_SNAPSHOT_REL" >> "$TARGET_DIR/checksums.sha256"
   printf 'Qdrant snapshot：%s bytes（%s points）\n' \
-    "$(file_size "$BACKUP_DIR/$QDRANT_SNAPSHOT_REL")" "$QDRANT_POINTS"
+    "$(file_size "$TARGET_DIR/$QDRANT_SNAPSHOT_REL")" "$QDRANT_POINTS"
   curl -sS -X DELETE "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots/$ENCODED_SNAPSHOT" >/dev/null 2>&1 || true
 fi
 
 if [[ "$SKIP_DATA" != "1" ]]; then
   info "複製 data/"
-  if [[ -d "$JUDGMENT_DATA_ABS" ]]; then
-    echo "複製判決資料：$JUDGMENT_DATA_ABS"
-    copy_tree "$JUDGMENT_DATA_ABS" "$BACKUP_DIR/data/judgments"
-  else
-    echo "警告：找不到判決資料目錄 $JUDGMENT_DATA_ABS" >&2
-  fi
-  if [[ -d "$LAW_DATA_ABS" ]]; then
-    echo "複製法規資料：$LAW_DATA_ABS"
-    copy_tree "$LAW_DATA_ABS" "$BACKUP_DIR/data/laws"
-  else
-    echo "警告：找不到法規資料目錄 $LAW_DATA_ABS" >&2
-  fi
+  copy_tree "$JUDGMENT_DATA_ABS" "$TARGET_DIR/data/judgments"
+  copy_tree "$LAW_DATA_ABS" "$TARGET_DIR/data/laws"
+  echo "判決資料 → $TARGET_DIR/data/judgments"
+  echo "法規資料 → $TARGET_DIR/data/laws"
 fi
 
-info "複製設定與還原腳本"
-if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  cp "$SCRIPT_DIR/.env" "$BACKUP_DIR/config/.env"
-  echo "已包含 .env（內含資料庫連線資訊，請妥善保管備份）" >&2
+info "複製設定"
+if [[ -f "$PROJECT_ROOT/.env" ]]; then
+  cp "$PROJECT_ROOT/.env" "$TARGET_DIR/config/.env"
+  echo "已包含 .env（內含資料庫連線資訊，請妥善保管）" >&2
 fi
 for file in docker-compose.yml pyproject.toml uv.lock; do
-  if [[ -f "$SCRIPT_DIR/$file" ]]; then
-    cp "$SCRIPT_DIR/$file" "$BACKUP_DIR/config/$file"
+  if [[ -f "$PROJECT_ROOT/$file" ]]; then
+    cp "$PROJECT_ROOT/$file" "$TARGET_DIR/config/$file"
   fi
 done
-cp "$SCRIPT_DIR/restore.sh" "$BACKUP_DIR/restore.sh" 2>/dev/null || true
-if [[ -f "$BACKUP_DIR/restore.sh" ]]; then
-  chmod +x "$BACKUP_DIR/restore.sh"
-fi
 
 GIT_COMMIT=""
 GIT_BRANCH=""
-if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  GIT_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
-  GIT_BRANCH="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+if git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  GIT_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  GIT_BRANCH="$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 fi
 
-export BACKUP_DIR JUDGMENT_DATA_ABS LAW_DATA_ABS
+export TARGET_DIR PROJECT_ROOT JUDGMENT_DATA_ABS LAW_DATA_ABS
 export JUDGMENT_BYTES LAW_BYTES TOTAL_BYTES
 export JUDGMENT_PG_SERVICE JUDGMENT_PG_USER JUDGMENT_PG_DB
 export PG_DUMP_REL PG_DUMP_SHA
@@ -346,9 +374,8 @@ export GIT_COMMIT GIT_BRANCH
 export SKIP_DATA SKIP_POSTGRES SKIP_QDRANT
 export BACKUP_CREATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 export BACKUP_HOSTNAME="$(hostname)"
-export PROJECT_ROOT="$SCRIPT_DIR"
 
-python3 - <<'PY' > "$BACKUP_DIR/manifest.json"
+python3 - <<'PY' > "$TARGET_DIR/manifest.json"
 import json
 import os
 from pathlib import Path
@@ -403,64 +430,52 @@ manifest = {
 for section in ("postgres", "qdrant"):
     relative = manifest[section].get("dump" if section == "postgres" else "snapshot")
     if relative:
-        path = Path(os.environ["BACKUP_DIR"]) / relative
+        path = Path(os.environ["TARGET_DIR"]) / relative
         if path.is_file():
             manifest[section]["bytes"] = path.stat().st_size
 print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
 PY
 
-cat > "$BACKUP_DIR/README-RESTORE.md" <<'EOF'
+cat > "$TARGET_DIR/README-RESTORE.md" <<'EOF'
 # Judgment environment restore
 
 This directory was produced by `backup.sh`.
 
-## Restore on a new computer
+## Restore
 
-1. Install Docker, `uv`, Python 3, and Ollama (`bge-m3`).
-2. Clone the project repository at the commit recorded in `manifest.json`.
-3. From the project directory, run:
+1. Clone the project repository at the commit in `manifest.json`.
+2. Install Docker and `uv`; start Docker.
+3. From this directory, run:
 
 ```bash
-./restore.sh --backup-dir /Volumes/USB/judgment-backup-YYYYmmdd-HHMMSS \
-  --project-dir /path/to/judgment
+./restore.sh -d /path/to/judgment
 ```
 
-Or run the copy of `restore.sh` inside this backup directory:
+`restore.sh` will check the project checkout, Docker, backup files, and then
+restore PostgreSQL, Qdrant, `data/`, and `.env`.
+
+4. Resume Qdrant indexing:
 
 ```bash
-./restore.sh --project-dir /path/to/judgment
-```
-
-4. Review the restored `.env` if the new machine uses different paths or hosts.
-5. Start the backend with `./up.sh` (restore.sh does this by default).
-6. Resume Qdrant indexing:
-
-```bash
+cd /path/to/judgment
 ./scripts/index_full_task.sh
 ```
 
-The PostgreSQL dump includes `judgment_vector_index`, so the restored Qdrant
-snapshot and index progress remain synchronized and indexing resumes instead
-of starting from zero.
+The PostgreSQL dump includes `judgment_vector_index`; restoring it together
+with the Qdrant snapshot keeps index progress synchronized.
 
 ## Important
 
-- Keep the backup encrypted; `config/.env` may contain credentials.
-- Do not restore a PostgreSQL dump and a Qdrant snapshot independently:
-  `judgment_vector_index` must match the Qdrant collection. If you skip Qdrant,
-  clear `judgment_vector_index` before running a full re-index.
-- Data files preserve archive paths inside raw Parquet manifests. Restoring to
-  the same project path is fastest; a different path may cause RARs to be
-  re-extracted on the next import.
+- Keep this directory encrypted; `config/.env` may contain credentials.
+- Do not restore PostgreSQL and Qdrant independently. If you skip Qdrant,
+  clear `judgment_vector_index` before a full re-index.
 EOF
 
-if [[ -f "$BACKUP_DIR/checksums.sha256" ]]; then
-  (cd "$BACKUP_DIR" && shasum -a 256 -c checksums.sha256 2>/dev/null || sha256sum -c checksums.sha256) || true
+if [[ -f "$TARGET_DIR/checksums.sha256" ]]; then
+  (cd "$TARGET_DIR" && shasum -a 256 -c checksums.sha256 2>/dev/null || sha256sum -c checksums.sha256) || true
 fi
 
 info "備份完成"
-printf '位置：%s\n' "$BACKUP_DIR"
-printf '大小：%s\n' "$(du -sh "$BACKUP_DIR" | awk '{print $1}')"
-printf 'Manifest：%s/manifest.json\n' "$BACKUP_DIR"
-printf '還原：%s/restore.sh --backup-dir %s --project-dir /path/to/judgment\n' \
-  "$BACKUP_DIR" "$BACKUP_DIR"
+printf '位置：%s\n' "$TARGET_DIR"
+printf '大小：%s\n' "$(du -sh "$TARGET_DIR" | awk '{print $1}')"
+printf '還原：%s/restore.sh -d /path/to/judgment\n' "$TARGET_DIR"

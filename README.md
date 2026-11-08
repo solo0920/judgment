@@ -114,13 +114,13 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 
 ### 完整環境備份與還原
 
-`backup.sh` 會將完整狀態匯出到指定的 USB 目錄：
+`backup.sh` 會先檢查專案、資料目錄、Docker／PostgreSQL／Qdrant collection、備份目錄空間與執行中的處理程序，再匯出到指定的空目錄：
 
 ```bash
-./backup.sh --dest /Volumes/USB/judgment-backups
+./backup.sh -s /path/to/judgment -d /Volumes/USB/judgment-backup-20261108
 ```
 
-內容包含：
+`-s` 可省略（預設為 `backup.sh` 所在專案），`-d` 必須是新的空目錄。備份內容包含：
 
 - `data/`：判決 RAR、原始判決 Parquet、法規／命令原始資料
 - `postgres/judgment.dump`：`pg_dump -Fc`，含判決、法規 metadata 與 `judgment_vector_index`
@@ -128,15 +128,22 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 - `config/`：`.env`、`docker-compose.yml`、`pyproject.toml`、`uv.lock`
 - `manifest.json`、checksums、`restore.sh` 與還原說明
 
-備份會建立 timestamp 子目錄，不會覆蓋既有備份。偵測到索引／匯入／下載程序執行中時會中止，避免 PostgreSQL 與 Qdrant 進度不一致；只有確定只備份部分資料時才使用 `--allow-running`。
+`restore.sh` 會直接複製到備份目錄根目錄。偵測到索引／匯入／下載程序執行中時會中止，避免 PostgreSQL 與 Qdrant 進度不一致；只有確定只備份部分資料時才使用 `--allow-running`。
 
-在新電腦上，先將專案 clone 到相同 commit，再從專案或備份目錄執行：
+在新電腦上，先 clone 專案，然後直接執行備份目錄中的 `restore.sh`：
 
 ```bash
-./restore.sh \
-  --backup-dir /Volumes/USB/judgment-backups/judgment-backup-YYYYmmdd-HHMMSS \
-  --project-dir /path/to/judgment
+cd /Volumes/USB/judgment-backup-20261108
+./restore.sh -d /path/to/judgment
 ```
+
+也可以從專案執行：
+
+```bash
+./restore.sh -b /Volumes/USB/judgment-backup-20261108 -d /path/to/judgment
+```
+
+`restore.sh` 會先檢查目標是否已 clone 專案（`pyproject.toml`、`src/judgment`、`up.sh`）、Docker 是否可用、備份 manifest／checksum 與目標磁碟空間。`-d` 是目標專案目錄；`-b` 可省略，預設為 `restore.sh` 所在備份目錄。
 
 還原流程會：
 
