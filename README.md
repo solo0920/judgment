@@ -934,6 +934,15 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 以 Playwright 驗證測試流程圖表：問題、RAG 答案、每步驟 module／function、即時 poll 更新、11 個子程序進度條（1 embedding + 1 retrieval + 1 context + 4 LLM + 4 validation）、失敗模型紅色 bar、總流程進度與依階段時間 bar、歷史選單還原舊 Flow、390px 與 0 console error。
 - 以 Playwright 驗證 RAG 提問頁下方的即時測試 Flow panel：測試模式提問時顯示問題、答案、module／function、5 個階段、子進度條與總時間 bar。
 
+## Case Assessment 文件（未來）
+
+Case Assessment & Legal Strategy Engine 尚未實作；目前先保留可行性評估與資料契約，供未來「專案評估／案件評估」功能使用。
+
+- [`documents/CASE_ASSESSMENT_FEASIBILITY_v1.0.md`](documents/CASE_ASSESSMENT_FEASIBILITY_v1.0.md)：可行性、現有資產重用、架構衝突、缺口、分期與風險。
+- [`documents/CASE_ASSESSMENT_DATA_DICTIONARY_v1.0.md`](documents/CASE_ASSESSMENT_DATA_DICTIONARY_v1.0.md)：案件、事實、證據、法律要件、判決比較、風險、策略、Analysis Run 與 Provenance 的資料字典。
+
+這兩份文件是架構參考，不代表 CASE 已核准開發；Auth、文件儲存、Tenant、條文版本與 Feature Schema 仍待決策。
+
 ## 測試與檢查
 
 ```bash
