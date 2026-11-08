@@ -23,7 +23,7 @@
 6. 有新版本時：
    - 保存原始 ZIP 與 manifest。
    - 將每筆法規寫成一列 Parquet（含完整 `raw_json` 與巢狀 `law_articles`）。
-   - 在 PostgreSQL 建立 `law_dataset_versions` 版本，更新 `law_documents`，並記錄 `added`／`modified`／`removed` 變更事件。
+   - 在 PostgreSQL 建立 `law_dataset_versions` 版本，更新 `law_documents`，寫入 `law_article_versions` 條文快照，並記錄法規層級與條文層級的 `added`／`modified`／`removed` 變更事件。
 7. 更新 `download_runs` 與 `law_sources` 狀態。
 8. 若寫入資料庫失敗，會清除本次新產生但未被引用的檔案。
 
@@ -63,6 +63,12 @@ uv run judgment-law-download --source all
 ```bash
 uv run judgment-law-download --source law --data-dir ./data/laws
 uv run judgment-law-download --source order --data-dir ./data/laws
+```
+
+既有資料補建條文版本：
+
+```bash
+uv run judgment-backfill-law-articles --data-dir ./data/laws
 ```
 
 其他選項：
@@ -247,6 +253,8 @@ cd /Volumes/USB/judgment-backup-20261108
 | `law_dataset_versions` | 每次成功匯入的版本；保留 ZIP/Parquet 路徑、三種雜湊、數量與 `is_current` |
 | `law_documents` | 每筆法規的現行中繼資料、首次／最後出現版本、移除版本與 `is_current` |
 | `law_change_events` | 法規層級的 `added`／`modified`／`removed` 事件、變更欄位與前後中繼資料 |
+| `law_article_versions` | 每個法規版本的完整條文快照；`law_id + law_version_id + article_key` 唯一 |
+| `law_article_change_events` | 條文層級的 `added`／`modified`／`removed` 事件、變更前後內容與版本 |
 | `download_runs` | 每次執行的狀態、HTTP 狀態、耗時、雜湊、數量、錯誤訊息與版本關聯 |
 
 查看目前版本：
@@ -260,6 +268,26 @@ LIMIT 5;
 SELECT change_type, count(*)
 FROM law_change_events
 GROUP BY change_type;
+
+SELECT change_type, count(*)
+FROM law_article_change_events
+GROUP BY change_type;
+```
+
+### 法規條文版本
+
+法規下載現在會為每個 `law_dataset_versions` 建立完整的 `law_article_versions` 條文快照：
+
+- `article_key` 由 `article_type` 與 `article_no` 組成，例如 `A:第 19 條`。
+- `content_hash` 用於判斷同一條文是否在新版本中變更。
+- `law_article_change_events` 記錄條文層級的 `added`／`modified`／`removed`、變更前後內容、來源版本與目標版本。
+- 既有資料可用 `uv run judgment-backfill-law-articles --data-dir ./data/laws` 補建；命令可重複執行，已回填的版本會跳過。
+- `GET /api/law` 預設回傳目前版本；加上 `version_id=1` 可讀取指定歷史版本，回應包含 `versions`、`selected_version_id`、`change_summary` 與 `changes`。
+- 資料頁的法規報表提供「條文版本」下拉選單；歷史版本會標示提醒，條文變更以可展開的「版本變更」區塊呈現。
+
+```bash
+# 指定歷史版本
+curl "http://127.0.0.1:9200/api/law?source_type=law&law_key=...&version_id=1"
 ```
 
 ## 判決匯入與金融法規篩選
@@ -405,7 +433,7 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
-| `GET` | `/api/law` | 依 `law_key`（可加 `source_type`）取得單一法規的 metadata、沿革、附件與最新 Parquet 條文。 |
+| `GET` | `/api/law` | 依 `law_key`（可加 `source_type`、`version_id`）取得單一法規的 metadata、沿革、附件、條文版本清單與指定版本條文；未指定時使用目前版本。 |
 | `GET` | `/api/judgment` | 依 `jid` 取得單一判決的 metadata、命中法規、引用與判決全文；`source=parquet` 改從原始判決 Parquet 讀取。 |
 | `GET` | `/api/performance` | 查詢 PostgreSQL 效能紀錄與 Flow JSON，支援程序、模組、模型、狀態、日期、耗時等 metadata 篩選。 |
 | `GET` | `/api/performance/options` | 回傳效能報表可用的程序、模組、模型、狀態與方法選項。 |
@@ -909,7 +937,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：112 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：116 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。

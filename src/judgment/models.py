@@ -125,6 +125,72 @@ class LawChangeEvent(Base):
     )
 
 
+class LawArticleVersion(Base):
+    __tablename__ = "law_article_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    law_id = Column(
+        Integer, ForeignKey("law_documents.id"), nullable=False, index=True
+    )
+    law_key = Column(String(512), nullable=False, default="", index=True)
+    law_version_id = Column(
+        Integer, ForeignKey("law_dataset_versions.id"), nullable=False, index=True
+    )
+    article_key = Column(String(512), nullable=False)
+    article_type = Column(String(32), nullable=False, default="")
+    article_no = Column(String(128), nullable=False, default="")
+    article_index = Column(Integer, nullable=False, default=0)
+    article_content = Column(Text, nullable=False, default="")
+    content_hash = Column(String(64), nullable=False, default="")
+    effective_date = Column(String(64), nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "law_id",
+            "law_version_id",
+            "article_key",
+            name="uq_law_article_version_key",
+        ),
+        Index("ix_law_article_versions_law_version", "law_id", "law_version_id"),
+    )
+
+
+class LawArticleChangeEvent(Base):
+    __tablename__ = "law_article_change_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    law_id = Column(
+        Integer, ForeignKey("law_documents.id"), nullable=False, index=True
+    )
+    law_key = Column(String(512), nullable=False, default="", index=True)
+    from_version_id = Column(
+        Integer, ForeignKey("law_dataset_versions.id"), nullable=True
+    )
+    to_version_id = Column(
+        Integer, ForeignKey("law_dataset_versions.id"), nullable=False, index=True
+    )
+    article_key = Column(String(512), nullable=False)
+    article_type = Column(String(32), nullable=False, default="")
+    article_no = Column(String(128), nullable=False, default="")
+    change_type = Column(String(16), nullable=False)
+    changed_fields = Column(JSON, nullable=True)
+    before_content = Column(Text, nullable=True)
+    after_content = Column(Text, nullable=True)
+    effective_date = Column(String(64), nullable=False, default="")
+    detected_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "law_id",
+            "to_version_id",
+            "article_key",
+            name="uq_law_article_change_version_key",
+        ),
+        Index("ix_law_article_changes_law", "law_id", "detected_at"),
+    )
+
+
 class JudgmentImportRun(Base):
     __tablename__ = "judgment_import_runs"
 

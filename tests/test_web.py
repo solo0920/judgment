@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -19,6 +19,8 @@ from judgment.models import (
     DownloadRun,
     JudgmentDocument,
     JudgmentImportRun,
+    LawArticleChangeEvent,
+    LawArticleVersion,
     LawDatasetVersion,
     LawDocument,
 )
@@ -1154,6 +1156,101 @@ def test_law_detail_combines_postgres_metadata_and_parquet_articles(web_client) 
         {"name": "附件.pdf", "url": "https://law.test/a.pdf"}
     ]
     assert payload["warnings"] == []
+
+
+def test_law_detail_reads_selected_article_version(web_client) -> None:
+    session_factory = web_client.app.state.session_factory
+    with session_factory() as session:
+        document = session.scalars(
+            select(LawDocument).where(LawDocument.law_key == "L0001")
+        ).first()
+        assert document is not None
+        version1 = session.get(LawDatasetVersion, 1)
+        assert version1 is not None
+        version1.is_current = False
+        version2 = LawDatasetVersion(
+            source_type="law",
+            source_url="https://example.test/law",
+            update_date="2026/11/06 上午 12:00:00",
+            content_sha256="1" * 64,
+            raw_json_sha256="2" * 64,
+            zip_sha256="3" * 64,
+            zip_path="/tmp/law-v2.zip",
+            parquet_path="/tmp/laws-v2.parquet",
+            law_count=2,
+            article_count=4,
+            is_current=True,
+        )
+        session.add(version2)
+        session.flush()
+        session.add_all(
+            [
+                LawArticleVersion(
+                    law_id=document.id,
+                    law_key=document.law_key,
+                    law_version_id=1,
+                    article_key="A:第1條",
+                    article_type="A",
+                    article_no="第 1 條",
+                    article_index=1,
+                    article_content="舊版條文內容",
+                    content_hash="f" * 64,
+                    effective_date="20260101",
+                ),
+                LawArticleVersion(
+                    law_id=document.id,
+                    law_key=document.law_key,
+                    law_version_id=version2.id,
+                    article_key="A:第1條",
+                    article_type="A",
+                    article_no="第 1 條",
+                    article_index=1,
+                    article_content="新版條文內容",
+                    content_hash="e" * 64,
+                    effective_date="20261106",
+                ),
+                LawArticleChangeEvent(
+                    law_id=document.id,
+                    law_key=document.law_key,
+                    from_version_id=1,
+                    to_version_id=version2.id,
+                    article_key="A:第1條",
+                    article_type="A",
+                    article_no="第 1 條",
+                    change_type="modified",
+                    changed_fields=["article_content"],
+                    before_content="舊版條文內容",
+                    after_content="新版條文內容",
+                    effective_date="20261106",
+                ),
+            ]
+        )
+        session.commit()
+        version2_id = version2.id
+
+    response = web_client.get(
+        "/api/law",
+        params={"law_key": "L0001", "source_type": "law"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selected_version_id"] == version2_id
+    assert payload["meta"]["selected_version_is_current"] is True
+    assert payload["articles"][0]["article_content"] == "新版條文內容"
+    assert payload["change_summary"] == {"modified": 1}
+    assert payload["changes_available"] is True
+    assert payload["changes"][0]["before_content"] == "舊版條文內容"
+
+    old_response = web_client.get(
+        "/api/law",
+        params={"law_key": "L0001", "source_type": "law", "version_id": 1},
+    )
+    assert old_response.status_code == 200
+    old_payload = old_response.json()
+    assert old_payload["selected_version_id"] == 1
+    assert old_payload["meta"]["selected_version_is_current"] is False
+    assert old_payload["articles"][0]["article_content"] == "舊版條文內容"
+    assert any("歷史" in warning for warning in old_payload["warnings"])
 
 
 def test_law_detail_without_parquet_returns_metadata_warning(web_client, tmp_path) -> None:

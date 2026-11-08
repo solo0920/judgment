@@ -1148,6 +1148,98 @@ function renderLawError(error, lawName) {
   </div>`;
 }
 
+function renderLawVersionSelector(detail) {
+  const versions = Array.isArray(detail.versions) ? detail.versions : [];
+  if (versions.length < 1) return "";
+  const selected = detail.selected_version_id ?? "";
+  return `<label class="law-version-select">
+    <span>條文版本</span>
+    <select class="select" data-action="select-law-version" aria-label="選擇法規條文版本">
+      ${versions
+        .map((item) => {
+          const updateDate =
+            String(item.update_date || "").match(/\d{4}\/\d{1,2}\/\d{1,2}/)?.[0] ||
+            "";
+          const label = [
+            `#${item.version_id}`,
+            item.is_current ? "目前" : "歷史",
+            updateDate,
+            item.article_count_for_law
+              ? `${formatNumber(item.article_count_for_law)} 筆`
+              : "無條文快照",
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          return `<option value="${escapeHtml(item.version_id)}" ${
+            String(item.version_id) === String(selected) ? "selected" : ""
+          }>${escapeHtml(label)}</option>`;
+        })
+        .join("")}
+    </select>
+  </label>`;
+}
+
+function renderLawVersionChanges(detail) {
+  const summary = detail.change_summary || {};
+  const total = Object.values(summary).reduce(
+    (sum, value) => sum + (Number(value) || 0),
+    0,
+  );
+  const changes = Array.isArray(detail.changes) ? detail.changes : [];
+  if (!detail.changes_available && !total) return "";
+  const labels = { added: "新增", modified: "修改", removed: "移除" };
+  const counts = ["added", "modified", "removed"]
+    .map((key) => `${labels[key]} ${formatNumber(summary[key] || 0)}`)
+    .join(" · ");
+  return `<details class="report-section law-version-changes">
+    <summary>
+      <span class="report-section-title">版本變更</span>
+      <span class="muted">${escapeHtml(counts)}</span>
+    </summary>
+    <div class="law-version-change-list">
+      ${
+        changes.length
+          ? changes
+              .slice(0, 20)
+              .map((item) => {
+                const tone =
+                  item.change_type === "added"
+                    ? "badge-ok"
+                    : item.change_type === "removed"
+                      ? "badge-danger"
+                      : "badge-warn";
+                const before = item.before_content
+                  ? `<details><summary>變更前</summary><pre>${escapeHtml(
+                      item.before_content,
+                    )}</pre></details>`
+                  : "";
+                const after = item.after_content
+                  ? `<details><summary>變更後</summary><pre>${escapeHtml(
+                      item.after_content,
+                    )}</pre></details>`
+                  : "";
+                return `<div class="law-version-change">
+                  <div class="law-version-change-head">
+                    <span class="badge ${tone}">${escapeHtml(
+                      labels[item.change_type] || item.change_type,
+                    )}</span>
+                    <strong>${escapeHtml(item.article_no || item.article_key)}</strong>
+                  </div>
+                  ${before}${after}
+                </div>`;
+              })
+              .join("")
+          : `<div class="report-empty-inline">此版本沒有可顯示的條文變更。</div>`
+      }
+      ${
+        detail.changes_truncated
+          ? `<div class="report-empty-inline">僅顯示前 20 筆變更；API 回傳上限 200 筆。</div>`
+          : ""
+      }
+    </div>
+  </details>`;
+}
+
 function renderLawReport(detail, { database = "", lawPage = 1, historyOpen = false } = {}) {
   const warnings = Array.isArray(detail.warnings) ? detail.warnings : [];
   const title = detail.law_name || detail.law_key || "法規";
@@ -1156,9 +1248,21 @@ function renderLawReport(detail, { database = "", lawPage = 1, historyOpen = fal
   ).length;
   const metadataSource = lawMetadataSource(detail);
   const articleSource =
-    detail.meta?.articles_source === "parquet" ? "Parquet 條文" : "條文未提供";
+    detail.meta?.articles_source === "postgresql"
+      ? "PostgreSQL 條文版本"
+      : detail.meta?.articles_source === "parquet"
+        ? "Parquet 條文"
+        : "條文未提供";
   const snapshot = detail.meta?.snapshot || "";
-  const origin = [metadataSource, articleSource, snapshot].filter(Boolean).join(" · ");
+  const versionOrigin =
+    detail.meta?.articles_source === "postgresql" &&
+    detail.selected_version_id !== null &&
+    detail.selected_version_id !== undefined
+      ? `條文版本 #${detail.selected_version_id}`
+      : "";
+  const origin = [metadataSource, articleSource, versionOrigin, snapshot]
+    .filter(Boolean)
+    .join(" · ");
   const sourceTypeLabel =
     detail.source_type === "law"
       ? "法律"
@@ -1184,6 +1288,16 @@ function renderLawReport(detail, { database = "", lawPage = 1, historyOpen = fal
   }
   if (version.last_seen_at) {
     metaItems.push(lawMetaItem("最後收錄時間", escapeHtml(formatDateTime(version.last_seen_at))));
+  }
+  if (version.selected_version_id !== null && version.selected_version_id !== undefined) {
+    metaItems.push(
+      lawMetaItem(
+        "條文版本",
+        `#${escapeHtml(version.selected_version_id)} · ${
+          detail.meta?.selected_version_is_current ? "目前" : "歷史"
+        }`,
+      ),
+    );
   }
 
   return `<div class="law-report">
@@ -1211,6 +1325,7 @@ function renderLawReport(detail, { database = "", lawPage = 1, historyOpen = fal
           </div>
         </div>
         <div class="report-actions">
+          ${renderLawVersionSelector(detail)}
           ${
             detail.law_url
               ? `<a class="btn btn-secondary btn-sm" href="${escapeHtml(
@@ -1261,6 +1376,7 @@ function renderLawReport(detail, { database = "", lawPage = 1, historyOpen = fal
         <div class="law-meta-grid">${metaItems.join("")}</div>
       </div>
 
+      ${renderLawVersionChanges(detail)}
       ${lawTextSection("法規前言", detail.law_foreword)}
       ${lawDisclosureSection("法規沿革", detail.law_histories, { open: historyOpen })}
       ${lawTextSection("生效說明", detail.law_effective_note)}
@@ -1763,7 +1879,12 @@ export async function render(root, ctx) {
     window.setTimeout(() => target.classList.remove("is-jump-target"), 2400);
   };
 
-  const openLawReport = async ({ lawKey, sourceType = "", lawName = "" }) => {
+  const openLawReport = async ({
+    lawKey,
+    sourceType = "",
+    lawName = "",
+    versionId = "",
+  }) => {
     const db = getDatabase(selectedId);
     const state = db ? stateFor(db) : null;
     const schemaResult =
@@ -1775,6 +1896,7 @@ export async function render(root, ctx) {
       lawKey,
       sourceType,
       lawName,
+      versionId: versionId ? String(versionId) : "",
       page: 1,
       detail: null,
       database: db.id,
@@ -1784,7 +1906,7 @@ export async function render(root, ctx) {
     reportBox.innerHTML = renderLawLoading(lawName || lawKey);
     reportBox.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
-      const detail = await api.lawDetail(lawKey, sourceType);
+      const detail = await api.lawDetail(lawKey, sourceType, lawView.versionId);
       if (disposed || !lawView || lawView.seq !== seq) return;
       lawView.detail = detail;
       lawView.page = 1;
@@ -2734,6 +2856,16 @@ export async function render(root, ctx) {
   });
 
   reportBox.addEventListener("change", (event) => {
+    const versionSelect = event.target.closest("[data-action='select-law-version']");
+    if (versionSelect && lawView) {
+      openLawReport({
+        lawKey: lawView.lawKey,
+        sourceType: lawView.sourceType,
+        lawName: lawView.lawName,
+        versionId: versionSelect.value,
+      });
+      return;
+    }
     if (!event.target.matches("[data-page-size]")) return;
     const db = getDatabase(selectedId);
     if (!db) return;

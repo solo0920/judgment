@@ -14,6 +14,8 @@ from judgment.law_download.storage import LawStorage
 from judgment.models import (
     Base,
     DownloadRun,
+    LawArticleChangeEvent,
+    LawArticleVersion,
     LawChangeEvent,
     LawDatasetVersion,
     LawDocument,
@@ -92,6 +94,8 @@ def test_first_run_writes_parquet_and_metadata(env) -> None:
         assert _count(session, LawDatasetVersion) == 1
         assert _count(session, LawDocument) == 2
         assert _count(session, LawChangeEvent) == 2
+        assert _count(session, LawArticleVersion) == 4
+        assert _count(session, LawArticleChangeEvent) == 0
         version = session.scalars(select(LawDatasetVersion)).one()
         assert version.is_current is True
         assert version.law_count == 2
@@ -188,6 +192,23 @@ def test_new_version_updates_adds_modifies_and_removes(env) -> None:
         ]
         modified = next(event for event in events if event.change_type == "modified")
         assert "content_hash" in modified.changed_fields
+
+        assert _count(session, LawArticleVersion) == 8
+        article_events = session.scalars(
+            select(LawArticleChangeEvent)
+            .where(LawArticleChangeEvent.to_version_id == 2)
+            .order_by(LawArticleChangeEvent.id)
+        ).all()
+        assert sorted(event.change_type for event in article_events) == [
+            "modified",
+            "removed",
+            "removed",
+        ]
+        modified_article = next(
+            event for event in article_events if event.change_type == "modified"
+        )
+        assert modified_article.before_content == "舊銀行法條文"
+        assert modified_article.after_content == "新銀行法條文"
 
     table = pq.read_table(second.parquet_path)
     assert table.num_rows == 2

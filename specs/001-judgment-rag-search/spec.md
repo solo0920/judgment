@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Status**: Partially implemented (performance records + API report; RAG, Google auth and vector search pending)
+**Status**: Partially implemented (RAG, vector search, performance report and article-level law versions implemented; Google auth and remaining version/UX requirements pending)
 
 **Input**: 使用者提供之需求（原文）：
 
@@ -300,3 +300,15 @@
 - 效能紀錄預設保留至少 90 天，並在背景清理過期資料。
 
 尚未完成：RAG 各階段（檢索、重排、法規擷取、生成、後處理）的細部效能紀錄、Google 登入、判決向量索引與完整 RAG 回答。
+
+## Implementation Note (2026-11-08): 法規條文版本
+
+已補上第一階段條文版本能力：
+
+- PostgreSQL 新增 `law_article_versions`，保存每個 `law_dataset_versions` 的完整條文快照。
+- PostgreSQL 新增 `law_article_change_events`，記錄條文層級的 `added`／`modified`／`removed`、變更前後內容與版本。
+- 法規下載匯入時自動寫入條文快照與變更事件；既有資料可用 `judgment-backfill-law-articles` 補建。
+- `GET /api/law` 支援 `version_id`，回傳 `versions`、`selected_version_id`、`change_summary` 與 `changes`。
+- 資料頁法規報表提供版本切換與條文變更明細。
+
+尚未完成：自動判定判決當時適用版本、跨版本條文差異的完整視覺化、舊版法規 metadata 的完整歷史快照。

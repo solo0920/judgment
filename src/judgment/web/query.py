@@ -24,6 +24,8 @@ from ..models import (
     DownloadRun,
     JudgmentDocument,
     JudgmentImportRun,
+    LawArticleChangeEvent,
+    LawArticleVersion,
     LawDatasetVersion,
     LawDocument,
 )
@@ -1342,9 +1344,10 @@ def _load_parquet_law(
 @traced(
     "query.law_detail",
     module=__name__,
-    params_fn=lambda *, law_key, source_type=None, **_: {
+    params_fn=lambda *, law_key, source_type=None, version_id=None, **_: {
         "law_key": law_key,
         "source_type": source_type,
+        "version_id": version_id,
     },
 )
 def get_law_detail(
@@ -1353,6 +1356,7 @@ def get_law_detail(
     data_dir: Path,
     law_key: str,
     source_type: Optional[str] = None,
+    version_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     key = str(law_key or "").strip()
@@ -1364,7 +1368,17 @@ def get_law_detail(
 
     record_metadata: Optional[Dict[str, Any]] = None
     record_attachments: List[Dict[str, str]] = []
-    version: Optional[Dict[str, Any]] = None
+    version_info: Optional[Dict[str, Any]] = None
+    versions_payload: List[Dict[str, Any]] = []
+    selected_version_payload: Optional[Dict[str, Any]] = None
+    selected_version_id: Optional[int] = None
+    selected_article_count = 0
+    articles_from_db: List[Dict[str, Any]] = []
+    change_summary: Dict[str, int] = {}
+    changes: List[Dict[str, Any]] = []
+    changes_available = False
+    changes_truncated = False
+
     with session_factory() as session:
         statement = select(LawDocument).where(LawDocument.law_key == key)
         if requested_source:
@@ -1376,7 +1390,7 @@ def get_law_detail(
         if record is not None:
             record_metadata = _record_law_metadata(record)
             record_attachments = _parse_attachments(record.law_attachments_json)
-            version = {
+            version_info = {
                 "first_seen_version_id": record.first_seen_version_id,
                 "last_seen_version_id": record.last_seen_version_id,
                 "removed_version_id": record.removed_version_id,
@@ -1387,6 +1401,164 @@ def get_law_detail(
                 if record.removed_at
                 else None,
             }
+
+            version_rows = session.scalars(
+                select(LawDatasetVersion)
+                .where(LawDatasetVersion.source_type == record.source_type)
+                .order_by(LawDatasetVersion.id.desc())
+            ).all()
+            article_counts = dict(
+                session.execute(
+                    select(
+                        LawArticleVersion.law_version_id,
+                        func.count(),
+                    )
+                    .where(LawArticleVersion.law_id == int(record.id))
+                    .group_by(LawArticleVersion.law_version_id)
+                ).all()
+            )
+            versions_payload = [
+                {
+                    "version_id": int(item.id),
+                    "update_date": item.update_date,
+                    "downloaded_at": item.downloaded_at,
+                    "is_current": bool(item.is_current),
+                    "law_count": int(item.law_count or 0),
+                    "article_count": int(item.article_count or 0),
+                    "article_count_for_law": int(
+                        article_counts.get(int(item.id), 0)
+                    ),
+                    "has_articles": bool(article_counts.get(int(item.id), 0)),
+                    "selected": False,
+                }
+                for item in version_rows
+            ]
+
+            if version_id is not None:
+                selected_version = next(
+                    (
+                        item
+                        for item in version_rows
+                        if int(item.id) == int(version_id)
+                    ),
+                    None,
+                )
+                if selected_version is None:
+                    raise ValueError(
+                        f"找不到法規版本：{version_id}（{record.source_type}）"
+                    )
+            else:
+                selected_version = next(
+                    (item for item in version_rows if item.is_current),
+                    version_rows[0] if version_rows else None,
+                )
+
+            if selected_version is not None:
+                selected_version_id = int(selected_version.id)
+                selected_version_payload = next(
+                    (
+                        item
+                        for item in versions_payload
+                        if item["version_id"] == selected_version_id
+                    ),
+                    None,
+                )
+                if selected_version_payload is not None:
+                    selected_version_payload["selected"] = True
+                selected_article_count = int(
+                    article_counts.get(selected_version_id, 0)
+                )
+                article_rows = session.scalars(
+                    select(LawArticleVersion)
+                    .where(
+                        LawArticleVersion.law_id == int(record.id),
+                        LawArticleVersion.law_version_id == selected_version_id,
+                    )
+                    .order_by(
+                        LawArticleVersion.article_index,
+                        LawArticleVersion.id,
+                    )
+                ).all()
+                articles_from_db = [
+                    {
+                        "article_key": item.article_key,
+                        "article_type": item.article_type,
+                        "article_no": item.article_no,
+                        "article_content": item.article_content,
+                    }
+                    for item in article_rows
+                ]
+
+                change_counts = dict(
+                    session.execute(
+                        select(
+                            LawArticleChangeEvent.change_type,
+                            func.count(),
+                        )
+                        .where(
+                            LawArticleChangeEvent.law_id == int(record.id),
+                            LawArticleChangeEvent.to_version_id
+                            == selected_version_id,
+                        )
+                        .group_by(LawArticleChangeEvent.change_type)
+                    ).all()
+                )
+                change_summary = {
+                    str(name): int(count) for name, count in change_counts.items()
+                }
+                total_changes = sum(change_summary.values())
+                change_rows = session.scalars(
+                    select(LawArticleChangeEvent)
+                    .where(
+                        LawArticleChangeEvent.law_id == int(record.id),
+                        LawArticleChangeEvent.to_version_id
+                        == selected_version_id,
+                    )
+                    .order_by(
+                        LawArticleChangeEvent.article_key,
+                        LawArticleChangeEvent.id,
+                    )
+                    .limit(200)
+                ).all()
+                changes = [
+                    {
+                        "article_key": item.article_key,
+                        "article_type": item.article_type,
+                        "article_no": item.article_no,
+                        "change_type": item.change_type,
+                        "changed_fields": list(item.changed_fields or []),
+                        "before_content": item.before_content,
+                        "after_content": item.after_content,
+                        "detected_at": item.detected_at,
+                    }
+                    for item in change_rows
+                ]
+                changes_truncated = total_changes > len(changes)
+                previous_version = next(
+                    (
+                        item
+                        for item in version_rows
+                        if int(item.id) < selected_version_id
+                    ),
+                    None,
+                )
+                if previous_version is not None:
+                    previous_count = int(
+                        session.scalar(
+                            select(func.count())
+                            .select_from(LawArticleVersion)
+                            .where(
+                                LawArticleVersion.law_id == int(record.id),
+                                LawArticleVersion.law_version_id
+                                == int(previous_version.id),
+                            )
+                        )
+                        or 0
+                    )
+                    changes_available = previous_count > 0
+
+    if version_id is not None and record_metadata is None:
+        raise ValueError("找不到法規版本：法規 metadata 尚未建立")
 
     lookup_source = requested_source or (record_metadata or {}).get("source_type")
     lookup_name = (record_metadata or {}).get("law_name") or ""
@@ -1405,7 +1577,18 @@ def get_law_detail(
     metadata["source_type"] = metadata.get("source_type") or (lookup_source or "")
     metadata["law_name"] = metadata.get("law_name") or lookup_name or key
 
-    articles = _normalize_articles((parquet_row or {}).get("law_articles"))
+    articles = list(articles_from_db)
+    articles_source = "postgresql" if articles else None
+    selected_is_current = bool(
+        (selected_version_payload or {}).get("is_current", False)
+    )
+    if not articles and (version_id is None or selected_is_current):
+        parquet_articles = _normalize_articles(
+            (parquet_row or {}).get("law_articles")
+        )
+        if parquet_articles:
+            articles = parquet_articles
+            articles_source = "parquet"
     attachments = _parse_attachments((parquet_row or {}).get("law_attachments_json"))
     if not attachments:
         attachments = record_attachments
@@ -1414,15 +1597,29 @@ def get_law_detail(
         warnings.append(
             "PostgreSQL 找不到這個法規的 metadata，目前以最新 Parquet 快照內容顯示。"
         )
-    if parquet_row is None:
+    if selected_version_id is not None and not selected_is_current:
         warnings.append(
-            "最新 Parquet 快照中找不到這個法規的條文內容，目前僅顯示 PostgreSQL metadata。"
+            f"目前顯示歷史條文版本 #{selected_version_id}；法規 metadata 以現行主檔為準。"
         )
-    elif not articles:
-        warnings.append("最新 Parquet 快照中沒有可顯示的條文內容。")
+    if not articles:
+        if version_id is not None and selected_version_id is not None:
+            warnings.append(
+                f"條文版本 #{selected_version_id} 尚無 PostgreSQL 條文快照；"
+                "請先執行 judgment-backfill-law-articles 或重新匯入該版本。"
+            )
+        elif parquet_row is None:
+            warnings.append(
+                "最新 Parquet 快照中找不到這個法規的條文內容，目前僅顯示 PostgreSQL metadata。"
+            )
+        else:
+            warnings.append("最新 Parquet 快照中沒有可顯示的條文內容。")
+    elif articles_source == "parquet" and version_id is not None:
+        warnings.append(
+            f"條文版本 #{selected_version_id} 尚未回填 PostgreSQL；目前以最新 Parquet 顯示。"
+        )
 
     snapshot = None
-    if parquet_path is not None:
+    if articles_source != "postgresql" and parquet_path is not None:
         try:
             snapshot = str(
                 Path(parquet_path)
@@ -1432,6 +1629,14 @@ def get_law_detail(
         except ValueError:
             snapshot = parquet_path.name
 
+    selected_version = (
+        selected_version_payload or {}
+    )
+    version = dict(version_info or {})
+    version["selected_version_id"] = selected_version_id
+    version["selected_version"] = selected_version or None
+    version["available_versions"] = versions_payload
+
     duration_ms = int((time.perf_counter() - started) * 1000)
     return {
         "status": "ok" if articles else "degraded",
@@ -1440,12 +1645,21 @@ def get_law_detail(
         "attachments": attachments,
         "warnings": warnings,
         "version": version,
+        "versions": versions_payload,
+        "selected_version_id": selected_version_id,
+        "selected_article_count": selected_article_count,
+        "changes": changes,
+        "change_summary": change_summary,
+        "changes_available": changes_available,
+        "changes_truncated": changes_truncated,
         "duration_ms": duration_ms,
         "meta": {
             "source_type": metadata.get("source_type") or requested_source or "",
             "law_key": key,
             "metadata_source": "postgresql" if record_metadata else "parquet",
-            "articles_source": "parquet" if articles else None,
+            "articles_source": articles_source,
+            "selected_version_id": selected_version_id,
+            "selected_version_is_current": selected_is_current,
             "snapshot": snapshot,
         },
     }

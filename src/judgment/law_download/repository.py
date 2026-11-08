@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..law_article_versions import (
+    persist_article_removals,
+    persist_article_snapshot,
+)
 from ..models import (
     DownloadRun,
     LawChangeEvent,
@@ -178,6 +182,8 @@ class LawRepository:
 
                 seen: set[str] = set()
                 new_documents: List[Tuple[LawDocument, LawRecord]] = []
+                removed_documents: List[LawDocument] = []
+                previous_version_id = _latest_version_id(latest)
                 added = modified = removed = unchanged = 0
 
                 for record in parsed.laws:
@@ -235,7 +241,7 @@ class LawRepository:
                         session.add(
                             LawChangeEvent(
                                 law_id=int(document.id),
-                                from_version_id=_latest_version_id(latest),
+                                from_version_id=previous_version_id,
                                 to_version_id=int(version.id),
                                 change_type="modified",
                                 changed_fields=changed_fields,
@@ -259,10 +265,11 @@ class LawRepository:
                     document.is_current = False
                     document.removed_version_id = int(version.id)
                     document.removed_at = now
+                    removed_documents.append(document)
                     session.add(
                         LawChangeEvent(
                             law_id=int(document.id),
-                            from_version_id=_latest_version_id(latest),
+                            from_version_id=previous_version_id,
                             to_version_id=int(version.id),
                             change_type="removed",
                             changed_fields=["is_current"],
@@ -287,6 +294,31 @@ class LawRepository:
                             detected_at=now,
                         )
                     )
+
+                documents_by_key = dict(existing)
+                for document, record in new_documents:
+                    documents_by_key[record.law_key] = document
+                article_result = persist_article_snapshot(
+                    session,
+                    version_id=int(version.id),
+                    records=parsed.laws,
+                    documents_by_key=documents_by_key,
+                    previous_version_id=previous_version_id,
+                    detected_at=now,
+                )
+                article_result["article_changes_inserted"] += persist_article_removals(
+                    session,
+                    version_id=int(version.id),
+                    documents=removed_documents,
+                    previous_version_id=previous_version_id,
+                    detected_at=now,
+                )
+                logger.info(
+                    "law version #%s article snapshots=%s changes=%s",
+                    int(version.id),
+                    article_result["articles_inserted"],
+                    article_result["article_changes_inserted"],
+                )
 
                 source_row.last_checked_at = now
                 source_row.last_change_at = now

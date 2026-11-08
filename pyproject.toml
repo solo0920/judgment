@@ -25,6 +25,7 @@ dev = [
 judgment-import-judgments = "judgment.judgment_import:main"
 judgment-index-vectors = "judgment.judgment_index:main"
 judgment-law-download = "judgment.law_download.cli:main"
+judgment-backfill-law-articles = "judgment.law_article_versions:main"
 judgment-normalize-courts = "judgment.court_normalize:main"
 judgment-power-agent = "judgment.web.power_agent:main"
 judgment-web = "judgment.web.app:main"

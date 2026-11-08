@@ -440,19 +440,28 @@ def create_app(
             ) from exc
 
     @app.get("/api/law")
-    def law_detail(law_key: str, source_type: Optional[str] = None) -> Dict[str, Any]:
+    def law_detail(
+        law_key: str,
+        source_type: Optional[str] = None,
+        version_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         try:
             with trace_segment(
                 "api.endpoint",
                 module=__name__,
                 function="law_detail",
-                params={"law_key": law_key, "source_type": source_type},
+                params={
+                    "law_key": law_key,
+                    "source_type": source_type,
+                    "version_id": version_id,
+                },
             ):
                 return get_law_detail(
                     session_factory=app.state.session_factory,
                     data_dir=app.state.data_dir,
                     law_key=law_key,
                     source_type=source_type,
+                    version_id=version_id,
                 )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

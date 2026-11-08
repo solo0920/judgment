@@ -386,9 +386,10 @@ export const api = {
     });
   },
 
-  lawDetail(lawKey, sourceType = "") {
+  lawDetail(lawKey, sourceType = "", versionId = "") {
     const params = new URLSearchParams({ law_key: lawKey });
     if (sourceType) params.set("source_type", sourceType);
+    if (versionId) params.set("version_id", String(versionId));
     return request(`/api/law?${params.toString()}`, { timeout: 45000 });
   },
 
