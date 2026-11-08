@@ -298,6 +298,37 @@ def test_answer_question_accepts_grounded_llm_answer(monkeypatch) -> None:
     assert payload["judgments"][0]["index"] == 1
 
 
+def test_llm_answer_includes_law_retrieval_summary(monkeypatch, tmp_path: Path) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "依檢索到的判決與法規，原告可請求返還借款 [1]。",
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法如何處理消費借貸爭議？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["status"] == "operational"
+    assert payload["law_answer"].startswith("- ")
+    assert "銀行法" in payload["law_answer"]
+    assert "返還借款" in payload["answer"]
+    assert payload["answer_source"] == "llm"
+
+
 def test_answer_question_without_qdrant_degrades_to_preview() -> None:
     session_factory = _session_factory()
     _seed_judgments(session_factory)

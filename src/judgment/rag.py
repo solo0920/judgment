@@ -277,6 +277,32 @@ def _build_citations(
     return citations, contexts
 
 
+def _law_answer_summary(law_sources: Sequence[Dict[str, Any]]) -> str:
+    """Summarize the law/order retrieval result before the LLM answer."""
+    if not law_sources:
+        return ""
+    lines = []
+    for source in law_sources:
+        label = source.get("source_label") or (
+            "命令" if source.get("source_type") == "order" else "法規"
+        )
+        line = (
+            f"- {source.get('law_name') or '未命名法規'}"
+            f"（{label}，{int(source.get('article_count') or 0)} 條）"
+        )
+        article_nos = [
+            str(article.get("article_no") or "").strip()
+            for article in (source.get("articles") or [])
+            if str(article.get("article_no") or "").strip()
+        ]
+        if article_nos:
+            line += "；相關條文：" + "、".join(article_nos[:3])
+        if source.get("index") is not None:
+            line += f" [{source['index']}]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _retrieval_answer(
     citations: Sequence[Dict[str, Any]],
     law_sources: Sequence[Dict[str, Any]] = (),
@@ -739,6 +765,7 @@ def answer_question(
         }
 
     assign_law_indexes(law_sources, start=len(citations) + 1)
+    law_answer = _law_answer_summary(law_sources)
     law_contexts = [
         {**source, "text": law_source_text(source)} for source in law_sources
     ]
@@ -794,6 +821,7 @@ def answer_question(
         "citations": [],
         "judgments": citations,
         "law_sources": law_sources,
+        "law_answer": law_answer,
         "matched_terms": terms,
         "answer_source": "llm" if llm_configured and status == "operational" else "retrieval",
         "llm_model": settings.llm_model if llm_configured else None,

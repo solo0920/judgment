@@ -422,6 +422,10 @@ function renderAnswer(question, payload, processHtml = "") {
     .filter(Boolean)
     .join(" · ");
   const structuredAnswer = payload.answer_source === "structured";
+  const lawAnswer = String(payload.law_answer || "").trim();
+  const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer;
+  const llmBlockTitle =
+    payload.answer_source === "llm" ? "LLM 綜合回答" : "檢索結果摘要";
   const modelChip = llmModel
     ? `<span class="answer-model" title="${escapeHtml(modelTitle)}">${icon(
         "brain",
@@ -462,7 +466,28 @@ function renderAnswer(question, payload, processHtml = "") {
       ${processHtml}
     </div>
     <div class="answer-body">
-      <p class="answer-text">${escapeHtml(payload.answer || "目前沒有可顯示的回答。")}</p>
+      ${
+        showLawAnswer
+          ? `<div class="answer-block law-answer-block">
+              <div class="answer-block-head">
+                <span>法規／命令檢索結果</span>
+                <span>${lawSources.length} 筆來源</span>
+              </div>
+              <p class="answer-text">${escapeHtml(lawAnswer)}</p>
+            </div>`
+          : ""
+      }
+      <div class="answer-block">
+        ${
+          showLawAnswer
+            ? `<div class="answer-block-head">
+                <span>${escapeHtml(llmBlockTitle)}</span>
+                <span>${escapeHtml(modelChip ? llmModel || "structured" : "retrieval")}</span>
+              </div>`
+            : ""
+        }
+        <p class="answer-text">${escapeHtml(payload.answer || "目前沒有可顯示的回答。")}</p>
+      </div>
       ${
         payload.notice
           ? `<div class="answer-notice">${escapeHtml(payload.notice)}</div>`
