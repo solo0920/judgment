@@ -2009,17 +2009,54 @@ button.chip:hover {
   white-space: pre-wrap;
 }
 
-.answer-head > .rag-process {
+.answer-head-left {
+  order: 1;
+}
+
+.answer-head-meta {
+  order: 3;
+}
+
+.answer-head > .rag-process[open] {
+  order: 4;
   flex: 1 0 100%;
   margin: 10px 0 0;
 }
 
-.answer-head > .rag-process > summary {
+.answer-head > .rag-process[open] > summary {
   padding: 6px 0;
 }
 
-.answer-head > .rag-process .rag-process-list {
+.answer-head > .rag-process[open] .rag-process-list {
   padding: 5px 0 7px;
+}
+
+.answer-head > .rag-process:not([open]) {
+  order: 2;
+  flex: 0 1 auto;
+  max-width: 100%;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.answer-head > .rag-process:not([open]) > summary {
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.answer-head > .rag-process:not([open]) .rag-process-title {
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.answer-head > .rag-process:not([open]) .rag-process-summary {
+  font-size: 8.5px;
 }
 
 .rag-process {
@@ -4642,6 +4679,46 @@ button.chip:hover {
 
   .service-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 0 12px;
+    height: auto;
+    padding-top: 9px;
+    padding-bottom: 0;
+  }
+
+  .brand {
+    margin-bottom: 8px;
+  }
+
+  .header-actions {
+    margin-bottom: 8px;
+    margin-left: auto;
+  }
+
+  .primary-nav {
+    order: 3;
+    flex-basis: 100%;
+    gap: 2px;
+    margin: 0 -4px;
+    padding-bottom: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .primary-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-link {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 12px;
   }
 }
 
