@@ -6,7 +6,7 @@
 #   ./restore.sh -d /path/to/judgment
 #
 # Usage (from the project):
-#   ./restore.sh -b /Volumes/USB/judgment-backup -d /path/to/judgment
+#   ./restore.sh -s /Volumes/USB/judgment-backup -d /path/to/judgment
 #
 set -euo pipefail
 
@@ -26,11 +26,11 @@ usage() {
   cat <<'EOF'
 用法：
   ./restore.sh -d <專案目錄>
-  ./restore.sh -b <備份目錄> -d <專案目錄>
+  ./restore.sh -s <備份目錄> -d <專案目錄>
 
 選項：
   -d, --dest DIR       要還原的 Judgment 專案目錄（必填）
-  -b, --backup-dir DIR 備份目錄；預設為 restore.sh 所在目錄
+  -s, --source DIR     備份來源目錄；預設為 restore.sh 所在目錄
   --yes                不顯示互動確認
   --skip-data          不還原 data/
   --skip-postgres      不還原 PostgreSQL
@@ -106,7 +106,7 @@ while [[ $# -gt 0 ]]; do
       PROJECT_DIR="$2"
       shift 2
       ;;
-    -b|--backup-dir)
+    -s|--source)
       [[ $# -ge 2 ]] || die "$1 需要一個目錄"
       BACKUP_DIR="$2"
       shift 2
@@ -169,7 +169,7 @@ need docker
 docker compose version >/dev/null 2>&1 || die "找不到 docker compose"
 
 info "備份與專案預檢"
-[[ -f "$BACKUP_DIR/manifest.json" ]] || die "找不到 $BACKUP_DIR/manifest.json；請在 backup.sh 產生的備份目錄執行，或使用 -b"
+[[ -f "$BACKUP_DIR/manifest.json" ]] || die "找不到 $BACKUP_DIR/manifest.json；請在 backup.sh 產生的備份目錄執行，或使用 -s"
 [[ -d "$PROJECT_DIR" ]] || die "找不到專案目錄：$PROJECT_DIR"
 [[ -f "$PROJECT_DIR/pyproject.toml" ]] || die "專案目錄沒有 pyproject.toml，請先 clone Judgment 專案"
 [[ -d "$PROJECT_DIR/src/judgment" ]] || die "專案目錄沒有 src/judgment，請確認已完整 clone"

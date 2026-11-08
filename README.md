@@ -126,9 +126,9 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 - `postgres/judgment.dump`：`pg_dump -Fc`，含判決、法規 metadata 與 `judgment_vector_index`
 - `qdrant/`：`judgment_documents` collection snapshot
 - `config/`：`.env`、`docker-compose.yml`、`pyproject.toml`、`uv.lock`
-- `manifest.json`、checksums、`restore.sh` 與還原說明
+- `manifest.json`、checksums、`restore.sh` 與 `USAGE.md`（兩個腳本的使用說明）
 
-`restore.sh` 會直接複製到備份目錄根目錄。偵測到索引／匯入／下載程序執行中時會中止，避免 PostgreSQL 與 Qdrant 進度不一致；只有確定只備份部分資料時才使用 `--allow-running`。
+`restore.sh` 會直接複製到備份目錄根目錄，並產生 `USAGE.md`。偵測到索引／匯入／下載程序執行中時會中止，避免 PostgreSQL 與 Qdrant 進度不一致；只有確定只備份部分資料時才使用 `--allow-running`。
 
 在新電腦上，先 clone 專案，然後直接執行備份目錄中的 `restore.sh`：
 
@@ -140,10 +140,10 @@ cd /Volumes/USB/judgment-backup-20261108
 也可以從專案執行：
 
 ```bash
-./restore.sh -b /Volumes/USB/judgment-backup-20261108 -d /path/to/judgment
+./restore.sh -s /Volumes/USB/judgment-backup-20261108 -d /path/to/judgment
 ```
 
-`restore.sh` 會先檢查目標是否已 clone 專案（`pyproject.toml`、`src/judgment`、`up.sh`）、Docker 是否可用、備份 manifest／checksum 與目標磁碟空間。`-d` 是目標專案目錄；`-b` 可省略，預設為 `restore.sh` 所在備份目錄。
+`restore.sh` 會先檢查目標是否已 clone 專案（`pyproject.toml`、`src/judgment`、`up.sh`）、Docker 是否可用、備份 manifest／checksum 與目標磁碟空間。`-d` 是目標專案目錄；`-s` 可省略，預設為 `restore.sh` 所在備份目錄。
 
 還原流程會：
 

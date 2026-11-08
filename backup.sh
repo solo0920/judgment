@@ -37,6 +37,8 @@ usage() {
   --dry-run            只檢查環境並顯示計畫，不寫入備份
   -h, --help           顯示說明
 
+備份目錄會自動包含 restore.sh 與 USAGE.md（兩個腳本的使用說明）。
+
 backup.sh 會先檢查：
   - 專案是否包含 pyproject.toml、docker-compose.yml、restore.sh
   - JUDGMENT_DATA_DIR 與 LAW_DATA_DIR 是否存在
@@ -436,39 +438,80 @@ for section in ("postgres", "qdrant"):
 print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
 PY
 
-cat > "$TARGET_DIR/README-RESTORE.md" <<'EOF'
-# Judgment environment restore
+cat > "$TARGET_DIR/USAGE.md" <<'EOF'
+# Judgment 備份與還原使用說明
 
-This directory was produced by `backup.sh`.
+## backup.sh
 
-## Restore
-
-1. Clone the project repository at the commit in `manifest.json`.
-2. Install Docker and `uv`; start Docker.
-3. From this directory, run:
+在 Judgment 專案目錄執行：
 
 ```bash
+./backup.sh -s /path/to/judgment -d /Volumes/USB/judgment-backup-20261108
+```
+
+- `-s, --source`：Judgment 專案目錄；可省略，預設為 `backup.sh` 所在目錄。
+- `-d, --dest`：備份目標目錄；必須是空目錄或尚未存在。
+- 也可將 `-s` 指向專案的 `data/` 目錄，腳本會自動尋找上一層專案。
+
+備份前會檢查：
+
+- `pyproject.toml`、`docker-compose.yml`、`restore.sh`
+- `JUDGMENT_DATA_DIR`、`LAW_DATA_DIR` 是否存在
+- Docker daemon、PostgreSQL、Qdrant collection
+- 目標目錄可寫入、為空、磁碟空間足夠
+- 是否有索引／匯入／下載程序仍在執行
+
+常用選項：
+
+```text
+--skip-data          不複製 data/
+--skip-postgres      不匯出 PostgreSQL
+--skip-qdrant        不匯出 Qdrant snapshot
+--allow-running      允許在資料處理程序執行中備份（不建議）
+--dry-run            只檢查環境，不寫入備份
+```
+
+備份內容包含 `data/`、`postgres/judgment.dump`、`qdrant/` snapshot、`config/`、`manifest.json`、checksums 與 `restore.sh`。
+
+## restore.sh
+
+在備份目錄中執行：
+
+```bash
+cd /Volumes/USB/judgment-backup-20261108
 ./restore.sh -d /path/to/judgment
 ```
 
-`restore.sh` will check the project checkout, Docker, backup files, and then
-restore PostgreSQL, Qdrant, `data/`, and `.env`.
-
-4. Resume Qdrant indexing:
+或從專案目錄指定備份來源：
 
 ```bash
-cd /path/to/judgment
-./scripts/index_full_task.sh
+./restore.sh -s /Volumes/USB/judgment-backup-20261108 -d /path/to/judgment
 ```
 
-The PostgreSQL dump includes `judgment_vector_index`; restoring it together
-with the Qdrant snapshot keeps index progress synchronized.
+- `-d, --dest`：要還原的 Judgment 專案目錄。
+- `-s, --source`：備份來源目錄；可省略，預設為 `restore.sh` 所在目錄。
+- 目標專案必須已 clone（含 `pyproject.toml`、`src/judgment`、`up.sh`）。
 
-## Important
+還原前會檢查 Docker、manifest、checksum、備份檔案與目標空間，然後還原 PostgreSQL schema、Qdrant collection、`data/` 與 `.env`，最後執行 `uv sync` 與 `./up.sh`。
 
-- Keep this directory encrypted; `config/.env` may contain credentials.
-- Do not restore PostgreSQL and Qdrant independently. If you skip Qdrant,
-  clear `judgment_vector_index` before a full re-index.
+常用選項：
+
+```text
+--yes                不顯示 YES 確認
+--skip-data          不還原 data/
+--skip-postgres      不還原 PostgreSQL
+--skip-qdrant        不還原 Qdrant snapshot
+--no-start           還原後不執行 ./up.sh
+--no-deps            不執行 uv sync
+--dry-run            只檢查環境與備份
+```
+
+## 重要
+
+- `judgment_vector_index` 必須與 Qdrant collection 一起還原。
+- 若跳過 Qdrant，重新索引前請先清空 `judgment_vector_index`。
+- `config/.env` 可能含資料庫密碼，請加密保存備份。
+- 還原後若要接續索引，執行 `./scripts/index_full_task.sh`。
 EOF
 
 if [[ -f "$TARGET_DIR/checksums.sha256" ]]; then
@@ -478,4 +521,5 @@ fi
 info "備份完成"
 printf '位置：%s\n' "$TARGET_DIR"
 printf '大小：%s\n' "$(du -sh "$TARGET_DIR" | awk '{print $1}')"
+printf '使用說明：%s/USAGE.md\n' "$TARGET_DIR"
 printf '還原：%s/restore.sh -d /path/to/judgment\n' "$TARGET_DIR"
