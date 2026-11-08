@@ -27,7 +27,7 @@ const EXAMPLES = [
 function answerPlaceholder() {
   return `<div class="answer-placeholder">
     <span class="empty-icon">${icon("sparkles", 26)}</span>
-    <h2 class="empty-title">答案只會來自檢索到的判決片段</h2>
+    <h2 class="empty-title">答案只會來自檢索到的判決及法規片段</h2>
     <p class="empty-text">送出問題後，系統會先以 Qdrant 檢索判決，再由 LLM 依檢索片段生成回答並標示引用編號。
       若向量索引或 LLM 尚未就緒，會明確顯示降級狀態，不會憑空生成答案。</p>
   </div>`;
