@@ -5,7 +5,6 @@ import {
   emptyState,
   escapeHtml,
   formatDate,
-  formatDuration,
   formatNumber,
   formatRelativeTime,
   icon,
@@ -73,6 +72,12 @@ function processDetail(segment) {
   return [segment?.module, segment?.function, segment?.name]
     .filter(Boolean)
     .join(" · ");
+}
+
+function formatProcessMs(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return `${formatNumber(Math.max(0, Math.round(number)))} ms`;
 }
 
 function processPanelMarkup() {
@@ -145,7 +150,7 @@ function createProcessController(answerCard) {
       updateText(
         item.element,
         ".rag-process-meta",
-        failed ? "失敗" : formatDuration(segment.duration_ms || 0),
+        failed ? "失敗" : formatProcessMs(segment.duration_ms || 0),
       );
       item.element.title = [
         processDetail(segment),
@@ -163,7 +168,7 @@ function createProcessController(answerCard) {
       updateText(element, ".rag-process-meta", ok ? "完成" : "中斷");
     });
     const stepCount = list?.children.length || items.size;
-    const elapsed = formatDuration(Math.max(0, performance.now() - started));
+    const elapsed = formatProcessMs(Math.max(0, performance.now() - started));
     if (summary) {
       summary.textContent = ok
         ? `完成 · ${stepCount} 步 · ${elapsed}`
