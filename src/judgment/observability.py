@@ -190,6 +190,7 @@ class FlowTrace:
         path: str = "",
         params: Optional[Dict[str, Any]] = None,
         client_started_at_ms: Optional[float] = None,
+        listener: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         self.request_id = (request_id or uuid4().hex)[:64]
         self.entrypoint = str(entrypoint or "")[:300]
@@ -206,6 +207,7 @@ class FlowTrace:
         self.status = "success"
         self.error_message: Optional[str] = None
         self.client: Optional[Dict[str, Any]] = None
+        self.listener = listener
         if client_started_at_ms:
             received_at_ms = time.time() * 1000
             self.client = {
@@ -223,6 +225,15 @@ class FlowTrace:
 
     def set_metadata(self, key: str, value: Any) -> None:
         self.metadata[str(key)] = _trim_json(value)
+
+    def _notify(self, event: Dict[str, Any]) -> None:
+        listener = self.listener
+        if listener is None:
+            return
+        try:
+            listener(event)
+        except Exception:
+            logger.warning("flow listener failed", exc_info=True)
 
     def _begin_segment(
         self,
@@ -257,6 +268,12 @@ class FlowTrace:
         }
         self._segments.append(segment)
         self._stack.append(self._seq)
+        self._notify(
+            {
+                "type": "segment_start",
+                "segment": dict(segment),
+            }
+        )
         return segment
 
     def _end_segment(
@@ -282,6 +299,12 @@ class FlowTrace:
             self._stack.remove(segment["seq"])
         except ValueError:
             pass
+        self._notify(
+            {
+                "type": "segment_end",
+                "segment": dict(segment),
+            }
+        )
 
     @contextmanager
     def segment(
@@ -365,6 +388,7 @@ def start_flow(
     path: str = "",
     params: Optional[Dict[str, Any]] = None,
     client_started_at_ms: Optional[float] = None,
+    listener: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> FlowTrace:
     flow = FlowTrace(
         request_id=request_id,
@@ -373,6 +397,7 @@ def start_flow(
         path=path,
         params=params,
         client_started_at_ms=client_started_at_ms,
+        listener=listener,
     )
     _current_flow.set(flow)
     return flow

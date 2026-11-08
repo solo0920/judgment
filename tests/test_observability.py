@@ -127,3 +127,31 @@ def test_record_performance_builds_summary_flow_for_cli_records() -> None:
     assert record.flow["summary"]["models"] == ["bge-m3"]
     assert record.flow["details"] == {"rows": 3}
     assert record.flow["metadata"]["source"] == "summary"
+
+
+def test_flow_trace_listener_receives_live_segment_events() -> None:
+    events = []
+    flow = start_flow(
+        request_id="request-live",
+        entrypoint="/api/test",
+        listener=events.append,
+    )
+    with trace_segment("outer.live", module="test.flow"):
+        with trace_segment("inner.live", module="test.flow"):
+            pass
+    flow.finish(status="success")
+    clear_flow()
+
+    starts = [event for event in events if event["type"] == "segment_start"]
+    ends = [event for event in events if event["type"] == "segment_end"]
+    assert [event["segment"]["name"] for event in starts] == [
+        "outer.live",
+        "inner.live",
+    ]
+    assert [event["segment"]["name"] for event in ends] == [
+        "inner.live",
+        "outer.live",
+    ]
+    assert starts[0]["segment"]["depth"] == 0
+    assert starts[1]["segment"]["depth"] == 1
+    assert all(event["segment"]["seq"] for event in starts)

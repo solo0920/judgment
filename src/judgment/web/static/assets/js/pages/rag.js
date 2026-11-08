@@ -5,6 +5,7 @@ import {
   emptyState,
   escapeHtml,
   formatDate,
+  formatDuration,
   formatNumber,
   formatRelativeTime,
   icon,
@@ -33,6 +34,149 @@ function answerPlaceholder() {
   </div>`;
 }
 
+const PROCESS_LABELS = {
+  "http.request": "FastAPI 接收請求",
+  "http.response": "回傳結果給前端",
+  "rag.answer_question": "RAG 主流程",
+  "rag.coverage": "PostgreSQL 索引覆蓋檢查",
+  "rag.law_retrieval": "法規／命令檢索",
+  "rag.law_lookup": "比對問題中的法規／命令名稱",
+  "rag.law_content": "讀取法規／命令條文",
+  "rag.qdrant_precheck": "Qdrant collection 檢查",
+  "rag.search": "RAG 檢索",
+  "rag.embed_query": "Ollama embedding 查詢向量",
+  "rag.qdrant_search": "Qdrant 向量搜尋",
+  "rag.fetch_documents": "PostgreSQL 讀取判決",
+  "rag.postgres_fetch": "PostgreSQL 判決查詢",
+  "rag.build_citations": "整理引用與判決片段",
+  "rag.extract_excerpt": "擷取相關片段",
+  "rag.llm": "LLM 回答生成",
+  "rag.llm_request": "Ollama LLM 生成",
+  "rag.validate_citations": "驗證引用編號",
+  "rag.test_mode": "測試模式多模型流程",
+  "rag.preview_fallback": "法規預覽降級",
+};
+
+function processLabel(segment) {
+  const name = String(segment?.name || "");
+  const params = segment?.params || {};
+  const model = String(params.model || params.embedding_model || "").trim();
+  if (name === "rag.llm_request") return `Ollama run ${model || "LLM"}`;
+  if (name === "rag.llm") return `LLM 回答生成${model ? ` · ${model}` : ""}`;
+  if (name === "rag.embed_query") {
+    return `Ollama embedding 查詢向量${model ? ` · ${model}` : ""}`;
+  }
+  return PROCESS_LABELS[name] || name || "backend step";
+}
+
+function processDetail(segment) {
+  return [segment?.module, segment?.function, segment?.name]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function processPanelMarkup() {
+  return `<details class="rag-process" id="rag-process" open>
+    <summary>
+      <span class="rag-process-title">後端處理流程</span>
+      <span class="rag-process-summary" id="rag-process-summary">執行中…</span>
+    </summary>
+    <div class="rag-process-list" id="rag-process-list">
+      <div class="rag-process-item is-running" data-process-key="frontend" style="--depth:0">
+        <span class="rag-process-dot"></span>
+        <span class="rag-process-label">frontend HTTP request → FastAPI</span>
+        <span class="rag-process-meta">送出</span>
+      </div>
+    </div>
+    <div class="rag-process-hint">完成後會自動收合；點擊摘要可展開完整流程。</div>
+  </details>`;
+}
+
+function createProcessController(answerCard) {
+  const panel = answerCard.querySelector("#rag-process");
+  const list = panel?.querySelector("#rag-process-list");
+  const summary = panel?.querySelector("#rag-process-summary");
+  const started = performance.now();
+  const items = new Map();
+
+  const updateText = (element, selector, text) => {
+    const target = element.querySelector(selector);
+    if (target) target.textContent = text;
+  };
+
+  const ensureItem = (segment) => {
+    if (!list) return null;
+    const key = String(segment?.seq ?? `step-${items.size + 1}`);
+    let item = items.get(key);
+    if (!item) {
+      const element = document.createElement("div");
+      element.className = "rag-process-item is-running";
+      element.dataset.processKey = key;
+      element.style.setProperty(
+        "--depth",
+        String(Math.max(0, Math.min(6, Number(segment?.depth) || 0))),
+      );
+      element.innerHTML = `<span class="rag-process-dot"></span>
+        <span class="rag-process-label"></span>
+        <span class="rag-process-meta">執行中…</span>`;
+      list.appendChild(element);
+      item = { element, segment };
+      items.set(key, item);
+    }
+    updateText(item.element, ".rag-process-label", processLabel(segment));
+    item.element.title = processDetail(segment);
+    return item;
+  };
+
+  const step = (payload) => {
+    const segment = payload?.segment;
+    if (!segment) return;
+    const item = ensureItem(segment);
+    if (!item) return;
+    if (payload.type === "segment_start") {
+      item.element.classList.add("is-running");
+      updateText(item.element, ".rag-process-meta", "執行中…");
+      return;
+    }
+    if (payload.type === "segment_end") {
+      const failed = segment.status === "error";
+      item.element.classList.remove("is-running");
+      item.element.classList.toggle("is-error", failed);
+      updateText(
+        item.element,
+        ".rag-process-meta",
+        failed ? "失敗" : formatDuration(segment.duration_ms || 0),
+      );
+      item.element.title = [
+        processDetail(segment),
+        failed ? segment.error || "" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+  };
+
+  const finish = (ok = true) => {
+    if (!panel) return "";
+    panel.querySelectorAll(".rag-process-item.is-running").forEach((element) => {
+      element.classList.remove("is-running");
+      updateText(element, ".rag-process-meta", ok ? "完成" : "中斷");
+    });
+    const stepCount = list?.children.length || items.size;
+    const elapsed = formatDuration(Math.max(0, performance.now() - started));
+    if (summary) {
+      summary.textContent = ok
+        ? `完成 · ${stepCount} 步 · ${elapsed}`
+        : `失敗 · ${stepCount} 步`;
+    }
+    panel.open = false;
+    panel.classList.add("is-complete");
+    return panel.outerHTML;
+  };
+
+  return { step, finish };
+}
+
 function answerLoading(question, testMode = false) {
   const detail = testMode
     ? "測試模式：正在依序執行所有可用 embedding 與 LLM 模型，可能需要數分鐘…"
@@ -48,6 +192,7 @@ function answerLoading(question, testMode = false) {
       <div class="skeleton skeleton-line" style="margin-top:22px;width:92%"></div>
       <div class="skeleton skeleton-line" style="width:76%"></div>
       <div class="skeleton skeleton-line" style="width:84%"></div>
+      ${testMode ? "" : processPanelMarkup()}
     </div>`;
 }
 
@@ -1003,6 +1148,7 @@ export async function render(root) {
     input.value = trimmed;
     resizeInput();
     answerCard.innerHTML = answerLoading(trimmed, testMode);
+    const processController = testMode ? null : createProcessController(answerCard);
     if (testMode) {
       paintTestFlow(null);
       startFlowPoll();
@@ -1012,10 +1158,16 @@ export async function render(root) {
     }
     setBusy(submit, true, "檢索中…");
     try {
-      const payload = await api.rag(trimmed, { testMode });
+      const payload = testMode
+        ? await api.rag(trimmed, { testMode })
+        : await api.ragStream(trimmed, {
+            onStep: (event) => processController?.step(event),
+          });
       if (disposed) return;
       stopFlowPoll();
+      const processHtml = processController?.finish(true) || "";
       answerCard.innerHTML = renderAnswer(trimmed, payload);
+      if (processHtml) answerCard.insertAdjacentHTML("beforeend", processHtml);
       if (payload.test_run?.run_id) {
         await loadExactTestFlow(payload.test_run.run_id);
       } else {
@@ -1039,7 +1191,9 @@ export async function render(root) {
     } catch (error) {
       stopFlowPoll();
       if (disposed) return;
+      const processHtml = processController?.finish(false) || "";
       answerCard.innerHTML = renderAnswerError(error);
+      if (processHtml) answerCard.insertAdjacentHTML("beforeend", processHtml);
       toast(error.message || "檢索失敗。", "danger");
     } finally {
       stopFlowPoll();

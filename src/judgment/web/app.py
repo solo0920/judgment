@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
+import logging
 import os
 import sys
 import time
@@ -13,7 +16,7 @@ from uuid import uuid4
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -53,6 +56,8 @@ from .query import (
     schema_suggestions,
 )
 from .status import build_status
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -179,6 +184,7 @@ def create_app(
             or path.startswith("/api/performance")
             or path.startswith("/api/processing")
             or path.startswith("/api/quality")
+            or path == "/api/rag/query/stream"
             or path.startswith("/api/test-")
             or path in {"/api/health", "/api/docs", "/api/openapi.json"}
             or request.method == "OPTIONS"
@@ -599,6 +605,145 @@ def create_app(
                 status_code=500,
                 detail=f"RAG 問答失敗：{exc.__class__.__name__}: {exc}",
             ) from exc
+
+    @app.post("/api/rag/query/stream")
+    async def rag_query_stream(
+        request: RagRequest,
+        http_request: Request,
+    ) -> StreamingResponse:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        request_id = _incoming_request_id(http_request)
+        client_started_at_ms = _client_started_ms(http_request)
+
+        def listener(event: Dict[str, Any]) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ("step", event))
+
+        def run_query() -> None:
+            flow = start_flow(
+                request_id=request_id,
+                entrypoint="/api/rag/query/stream",
+                method="POST",
+                path="/api/rag/query/stream",
+                params={"question_length": len(request.question)},
+                client_started_at_ms=client_started_at_ms,
+                listener=listener,
+            )
+            started_at = flow.started_at
+            status = "success"
+            error_message = None
+            result: Optional[Dict[str, Any]] = None
+            try:
+                result = answer_question(
+                    session_factory=app.state.session_factory,
+                    question=request.question,
+                    settings=settings,
+                )
+                flow.set_metadata("question", request.question)
+                flow.set_metadata("answer", result.get("answer") or "")
+                flow.set_metadata("rag_status", result.get("status") or "")
+                if isinstance(result.get("test_run"), dict):
+                    flow.set_metadata(
+                        "test_run_id",
+                        result["test_run"].get("run_id"),
+                    )
+            except Exception as exc:
+                status = "failed"
+                error_message = f"{exc.__class__.__name__}: {exc}"
+            finally:
+                flow.finish(status=status, error_message=error_message)
+                duration_ms = int(
+                    max(
+                        0.0,
+                        (
+                            flow.finished_at or datetime.now(timezone.utc)
+                        ).timestamp()
+                        - started_at.timestamp(),
+                    )
+                    * 1000
+                )
+                record_performance(
+                    app.state.session_factory,
+                    process="RAG 問答",
+                    module="judgment.rag.answer_question",
+                    status=status,
+                    started_at=started_at,
+                    finished_at=flow.finished_at,
+                    duration_ms=duration_ms,
+                    method="POST",
+                    path="/api/rag/query/stream",
+                    request_id=request_id,
+                    params={"question_length": len(request.question)},
+                    flow=flow.to_dict(),
+                    error_message=error_message,
+                )
+                if result is not None:
+                    loop.call_soon_threadsafe(queue.put_nowait, ("result", result))
+                else:
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        (
+                            "error",
+                            {
+                                "message": error_message or "RAG 流程失敗。",
+                                "status": "failed",
+                            },
+                        ),
+                    )
+
+        def sse(event: str, payload: Dict[str, Any]) -> str:
+            return (
+                f"event: {event}\n"
+                f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+            )
+
+        async def event_stream():
+            yield sse(
+                "step",
+                {
+                    "type": "segment_start",
+                    "segment": {
+                        "seq": 0,
+                        "parent_seq": None,
+                        "depth": 0,
+                        "name": "http.request",
+                        "module": "judgment.web.app",
+                        "function": "rag_query_stream",
+                        "params": {"question_length": len(request.question)},
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "offset_ms": 0,
+                        "duration_ms": 0,
+                        "status": "running",
+                        "error": None,
+                    },
+                },
+            )
+            task = asyncio.create_task(asyncio.to_thread(run_query))
+            try:
+                while True:
+                    kind, payload = await queue.get()
+                    if kind == "step":
+                        yield sse("step", payload)
+                    elif kind == "result":
+                        yield sse("result", payload)
+                        break
+                    else:
+                        yield sse("error", payload)
+                        break
+            finally:
+                try:
+                    await task
+                except Exception:
+                    logger.exception("RAG stream worker failed")
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     return app
 

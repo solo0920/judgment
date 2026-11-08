@@ -24,7 +24,7 @@ from judgment.models import (
     LawDatasetVersion,
     LawDocument,
 )
-from judgment.observability import record_performance
+from judgment.observability import record_performance, trace_segment
 from judgment.web.app import create_app
 
 
@@ -793,6 +793,46 @@ def test_rag_flow_records_nested_segments_and_models(web_client) -> None:
     )
     assert filtered.status_code == 200
     assert filtered.json()["total"] >= 1
+
+
+def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+
+    def fake_answer_question(*, session_factory, question, settings):
+        with trace_segment(
+            "rag.fake_step",
+            module="test.rag",
+            function="fake_answer_question",
+            params={"question_length": len(question)},
+        ):
+            pass
+        return {
+            "status": "operational",
+            "answer": "測試回答 [1]",
+            "notice": "test",
+            "citations": [],
+            "judgments": [],
+            "law_sources": [],
+            "matched_terms": [],
+            "duration_ms": 1,
+        }
+
+    monkeypatch.setattr(app_module, "answer_question", fake_answer_question)
+    with web_client.stream(
+        "POST",
+        "/api/rag/query/stream",
+        json={"question": "測試問題"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "event: step" in body
+    assert "http.request" in body
+    assert "rag.fake_step" in body
+    assert "event: result" in body
+    assert "測試回答" in body
 
 
 def test_data_query_flow_records_function_params(web_client) -> None:

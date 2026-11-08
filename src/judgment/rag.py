@@ -503,14 +503,23 @@ def answer_question(
     law_stats: Dict[str, Any] = {}
     stat_entity = extract_stat_entity(question) if is_citation_stats_question(question) else ""
     try:
-        if stat_entity:
-            law_stats = judgment_law_stats(session_factory, stat_entity)
-        law_sources = law_sources_for_question(
-            session_factory,
-            settings.law_data_dir,
-            question,
-            stats=law_stats,
-        )
+        with trace_segment(
+            "rag.law_retrieval",
+            module=__name__,
+            function="law_sources_for_question",
+            params={
+                "question_length": len(question),
+                "stat_entity": stat_entity or None,
+            },
+        ):
+            if stat_entity:
+                law_stats = judgment_law_stats(session_factory, stat_entity)
+            law_sources = law_sources_for_question(
+                session_factory,
+                settings.law_data_dir,
+                question,
+                stats=law_stats,
+            )
     except Exception as exc:
         logger.warning("law/order retrieval failed: %s", exc)
         law_sources = []

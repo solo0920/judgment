@@ -417,7 +417,7 @@ uv run judgment-normalize-courts --all
 
 | 路由 | 頁面 | 功能 |
 | --- | --- | --- |
-| `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、LLM 引用回答、索引覆蓋率、判決引用與瀏覽器端提問紀錄。 |
+| `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。 |
 | `#/data` | 資料庫查詢 | 先切換「法規命令／判決」，再選擇資料庫；側欄提供「查詢／Schema」切換，Schema 模式列出該資料庫的資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
 | `#/quality` | 資料品質 | DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。無法取得的數值顯示「—」。 |
 | `#/performance` | 效能報表 | 上方測試流程圖表顯示目前／歷史模型測試進度；中段「索引效能」面板顯示當次執行筆數、平均每秒筆數、耗時、平均每批時間與吞吐／時間組成／進度圖表；下方記錄每次執行按鈕的完整 Flow、模組、函式、參數、模型與區段耗時；可展開時間軸、篩選、分頁與匯出。 |
@@ -443,6 +443,7 @@ uv run judgment-normalize-courts --all
 | `POST` | `/api/processing/update` | 啟動可中斷續跑的資料更新；body 為 `{"index": false}`。已在執行中或外部匯入／更新程序佔用時回傳 409。 |
 | `POST` | `/api/processing/stop` | 對由 Web 啟動的資料更新送出 SIGINT；外部程序不會被強制停止。 |
 | `POST` | `/api/rag/query` | 以 Qdrant 檢索判決並由 LLM 產生有引用編號的回答；問題上限 500 字，服務未就緒時降級。 |
+| `POST` | `/api/rag/query/stream` | 與 `/api/rag/query` 相同，但以 SSE 逐段回傳 `step`、`result`、`error`；RAG 頁用來即時顯示後端處理流程。 |
 | `GET` | `/api/docs` | Swagger UI 互動式 API 文件。 |
 | `GET` | `/api/openapi.json` | OpenAPI schema。 |
 
@@ -937,7 +938,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：116 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：118 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
@@ -950,6 +951,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 法規／命令範例問題：以「證券營業員常觸犯什麼法規或命令?」提問，系統在 30 筆全文提及「證券營業員」的判決中統計引用次數，回傳洗錢防制法、民法、保險法、證券交易法等法規卡；「有哪些法規是和壽險及產險相關的?」會依名稱與類別關鍵字整理保險法、簡易人壽保險法、人壽保險各類保險定名準則、財產保險業財務報告編製準則等 8 筆法規／命令。
 - 法規／命令 RAG 實測：以「證交法有多少條文?」提問，別名解析為 `證券交易法`，回傳 229 條與法規卡，約 0.16 秒；「銀行法是何時開始有的?」回傳民國 20 年 3 月 28 日（1931-03-28），約 0.08 秒；「保險業務員最常觸犯什麼法條?」依 42 筆判決的引用統計列出 `保險業務員管理規則` 第 19、15 條與 `民法` 第 184 條等，約 0.21 秒。法規／命令與判決並存時，回答卡會同時顯示判決卡與法規／命令卡，引用編號共用。
 - RAG 實測（快速 profile）：以「侵權行為損害賠償的舉證責任」提問，狀態 `operational`，回傳 4 筆判決與 `[1, 2, 3, 4]` 引用，約 2.0–2.4 秒；回答標頭顯示狀態、耗時與模型 `gemma3:4b`，tooltip 另列 embedding `bge-m3`；「銀行法對於吸收存款與授信有哪些限制？」約 2.3–3.8 秒；「有關內線交易的法律有哪些?」約 5.1 秒。皆未產生虛構案號。
+- RAG 串流處理流程：正常提問改用 `POST /api/rag/query/stream`，前端逐行顯示 FastAPI、PostgreSQL、Qdrant、Ollama embedding、LLM 生成與引用驗證等步驟；完成後自動收合，可點擊展開。實測一般問答 21 步、約 11 秒，法規結構化問答 7–8 步、約 0.2 秒。
 - 以 Playwright 驗證法規／命令卡 dialog：點擊 `證券交易法` 卡可從本地 Parquet 一次讀取並列出 229 條原文，顯示來源快照、法規沿革與來源網站；沒有分頁控制，對話框內可連續捲動全部條文，並可以 X／返回回答／點擊外部關閉；390px 無水平溢出、無 console error。
 - 以 Playwright 驗證 Qdrant 資料頁：語意查詢、Top K、相似度門檻、相似度／案號／法院／案由／裁判日期／命中法規欄位、點選案號開啟判決原文，以及返回後查詢條件保留；RAG 頁驗證索引覆蓋率、4 筆判決引用與引用編號，狀態頁驗證 Qdrant／Embedding／RAG／LLM 均為正常；390px 無水平溢出、無 console error。
 - 效能 Flow 實測：快速 profile 的 RAG 請求產生約 20 段 Flow，包含 `http.request`、`rag.answer_question`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm`、`rag.validate_citations` 與 `client.render`；`summary.models` 為 `bge-m3`、`gemma3:4b`。伺服器端 LLM 區段約 1–4 秒，前端 client 全流程與伺服器總耗時接近。時間軸以每個點位的 `started_at` 顯示開始時間，主要數字為「本點到下一點」區間；「累計」採流水線累加，例如 `http.request` 顯示 1 ms 並累計 1 ms，`rag.coverage` 顯示 30 ms 並累計 32 ms，`rag.llm_request` 顯示 2.9 s，最後 `client.render` 才累計到整體 3.9–4.0 秒。

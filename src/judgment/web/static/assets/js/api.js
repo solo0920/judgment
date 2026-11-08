@@ -492,4 +492,124 @@ export const api = {
       timeout: options.testMode ? 0 : RAG_TIMEOUT,
     });
   },
+
+  async ragStream(question, { testMode = false, onStep = null } = {}) {
+    const base = getApiBase();
+    const controller = new AbortController();
+    const timeout = testMode ? 0 : RAG_TIMEOUT;
+    const timer =
+      timeout > 0 ? window.setTimeout(() => controller.abort(), timeout) : null;
+    const clientStartedAt = Date.now();
+    const clientStarted = performance.now();
+    const requestId = newRequestId();
+    const headers = {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      "X-Judgment-Request-Id": requestId,
+      "X-Judgment-Client-Started-At": String(clientStartedAt),
+    };
+    let response;
+    try {
+      response = await fetch(apiUrl("/api/rag/query/stream", base), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ question }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new ApiError("請求逾時，請稍後再試。", 0, null);
+      }
+      throw new ApiError(networkErrorMessage(base), 0, error);
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+    if (!response.ok) {
+      let detail = null;
+      try {
+        detail = await response.json();
+      } catch (error) {
+        detail = null;
+      }
+      const message =
+        detail && typeof detail === "object" && detail.detail
+          ? String(detail.detail)
+          : `伺服器回應 ${response.status}，請稍後再試。`;
+      throw new ApiError(message, response.status, detail);
+    }
+    if (!response.body) {
+      throw new ApiError("伺服器沒有回傳可讀取的流程串流。", 0, null);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result = null;
+    let streamError = null;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary >= 0) {
+          const block = buffer.slice(0, boundary).replace(/\r/g, "");
+          buffer = buffer.slice(boundary + 2);
+          let event = "message";
+          const dataLines = [];
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+          }
+          if (dataLines.length) {
+            let payload = null;
+            try {
+              payload = JSON.parse(dataLines.join("\n"));
+            } catch (error) {
+              payload = null;
+            }
+            if (payload) {
+              if (event === "step" && typeof onStep === "function") {
+                try {
+                  onStep(payload);
+                } catch (error) {
+                  /* process rendering must not break the request */
+                }
+              } else if (event === "result") {
+                result = payload;
+              } else if (event === "error") {
+                streamError = new ApiError(
+                  payload.message || payload.detail || "RAG 流程失敗。",
+                  0,
+                  payload,
+                );
+              }
+            }
+          }
+          boundary = buffer.indexOf("\n\n");
+        }
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } catch (error) {
+        /* already closed */
+      }
+      if (timer) window.clearTimeout(timer);
+    }
+
+    if (streamError) throw streamError;
+    if (!result) {
+      throw new ApiError("流程串流結束，但沒有收到最終回答。", 0, null);
+    }
+    const totalMs = Math.round(performance.now() - clientStarted);
+    reportClientTiming({
+      request_id: requestId,
+      route: `${window.location.pathname}${window.location.hash || ""}`,
+      total_ms: totalMs,
+      render_ms: 0,
+      status: "success",
+    });
+    return result;
+  },
 };

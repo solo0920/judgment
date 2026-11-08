@@ -2008,6 +2008,116 @@ button.chip:hover {
   white-space: pre-wrap;
 }
 
+.answer-card > .rag-process {
+  margin: 18px 20px 22px;
+}
+
+.answer-body .rag-process {
+  margin: 18px 0 0;
+}
+
+.rag-process {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.rag-process > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.rag-process > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rag-process[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.rag-process-title {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.rag-process-summary {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+
+.rag-process-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 12px 9px;
+}
+
+.rag-process-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 0 4px calc(var(--depth, 0) * 12px);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.rag-process-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 4px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.rag-process-item.is-running .rag-process-dot {
+  background: var(--accent);
+  animation: rag-process-pulse 1.1s ease-in-out infinite;
+}
+
+.rag-process-item.is-error .rag-process-dot {
+  background: var(--danger);
+}
+
+.rag-process-label {
+  min-width: 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-process-meta {
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+}
+
+.rag-process-hint {
+  padding: 0 12px 9px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+@keyframes rag-process-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 .answer-notice {
   margin-top: 16px;
   padding: 11px 13px;
