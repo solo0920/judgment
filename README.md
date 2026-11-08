@@ -282,13 +282,28 @@ uv run judgment-import-judgments \
 
 - `--dry-run`：只掃描與統計，不寫入資料庫。
 - `--raw-only`：只建立原始 Parquet 備份，不篩選、不寫入 PostgreSQL；可用來補建既有 `.rar` 的原始備份。
-- `--limit 2000`：限制掃描筆數，適合測試。
+- `--limit 2000`：限制 DuckDB 候選處理筆數，適合測試。
 - `--archive PATH`：只處理指定的 `.rar`，可重複指定。
 - `--batch-size 500`：調整每批寫入筆數。
 - 匯入過程使用 macOS 內建的 `bsdtar` 讀取 RAR；Linux 需安裝 `libarchive-tools`。
 - 每次匯入會寫入 `judgment_import_runs`，記錄掃描、命中、寫入、引用數與耗時。
 - 匯入前會先將解壓縮後的每個 JSON 物件寫入 `parquet/raw_judgments/.../raw.parquet`；`raw_json` 保留原始文字內容，且包含未命中金融法規的判決，作為不可變的原始備份。
 - 未命中的判決不會寫入資料庫，但會保留在原始 Parquet 備份與原始 `.rar` 中。
+
+### DuckDB 候選篩選（Phase 1）
+
+PostgreSQL 匯入階段現在使用 DuckDB 掃描原始 Parquet：
+
+```sql
+SELECT ...
+FROM read_parquet('raw.parquet')
+WHERE citation_count > 0 AND jid <> ''
+```
+
+- DuckDB 負責 2,485,151 筆 Parquet 的大量掃描與候選篩選。
+- Python 只接收命中候選，組裝 `judgment_documents` row，不再重跑 2,485,151 筆 Regex。
+- `judgment_import_runs.scanned_count` 保留原始 Parquet 筆數；匯入摘要新增 `candidate_count`，代表 DuckDB 候選數。
+- 原始 Parquet 建立時仍由 Python Regex 產生 `matched_laws`、`citations`、`citation_count`；完整把第一層篩選移到 DuckDB（Phase 2）尚未實作，需重新 backfill 原始 Parquet。
 
 收錄欄位包含：案號、年度／字別／號碼、裁判日期、法院、正規化法院、案由、判決全文、PDF 連結、來源壓縮檔、命中法規清單、引用條號、引用數與內容雜湊。
 
@@ -386,7 +401,7 @@ uv run judgment-normalize-courts --all
 
 `#/processing` 會讀取 `.run/processing_state.json`（可用 `JUDGMENT_PROCESSING_STATE` 覆寫），並同時查詢 PostgreSQL、Qdrant 與本機 `.rar`，因此畫面只顯示可驗證的數值：
 
-- **流程圖**：判決、法規、命令三條分支。判決分支依序為 RAR 解壓縮 → 原始 Parquet 備份 → 金融法規篩選 → PostgreSQL metadata → Qdrant；法規／命令分支為下載 → 原始 Parquet → 解析 → PostgreSQL。每個階段都有獨立顏色、筆數、百分比與進度條；無法計算總量時顯示「進度未知」，不以猜測值代替。
+- **流程圖**：判決、法規、命令三條分支。判決分支依序為 RAR 解壓縮 → 原始 Parquet 備份 → DuckDB 候選篩選＋金融法規篩選 → PostgreSQL metadata → Qdrant；法規／命令分支為下載 → 原始 Parquet → 解析 → PostgreSQL。每個階段都有獨立顏色、筆數、百分比與進度條；無法計算總量時顯示「進度未知」，不以猜測值代替。
 - **原始備份**：判決 RAR 會先將每個 JSON 物件以原始文字寫入 `JUDGMENT_DATA_DIR/parquet/raw_judgments/.../raw.parquet`；`raw_json` 保留未修改的原始文字，另外附加案號、法院、案由、裁判日期、命中法規與引用等查詢欄位。這個階段在金融法規篩選之前完成。法規／命令則在解析前寫入 `LAW_DATA_DIR/raw_parquet/.../laws.parquet`，原始 ZIP 仍保留在 `raw/`。
   - 2026-11-08 已補建既有 24 個判決 RAR：2,485,151 筆原始 JSON，Parquet 約 6.2 GB；既有法規／命令也補建原始 Parquet（法規 1,351、命令 10,454）。
 - **逐檔進度**：從狀態檔的 `archives` 讀取每個壓縮檔的解壓縮、原始備份、篩選與 PostgreSQL 進度，直接顯示在檔名後方。沒有狀態檔時，改用 PostgreSQL 的 `source_archive` 顯示哪些壓縮檔已處理。

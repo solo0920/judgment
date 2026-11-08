@@ -40,7 +40,7 @@ BRANCH_META: Dict[str, Dict[str, str]] = {
     "judgment": {
         "label": "判決",
         "icon": "database",
-        "description": "RAR → 原始 Parquet 備份 → 金融法規篩選 → PostgreSQL metadata → Qdrant",
+        "description": "RAR → 原始 Parquet 備份 → DuckDB 候選篩選 → PostgreSQL metadata → Qdrant",
     },
     "law": {
         "label": "法規",

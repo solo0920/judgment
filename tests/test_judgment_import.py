@@ -142,6 +142,7 @@ def test_import_filters_and_stores_only_matching_judgments(tmp_path: Path) -> No
     )
 
     assert summary["scanned_count"] == 3
+    assert summary["candidate_count"] == 2
     assert summary["matched_count"] == 2
     assert summary["stored_count"] == 2
     assert summary["citation_count"] == 3
@@ -236,6 +237,7 @@ def test_import_tracks_archive_progress_state(tmp_path: Path, monkeypatch) -> No
         track_state=True,
     )
     assert summary["stored_count"] == 1
+    assert summary["candidate_count"] == 1
 
     payload = ProcessingStateStore().read()
     run = payload["runs"][0]

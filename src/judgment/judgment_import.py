@@ -22,9 +22,9 @@ from sqlalchemy import delete, insert
 from .config import Settings
 from .courts import normalize_court
 from .db import build_engine, build_session_factory, init_db
+from .judgment_duckdb import candidate_count, iter_candidate_batches
 from .judgment_raw_parquet import (
     find_reusable_raw_parquet,
-    iter_raw_judgment_json,
     write_archive_raw_parquet,
 )
 from .models import JudgmentDocument, JudgmentImportRun
@@ -305,33 +305,6 @@ def _judgment_base_fields(
     }
 
 
-def _judgment_row(
-    obj: Dict[str, Any],
-    *,
-    archive: Path,
-    pattern: re.Pattern[str],
-    run_id: Optional[int],
-) -> Optional[Dict[str, Any]]:
-    row = _judgment_base_fields(obj, archive=archive)
-    if not row["jid"] or not str(row["full_text"]).strip():
-        return None
-    citation_result = extract_citations(row["full_text"], pattern)
-    if not citation_result.citations:
-        return None
-    matched_laws = list(citation_result.matched_laws)
-    citations = [dict(item) for item in citation_result.citations]
-    row.update(
-        {
-            "matched_laws": matched_laws,
-            "matched_laws_text": "\n" + "\n".join(matched_laws) + "\n",
-            "citations": citations,
-            "citation_count": len(citations),
-            "import_run_id": run_id,
-        }
-    )
-    return row
-
-
 def _raw_judgment_fields(
     obj: Dict[str, Any],
     *,
@@ -355,6 +328,58 @@ def _raw_judgment_fields(
         }
     )
     return row
+
+
+def _row_from_duckdb_candidate(
+    raw: Dict[str, Any],
+    *,
+    archive: Path,
+    run_id: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    jid = str(raw.get("jid") or "").strip()
+    full_text = str(raw.get("full_text") or "")
+    if not jid or not full_text.strip():
+        return None
+    citations_value = raw.get("citations") or "[]"
+    if isinstance(citations_value, str):
+        try:
+            citations = json.loads(citations_value)
+        except ValueError:
+            citations = []
+    elif isinstance(citations_value, list):
+        citations = citations_value
+    else:
+        citations = []
+    if not isinstance(citations, list):
+        citations = []
+    citations = [dict(item) for item in citations if isinstance(item, dict)]
+    matched_laws = [str(item) for item in (raw.get("matched_laws") or [])]
+    matched_text = str(raw.get("matched_laws_text") or "")
+    if not matched_text:
+        matched_text = "\n" + "\n".join(matched_laws) + "\n"
+    content_hash = str(raw.get("content_hash") or "")
+    if not content_hash:
+        content_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()
+    return {
+        "jid": jid[:255],
+        "jyear": str(raw.get("jyear") or "")[:16],
+        "jcase": str(raw.get("jcase") or "")[:64],
+        "jno": str(raw.get("jno") or "")[:32],
+        "jdate": str(raw.get("jdate") or "")[:16],
+        "court": str(raw.get("court") or ""),
+        "court_normalized": str(raw.get("court_normalized") or ""),
+        "title": str(raw.get("title") or ""),
+        "full_text": full_text,
+        "pdf_url": str(raw.get("pdf_url") or ""),
+        "source_archive": str(raw.get("source_archive") or archive.name),
+        "content_hash": content_hash,
+        "matched_laws": matched_laws,
+        "matched_laws_text": matched_text,
+        "citations": citations,
+        "citation_count": int(raw.get("citation_count") or len(citations)),
+        "full_text_length": int(raw.get("full_text_length") or len(full_text)),
+        "import_run_id": run_id,
+    }
 
 
 def _flush_batch(session_factory, rows: List[Dict[str, Any]]) -> int:
@@ -745,17 +770,6 @@ def import_judgments(
                 duration_ms=raw_total_ms,
                 message=f"原始 Parquet 備份完成：{raw_total_rows:,} 筆。",
             )
-            state.start_stage(
-                state_run_id,
-                "filter",
-                total=raw_total_rows,
-                message="逐筆比對金融法規引用，篩選後寫入 PostgreSQL。",
-            )
-            state.start_stage(
-                state_run_id,
-                "postgres",
-                message="等待符合金融法規條件的判決。",
-            )
         if raw_only:
             duration_ms = int((time.perf_counter() - started_perf) * 1000)
             if state is not None and state_run_id is not None:
@@ -808,13 +822,43 @@ def import_judgments(
                 "citation_count": 0,
                 "duration_ms": duration_ms,
             }
+        candidate_totals: Dict[Path, int] = {}
+        for archive in archive_paths:
+            raw_path = Path(str(raw_results[archive]["path"]))
+            candidate_totals[archive] = candidate_count(raw_path)
+        candidate_total_all = sum(candidate_totals.values())
+        logger.info(
+            "duckdb candidates=%s raw_rows=%s",
+            candidate_total_all,
+            raw_total_rows,
+        )
+        if state is not None and state_run_id is not None:
+            state.start_stage(
+                state_run_id,
+                "filter",
+                total=candidate_total_all,
+                message=(
+                    f"DuckDB 已選出 {candidate_total_all:,} 筆候選；"
+                    "Python 只組裝 PostgreSQL metadata。"
+                ),
+            )
+            state.start_stage(
+                state_run_id,
+                "postgres",
+                message="等待符合金融法規條件的判決。",
+            )
         current_phase = "filter"
         for archive_index, archive in enumerate(archive_paths):
             current_archive = archive
             raw_result = raw_results[archive]
             raw_path = Path(str(raw_result["path"]))
+            archive_raw_rows = int(raw_result["rows"])
+            archive_candidates = candidate_totals[archive]
             logger.info(
-                "filtering %s (%s raw rows)", archive.name, raw_result["rows"]
+                "filtering %s (%s raw rows, %s candidates)",
+                archive.name,
+                archive_raw_rows,
+                archive_candidates,
             )
             archive_scanned = 0
             archive_matched = 0
@@ -841,8 +885,8 @@ def import_judgments(
                     "filter",
                     status="running",
                     current=0,
-                    total=int(raw_result["rows"]),
-                    message="逐筆比對金融法規引用。",
+                    total=archive_candidates,
+                    message=f"DuckDB 選出 {archive_candidates:,} 筆候選；Python 組裝 metadata。",
                 )
                 state.update_archive_stage(
                     state_run_id,
@@ -855,11 +899,18 @@ def import_judgments(
                 )
                 state.set_current_stage(state_run_id, "filter")
 
-            iterator = iter_raw_judgment_json(raw_path)
+            def candidate_rows():
+                for batch in iter_candidate_batches(
+                    raw_path,
+                    batch_size=max(1, int(batch_size)),
+                ):
+                    yield from batch
+
+            iterator = candidate_rows()
             while True:
                 read_started = time.perf_counter()
                 try:
-                    obj = next(iterator)
+                    raw_row = next(iterator)
                 except StopIteration:
                     filter_elapsed = time.perf_counter() - read_started
                     filter_total_s += filter_elapsed
@@ -874,18 +925,16 @@ def import_judgments(
                 scanned += 1
                 archive_scanned += 1
                 filter_started = time.perf_counter()
-                row = _judgment_row(
-                    obj,
+                row = _row_from_duckdb_candidate(
+                    raw_row,
                     archive=archive,
-                    pattern=pattern,
                     run_id=run_id,
                 )
                 filter_elapsed = time.perf_counter() - filter_started
                 filter_total_s += filter_elapsed
                 archive_filter_s += filter_elapsed
                 if row is None:
-                    if not str(obj.get("JID") or "").strip():
-                        failed += 1
+                    failed += 1
                     continue
                 matched += 1
                 archive_matched += 1
@@ -918,9 +967,9 @@ def import_judgments(
                         state_run_id,
                         "filter",
                         current=scanned,
-                        total=raw_total_rows,
+                        total=candidate_total_all,
                         duration_ms=int(filter_total_s * 1000),
-                        message=f"已掃描 {scanned:,} 筆，命中 {matched:,} 筆。",
+                        message=f"已處理 {scanned:,} 筆 DuckDB 候選，命中 {matched:,} 筆。",
                     )
                     state.update_stage(
                         state_run_id,
@@ -934,9 +983,9 @@ def import_judgments(
                         archive.name,
                         "filter",
                         current=archive_scanned,
-                        total=int(raw_result["rows"]),
+                        total=archive_candidates,
                         status="running",
-                        message=f"已篩選 {archive_scanned:,} 筆，命中 {archive_matched:,} 筆。",
+                        message=f"已處理 {archive_scanned:,} 筆候選，命中 {archive_matched:,} 筆。",
                     )
                     state.update_archive(
                         state_run_id,
@@ -969,9 +1018,12 @@ def import_judgments(
                     "filter",
                     status="success",
                     current=archive_scanned,
-                    total=int(raw_result["rows"]),
+                    total=archive_candidates,
                     duration_ms=int(archive_filter_s * 1000),
-                    message=f"掃描 {archive_scanned:,} 筆，命中 {archive_matched:,} 筆金融法規判決。",
+                    message=(
+                        f"DuckDB 候選 {archive_candidates:,} 筆；"
+                        f"Python 命中 {archive_matched:,} 筆。"
+                    ),
                 )
                 state.update_archive_stage(
                     state_run_id,
@@ -988,7 +1040,7 @@ def import_judgments(
                     archive.name,
                     status="success",
                     current_stage="",
-                    scanned=archive_scanned,
+                    scanned=archive_raw_rows,
                     matched=archive_matched,
                     stored=archive_stored,
                     duration_ms=int(
@@ -1005,9 +1057,9 @@ def import_judgments(
                     state_run_id,
                     "filter",
                     current=scanned,
-                    total=raw_total_rows,
+                    total=candidate_total_all,
                     duration_ms=int(filter_total_s * 1000),
-                    message=f"已掃描 {scanned:,} 筆，命中 {matched:,} 筆。",
+                    message=f"已處理 {scanned:,} 筆 DuckDB 候選，命中 {matched:,} 筆。",
                 )
                 state.update_stage(
                     state_run_id,
@@ -1020,13 +1072,13 @@ def import_judgments(
                 break
 
         if state is not None and state_run_id is not None:
-            filter_total = scanned if stopped_early else raw_total_rows
+            filter_total = scanned if stopped_early else candidate_total_all
             state.finish_stage(
                 state_run_id,
                 "filter",
                 current=scanned,
                 total=filter_total or scanned,
-                message=f"掃描 {scanned:,} 筆，命中 {matched:,} 筆。",
+                message=f"DuckDB 候選 {scanned:,} 筆，Python 命中 {matched:,} 筆。",
             )
             state.finish_stage(
                 state_run_id,
@@ -1040,12 +1092,14 @@ def import_judgments(
                 status="success",
                 message=(
                     f"完成 {len(archive_paths)} 個壓縮檔：原始 Parquet {raw_total_rows:,} 筆、"
-                    f"掃描 {scanned:,} 筆、命中 {matched:,} 筆、寫入 {stored:,} 筆。"
+                    f"DuckDB 候選 {scanned:,} 筆、Python 命中 {matched:,} 筆、"
+                    f"寫入 {stored:,} 筆。"
                 ),
                 counts={
                     "raw_parquet_rows": raw_total_rows,
                     "raw_parquet_count": len(raw_results),
-                    "scanned_count": scanned,
+                    "candidate_count": scanned,
+                    "scanned_count": raw_total_rows,
                     "matched_count": matched,
                     "stored_count": stored,
                     "failed_count": failed,
@@ -1066,7 +1120,7 @@ def import_judgments(
                     )
                 duration_ms = int((time.perf_counter() - started_perf) * 1000)
                 run.status = "success"
-                run.scanned_count = scanned
+                run.scanned_count = raw_total_rows
                 run.matched_count = matched
                 run.stored_count = stored
                 run.failed_count = failed
@@ -1093,7 +1147,8 @@ def import_judgments(
                         "run_id": run_id,
                         "raw_parquet_rows": raw_total_rows,
                         "raw_parquet_count": len(raw_results),
-                        "scanned_count": scanned,
+                        "candidate_count": scanned,
+                        "scanned_count": raw_total_rows,
                         "matched_count": matched,
                         "stored_count": stored,
                         "failed_count": failed,
@@ -1128,7 +1183,8 @@ def import_judgments(
                 counts={
                     "raw_parquet_rows": raw_total_rows,
                     "raw_parquet_count": len(raw_results),
-                    "scanned_count": scanned,
+                    "candidate_count": scanned,
+                    "scanned_count": raw_total_rows,
                     "matched_count": matched,
                     "stored_count": stored,
                     "failed_count": failed,
@@ -1140,7 +1196,7 @@ def import_judgments(
                 run = session.get(JudgmentImportRun, run_id)
                 if run is not None:
                     run.status = "failed"
-                    run.scanned_count = scanned
+                    run.scanned_count = raw_total_rows
                     run.matched_count = matched
                     run.stored_count = stored
                     run.failed_count = failed
@@ -1178,7 +1234,8 @@ def import_judgments(
                 counts={
                     "raw_parquet_rows": raw_total_rows,
                     "raw_parquet_count": len(raw_results),
-                    "scanned_count": scanned,
+                    "candidate_count": scanned,
+                    "scanned_count": raw_total_rows,
                     "matched_count": matched,
                     "stored_count": stored,
                     "failed_count": failed,
@@ -1190,7 +1247,7 @@ def import_judgments(
                 run = session.get(JudgmentImportRun, run_id)
                 if run is not None:
                     run.status = "failed"
-                    run.scanned_count = scanned
+                    run.scanned_count = raw_total_rows
                     run.matched_count = matched
                     run.stored_count = stored
                     run.failed_count = failed
@@ -1247,7 +1304,8 @@ def import_judgments(
                 "limit": limit,
             },
             details={
-                "scanned_count": scanned,
+                "candidate_count": scanned,
+                "scanned_count": raw_total_rows,
                 "matched_count": matched,
                 "stored_count": stored,
                 "failed_count": failed,
@@ -1275,7 +1333,8 @@ def import_judgments(
             if dry_run
             else [str(item.get("path")) for item in raw_results.values()]
         ),
-        "scanned_count": scanned,
+        "candidate_count": scanned,
+        "scanned_count": raw_total_rows,
         "matched_count": matched,
         "stored_count": stored,
         "failed_count": failed,
