@@ -64,6 +64,7 @@ class Settings:
     embedding_fallback_url: str = ""
     embedding_model: str = "bge-m3"
     embedding_timeout_seconds: float = 120.0
+    embedding_query_timeout_seconds: float = 10.0
     llm_url: str = ""
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
@@ -145,6 +146,9 @@ class Settings:
             embedding_model=os.getenv("EMBEDDING_MODEL", "bge-m3").strip()
             or "bge-m3",
             embedding_timeout_seconds=_env_float("EMBEDDING_TIMEOUT_SECONDS", 120.0),
+            embedding_query_timeout_seconds=_env_float(
+                "EMBEDDING_QUERY_TIMEOUT_SECONDS", 10.0
+            ),
             llm_url=os.getenv("LLM_URL", "").rstrip("/"),
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             llm_timeout_seconds=_env_float("LLM_TIMEOUT_SECONDS", 180.0),

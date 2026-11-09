@@ -3,7 +3,18 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from judgment.embeddings import EmbeddingError, OllamaEmbedder
+from judgment.embeddings import (
+    _PRIMARY_COOLDOWNS,
+    EmbeddingError,
+    OllamaEmbedder,
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_embedding_cooldowns():
+    _PRIMARY_COOLDOWNS.clear()
+    yield
+    _PRIMARY_COOLDOWNS.clear()
 
 
 class FakeResponse:
@@ -58,3 +69,70 @@ def test_embedding_reports_both_provider_failures(monkeypatch) -> None:
         embedder.embed(["測試"])
     assert "primary failed" in str(exc_info.value)
     assert "fallback failed" in str(exc_info.value)
+
+
+def test_query_embedding_uses_short_primary_timeout_then_local_fallback(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs.get("timeout")))
+        if "primary.test" in url:
+            raise httpx.ReadTimeout("primary timed out")
+        return FakeResponse([[0.1, 0.2, 0.3, 0.4]])
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=120,
+        query_timeout=10,
+        fallback_base_url="http://127.0.0.1:11434",
+    )
+    vector = embedder.embed_query("測試")
+    assert len(vector) == 4
+    assert calls == [
+        ("http://primary.test/api/embed", 10.0),
+        ("http://127.0.0.1:11434/api/embed", 120.0),
+    ]
+    assert embedder.using_fallback is True
+
+
+def test_primary_timeout_cooldown_skips_primary_for_next_query(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if "primary.test" in url:
+            raise httpx.ReadTimeout("primary timed out")
+        return FakeResponse([[0.1, 0.2]])
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    first = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=120,
+        query_timeout=10,
+        fallback_base_url="http://127.0.0.1:11434",
+    )
+    assert first.embed_query("第一次") == [0.1, 0.2]
+    assert calls == [
+        "http://primary.test/api/embed",
+        "http://127.0.0.1:11434/api/embed",
+    ]
+
+    second = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=120,
+        query_timeout=10,
+        fallback_base_url="http://127.0.0.1:11434",
+    )
+    assert second.embed_query("第二次") == [0.1, 0.2]
+    assert calls == [
+        "http://primary.test/api/embed",
+        "http://127.0.0.1:11434/api/embed",
+        "http://127.0.0.1:11434/api/embed",
+    ]
+    assert second.using_fallback is True

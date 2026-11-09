@@ -1,12 +1,35 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+_PRIMARY_COOLDOWNS: Dict[str, float] = {}
+_COOLDOWN_LOCK = threading.Lock()
+
+
+def _primary_cooldown_key(base_url: str, model: str) -> str:
+    return f"{base_url}|{model}"
+
+
+def _primary_down_until(key: str) -> float:
+    with _COOLDOWN_LOCK:
+        return _PRIMARY_COOLDOWNS.get(key, 0.0)
+
+
+def _mark_primary_down(key: str, seconds: float) -> None:
+    with _COOLDOWN_LOCK:
+        _PRIMARY_COOLDOWNS[key] = time.monotonic() + max(0.0, float(seconds))
+
+
+def _clear_primary_down(key: str) -> None:
+    with _COOLDOWN_LOCK:
+        _PRIMARY_COOLDOWNS.pop(key, None)
 
 
 class EmbeddingError(RuntimeError):
@@ -67,6 +90,7 @@ class OllamaEmbedder:
         model: str = "bge-m3",
         *,
         timeout: Optional[float] = 120.0,
+        query_timeout: Optional[float] = 10.0,
         fallback_base_url: str = "",
         fallback_cooldown_seconds: float = 60.0,
     ) -> None:
@@ -74,10 +98,13 @@ class OllamaEmbedder:
         self.fallback_base_url = str(fallback_base_url or "").rstrip("/")
         self.model = str(model or "bge-m3")
         self.timeout = None if timeout is None else float(timeout)
+        self.query_timeout = (
+            None if query_timeout is None else float(query_timeout)
+        )
         self.fallback_cooldown_seconds = max(
             0.0, float(fallback_cooldown_seconds)
         )
-        self._primary_down_until = 0.0
+        self._cooldown_key = _primary_cooldown_key(self.base_url, self.model)
         self._using_fallback = False
 
     @property
@@ -88,12 +115,19 @@ class OllamaEmbedder:
     def using_fallback(self) -> bool:
         return self._using_fallback
 
-    def _embed_at(self, base_url: str, values: Sequence[str]) -> List[List[float]]:
+    def _embed_at(
+        self,
+        base_url: str,
+        values: Sequence[str],
+        *,
+        timeout: Optional[float] = None,
+    ) -> List[List[float]]:
+        request_timeout = self.timeout if timeout is None else timeout
         try:
             response = httpx.post(
                 f"{base_url}/api/embed",
                 json={"model": self.model, "input": list(values)},
-                timeout=self.timeout,
+                timeout=request_timeout,
             )
             response.raise_for_status()
             payload = response.json()
@@ -120,27 +154,39 @@ class OllamaEmbedder:
             raise EmbeddingError("Embedding API 回傳的向量維度不一致")
         return result
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        primary_timeout: Optional[float] = None,
+    ) -> List[List[float]]:
         values = [str(text or "") for text in texts]
         if not values:
             return []
         if not self.configured:
             raise EmbeddingError("EMBEDDING_URL 未設定")
+        down_until = _primary_down_until(self._cooldown_key)
         primary_available = bool(
-            self.base_url and time.monotonic() >= self._primary_down_until
+            self.base_url
+            and (time.monotonic() >= down_until or not self.fallback_base_url)
         )
         primary_error: Optional[Exception] = None
         if primary_available:
             try:
-                result = self._embed_at(self.base_url, values)
+                result = self._embed_at(
+                    self.base_url,
+                    values,
+                    timeout=primary_timeout,
+                )
                 if self._using_fallback:
                     logger.info("Embedding primary recovered: %s", self.base_url)
                 self._using_fallback = False
+                _clear_primary_down(self._cooldown_key)
                 return result
             except EmbeddingError as exc:
                 primary_error = exc
-                self._primary_down_until = (
-                    time.monotonic() + self.fallback_cooldown_seconds
+                _mark_primary_down(
+                    self._cooldown_key, self.fallback_cooldown_seconds
                 )
                 if not self.fallback_base_url:
                     raise
@@ -149,6 +195,11 @@ class OllamaEmbedder:
                     self.fallback_base_url,
                     exc,
                 )
+        elif self.fallback_base_url:
+            logger.debug(
+                "Embedding primary cooling down; using fallback %s",
+                self.fallback_base_url,
+            )
         if self.fallback_base_url:
             try:
                 result = self._embed_at(self.fallback_base_url, values)
@@ -166,7 +217,7 @@ class OllamaEmbedder:
         raise EmbeddingError("沒有可用的 embedding provider")
 
     def embed_query(self, text: str) -> List[float]:
-        vectors = self.embed([text])
+        vectors = self.embed([text], primary_timeout=self.query_timeout)
         if not vectors:
             raise EmbeddingError("Embedding API 沒有回傳查詢向量")
         return vectors[0]
