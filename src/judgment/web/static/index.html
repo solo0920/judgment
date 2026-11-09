@@ -111,34 +111,20 @@
         </nav>
 
         <div class="header-actions">
-          <button
-            class="api-trigger"
-            type="button"
-            id="api-config-trigger"
-            aria-haspopup="dialog"
-            aria-controls="api-dialog"
-            aria-expanded="false"
-            title="設定後端 API 位址"
+          <a
+            class="api-trigger system-test-trigger"
+            id="system-test-trigger"
+            data-route="tests"
+            href="#/tests"
+            title="系統測試：API 連線、測試模式與模型測試 Flow"
+            aria-label="系統測試"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M10 13a5 5 0 0 0 7.1 0l1.4-1.4a5 5 0 0 0-7.1-7.1L10.2 5.7"/>
-              <path d="M14 11a5 5 0 0 0-7.1 0l-1.4 1.4a5 5 0 0 0 7.1 7.1l1.2-1.2"/>
+              <path d="m5 7 5 5-5 5"/>
+              <path d="M12 17h7"/>
             </svg>
-            <span class="api-trigger-label">API</span>
-          </button>
-          <button
-            class="header-status header-power"
-            id="header-status"
-            type="button"
-            role="switch"
-            aria-checked="false"
-            aria-label="測試模式開關"
-            title="測試模式：開啟後 RAG 提問會執行所有可用模型，且不設逾時"
-            disabled
-          >
-            <span class="header-status-label header-power-label">…</span>
-            <span class="header-power-knob" aria-hidden="true"></span>
-          </button>
+            <span class="api-trigger-label">系統測試</span>
+          </a>
           <div class="style-picker" id="style-picker">
             <button
               type="button"
@@ -192,7 +178,6 @@
     </div>
 
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <div id="dialog-root"></div>
     <script type="module" src="./assets/js/app.js"></script>
   </body>
 </html>

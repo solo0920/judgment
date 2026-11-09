@@ -467,8 +467,10 @@ def test_static_console_is_served(web_client) -> None:
     assert page.status_code == 200
     assert "Judgment RAG Console" in page.text
     assert "/assets/js/app.js" in page.text
-    assert 'id="header-status"' in page.text
-    assert 'role="switch"' in page.text
+    assert 'id="system-test-trigger"' in page.text
+    assert 'data-route="tests"' in page.text
+    assert 'href="#/tests"' in page.text
+    assert 'id="header-status"' not in page.text
     assert 'data-route="performance"' in page.text
     assert 'data-route="quality"' in page.text
 

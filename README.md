@@ -116,7 +116,7 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 
 開啟 <http://127.0.0.1:9200/>，預設進入 RAG 提問頁。主控台是純靜態的 Vanilla JS SPA，由 FastAPI 直接服務，原始碼模式不需要 Node.js 建置步驟。若要以 `file://` 直接開啟，或部署到 Cloudflare Pages，請先產生 `frontend/`，見〈靜態前端與部署〉。
 
-`judgment-web` 啟動時會自動在 `127.0.0.1:9201` 建立本機電源控制器，供 `./up.sh`／`./down.sh` 與電源 API 使用；header 右上角現在是**測試模式開關**，不再控制電源。設定 `JUDGMENT_POWER_AGENT=0` 可停用控制器。
+`judgment-web` 啟動時會自動在 `127.0.0.1:9201` 建立本機電源控制器，供 `./up.sh`／`./down.sh` 與電源 API 使用；header 右上角現在是**系統測試**入口，測試模式與 API 連線設定都整合在該頁。設定 `JUDGMENT_POWER_AGENT=0` 可停用控制器。
 
 ### 完整環境備份與還原
 
@@ -490,7 +490,7 @@ uv run python -m judgment.processing_update --index  # 完成後接續 Qdrant
 
 ### 本機電源控制器
 
-header 右上角的膠囊按鈕已改為測試模式開關；後端電源仍由 `./up.sh`、`./down.sh` 或本機電源控制器管理。
+header 右上角已改為**系統測試**入口；後端電源仍由 `./up.sh`、`./down.sh` 或本機電源控制器管理。
 
 控制器是獨立程序，因此後端停止後仍能把它重新啟動。`judgment-web` 預設會自動啟動控制器；若後端已經停止且控制器也不在執行，可手動啟動：
 
@@ -500,7 +500,7 @@ uv run judgment-power-agent --backend-port 9200 --data-dir ./data/laws
 
 控制器只綁定 `127.0.0.1:9201`，僅接受本機、`file://` 或 localhost 來源，且啟動／停止請求必須帶 `X-Judgment-Power: 1`。日誌位於系統暫存目錄的 `judgment-power-agent.log` 與 `judgment-web.log`。
 
-> 電源控制只支援本機 API。部署在 Cloudflare Pages 並透過 cloudflared 連線時，仍需由本機執行 `./up.sh`／`./down.sh` 管理後端；header 的測試模式開關只切換模型測試行為，不會啟動或停止後端。
+> 電源控制只支援本機 API。部署在 Cloudflare Pages 並透過 cloudflared 連線時，仍需由本機執行 `./up.sh`／`./down.sh` 管理後端；系統測試頁的測試模式只切換模型測試行為，不會啟動或停止後端。
 
 單一法規報表範例：
 
@@ -642,7 +642,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 
 ### 測試模式與模型測試 Flow
 
-header 右上角的膠囊開關現在是**測試模式開關**，不再控制後端電源；後端電源仍由 `./up.sh`、`./down.sh` 或 `127.0.0.1:9201` 電源控制器管理。
+header 右上角的「系統測試」頁整合**API 連線設定**與**測試模式開關**；後端電源仍由 `./up.sh`、`./down.sh` 或 `127.0.0.1:9201` 電源控制器管理。
 
 測試模式為 ON 時：
 
@@ -655,7 +655,7 @@ header 右上角的膠囊開關現在是**測試模式開關**，不再控制後
 
 #### 測試流程圖表
 
-效能報表頁上方新增「測試流程」panel；RAG 提問頁在送出測試模式問題後，也會在頁面下方即時生成同一個 panel：
+系統測試頁整合 API 連線表單、測試模式開關與測試 Flow；效能報表頁上方也有「測試流程」panel。RAG 提問頁在送出測試模式問題後，也會在頁面下方即時生成同一個 panel：
 
 - 顯示目前執行中的測試，或最近一筆測試。
 - 標記原始 RAG 問題與 RAG 引擎產生的答案。
@@ -733,17 +733,17 @@ frontend/
 
 1. 啟動後端：`uv run judgment-web --host 127.0.0.1 --port 9200`
 2. 用 Chrome 直接開啟 `frontend/index.html`（`file://` 路徑）。
-3. 前端預設連到 `http://127.0.0.1:9200`。若後端使用其他連接埠，點擊 header 的 `API` 按鈕修改，或在網址加上 `?api=http://127.0.0.1:8765`。
+3. 前端預設連到 `http://127.0.0.1:9200`。若後端使用其他連接埠，點擊 header 的「系統測試」後修改 API Base，或在網址加上 `?api=http://127.0.0.1:8765`。
 
 API 位址的優先順序：
 
 1. 網址參數 `?api=...`（最高，適合臨時測試）
-2. header `API` 對話框儲存在 `localStorage` 的 `judgment.api_base`
+2. 系統測試頁 API 表單儲存在 `localStorage` 的 `judgment.api_base`
 3. `frontend/config.js` 的 `apiBase`
 4. `file://` 模式的預設值 `http://127.0.0.1:9200`
 5. 同源（目前網域）
 
-`API` 對話框提供連線測試、儲存後重新載入與恢復預設。若頁面是 HTTPS，卻填入非 localhost 的 `http://` 位址，瀏覽器會以 mixed content 阻擋；此時必須使用 cloudflared 的 `https://` 位址。
+系統測試頁的 API 表單提供連線測試、儲存後重新載入與恢復預設。若頁面是 HTTPS，卻填入非 localhost 的 `http://` 位址，瀏覽器會以 mixed content 阻擋；此時必須使用 cloudflared 的 `https://` 位址。
 
 #### 部署到 Cloudflare Pages
 
@@ -753,7 +753,7 @@ API 位址的優先順序：
 npx wrangler pages deploy frontend --project-name judgment-rag
 ```
 
-也可在 Cloudflare Pages 以 Git 整合設定：Framework preset 選 `None`、Build command 留空、Build output directory 填 `frontend`。`_headers` 會一併套用。部署後開啟 Pages 網址，若尚未設定 API，前端會自動開啟 `API` 對話框要求填入後端位址。
+也可在 Cloudflare Pages 以 Git 整合設定：Framework preset 選 `None`、Build command 留空、Build output directory 填 `frontend`。`_headers` 會一併套用。部署後開啟 Pages 網址，若尚未設定 API，前端會自動導向系統測試頁要求填入後端位址。
 
 #### 以 cloudflared 連到本機後端
 
@@ -763,7 +763,7 @@ macOS 可用 `brew install cloudflared` 安裝。快速通道（每次重啟會�
 cloudflared tunnel --url http://127.0.0.1:9200
 ```
 
-Quick Tunnel 只適合臨時測試，且可能受網路環境或邊緣節點影響。將輸出的 `https://xxxx.trycloudflare.com` 填入 Pages 前端的 `API` 對話框並測試連線，或建置時寫入：
+Quick Tunnel 只適合臨時測試，且可能受網路環境或邊緣節點影響。將輸出的 `https://xxxx.trycloudflare.com` 填入系統測試頁的 API 表單並測試連線，或建置時寫入：
 
 ```bash
 uv run python scripts/build_frontend.py --api-base https://xxxx.trycloudflare.com
@@ -965,8 +965,8 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 以 Playwright 驗證效能 Flow 頁：模型篩選、21 段巢狀時間軸、每點實際開始時間、點到點區間、流水線累計、module／function／params、時間軸比例條、模型統計、最慢區段、Flow JSON 展開、390px 無水平溢出與 0 console error。
 - 以 Playwright 驗證十種主題切換與持久化、四個頁面、法規／判決類別切換、判決命中法規查詢、匯入紀錄查詢、查詢報表、法規明細、判決原文與返回流程、服務狀態與 390px 行動版；無 console error、無失敗請求、無水平溢出。
 - 以 Playwright 驗證判決法院正規化：下拉選單只有 37 個標準法院＋全部、無重複或髒值，以標準名稱篩選／排序／開啟原文皆一致，返回查詢結果後條件與資料列保留。
-- 以 Playwright 驗證 `file://frontend/index.html`、header `API` 對話框的測試／儲存流程，以及靜態主機（含 `?api=` 覆寫）的跨來源 API 呼叫。
-- 以 Playwright 驗證 header 測試模式開關：ON/OFF 切換、模型數 title、RAG 頁測試模式提示，以及 `/api/test-mode` 狀態一致；後端電源改由 `./up.sh`／`./down.sh` 管理。
+- 以 Playwright 驗證 `file://frontend/index.html`、系統測試頁的 API 連線測試／儲存流程，以及靜態主機（含 `?api=` 覆寫）的跨來源 API 呼叫。
+- 以 Playwright 驗證系統測試頁：header「系統測試」入口、API 表單、測試模式 ON/OFF 切換、模型清單、測試 Flow、RAG 頁測試模式提示，以及 `/api/test-mode` 狀態一致；後端電源改由 `./up.sh`／`./down.sh` 管理。
 - 以 Playwright 驗證測試模式 RAG：4 個 LLM 全數執行、耗時 149 秒、無前端 timeout，回答卡顯示 `test_run` 與「查看測試 Flow」連結。
 - 以 Playwright 驗證測試流程圖表：問題、RAG 答案、每步驟 module／function、即時 poll 更新、11 個子程序進度條（1 embedding + 1 retrieval + 1 context + 4 LLM + 4 validation）、失敗模型紅色 bar、總流程進度與依階段時間 bar、歷史選單還原舊 Flow、390px 與 0 console error。
 - 以 Playwright 驗證 RAG 提問頁下方的即時測試 Flow panel：測試模式提問時顯示問題、答案、module／function、5 個階段、子進度條與總時間 bar。

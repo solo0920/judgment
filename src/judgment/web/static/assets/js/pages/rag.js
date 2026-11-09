@@ -988,7 +988,7 @@ export async function render(root) {
     testModeBox.innerHTML = notice({
       tone: "warn",
       title: "測試模式已開啟",
-      text: `每次提問會依序執行 ${embedding} 個 embedding 與 ${llm} 個 LLM 模型，且不設逾時。測試 Flow 會在頁面下方即時顯示，也可到 <a href="#/performance">效能報表</a> 查看歷史。`,
+      text: `每次提問會依序執行 ${embedding} 個 embedding 與 ${llm} 個 LLM 模型，且不設逾時。測試 Flow 會在頁面下方即時顯示，也可到 <a href="#/tests">系統測試</a> 或 <a href="#/performance">效能報表</a> 查看歷史。`,
     });
   };
 

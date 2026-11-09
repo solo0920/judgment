@@ -144,7 +144,7 @@ export function apiUrl(path, base = getApiBase()) {
 
 function networkErrorMessage(base) {
   const where = base ? `（${base}）` : "";
-  return `無法連線到伺服器${where}，請確認後端是否啟動，或點選 header 的「API」設定後端位址。`;
+  return `無法連線到伺服器${where}，請確認後端是否啟動，或到「系統測試」頁設定後端位址。`;
 }
 
 async function request(path, options = {}) {

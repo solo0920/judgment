@@ -470,7 +470,6 @@ export async function render(root, ctx) {
       if (disposed) return;
       latest = status;
       content.innerHTML = renderContent(status);
-      if (typeof ctx?.refreshHeaderStatus === "function") ctx.refreshHeaderStatus();
       const retry = content.querySelector("#status-retry");
       if (retry) retry.addEventListener("click", () => loadStatus());
       if (!quiet) toast("服務狀態已更新。", "ok", 2200);

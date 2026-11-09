@@ -1022,7 +1022,7 @@ export function renderTestFlowPanel(run, runs, selectedRunId, viewOptions = {}) 
       <div class="test-flow-question">${
         run
           ? escapeHtml(run.question || "未命名測試")
-          : "尚無測試流程。將 header 的測試模式開關設為 ON，並在 RAG 頁提問。"
+          : "尚無測試流程。請到「系統測試」頁開啟測試模式，並在 RAG 頁提問。"
       }</div>
     </div>
     <div class="test-flow-actions">${panelActions}</div>
@@ -1033,7 +1033,7 @@ export function renderTestFlowPanel(run, runs, selectedRunId, viewOptions = {}) 
       ${emptyState({
         iconName: "activity",
         title: "等待測試流程",
-        text: "測試模式開啟後，下一次 RAG 提問會執行所有可用模型，並在這裡即時顯示每個階段的進度。",
+        text: "到「系統測試」頁開啟測試模式後，下一次 RAG 提問會執行所有可用模型，並在這裡即時顯示每個階段的進度。",
       })}
     </div>`;
   }

@@ -457,11 +457,20 @@ samp {
   font-size: 10.5px;
   font-weight: 600;
   line-height: 1;
+  text-decoration: none;
   white-space: nowrap;
   transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
 }
 
-.api-trigger:hover {
+.api-trigger:hover,
+.api-trigger:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+  outline: none;
+}
+
+.api-trigger.is-active {
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent);
@@ -488,25 +497,6 @@ samp {
 
 .api-trigger.is-invalid svg {
   color: var(--danger);
-}
-
-.api-dialog {
-  width: min(580px, calc(100vw - 32px));
-  max-height: min(86vh, 760px);
-  margin: auto;
-  padding: 0;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-lg);
-}
-
-.api-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.48);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
 }
 
 .api-dialog-form {
@@ -555,24 +545,6 @@ samp {
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.6;
-}
-
-.api-dialog-close {
-  width: 30px;
-  min-height: 30px;
-  margin: -4px -4px 0 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--faint);
-  font-size: 19px;
-  line-height: 1;
-}
-
-.api-dialog-close:hover {
-  background: var(--surface-2);
-  color: var(--ink);
 }
 
 .api-dialog-preview {
@@ -7826,5 +7798,169 @@ button.chip:hover {
     flex: 1 0 100%;
     justify-content: space-between;
     margin-right: 0;
+  }
+}
+
+/* ---------------------------------------------------------- system tests */
+.tests-page .page-header {
+  align-items: flex-start;
+}
+
+.tests-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.tests-card {
+  min-width: 0;
+  padding: clamp(16px, 2vw, 22px);
+}
+
+.tests-api-form {
+  gap: 14px;
+  padding: 0;
+}
+
+.tests-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tests-card-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tests-card-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.tests-card-copy {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.tests-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.test-mode-switch {
+  width: 70px;
+  height: 30px;
+  flex: none;
+}
+
+.tests-mode-summary {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.tests-models {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.tests-model-group {
+  display: grid;
+  gap: 5px;
+}
+
+.tests-model-label {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tests-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tests-model-empty {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.tests-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.tests-status {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.tests-status:empty {
+  display: none;
+}
+
+.tests-status.is-ok {
+  border-color: transparent;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.tests-status.is-error {
+  border-color: transparent;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.tests-status.is-warn {
+  border-color: transparent;
+  background: var(--warning-soft);
+  color: var(--ink);
+}
+
+.tests-page #tests-flow {
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .tests-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .tests-mode-row {
+    flex-wrap: wrap;
+  }
+
+  .tests-api-form .api-dialog-actions .grow {
+    display: none;
   }
 }
