@@ -1437,6 +1437,19 @@ function renderJudgmentError(error, jid) {
   </div>`;
 }
 
+function judgmentCitationLawLink(lawName) {
+  const name = String(lawName || "").trim();
+  if (!name) return "—";
+  return `<button class="law-link judgment-citation-law" type="button"
+    data-action="open-law"
+    data-law-key="${escapeHtml(name)}"
+    data-law-source=""
+    data-law-name="${escapeHtml(name)}"
+    title="檢視「${escapeHtml(name)}」的完整法規報表">${escapeHtml(
+      name,
+    )}${icon("chevronRight", 12, "law-link-icon")}</button>`;
+}
+
 function renderJudgmentCitations(detail) {
   const groups = new Map();
   for (const citation of Array.isArray(detail.citations) ? detail.citations : []) {
@@ -1453,7 +1466,7 @@ function renderJudgmentCitations(detail) {
     ${[...groups.entries()]
       .map(
         ([law, articles]) => `<div class="judgment-citation-group">
-          <span class="judgment-citation-law">${escapeHtml(law)}</span>
+          ${judgmentCitationLawLink(law)}
           <span class="judgment-citation-articles">${
             [...articles].map((value) => escapeHtml(value)).join("、") || "—"
           }</span>

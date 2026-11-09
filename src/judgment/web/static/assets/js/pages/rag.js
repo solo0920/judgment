@@ -265,6 +265,27 @@ function answerLoading(question, testMode = false) {
     </div>`;
 }
 
+function lawArticleJumpKey(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .replace(/^第/, "")
+    .replace(/條$/, "")
+    .replace(/之/g, "-");
+}
+
+function lawChipMarkup(lawName, { lawKey = "", sourceType = "", label = "" } = {}) {
+  const name = String(lawName || "").trim();
+  if (!name) return "";
+  return `<button class="chip chip-action" type="button"
+    data-action="open-law-source"
+    data-law-key="${escapeHtml(lawKey || name)}"
+    data-source-type="${escapeHtml(sourceType || "")}"
+    title="點擊開啟 ${escapeHtml(name)} 的完整條文"
+    aria-label="開啟 ${escapeHtml(name)} 的完整條文">${escapeHtml(
+      label || name,
+    )}</button>`;
+}
+
 function judgmentCard(judgment, index) {
   const score =
     judgment.score === null || judgment.score === undefined
@@ -276,9 +297,9 @@ function judgmentCard(judgment, index) {
     .join("");
   const laws = (Array.isArray(judgment.matched_laws) ? judgment.matched_laws : [])
     .slice(0, 5)
-    .map((law) => `<span class="chip">${escapeHtml(law)}</span>`)
+    .map((law) => lawChipMarkup(law))
     .join("");
-  const bodyAttributes = judgment.jid
+  const headAttributes = judgment.jid
     ? ` data-action="open-parquet-judgment"
         data-jid="${escapeHtml(judgment.jid)}"
         role="button"
@@ -294,14 +315,16 @@ function judgmentCard(judgment, index) {
     : "";
   return `<article class="citation">
     <span class="citation-index">[${judgment.index ?? index + 1}]</span>
-    <div class="citation-body"${bodyAttributes}>
-      <h4 class="citation-name">${escapeHtml(judgment.jid || "未知案號")}</h4>
-      <div class="citation-meta">${meta || "<span>判決 metadata</span>"}</div>
-      ${
-        judgment.title
-          ? `<div class="citation-meta"><span>案由：${escapeHtml(judgment.title)}</span></div>`
-          : ""
-      }
+    <div class="citation-body">
+      <div class="citation-head"${headAttributes}>
+        <h4 class="citation-name">${escapeHtml(judgment.jid || "未知案號")}</h4>
+        <div class="citation-meta">${meta || "<span>判決 metadata</span>"}</div>
+        ${
+          judgment.title
+            ? `<div class="citation-meta"><span>案由：${escapeHtml(judgment.title)}</span></div>`
+            : ""
+        }
+      </div>
       ${laws ? `<div class="chips" style="margin-top:8px">${laws}</div>` : ""}
       ${
         judgment.snippet
@@ -328,9 +351,19 @@ function citationCard(citation, index) {
         11,
       )}</a>`
     : "";
+  const citationLawKey = citation.law_key || citation.law_name || "";
+  const bodyAttributes = citationLawKey
+    ? ` data-action="open-law-source"
+        data-law-key="${escapeHtml(citationLawKey)}"
+        data-source-type=""
+        role="button"
+        tabindex="0"
+        title="點擊開啟法規／命令原始條文"
+        aria-label="開啟 ${escapeHtml(citation.law_name || "法規")} 原始條文"`
+    : "";
   return `<article class="citation">
     <span class="citation-index">${String(citation.index ?? index + 1).padStart(2, "0")}</span>
-    <div class="citation-body">
+    <div class="citation-body"${bodyAttributes}>
       <h4 class="citation-name">${escapeHtml(citation.law_name || "未命名法規")}</h4>
       <div class="citation-meta">${meta || "<span>法規 metadata</span>"}</div>
       ${
@@ -510,12 +543,10 @@ function matchedChipsMarkup(matched, lawSources) {
         if (!source?.law_key) {
           return `<span class="chip">${escapeHtml(term)}</span>`;
         }
-        return `<button class="chip chip-action" type="button"
-          data-action="open-law-source"
-          data-law-key="${escapeHtml(source.law_key)}"
-          data-source-type="${escapeHtml(source.source_type || "")}"
-          title="點擊開啟 ${escapeHtml(term)} 的完整條文"
-          aria-label="開啟 ${escapeHtml(term)} 的完整條文">${escapeHtml(term)}</button>`;
+        return lawChipMarkup(term, {
+          lawKey: source.law_key,
+          sourceType: source.source_type || "",
+        });
       })
       .join("")}</div>`;
 }
@@ -630,15 +661,18 @@ function renderAnswerBody(payload) {
             ? `<div class="law-framework-sources">
                 <span>法規來源</span>
                 ${frameworkSources
-                  .map(
-                    (source) => `<span class="chip">${escapeHtml(
-                      source.law_name || source,
-                    )}${
+                  .map((source) => {
+                    const name = String(
+                      source?.law_name || source || "",
+                    ).trim();
+                    const index =
                       source && source.index !== null && source.index !== undefined
                         ? ` [${escapeHtml(source.index)}]`
-                        : ""
-                    }</span>`,
-                  )
+                        : "";
+                    return lawChipMarkup(name, {
+                      label: `${name}${index}`,
+                    });
+                  })
                   .join("")}
               </div>`
             : ""
@@ -1183,7 +1217,7 @@ export async function render(root) {
 
   const renderParquetJudgment = (detail) => {
     const laws = (Array.isArray(detail.matched_laws) ? detail.matched_laws : [])
-      .map((law) => `<span class="chip">${escapeHtml(law)}</span>`)
+      .map((law) => lawChipMarkup(law))
       .join("");
     const meta = [
       detail.court,
@@ -1292,7 +1326,9 @@ export async function render(root) {
         if (article.article_type === "C") {
           return `<div class="law-chapter">${escapeHtml(content)}</div>`;
         }
-        return `<article class="law-article">
+        return `<article class="law-article" data-article-no="${escapeHtml(
+          lawArticleJumpKey(article.article_no),
+        )}">
           <div class="law-article-head">
             <span class="law-article-no">${escapeHtml(article.article_no || "條文")}</span>
           </div>
@@ -1340,6 +1376,19 @@ export async function render(root) {
     const articleBadge = articleView
       ? `<span class="badge badge-mono">${escapeHtml(selectedArticleNo)}</span>`
       : "";
+    const jumpControl =
+      !articleView && articles.length > 1
+        ? `<div class="law-dialog-jump">
+          <div class="law-article-jump">
+            <input class="input law-article-jump-input law-jump-input"
+              id="rag-law-article-jump" type="text" inputmode="numeric"
+              autocomplete="off" placeholder="跳至第幾條" aria-label="跳至指定條文" />
+            <button class="btn btn-secondary btn-sm" type="button"
+              data-action="jump-law-article"
+              data-jump-input="rag-law-article-jump">跳至條文</button>
+          </div>
+        </div>`
+        : "";
     const title = articleView
       ? `${detail.law_name || detail.law_key || "法規／命令"} · ${selectedArticleNo}`
       : detail.law_name || detail.law_key || "法規／命令";
@@ -1357,6 +1406,7 @@ export async function render(root) {
       )}</div>
       ${warnings ? `<div class="law-dialog-warning">${warnings}</div>` : ""}
       ${history}
+      ${jumpControl}
       <div class="law-dialog-articles">${
         body ||
         `<div class="report-empty-inline">${
@@ -1369,6 +1419,26 @@ export async function render(root) {
           data-action="close-law-source">返回回答</button>
       </div>`,
     );
+  };
+
+  const jumpToLawArticle = (container, inputId) => {
+    const input = container?.querySelector(`#${inputId}`);
+    const key = lawArticleJumpKey(input?.value || "");
+    if (!key) {
+      toast("請輸入要跳至的條號，例如 100 或 第100條。", "warn");
+      input?.focus();
+      return;
+    }
+    const target = [...(container?.querySelectorAll("[data-article-no]") || [])].find(
+      (element) => element.dataset.articleNo === key,
+    );
+    if (!target) {
+      toast(`找不到第 ${key} 條。`, "warn");
+      return;
+    }
+    target.scrollIntoView({ behavior: "instant", block: "center" });
+    target.classList.add("is-jump-target");
+    window.setTimeout(() => target.classList.remove("is-jump-target"), 2400);
   };
 
   const openLawSource = async (lawKey, sourceType = "", articleNo = "") => {
@@ -1408,6 +1478,14 @@ export async function render(root) {
   };
 
   lawDialog?.addEventListener("click", (event) => {
+    const jumpButton = event.target.closest('[data-action="jump-law-article"]');
+    if (jumpButton) {
+      jumpToLawArticle(
+        lawDialog,
+        jumpButton.dataset.jumpInput || "rag-law-article-jump",
+      );
+      return;
+    }
     if (event.target.closest('[data-action="close-law-source"]')) {
       lawDialog.close();
       return;
@@ -1421,7 +1499,22 @@ export async function render(root) {
     if (outside) lawDialog.close();
   });
 
+  lawDialog?.addEventListener("keydown", (event) => {
+    if (!event.target.matches(".law-jump-input") || event.key !== "Enter") return;
+    event.preventDefault();
+    jumpToLawArticle(lawDialog, event.target.id);
+  });
+
   judgmentDialog?.addEventListener("click", (event) => {
+    const lawTarget = event.target.closest('[data-action="open-law-source"]');
+    if (lawTarget) {
+      openLawSource(
+        lawTarget.dataset.lawKey || "",
+        lawTarget.dataset.sourceType || "",
+        lawTarget.dataset.articleNo || "",
+      );
+      return;
+    }
     if (event.target.closest('[data-action="close-parquet-judgment"]')) {
       judgmentDialog.close();
       return;

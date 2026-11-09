@@ -1267,6 +1267,21 @@ def test_law_detail_combines_postgres_metadata_and_parquet_articles(web_client) 
     assert payload["warnings"] == []
 
 
+def test_law_detail_accepts_law_name_instead_of_key(web_client) -> None:
+    response = web_client.get(
+        "/api/law",
+        params={"law_key": "銀行法", "source_type": "law"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["law_name"] == "銀行法"
+    assert payload["law_key"] == "L0001"
+    assert [article["article_no"] for article in payload["articles"] if article["article_type"] == "A"] == [
+        "第 1 條",
+        "第 2 條",
+    ]
+
+
 def test_law_detail_filters_single_article(web_client) -> None:
     response = web_client.get(
         "/api/law",

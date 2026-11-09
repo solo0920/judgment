@@ -1382,7 +1382,9 @@ def get_law_detail(
     changes_truncated = False
 
     with session_factory() as session:
-        statement = select(LawDocument).where(LawDocument.law_key == key)
+        statement = select(LawDocument).where(
+            or_(LawDocument.law_key == key, LawDocument.law_name == key)
+        )
         if requested_source:
             statement = statement.where(LawDocument.source_type == requested_source)
         statement = statement.order_by(

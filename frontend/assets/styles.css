@@ -3755,6 +3755,12 @@ button.chip:hover {
   gap: 5px;
 }
 
+.law-dialog-jump {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .law-article-jump-input {
   width: 118px;
   height: 30px;
@@ -3908,6 +3914,10 @@ button.chip:hover {
   }
 
   .law-article-controls {
+    justify-content: flex-start;
+  }
+
+  .law-dialog-jump {
     justify-content: flex-start;
   }
 
@@ -7221,17 +7231,21 @@ button.chip:hover {
   font-size: 12px;
 }
 
-.citation-body[data-action] {
+.citation-body[data-action],
+.citation-head[data-action] {
   border-radius: 6px;
   cursor: pointer;
 }
 
 .citation-body[data-action]:hover .citation-name,
-.citation-body[data-action]:focus-visible .citation-name {
+.citation-body[data-action]:focus-visible .citation-name,
+.citation-head[data-action]:hover .citation-name,
+.citation-head[data-action]:focus-visible .citation-name {
   color: var(--accent);
 }
 
-.citation-body[data-action]:focus-visible {
+.citation-body[data-action]:focus-visible,
+.citation-head[data-action]:focus-visible {
   outline: none;
   box-shadow: var(--focus);
 }
