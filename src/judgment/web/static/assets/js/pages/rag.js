@@ -102,7 +102,10 @@ function toggleProcessDuration(button) {
 function processPanelMarkup() {
   return `<details class="rag-process" id="rag-process" open>
     <summary>
-      <span class="rag-process-title">後端處理流程</span>
+      <span class="rag-process-title">
+        <span class="rag-process-title-collapsed">展開後端處理流程</span>
+        <span class="rag-process-title-expanded">後端處理流程</span>
+      </span>
       <span class="rag-process-summary" id="rag-process-summary">執行中…</span>
     </summary>
     <div class="rag-process-list" id="rag-process-list">
@@ -115,7 +118,7 @@ function processPanelMarkup() {
     <div class="rag-process-hint">完成後會自動收合；點擊摘要可展開完整流程，點擊 + 可顯示父流程耗時。</div>
   </details>
   <button type="button" class="rag-process-collapse" aria-label="收合後端處理流程" title="收合後端處理流程">
-    ${icon("chevronDown", 11)}<span>收合</span>
+    ${icon("chevronDown", 11)}<span>收合後端處理流程</span>
   </button>`;
 }
 
