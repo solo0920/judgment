@@ -106,8 +106,46 @@ else
   fi
 fi
 
-if ! curl -fsS --max-time 2 "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
-  echo "警告：Ollama 未執行（127.0.0.1:11434），Embedding 與 LLM 會顯示未設定或降級。"
+probe_ollama_model() {
+  local url="$1"
+  local model="$2"
+  local timeout="${JUDGMENT_EMBEDDING_PROBE_TIMEOUT:-2}"
+  local tags
+  tags="$(curl -fsS --max-time "${timeout}" "${url}/api/tags" 2>/dev/null || true)"
+  [[ -n "${tags}" ]] || return 1
+  printf '%s' "${tags}" | grep -q "${model}" 2>/dev/null
+}
+
+X570_EMBEDDING_URL="${JUDGMENT_X570_EMBEDDING_URL:-http://x570:11434}"
+LOCAL_EMBEDDING_URL="${JUDGMENT_LOCAL_EMBEDDING_URL:-http://127.0.0.1:11434}"
+EMBEDDING_MODEL="${EMBEDDING_MODEL:-bge-m3}"
+
+remote_embedding_ok=0
+local_embedding_ok=0
+if probe_ollama_model "${X570_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+  remote_embedding_ok=1
+fi
+if probe_ollama_model "${LOCAL_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+  local_embedding_ok=1
+fi
+
+if [[ "${remote_embedding_ok}" == "1" ]]; then
+  export EMBEDDING_URL="${X570_EMBEDDING_URL}"
+  if [[ "${local_embedding_ok}" == "1" ]]; then
+    export EMBEDDING_FALLBACK_URL="${LOCAL_EMBEDDING_URL}"
+    echo "Embedding：x570（${X570_EMBEDDING_URL}）· fallback：本機 Ollama"
+  else
+    export EMBEDDING_FALLBACK_URL=""
+    echo "Embedding：x570（${X570_EMBEDDING_URL}）· 本機 Ollama 未就緒"
+  fi
+else
+  export EMBEDDING_URL="${LOCAL_EMBEDDING_URL}"
+  export EMBEDDING_FALLBACK_URL=""
+  if [[ "${local_embedding_ok}" == "1" ]]; then
+    echo "x570 Ollama 不可用，Embedding 改用本機 Ollama（${LOCAL_EMBEDDING_URL}）"
+  else
+    echo "警告：x570 與本機 Ollama 都無法使用，Embedding 會降級。"
+  fi
 fi
 
 health="$(curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/health" 2>/dev/null || true)"
