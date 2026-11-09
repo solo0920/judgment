@@ -113,7 +113,10 @@ function processPanelMarkup() {
       </div>
     </div>
     <div class="rag-process-hint">完成後會自動收合；點擊摘要可展開完整流程，點擊 + 可顯示父流程耗時。</div>
-  </details>`;
+  </details>
+  <button type="button" class="rag-process-collapse" aria-label="收合後端處理流程" title="收合後端處理流程">
+    ${icon("chevronDown", 11)}<span>收合</span>
+  </button>`;
 }
 
 function createProcessController(answerCard) {
@@ -236,7 +239,12 @@ function createProcessController(answerCard) {
     }
     panel.open = false;
     panel.classList.add("is-complete");
-    return panel.outerHTML;
+    const collapse = panel.nextElementSibling;
+    return `${panel.outerHTML}${
+      collapse?.classList.contains("rag-process-collapse")
+        ? collapse.outerHTML
+        : ""
+    }`;
   };
 
   return { step, finish };
@@ -1250,6 +1258,12 @@ export async function render(root) {
   });
 
   answerCard.addEventListener("click", (event) => {
+    const processCollapse = event.target.closest(".rag-process-collapse");
+    if (processCollapse) {
+      const panel = processCollapse.previousElementSibling;
+      if (panel?.matches("details.rag-process")) panel.open = false;
+      return;
+    }
     const durationToggle = event.target.closest(".rag-process-time-toggle");
     if (durationToggle) {
       toggleProcessDuration(durationToggle);
