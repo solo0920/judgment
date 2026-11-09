@@ -2315,7 +2315,7 @@ button.chip:hover {
   padding: 10px 14px;
   border-radius: 16px 16px 4px 16px;
   background: var(--accent);
-  color: var(--accent-ink, #fff);
+  color: #fff;
   box-shadow: var(--shadow-xs);
   font-size: 13px;
   line-height: 1.65;
