@@ -443,7 +443,7 @@ uv run judgment-normalize-courts --all
 | `POST` | `/api/processing/update` | 啟動可中斷續跑的資料更新；body 為 `{"index": false}`。已在執行中或外部匯入／更新程序佔用時回傳 409。 |
 | `POST` | `/api/processing/stop` | 對由 Web 啟動的資料更新送出 SIGINT；外部程序不會被強制停止。 |
 | `POST` | `/api/rag/query` | 以 Qdrant 檢索判決並由 LLM 產生有引用編號的回答；問題上限 500 字，服務未就緒時降級。 |
-| `POST` | `/api/rag/query/stream` | 與 `/api/rag/query` 相同，但以 SSE 逐段回傳 `step`、`result`、`error`；RAG 頁用來即時顯示後端處理流程。 |
+| `POST` | `/api/rag/query/stream` | 與 `/api/rag/query` 相同，但以 SSE 逐段回傳 `step`、`partial`、`token`、`token_reset`、`result`、`error`；RAG 頁用來即時顯示後端處理流程、先顯示法規結果，再逐 token 顯示 LLM 回答。 |
 | `GET` | `/api/docs` | Swagger UI 互動式 API 文件。 |
 | `GET` | `/api/openapi.json` | OpenAPI schema。 |
 
@@ -938,7 +938,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：123 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：125 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
@@ -951,7 +951,10 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 法規／命令範例問題：以「證券營業員常觸犯什麼法規或命令?」提問，系統在 30 筆全文提及「證券營業員」的判決中統計引用次數，回傳洗錢防制法、民法、保險法、證券交易法等法規卡；「有哪些法規是和壽險及產險相關的?」會依名稱與類別關鍵字整理保險法、簡易人壽保險法、人壽保險各類保險定名準則、財產保險業財務報告編製準則等 8 筆法規／命令。
 - 法規／命令 RAG 實測：以「證交法有多少條文?」提問，別名解析為 `證券交易法`，回傳 229 條與法規卡，約 0.16 秒；「銀行法是何時開始有的?」回傳民國 20 年 3 月 28 日（1931-03-28），約 0.08 秒；「保險業務員最常觸犯什麼法條?」依 42 筆判決的引用統計列出 `保險業務員管理規則` 第 19、15 條與 `民法` 第 184 條等，約 0.21 秒。法規／命令與判決並存時，回答卡會同時顯示判決卡與法規／命令卡，引用編號共用。
 - RAG 實測（快速 profile）：以「侵權行為損害賠償的舉證責任」提問，狀態 `operational`，回傳 4 筆判決與 `[1, 2, 3, 4]` 引用，約 2.0–2.4 秒；回答標頭顯示狀態、耗時與模型 `gemma3:4b`，tooltip 另列 embedding `bge-m3`；「銀行法對於吸收存款與授信有哪些限制？」約 2.3–3.8 秒；「有關內線交易的法律有哪些?」約 5.1 秒。皆未產生虛構案號。
-- RAG 串流處理流程：正常提問改用 `POST /api/rag/query/stream`，前端逐行顯示 FastAPI、PostgreSQL、Qdrant、Ollama embedding、LLM 生成與引用驗證等步驟；完成後自動收合，可點擊展開。實測一般問答 21 步、約 11 秒，法規結構化問答 7–8 步、約 0.2 秒。
+- RAG 串流處理流程：正常提問改用 `POST /api/rag/query/stream`，前端逐行顯示 FastAPI、PostgreSQL、Qdrant、Ollama embedding、LLM 生成與引用驗證等步驟；顯示第一個法規結果時自動收合流程清單，完成後維持收合，可點擊展開。實測一般問答 21 步、約 11 秒，法規結構化問答 7–8 步、約 0.2 秒。
+- 檢索速度差異：結構化法規問題（例如「有哪些法規是和壽險及產險相關的？」）只查 PostgreSQL metadata 與法規 Parquet，命中後直接以 `answer_source=structured` 回傳，不呼叫 Qdrant embedding、向量搜尋或 LLM，實測約 0.1–0.3 秒；「保險法對於業務員不當招攬的責任規定？」需要建立保險責任架構、進行判決向量檢索，並等待 Ollama LLM 生成與引用驗證，主要耗時在 embedding（數秒）與 LLM token 生成（約 5–10 秒）。
+- 回答逐步顯示：串流端點先送 `partial` 顯示法規／命令責任架構或法規摘要，再送含判決／法規來源的 `partial`，LLM 以 `stream: true` 逐 token 送 `token`；前端在原回答區先顯示法規結果，再逐字接上 LLM 回答，最後以通過引用驗證的 `result` 更新。若 LLM 引用驗證失敗，會送出重試或清除未驗證草稿，改顯示可驗證的檢索結果摘要。
+- 逐步輸出實測（「銀行法對於吸收存款與授信有哪些限制？」）：法規摘要約 0.6 秒先出現，第一個 LLM token 約 4.3 秒，完整回答約 6.6 秒；流程面板在法規結果出現時先收合，避免即時步驟把回答推到畫面下方。
 - 處理流程的子步驟直接顯示耗時（`ms`）；有子步驟的父流程只顯示流程名稱，右側不顯示耗時。
 - 流程控制固定分成左右兩部分：左側為「展開後端處理流程」／「收合後端處理流程」按鈕，右側為「完成 · N 步 · 耗時 ms」摘要。展開時控制項留在回答標頭原位置，步驟清單直接從下方展開，不會把整塊面板移到標頭下方。窄版（≤480px）控制項獨占一列，按鈕靠左、摘要靠右。
 - LLM RAG 回答會先顯示「法規／命令檢索結果」，再顯示「LLM 綜合回答」；`/api/rag/query` 與串流結果都包含 `law_answer`，避免 LLM 回答掩蓋實際檢索到的法規／命令。

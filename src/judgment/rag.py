@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 from sqlalchemy import select
@@ -358,6 +359,41 @@ def _build_llm_prompt(
     )
 
 
+def _llm_request_payload(
+    *,
+    settings: Settings,
+    model: str,
+    question: str,
+    contexts: Sequence[Dict[str, Any]],
+    strict: bool,
+    stream: bool,
+) -> Tuple[Dict[str, Any], int]:
+    user_prompt = _build_llm_prompt(question=question, contexts=contexts)
+    system_prompt = SYSTEM_PROMPT
+    if strict:
+        system_prompt += (
+            " 你上一次的回答缺少有效引用標記；這次每個結論後都必須加上 "
+            "對應的 [n]，不得省略，也不得使用未提供的來源。"
+        )
+    return (
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": stream,
+            "keep_alive": settings.llm_keep_alive,
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": settings.llm_num_ctx,
+                "num_predict": settings.llm_num_predict,
+            },
+        },
+        len(user_prompt),
+    )
+
+
 def generate_answer_with_model(
     *,
     settings: Settings,
@@ -366,59 +402,73 @@ def generate_answer_with_model(
     contexts: Sequence[Dict[str, Any]],
     timeout: Optional[float],
     strict: bool = False,
+    on_token: Optional[Callable[[str], None]] = None,
 ) -> str:
     """Generate one grounded answer with an explicit model and timeout.
 
     Test mode passes ``timeout=None`` so a slow local model is not cut off.
     ``strict`` is used for one retry when the first answer omitted citation
-    markers.
+    markers. When ``on_token`` is provided, Ollama's streaming chat response is
+    consumed and each content chunk is forwarded before the final answer is
+    validated.
     """
     if not settings.llm_url or not model:
         raise RuntimeError("LLM_URL 或 LLM_MODEL 未設定")
-    user_prompt = _build_llm_prompt(question=question, contexts=contexts)
-    system_prompt = SYSTEM_PROMPT
-    if strict:
-        system_prompt += (
-            " 你上一次的回答缺少有效引用標記；這次每個結論後都必須加上 "
-            "對應的 [n]，不得省略，也不得使用未提供的來源。"
-        )
+    streaming = on_token is not None
+    request_payload, prompt_chars = _llm_request_payload(
+        settings=settings,
+        model=model,
+        question=question,
+        contexts=contexts,
+        strict=strict,
+        stream=streaming,
+    )
+    url = f"{settings.llm_url.rstrip('/')}/api/chat"
     with trace_segment(
         "rag.llm_request",
         module=__name__,
-        function="httpx.post",
+        function="httpx.stream" if streaming else "httpx.post",
         params={
-            "url": f"{settings.llm_url.rstrip('/')}/api/chat",
+            "url": url,
             "model": model,
-            "stream": False,
+            "stream": streaming,
             "temperature": 0.1,
             "num_ctx": settings.llm_num_ctx,
             "num_predict": settings.llm_num_predict,
             "keep_alive": settings.llm_keep_alive,
             "timeout": timeout,
-            "prompt_chars": len(user_prompt),
+            "prompt_chars": prompt_chars,
         },
     ):
-        response = httpx.post(
-            f"{settings.llm_url.rstrip('/')}/api/chat",
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "stream": False,
-                "keep_alive": settings.llm_keep_alive,
-                "options": {
-                    "temperature": 0.1,
-                    "num_ctx": settings.llm_num_ctx,
-                    "num_predict": settings.llm_num_predict,
-                },
-            },
-            timeout=timeout,
-        )
-    response.raise_for_status()
-    payload = response.json()
-    answer = str((payload.get("message") or {}).get("content") or "").strip()
+        if not streaming:
+            response = httpx.post(url, json=request_payload, timeout=timeout)
+            response.raise_for_status()
+            payload = response.json()
+            answer = str((payload.get("message") or {}).get("content") or "").strip()
+        else:
+            chunks: List[str] = []
+            with httpx.stream(
+                "POST", url, json=request_payload, timeout=timeout
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.strip():
+                        continue
+                    event = json.loads(line)
+                    error = event.get("error")
+                    if error:
+                        raise RuntimeError(f"LLM 串流失敗：{error}")
+                    content = str(
+                        (event.get("message") or {}).get("content") or ""
+                    )
+                    if not content:
+                        continue
+                    chunks.append(content)
+                    try:
+                        on_token(content)
+                    except Exception:
+                        logger.debug("LLM token callback failed", exc_info=True)
+            answer = "".join(chunks).strip()
     if not answer:
         raise RuntimeError("LLM 回傳空回答")
     return answer
@@ -445,6 +495,7 @@ def _generate_answer(
     question: str,
     contexts: Sequence[Dict[str, Any]],
     strict: bool = False,
+    on_token: Optional[Callable[[str], None]] = None,
 ) -> str:
     if not settings.llm_url or not settings.llm_model:
         raise RuntimeError("LLM_URL 或 LLM_MODEL 未設定")
@@ -455,6 +506,7 @@ def _generate_answer(
         contexts=contexts,
         timeout=settings.llm_timeout_seconds,
         strict=strict,
+        on_token=on_token,
     )
 
 
@@ -498,11 +550,22 @@ def answer_question(
     settings: Settings,
     store: Optional[QdrantStore] = None,
     embedder: Optional[OllamaEmbedder] = None,
+    on_partial: Optional[Callable[[Dict[str, Any]], None]] = None,
+    on_token: Optional[Callable[[str], None]] = None,
+    on_token_reset: Optional[Callable[[], None]] = None,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     question = str(question or "").strip()
     if not question:
         raise ValueError("問題不可為空")
+
+    def emit_partial(payload: Dict[str, Any]) -> None:
+        if on_partial is None:
+            return
+        try:
+            on_partial(payload)
+        except Exception:
+            logger.debug("partial answer callback failed", exc_info=True)
 
     collection = settings.judgment_vector_collection
     try:
@@ -618,6 +681,51 @@ def answer_question(
                 "coverage": coverage,
                 "duration_ms": _elapsed_ms(started),
             }
+
+    if on_partial is not None and law_sources and not test_mode_enabled:
+        try:
+            partial_sources = [{**source} for source in law_sources]
+            for source in partial_sources:
+                source.pop("index", None)
+            early_framework = build_insurance_responsibility_framework(
+                question=question,
+                session_factory=session_factory,
+                law_data_dir=settings.law_data_dir,
+                law_sources=partial_sources,
+            )
+            emit_partial(
+                {
+                    "status": "retrieving",
+                    "answer": "正在檢索判決並生成 LLM 回答…",
+                    "notice": (
+                        "法規／命令結果已先顯示；判決檢索與 LLM 回答完成後"
+                        "會自動接續更新。"
+                    ),
+                    "citations": [],
+                    "judgments": [],
+                    "law_sources": partial_sources,
+                    "law_answer": _law_answer_summary(partial_sources),
+                    "law_framework": early_framework,
+                    "matched_terms": [
+                        source["law_name"] for source in partial_sources
+                    ],
+                    "answer_source": "partial",
+                    "llm_model": settings.llm_model or None,
+                    "embedding_model": settings.embedding_model or None,
+                    "retrieval": {
+                        "status": "pending",
+                        "hits": 0,
+                        "law_hits": len(partial_sources),
+                    },
+                    "coverage": coverage,
+                    "duration_ms": _elapsed_ms(started),
+                    "partial": True,
+                    "streaming": False,
+                    "show_sources": False,
+                }
+            )
+        except Exception:
+            logger.debug("early law partial failed", exc_info=True)
 
     retrieval: Dict[str, Any] = {
         "status": "not_configured" if not settings.qdrant_url else "pending",
@@ -790,17 +898,52 @@ def answer_question(
     ]
     contexts = judgment_contexts + law_contexts
     citation_total = len(law_sources) + len(citations)
+    terms = [source["law_name"] for source in law_sources]
+    if law_stats.get("entity") and law_stats["entity"] not in terms:
+        terms.append(law_stats["entity"])
     llm_configured = bool(settings.llm_url and settings.llm_model)
+    if on_partial is not None and llm_configured:
+        emit_partial(
+            {
+                "status": "streaming",
+                "answer": "",
+                "notice": (
+                    "判決與法規來源已先顯示；LLM 回答生成中，"
+                    "完成後會驗證引用編號。"
+                ),
+                "citations": [],
+                "judgments": citations,
+                "law_sources": law_sources,
+                "law_answer": law_answer,
+                "law_framework": law_framework,
+                "matched_terms": terms,
+                "answer_source": "streaming",
+                "llm_model": settings.llm_model,
+                "embedding_model": settings.embedding_model or None,
+                "retrieval": retrieval,
+                "coverage": coverage,
+                "duration_ms": _elapsed_ms(started),
+                "partial": True,
+                "streaming": True,
+                "show_sources": True,
+            }
+        )
     if llm_configured:
         answer: Optional[str] = None
         last_error: Optional[Exception] = None
         for strict in (False, True):
+            if strict and on_token is not None and on_token_reset is not None:
+                try:
+                    on_token_reset()
+                except Exception:
+                    logger.debug("LLM token reset callback failed", exc_info=True)
             try:
                 candidate = _generate_answer(
                     settings=settings,
                     question=question,
                     contexts=contexts,
                     strict=strict,
+                    on_token=on_token,
                 )
                 if not _valid_citation_markers(candidate, citation_total):
                     raise RuntimeError("LLM 回答缺少有效引用標記")
@@ -839,9 +982,6 @@ def answer_question(
         status = "retrieval_only"
         notice = "LLM_URL／LLM_MODEL 未設定，只顯示檢索結果，不生成推測內容。"
 
-    terms = [source["law_name"] for source in law_sources]
-    if law_stats.get("entity") and law_stats["entity"] not in terms:
-        terms.append(law_stats["entity"])
     retrieval["law_hits"] = len(law_sources)
     retrieval["law_stats"] = law_stats or None
     return {

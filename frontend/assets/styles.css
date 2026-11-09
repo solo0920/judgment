@@ -2084,6 +2084,19 @@ button.chip:hover {
   white-space: pre-wrap;
 }
 
+.answer-text.is-streaming::after {
+  content: "▍";
+  margin-left: 1px;
+  color: var(--accent);
+  animation: answer-stream-cursor 900ms steps(2, start) infinite;
+}
+
+@keyframes answer-stream-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
 .answer-head-left {
   order: 1;
 }

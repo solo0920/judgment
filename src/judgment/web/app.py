@@ -622,6 +622,17 @@ def create_app(
         def listener(event: Dict[str, Any]) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, ("step", event))
 
+        def emit_partial(payload: Dict[str, Any]) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ("partial", payload))
+
+        def emit_token(text: str) -> None:
+            loop.call_soon_threadsafe(
+                queue.put_nowait, ("token", {"text": str(text or "")})
+            )
+
+        def reset_token() -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ("token_reset", {}))
+
         def run_query() -> None:
             flow = start_flow(
                 request_id=request_id,
@@ -641,6 +652,9 @@ def create_app(
                     session_factory=app.state.session_factory,
                     question=request.question,
                     settings=settings,
+                    on_partial=emit_partial,
+                    on_token=emit_token,
+                    on_token_reset=reset_token,
                 )
                 flow.set_metadata("question", request.question)
                 flow.set_metadata("answer", result.get("answer") or "")
@@ -727,6 +741,12 @@ def create_app(
                     kind, payload = await queue.get()
                     if kind == "step":
                         yield sse("step", payload)
+                    elif kind == "partial":
+                        yield sse("partial", payload)
+                    elif kind == "token":
+                        yield sse("token", payload)
+                    elif kind == "token_reset":
+                        yield sse("token_reset", payload)
                     elif kind == "result":
                         yield sse("result", payload)
                         break

@@ -111,7 +111,7 @@ function processPanelMarkup() {
           <span class="rag-process-meta">送出</span>
         </div>
       </div>
-      <div class="rag-process-hint">完成後會自動收合；點擊按鈕可展開完整流程。</div>
+      <div class="rag-process-hint">顯示法規結果時會先收合；點擊按鈕可展開完整流程。</div>
     </div>
   </div>`;
 }
@@ -243,7 +243,7 @@ function createProcessController(answerCard) {
     return panel.outerHTML;
   };
 
-  return { step, finish };
+  return { step, finish, collapse: () => setProcessExpanded(panel, false) };
 }
 
 function answerLoading(question, testMode = false) {
@@ -424,24 +424,15 @@ function lawSourceCard(source, index) {
   </article>`;
 }
 
-function renderAnswer(question, payload, processHtml = "") {
+function renderAnswerBody(payload) {
   const citations = Array.isArray(payload.citations) ? payload.citations : [];
   const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
   const lawSources = Array.isArray(payload.law_sources) ? payload.law_sources : [];
   const matched = Array.isArray(payload.matched_terms) ? payload.matched_terms : [];
   const status = payload.status || "preview";
-  const statusLabel =
-    status === "operational"
-      ? "完成"
-      : status === "retrieval_only"
-        ? "僅檢索結果"
-        : status === "preview"
-          ? "法規預覽"
-          : status === "unavailable" || status === "not_configured"
-            ? "資料不可用"
-            : status === "degraded"
-              ? "降級"
-              : "完成";
+  const partial = Boolean(payload.partial);
+  const streaming = Boolean(payload.streaming);
+  const showSources = Boolean(payload.show_sources) || !partial;
 
   const judgmentSection = judgments.length
     ? `<div class="answer-divider"></div>
@@ -473,8 +464,10 @@ function renderAnswer(question, payload, processHtml = "") {
         .map((citation, index) => citationCard(citation, index))
         .join("")}</div>`
     : "";
-  let citationSection = judgmentSection + lawSection + metadataSection;
-  if (!citationSection) {
+  let citationSection = showSources
+    ? judgmentSection + lawSection + metadataSection
+    : "";
+  if (!citationSection && !partial) {
     citationSection = `<div class="answer-divider"></div>
       ${emptyState({
         iconName: "file",
@@ -516,7 +509,9 @@ function renderAnswer(question, payload, processHtml = "") {
   const hasFramework = frameworkRows.length > 0;
   const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer && !hasFramework;
   const llmBlockTitle =
-    payload.answer_source === "llm" ? "LLM 綜合回答" : "檢索結果摘要";
+    streaming || payload.answer_source === "llm"
+      ? "LLM 綜合回答"
+      : "檢索結果摘要";
   const frameworkBlock = hasFramework
     ? `<div class="answer-block law-framework-block">
         <div class="answer-block-head">
@@ -573,6 +568,11 @@ function renderAnswer(question, payload, processHtml = "") {
             11,
           )}法規資料庫</span>`
         : "";
+  const blockMeta = streaming
+    ? `${llmModel || "LLM"} · 生成中`
+    : modelChip
+      ? llmModel || "structured"
+      : "retrieval";
   const testRunBlock = testRun
     ? `<div class="test-run-summary">
         <div class="test-run-summary-head">
@@ -590,6 +590,90 @@ function renderAnswer(question, payload, processHtml = "") {
       </div>`
     : "";
 
+  const answerText = String(payload.answer || "").trim();
+  const answerContent =
+    answerText ||
+    (streaming
+      ? "正在生成回答…"
+      : partial
+        ? "正在檢索判決並生成 LLM 回答…"
+        : "目前沒有可顯示的回答。");
+  const streamingAttribute = streaming ? " data-partial-answer" : "";
+  const streamingClass = streaming ? " is-streaming" : "";
+
+  return `${frameworkBlock}
+      ${
+        showLawAnswer
+          ? `<div class="answer-block law-answer-block">
+              <div class="answer-block-head">
+                <span>法規／命令檢索結果</span>
+                <span>${partial && !showSources ? "法規資料庫" : `${lawSources.length} 筆來源`}</span>
+              </div>
+              <p class="answer-text">${escapeHtml(lawAnswer)}</p>
+            </div>`
+          : ""
+      }
+      <div class="answer-block">
+        ${
+          showLawAnswer || hasFramework
+            ? `<div class="answer-block-head">
+                <span>${escapeHtml(llmBlockTitle)}</span>
+                <span>${escapeHtml(blockMeta)}</span>
+              </div>`
+            : ""
+        }
+        <p class="answer-text${streamingClass}"${streamingAttribute}>${escapeHtml(
+          answerContent,
+        )}</p>
+      </div>
+      ${
+        payload.notice
+          ? `<div class="answer-notice">${escapeHtml(payload.notice)}</div>`
+          : ""
+      }
+      ${testRunBlock}
+      ${matchedChips}
+      ${citationSection}`;
+}
+
+function renderAnswer(question, payload, processHtml = "") {
+  const status = payload.status || "preview";
+  const statusLabel =
+    status === "operational"
+      ? "完成"
+      : status === "retrieval_only"
+        ? "僅檢索結果"
+        : status === "preview"
+          ? "法規預覽"
+          : status === "unavailable" || status === "not_configured"
+            ? "資料不可用"
+            : status === "degraded"
+              ? "降級"
+              : "完成";
+  const testRun = payload.test_run;
+  const llmModel = String(
+    payload.llm_model || testRun?.primary_model || "",
+  ).trim();
+  const embeddingModel = String(payload.embedding_model || "").trim();
+  const modelTitle = [
+    llmModel ? `LLM：${llmModel}` : "",
+    embeddingModel ? `Embedding：${embeddingModel}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const structuredAnswer = payload.answer_source === "structured";
+  const modelChip =
+    payload.answer_source === "llm" && llmModel
+      ? `<span class="answer-model" title="${escapeHtml(modelTitle)}">${icon(
+          "brain",
+          11,
+        )}${escapeHtml(llmModel)}</span>`
+      : structuredAnswer
+        ? `<span class="answer-model" title="由 PostgreSQL metadata、Parquet 條文與判決引用統計直接整理">${icon(
+            "database",
+            11,
+          )}法規資料庫</span>`
+        : "";
   return `<div class="answer-head">
       <div class="answer-head-left">${icon("sparkles", 16)}
         <span class="answer-head-title">檢索結果</span>
@@ -601,39 +685,7 @@ function renderAnswer(question, payload, processHtml = "") {
       </div>
       ${processHtml}
     </div>
-    <div class="answer-body">
-      ${frameworkBlock}
-      ${
-        showLawAnswer
-          ? `<div class="answer-block law-answer-block">
-              <div class="answer-block-head">
-                <span>法規／命令檢索結果</span>
-                <span>${lawSources.length} 筆來源</span>
-              </div>
-              <p class="answer-text">${escapeHtml(lawAnswer)}</p>
-            </div>`
-          : ""
-      }
-      <div class="answer-block">
-        ${
-          showLawAnswer || hasFramework
-            ? `<div class="answer-block-head">
-                <span>${escapeHtml(llmBlockTitle)}</span>
-                <span>${escapeHtml(modelChip ? llmModel || "structured" : "retrieval")}</span>
-              </div>`
-            : ""
-        }
-        <p class="answer-text">${escapeHtml(payload.answer || "目前沒有可顯示的回答。")}</p>
-      </div>
-      ${
-        payload.notice
-          ? `<div class="answer-notice">${escapeHtml(payload.notice)}</div>`
-          : ""
-      }
-      ${testRunBlock}
-      ${matchedChips}
-      ${citationSection}
-    </div>`;
+    <div class="answer-body">${renderAnswerBody(payload)}</div>`;
 }
 
 function renderAnswerError(error, processHtml = "") {
@@ -1353,11 +1405,43 @@ export async function render(root) {
       paintTestFlow(null);
     }
     setBusy(submit, true, "檢索中…");
+    let partialPayload = null;
+    let partialAnswer = "";
+    const applyPartialAnswer = (payload) => {
+      if (disposed || !payload?.partial) return;
+      const body = answerCard.querySelector(".answer-body");
+      if (!body) return;
+      partialPayload = payload;
+      partialAnswer = String(payload.answer || "");
+      body.innerHTML = renderAnswerBody(payload);
+      processController?.collapse?.();
+      const title = answerCard.querySelector(".answer-head-title");
+      if (title) {
+        title.textContent = payload.streaming
+          ? "LLM 回答生成中"
+          : "法規結果已顯示";
+      }
+    };
+    const appendPartialToken = (text) => {
+      if (disposed || !text || !partialPayload?.streaming) return;
+      partialAnswer += text;
+      const target = answerCard.querySelector("[data-partial-answer]");
+      if (target) target.textContent = partialAnswer;
+    };
+    const resetPartialTokens = () => {
+      if (disposed || !partialPayload?.streaming) return;
+      partialAnswer = "";
+      const target = answerCard.querySelector("[data-partial-answer]");
+      if (target) target.textContent = "正在重新生成回答…";
+    };
     try {
       const payload = testMode
         ? await api.rag(trimmed, { testMode })
         : await api.ragStream(trimmed, {
             onStep: (event) => processController?.step(event),
+            onPartial: applyPartialAnswer,
+            onToken: appendPartialToken,
+            onTokenReset: resetPartialTokens,
           });
       if (disposed) return;
       stopFlowPoll();

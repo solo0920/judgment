@@ -333,6 +333,101 @@ def test_llm_answer_includes_law_retrieval_summary(monkeypatch, tmp_path: Path) 
     assert payload["answer_source"] == "llm"
 
 
+def test_answer_question_streams_law_partial_and_tokens(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    partials = []
+    tokens = []
+    resets = []
+
+    def fake_generate(**kwargs):
+        on_token = kwargs.get("on_token")
+        if on_token:
+            on_token("依")
+            on_token("法規")
+        return "依法規與判決，原告可請求返還借款 [1]。"
+
+    monkeypatch.setattr("judgment.rag._generate_answer", fake_generate)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        on_partial=partials.append,
+        on_token=tokens.append,
+        on_token_reset=lambda: resets.append(True),
+    )
+
+    assert [partial["streaming"] for partial in partials] == [False, True]
+    assert partials[0]["law_sources"][0]["law_name"] == "銀行法"
+    assert partials[0]["show_sources"] is False
+    assert partials[0]["law_framework"] is None
+    assert partials[1]["show_sources"] is True
+    assert partials[1]["judgments"]
+    assert partials[1]["answer"] == ""
+    assert tokens == ["依", "法規"]
+    assert resets == []
+    assert payload["status"] == "operational"
+    assert "返還借款" in payload["answer"]
+
+
+def test_answer_question_resets_tokens_before_strict_retry(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    tokens = []
+    resets = []
+    calls = {"count": 0}
+
+    def fake_generate(**kwargs):
+        calls["count"] += 1
+        on_token = kwargs.get("on_token")
+        if kwargs.get("strict"):
+            if on_token:
+                on_token("正確回答 [1]")
+            return "正確回答 [1]"
+        if on_token:
+            on_token("缺少引用")
+        return "缺少引用的回答。"
+
+    monkeypatch.setattr("judgment.rag._generate_answer", fake_generate)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        on_token=tokens.append,
+        on_token_reset=lambda: resets.append(True),
+    )
+
+    assert calls["count"] == 2
+    assert resets == [True]
+    assert tokens == ["缺少引用", "正確回答 [1]"]
+    assert payload["status"] == "operational"
+    assert payload["answer"] == "正確回答 [1]"
+
+
 def test_insurance_responsibility_framework(monkeypatch, tmp_path: Path) -> None:
     session_factory = _session_factory()
     _seed_laws(session_factory)

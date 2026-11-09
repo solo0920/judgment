@@ -800,7 +800,15 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
 
     app_module = importlib.import_module("judgment.web.app")
 
-    def fake_answer_question(*, session_factory, question, settings):
+    def fake_answer_question(
+        *,
+        session_factory,
+        question,
+        settings,
+        on_partial=None,
+        on_token=None,
+        on_token_reset=None,
+    ):
         with trace_segment(
             "rag.fake_step",
             module="test.rag",
@@ -808,6 +816,20 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
             params={"question_length": len(question)},
         ):
             pass
+        if on_partial:
+            on_partial(
+                {
+                    "partial": True,
+                    "streaming": False,
+                    "status": "retrieving",
+                    "answer": "法規結果先顯示",
+                }
+            )
+        if on_token_reset:
+            on_token_reset()
+        if on_token:
+            on_token("測試")
+            on_token("回答")
         return {
             "status": "operational",
             "answer": "測試回答 [1]",
@@ -831,8 +853,14 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
     assert "event: step" in body
     assert "http.request" in body
     assert "rag.fake_step" in body
-    assert "event: result" in body
+    assert "event: partial" in body
+    assert "event: token_reset" in body
+    assert "event: token" in body
+    assert "法規結果先顯示" in body
     assert "測試回答" in body
+    assert "event: result" in body
+    assert body.index("event: partial") < body.index("event: result")
+    assert body.index("event: token") < body.index("event: result")
 
 
 def test_data_query_flow_records_function_params(web_client) -> None:

@@ -494,7 +494,16 @@ export const api = {
     });
   },
 
-  async ragStream(question, { testMode = false, onStep = null } = {}) {
+  async ragStream(
+    question,
+    {
+      testMode = false,
+      onStep = null,
+      onPartial = null,
+      onToken = null,
+      onTokenReset = null,
+    } = {},
+  ) {
     const base = getApiBase();
     const controller = new AbortController();
     const timeout = testMode ? 0 : RAG_TIMEOUT;
@@ -575,6 +584,30 @@ export const api = {
                   onStep(payload);
                 } catch (error) {
                   /* process rendering must not break the request */
+                }
+              } else if (event === "partial") {
+                if (typeof onPartial === "function") {
+                  try {
+                    onPartial(payload);
+                  } catch (error) {
+                    /* partial rendering must not break the request */
+                  }
+                }
+              } else if (event === "token") {
+                if (typeof onToken === "function") {
+                  try {
+                    onToken(String(payload.text || ""));
+                  } catch (error) {
+                    /* token rendering must not break the request */
+                  }
+                }
+              } else if (event === "token_reset") {
+                if (typeof onTokenReset === "function") {
+                  try {
+                    onTokenReset();
+                  } catch (error) {
+                    /* token reset must not break the request */
+                  }
                 }
               } else if (event === "result") {
                 result = payload;
