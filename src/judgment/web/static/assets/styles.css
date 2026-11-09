@@ -2384,6 +2384,22 @@ button.chip:hover {
   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 }
 
+.law-source-article[data-action] {
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.law-source-article[data-action]:hover,
+.law-source-article[data-action]:focus-visible {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.law-source-article[data-action]:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+
 .law-source-article-no {
   display: block;
   margin-bottom: 3px;

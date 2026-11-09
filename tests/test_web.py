@@ -1198,6 +1198,53 @@ def test_law_detail_combines_postgres_metadata_and_parquet_articles(web_client) 
     assert payload["warnings"] == []
 
 
+def test_law_detail_filters_single_article(web_client) -> None:
+    response = web_client.get(
+        "/api/law",
+        params={
+            "law_key": "L0001",
+            "source_type": "law",
+            "article_no": "第 2 條",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["selected_article_no"] == "第 2 條"
+    assert payload["meta"]["selected_article_no"] == "第 2 條"
+    assert payload["articles"] == [
+        {
+            "article_type": "A",
+            "article_no": "第 2 條",
+            "article_content": "銀行之主管機關為金融監督管理委員會。",
+        }
+    ]
+
+
+def test_law_detail_article_filter_ignores_whitespace(web_client) -> None:
+    response = web_client.get(
+        "/api/law",
+        params={"law_key": "L0001", "source_type": "law", "article_no": "第2條"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert [article["article_no"] for article in payload["articles"]] == ["第 2 條"]
+
+
+def test_law_detail_returns_404_for_unknown_article(web_client) -> None:
+    response = web_client.get(
+        "/api/law",
+        params={
+            "law_key": "L0001",
+            "source_type": "law",
+            "article_no": "第 99 條",
+        },
+    )
+    assert response.status_code == 404
+    assert "找不到條文" in response.json()["detail"]
+
+
 def test_law_detail_reads_selected_article_version(web_client) -> None:
     session_factory = web_client.app.state.session_factory
     with session_factory() as session:

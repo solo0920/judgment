@@ -371,14 +371,30 @@ function lawSourceCard(source, index) {
         <span>本法規被引用 ${formatNumber(stats.law_count || 0)} 次</span>
       </div>`
     : "";
+  const lawKey = source.law_key || "";
+  const sourceType = source.source_type || "";
   const articles = (Array.isArray(source.articles) ? source.articles : [])
     .slice(0, 2)
-    .map(
-      (article) => `<div class="law-source-article">
+    .map((article) => {
+      const articleNo = String(article.article_no || "");
+      const articleAttributes =
+        lawKey && articleNo
+          ? ` data-action="open-law-source"
+        data-law-key="${escapeHtml(lawKey)}"
+        data-source-type="${escapeHtml(sourceType)}"
+        data-article-no="${escapeHtml(articleNo)}"
+        role="button"
+        tabindex="0"
+        title="點選查看 ${escapeHtml(articleNo)} 的完整內容"
+        aria-label="開啟 ${escapeHtml(source.law_name || "法規")} ${escapeHtml(
+          articleNo,
+        )} 的完整條文"`
+          : "";
+      return `<div class="law-source-article"${articleAttributes}>
         <span class="law-source-article-no">${escapeHtml(article.article_no || "條文")}</span>
         <p class="law-source-article-text">${escapeHtml(article.article_content || "")}</p>
-      </div>`,
-    )
+      </div>`;
+    })
     .join("");
   const link = source.law_url
     ? `<a class="citation-link" href="${escapeHtml(source.law_url)}" target="_blank" rel="noopener noreferrer">法規來源${icon(
@@ -1119,7 +1135,11 @@ export async function render(root) {
   </div>
   <div class="judgment-dialog-body">${body}</div>`;
 
-  const renderLawSourceDetail = (detail) => {
+  const renderLawSourceDetail = (detail, articleNo = "") => {
+    const selectedArticleNo = String(
+      detail.selected_article_no || articleNo || "",
+    ).trim();
+    const articleView = Boolean(selectedArticleNo);
     const articles = Array.isArray(detail.articles) ? detail.articles : [];
     const body = articles
       .map((article) => {
@@ -1141,8 +1161,13 @@ export async function render(root) {
       .join("<br />");
     const sourceTypeLabel =
       detail.source_type === "order" ? "命令" : "法規";
+    const articlesSource = detail.meta?.articles_source;
     const articleSource =
-      detail.meta?.articles_source === "parquet" ? "Parquet 條文" : "條文未提供";
+      articlesSource === "parquet"
+        ? "Parquet 條文"
+        : articlesSource === "postgresql"
+          ? "PostgreSQL 條文"
+          : "條文未提供";
     const snapshot = detail.meta?.snapshot || "";
     const meta = [
       detail.law_level,
@@ -1161,18 +1186,26 @@ export async function render(root) {
           13,
         )}<span>來源網站</span></a>`
       : "";
-    const history = detail.law_histories
-      ? `<details class="law-dialog-history">
+    const history =
+      !articleView && detail.law_histories
+        ? `<details class="law-dialog-history">
           <summary>法規沿革</summary>
           <div>${escapeHtml(detail.law_histories)}</div>
         </details>`
+        : "";
+    const articleBadge = articleView
+      ? `<span class="badge badge-mono">${escapeHtml(selectedArticleNo)}</span>`
       : "";
+    const title = articleView
+      ? `${detail.law_name || detail.law_key || "法規／命令"} · ${selectedArticleNo}`
+      : detail.law_name || detail.law_key || "法規／命令";
     return lawDialogFrame(
-      detail.law_name || detail.law_key || "法規／命令",
+      title,
       `<div class="judgment-dialog-meta">
         <span class="badge ${detail.source_type === "order" ? "badge-warn" : "badge-info"}">${escapeHtml(
           sourceTypeLabel,
         )}</span>
+        ${articleBadge}
         ${meta}
       </div>
       <div class="judgment-dialog-source">${escapeHtml(
@@ -1181,7 +1214,10 @@ export async function render(root) {
       ${warnings ? `<div class="law-dialog-warning">${warnings}</div>` : ""}
       ${history}
       <div class="law-dialog-articles">${
-        body || `<div class="report-empty-inline">這個法規／命令目前沒有可顯示的條文。</div>`
+        body ||
+        `<div class="report-empty-inline">${
+          articleView ? "這條條文目前沒有可顯示的內容。" : "這個法規／命令目前沒有可顯示的條文。"
+        }</div>`
       }</div>
       <div class="judgment-dialog-actions">
         ${lawLink}
@@ -1191,22 +1227,24 @@ export async function render(root) {
     );
   };
 
-  const openLawSource = async (lawKey, sourceType = "") => {
+  const openLawSource = async (lawKey, sourceType = "", articleNo = "") => {
     if (!lawDialog || !lawKey) return;
     const seq = ++lawDialogSeq;
     if (!lawDialog.open) lawDialog.showModal();
     syncDialogScrollLock();
     lawDialog.innerHTML = lawDialogFrame(
-      "讀取法規／命令中…",
+      articleNo ? "讀取法規條文中…" : "讀取法規／命令中…",
       `<div class="judgment-dialog-loading">
         <span class="spinner"></span>
-        <span>正在從本地 Parquet 讀取 ${escapeHtml(lawKey)} 的原始條文…</span>
+        <span>正在從本地 Parquet 讀取 ${escapeHtml(
+          [lawKey, articleNo].filter(Boolean).join(" · "),
+        )} 的原始條文…</span>
       </div>`,
     );
     try {
-      const detail = await api.lawDetail(lawKey, sourceType);
+      const detail = await api.lawDetail(lawKey, sourceType, "", articleNo);
       if (disposed || seq !== lawDialogSeq) return;
-      lawDialog.innerHTML = renderLawSourceDetail(detail);
+      lawDialog.innerHTML = renderLawSourceDetail(detail, articleNo);
     } catch (error) {
       if (disposed || seq !== lawDialogSeq) return;
       lawDialog.innerHTML = lawDialogFrame(
@@ -1270,6 +1308,7 @@ export async function render(root) {
       openLawSource(
         target.dataset.lawKey || "",
         target.dataset.sourceType || "",
+        target.dataset.articleNo || "",
       );
       return;
     }
@@ -1287,6 +1326,7 @@ export async function render(root) {
       openLawSource(
         target.dataset.lawKey || "",
         target.dataset.sourceType || "",
+        target.dataset.articleNo || "",
       );
       return;
     }

@@ -1357,6 +1357,7 @@ def get_law_detail(
     law_key: str,
     source_type: Optional[str] = None,
     version_id: Optional[int] = None,
+    article_no: Optional[str] = None,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     key = str(law_key or "").strip()
@@ -1365,6 +1366,7 @@ def get_law_detail(
     requested_source = str(source_type or "").strip() or None
     if requested_source and requested_source not in ("law", "order"):
         raise ValueError(f"不支援的資料類型：{requested_source}")
+    requested_article = str(article_no or "").strip() or None
 
     record_metadata: Optional[Dict[str, Any]] = None
     record_attachments: List[Dict[str, str]] = []
@@ -1589,6 +1591,17 @@ def get_law_detail(
         if parquet_articles:
             articles = parquet_articles
             articles_source = "parquet"
+    if requested_article:
+        article_key = re.sub(r"\s+", "", requested_article)
+        articles = [
+            article
+            for article in articles
+            if re.sub(r"\s+", "", _text(article.get("article_no"))) == article_key
+        ]
+        if not articles:
+            raise LookupError(
+                f"找不到條文：{metadata['law_name']} {requested_article}"
+            )
     attachments = _parse_attachments((parquet_row or {}).get("law_attachments_json"))
     if not attachments:
         attachments = record_attachments
@@ -1647,6 +1660,7 @@ def get_law_detail(
         "version": version,
         "versions": versions_payload,
         "selected_version_id": selected_version_id,
+        "selected_article_no": requested_article,
         "selected_article_count": selected_article_count,
         "changes": changes,
         "change_summary": change_summary,
@@ -1660,6 +1674,7 @@ def get_law_detail(
             "articles_source": articles_source,
             "selected_version_id": selected_version_id,
             "selected_version_is_current": selected_is_current,
+            "selected_article_no": requested_article,
             "snapshot": snapshot,
         },
     }

@@ -282,7 +282,7 @@ GROUP BY change_type;
 - `content_hash` 用於判斷同一條文是否在新版本中變更。
 - `law_article_change_events` 記錄條文層級的 `added`／`modified`／`removed`、變更前後內容、來源版本與目標版本。
 - 既有資料可用 `uv run judgment-backfill-law-articles --data-dir ./data/laws` 補建；命令可重複執行，已回填的版本會跳過。
-- `GET /api/law` 預設回傳目前版本；加上 `version_id=1` 可讀取指定歷史版本，回應包含 `versions`、`selected_version_id`、`change_summary` 與 `changes`。
+- `GET /api/law` 預設回傳目前版本；加上 `version_id=1` 可讀取指定歷史版本，回應包含 `versions`、`selected_version_id`、`change_summary` 與 `changes`。加上 `article_no=第%2019%20條` 只回傳該條文，可用來直接開啟單一條款。
 - 資料頁的法規報表提供「條文版本」下拉選單；歷史版本會標示提醒，條文變更以可展開的「版本變更」區塊呈現。
 
 ```bash
@@ -433,7 +433,7 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
-| `GET` | `/api/law` | 依 `law_key`（可加 `source_type`、`version_id`）取得單一法規的 metadata、沿革、附件、條文版本清單與指定版本條文；未指定時使用目前版本。 |
+| `GET` | `/api/law` | 依 `law_key`（可加 `source_type`、`version_id`、`article_no`）取得單一法規的 metadata、沿革、附件、條文版本清單與指定版本條文；指定 `article_no` 時只回傳該條文，未指定時使用目前版本。 |
 | `GET` | `/api/judgment` | 依 `jid` 取得單一判決的 metadata、命中法規、引用與判決全文；`source=parquet` 改從原始判決 Parquet 讀取。 |
 | `GET` | `/api/performance` | 查詢 PostgreSQL 效能紀錄與 Flow JSON，支援程序、模組、模型、狀態、日期、耗時等 metadata 篩選。 |
 | `GET` | `/api/performance/options` | 回傳效能報表可用的程序、模組、模型、狀態與方法選項。 |
@@ -900,7 +900,7 @@ uv run judgment-index-vectors --recreate --batch-size 16
 | `LLM_URL`／`LLM_MODEL` 未設定 | 標示 `retrieval_only`，只列出檢索結果 |
 | LLM 回答缺少有效引用 | 降級為 `retrieval_only`，不顯示未經驗證的回答 |
 
-Qdrant 資料頁提供「語意查詢」「Collection」「Top K」「相似度門檻」；結果包含相似度、案號、法院、案由、裁判日期、命中法規與相似片段，點選案號可開啟判決原文。RAG 回答與所有引用皆不是法律意見。 點擊 RAG 回覆中的法規／命令卡，會從本地原始法規 Parquet 開啟完整原始條文 dialog；dialog 一次列出全部條文、法規沿革與來源網站，並可透過右上角 X、「返回回答」或點擊外部關閉。
+Qdrant 資料頁提供「語意查詢」「Collection」「Top K」「相似度門檻」；結果包含相似度、案號、法院、案由、裁判日期、命中法規與相似片段，點選案號可開啟判決原文。RAG 回答與所有引用皆不是法律意見。 點擊 RAG 回覆中的法規／命令卡，會從本地原始法規 Parquet 開啟完整原始條文 dialog；dialog 一次列出全部條文、法規沿革與來源網站，並可透過右上角 X、「返回回答」或點擊外部關閉。點擊卡內的單一條文預覽，則只顯示該條文的完整內容，不列出其他條文。
 
 ### RAG 速度調校（10 秒內）
 
@@ -938,7 +938,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：120 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：123 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
@@ -956,7 +956,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 流程控制固定分成左右兩部分：左側為「展開後端處理流程」／「收合後端處理流程」按鈕，右側為「完成 · N 步 · 耗時 ms」摘要。展開時控制項留在回答標頭原位置，步驟清單直接從下方展開，不會把整塊面板移到標頭下方。窄版（≤480px）控制項獨占一列，按鈕靠左、摘要靠右。
 - LLM RAG 回答會先顯示「法規／命令檢索結果」，再顯示「LLM 綜合回答」；`/api/rag/query` 與串流結果都包含 `law_answer`，避免 LLM 回答掩蓋實際檢索到的法規／命令。
 - 保險業務員招攬責任類問題會額外先列「相關法規的責任架構」表（法規、條文、規範重點）與法規來源，再顯示 LLM 回答；目前規則涵蓋保險業務員管理規則第 15、19 條與金融消費者保護法第 8、9、10、11、11-3 條。
-- 以 Playwright 驗證法規／命令卡 dialog：點擊 `證券交易法` 卡可從本地 Parquet 一次讀取並列出 229 條原文，顯示來源快照、法規沿革與來源網站；沒有分頁控制，對話框內可連續捲動全部條文，並可以 X／返回回答／點擊外部關閉；390px 無水平溢出、無 console error。
+- 以 Playwright 驗證法規／命令卡 dialog：點擊 `證券交易法` 卡可從本地 Parquet 一次讀取並列出 229 條原文，顯示來源快照、法規沿革與來源網站；沒有分頁控制，對話框內可連續捲動全部條文，並可以 X／返回回答／點擊外部關閉。點擊卡內的單一條文預覽（例如 `保險法` 第 163 條）只顯示該條完整內容（1 條），標題為「法規 · 條號」，不顯示其他條文與法規沿革；390px 無水平溢出、無 console error。
 - 以 Playwright 驗證 Qdrant 資料頁：語意查詢、Top K、相似度門檻、相似度／案號／法院／案由／裁判日期／命中法規欄位、點選案號開啟判決原文，以及返回後查詢條件保留；RAG 頁驗證索引覆蓋率、4 筆判決引用與引用編號，狀態頁驗證 Qdrant／Embedding／RAG／LLM 均為正常；390px 無水平溢出、無 console error。
 - 效能 Flow 實測：快速 profile 的 RAG 請求產生約 20 段 Flow，包含 `http.request`、`rag.answer_question`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm`、`rag.validate_citations` 與 `client.render`；`summary.models` 為 `bge-m3`、`gemma3:4b`。伺服器端 LLM 區段約 1–4 秒，前端 client 全流程與伺服器總耗時接近。時間軸以每個點位的 `started_at` 顯示開始時間，主要數字為「本點到下一點」區間；「累計」採流水線累加，例如 `http.request` 顯示 1 ms 並累計 1 ms，`rag.coverage` 顯示 30 ms 並累計 32 ms，`rag.llm_request` 顯示 2.9 s，最後 `client.render` 才累計到整體 3.9–4.0 秒。
 - 以 Playwright 驗證效能 Flow 頁：模型篩選、21 段巢狀時間軸、每點實際開始時間、點到點區間、流水線累計、module／function／params、時間軸比例條、模型統計、最慢區段、Flow JSON 展開、390px 無水平溢出與 0 console error。

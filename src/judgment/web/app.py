@@ -450,6 +450,7 @@ def create_app(
         law_key: str,
         source_type: Optional[str] = None,
         version_id: Optional[int] = None,
+        article_no: Optional[str] = None,
     ) -> Dict[str, Any]:
         try:
             with trace_segment(
@@ -460,6 +461,7 @@ def create_app(
                     "law_key": law_key,
                     "source_type": source_type,
                     "version_id": version_id,
+                    "article_no": article_no,
                 },
             ):
                 return get_law_detail(
@@ -468,6 +470,7 @@ def create_app(
                     law_key=law_key,
                     source_type=source_type,
                     version_id=version_id,
+                    article_no=article_no,
                 )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
