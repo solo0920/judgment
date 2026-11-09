@@ -17,11 +17,13 @@ from sqlalchemy import delete, exists, func, insert, or_, select
 from .config import Settings
 from .db import build_engine, build_session_factory, init_db
 from .embeddings import EmbeddingError, OllamaEmbedder
+from .index_progress import IndexProgress
 from .index_versions import (
     activate_version,
     active_version,
     capture_source_snapshot,
     create_version,
+    discard_version,
     ensure_legacy_version,
     find_resumable_version,
     get_version,
@@ -810,6 +812,11 @@ def build_index_version(
     version_id = int(version["version_id"])
     collection = str(version["physical_collection"])
     indexed = int(version.get("indexed_count") or 0)
+    progress = IndexProgress(
+        expected_count,
+        label=f"v{version_id:03d}",
+        initial_indexed=indexed,
+    )
     last_id = int(version.get("last_indexed_id") or 0)
     dimensions = int(version.get("embedding_dimension") or 0)
     reused_count = 0
@@ -834,7 +841,12 @@ def build_index_version(
             dimensions = store.collection_dimension(source_collection) or int(
                 previous.get("embedding_dimension") or 0
             )
-            store.copy_collection(source_collection, collection, batch_size=256)
+            store.copy_collection(
+                source_collection,
+                collection,
+                batch_size=256,
+                on_progress=progress.copy_update,
+            )
             for field in ("jid", "court", "jdate", "source_archive"):
                 store.ensure_payload_index(collection, field, "keyword")
             update_version_progress(
@@ -1052,13 +1064,10 @@ def build_index_version(
                 )
                 last_progress_at = now
             first_batch = False
-            logger.info(
-                "version=%s indexed=%s reused=%s embedded=%s collection=%s",
-                version_id,
+            progress.update(
                 indexed,
-                reused_count,
-                embedded_count,
-                collection,
+                reused=reused_count,
+                embedded=embedded_count,
             )
 
         if build_mode == "reuse" and previous:
@@ -1090,6 +1099,7 @@ def build_index_version(
                     [vector_point_id(jid) for jid in stale_jids],
                 )
 
+        progress.finish(indexed)
         update_version_progress(
             session_factory,
             version_id=version_id,
@@ -1157,6 +1167,7 @@ def build_index_version(
         )
         return summary
     except Exception as exc:
+        progress.finish(indexed)
         mark_version_failed(
             session_factory,
             version_id=version_id,
@@ -1192,6 +1203,44 @@ def build_index_version(
         raise
 
 
+def _format_elapsed(ms: int) -> str:
+    seconds = max(0, int(ms) // 1000)
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def _print_build_summary(summary: Dict[str, Any]) -> None:
+    validation = summary.get("validation") or {}
+    activated = summary.get("activated")
+    print("建置結果")
+    print(f"  版本：v{int(summary.get('version_id') or 0):03d} · {summary.get('collection')}")
+    print(f"  模式：{summary.get('build_mode')}")
+    print(
+        f"  文件：{int(summary.get('indexed_count') or 0):,}"
+        f" / {int(summary.get('document_count') or 0):,}"
+    )
+    print(f"  重用：{int(summary.get('reused_count') or 0):,}")
+    print(f"  新 embedding：{int(summary.get('embedded_count') or 0):,}")
+    print(f"  Qdrant points：{int(summary.get('points_upserted') or 0):,}")
+    print(f"  刪除 points：{int(summary.get('deleted_points') or 0):,}")
+    print(f"  驗證：{validation.get('status') or '—'}")
+    print(f"  耗時：{_format_elapsed(int(summary.get('duration_ms') or 0))}")
+    if activated:
+        print(f"  Alias：已切換到 v{int(activated.get('version_id') or 0):03d}")
+    else:
+        print("  Alias：尚未切換")
+        print(
+            "  下一步：uv run judgment-index-vectors "
+            f"--validate-version {int(summary.get('version_id') or 0)}"
+            "，再 --activate-version"
+        )
+
+
 def configure_logging(level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
@@ -1219,7 +1268,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=1,
         help="只索引 id 為 stride 倍數的判決，用於建立跨語料抽樣索引（預設 1）",
     )
-    parser.add_argument("--batch-size", type=int, default=16, help="每批判決數")
+    parser.add_argument("--batch-size", type=int, default=64, help="每批判決數")
     parser.add_argument("--max-chars", type=int, default=None, help="每筆embedding 字數上限")
     parser.add_argument("--all", action="store_true", help="重新索引所有判決")
     parser.add_argument(
@@ -1257,6 +1306,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="將指定索引版本切換為 active",
     )
     parser.add_argument(
+        "--discard-version",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="刪除非 active 的指定索引版本與其 collection",
+    )
+    parser.add_argument(
         "--rollback",
         action="store_true",
         help="將 alias 切回上一個成功版本",
@@ -1288,6 +1344,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log_level=args.log_level,
     )
     configure_logging(settings.log_level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     engine = build_engine(settings.database_url)
     init_db(engine)
     session_factory = build_session_factory(engine)
@@ -1341,6 +1398,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     alias_name=settings.judgment_vector_alias,
                 ),
             }
+        elif args.discard_version is not None:
+            summary = {
+                "status": "success",
+                "discarded": discard_version(
+                    session_factory,
+                    store=store,
+                    version_id=args.discard_version,
+                ),
+            }
         elif args.rollback:
             summary = {
                 "status": "success",
@@ -1391,6 +1457,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     finally:
         engine.dispose()
+    if args.build_version:
+        _print_build_summary(summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
     return 0
 

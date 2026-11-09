@@ -53,7 +53,7 @@ class FakeVersionStore:
     def ensure_payload_index(self, collection, field_name, field_schema="keyword"):
         return None
 
-    def copy_collection(self, source, target, *, batch_size=256):
+    def copy_collection(self, source, target, *, batch_size=256, on_progress=None):
         source_points = self.collections[self._target(source)]["points"]
         self.ensure_collection(
             target, size=self.collection_dimension(source) or 4

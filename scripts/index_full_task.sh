@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MODE="${1:-run}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+BATCH_SIZE="${BATCH_SIZE:-64}"
 MAX_CHARS="${MAX_CHARS:-1600}"
 RECREATE="${RECREATE:-0}"
 AUTO_ACTIVATE="${AUTO_ACTIVATE:-1}"

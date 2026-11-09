@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
 import httpx
 
@@ -199,12 +199,15 @@ class QdrantStore:
         target: str,
         *,
         batch_size: int = 256,
+        on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         if not source or not target or source == target:
             return 0
         dimension = self.collection_dimension(source)
         if dimension is None:
             raise QdrantError(f"無法讀取來源 collection 維度：{source}")
+        info = self.collection_info(source) or {}
+        total = int(info.get("points_count") or 0)
         self.ensure_collection(target, size=dimension)
         copied = 0
         for points in self.scroll_points(source, batch_size=batch_size):
@@ -220,6 +223,8 @@ class QdrantStore:
             if body:
                 self.upsert(target, body)
                 copied += len(body)
+                if on_progress is not None:
+                    on_progress(copied, total)
         return copied
 
     def delete_points(

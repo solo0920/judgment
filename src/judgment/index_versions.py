@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import func, inspect, select, text
+from sqlalchemy import delete, func, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -305,6 +305,36 @@ def mark_version_failed(
         if validation_result is not None:
             version.validation_result = validation_result
         session.commit()
+
+
+def discard_version(
+    session_factory: sessionmaker[Session],
+    *,
+    store: QdrantStore,
+    version_id: int,
+) -> Dict[str, Any]:
+    """Delete a non-active building/failed/ready version and its collection."""
+
+    with session_factory() as session:
+        version = session.get(JudgmentIndexVersion, int(version_id))
+        if version is None:
+            raise LookupError(f"找不到索引版本：{version_id}")
+        if version.status == "active":
+            raise ValueError("active 版本不可直接刪除；請先啟用其他版本")
+        collection = version.physical_collection
+        session.execute(
+            delete(JudgmentVectorIndex).where(
+                JudgmentVectorIndex.version_id == version.version_id
+            )
+        )
+        session.delete(version)
+        session.commit()
+    store.delete_collection(collection)
+    return {
+        "version_id": int(version_id),
+        "deleted_collection": collection,
+        "status": "discarded",
+    }
 
 
 def validate_version(
@@ -758,6 +788,19 @@ def ensure_index_version_schema(engine: Engine) -> None:
                     {"version_id": version_id},
                 )
 
+        connection.execute(
+            text(
+                "UPDATE judgment_vector_index v "
+                "SET embedding_version = COALESCE(NULLIF(v.embedding_version, ''), iv.embedding_version), "
+                "index_recipe_version = COALESCE(NULLIF(v.index_recipe_version, ''), iv.index_recipe_version), "
+                "source_year = COALESCE(NULLIF(v.source_year, ''), substring(d.jdate, 1, 4)), "
+                "source_updated_at = COALESCE(v.source_updated_at, d.updated_at) "
+                "FROM judgment_index_versions iv, judgment_documents d "
+                "WHERE v.version_id = iv.version_id AND d.jid = v.jid "
+                "AND (v.embedding_version = '' OR v.index_recipe_version = '' "
+                "OR v.source_year = '' OR v.source_updated_at IS NULL)"
+            )
+        )
         # Make version_id non-null before installing the composite PK.
         remaining_null = int(
             connection.execute(

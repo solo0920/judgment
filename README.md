@@ -876,6 +876,7 @@ curl "http://127.0.0.1:9200/api/index-versions"
 curl "http://127.0.0.1:9200/api/index-alias/reconcile"
 ```
 
+- `--build-version` 在終端機顯示 1 行狀態（百分比、已處理／總數、reused、embedded、速度、ETA）＋10 行 × 100 字元進度＋第 11 行全寬總進度；每個字元代表 0.1%。按 `Ctrl-C` 可中斷，下次執行會接續同一個 building 版本。
 - 相容條件：相同 `JUDGMENT_EMBEDDING_VERSION`、`JUDGMENT_INDEX_RECIPE_VERSION`、embedding model、維度與 point ID 規則。
 - 增量重用的指紋包含 `content_hash`、`index_text_hash`、`payload_hash`、`source_updated_at`；metadata-only 變更也會重新 embedding。
 - 已刪除或不再符合資格的判決會從新 collection 刪除。
@@ -989,7 +990,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：133 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：131 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
