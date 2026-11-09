@@ -99,27 +99,40 @@ function toggleProcessDuration(button) {
   if (value) value.hidden = expanded;
 }
 
+function setProcessExpanded(panel, expanded) {
+  if (!panel) return;
+  panel.classList.toggle("is-open", expanded);
+  const body = panel.querySelector("#rag-process-body");
+  const toggle = panel.querySelector(".rag-process-toggle");
+  if (body) body.hidden = !expanded;
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.title = expanded ? "收合後端處理流程" : "展開後端處理流程";
+  }
+}
+
 function processPanelMarkup() {
-  return `<details class="rag-process" id="rag-process" open>
-    <summary>
-      <span class="rag-process-title">
-        <span class="rag-process-title-collapsed">展開後端處理流程</span>
-        <span class="rag-process-title-expanded">後端處理流程</span>
-      </span>
+  return `<div class="rag-process is-open" id="rag-process">
+    <div class="rag-process-control">
+      <button type="button" class="rag-process-toggle" id="rag-process-toggle"
+        aria-expanded="true" aria-controls="rag-process-body" title="收合後端處理流程">
+        <span class="rag-process-toggle-label-collapsed">展開後端處理流程</span>
+        <span class="rag-process-toggle-label-expanded">收合後端處理流程</span>
+        ${icon("chevronDown", 11)}
+      </button>
       <span class="rag-process-summary" id="rag-process-summary">執行中…</span>
-    </summary>
-    <div class="rag-process-list" id="rag-process-list">
-      <div class="rag-process-item is-running" data-process-key="frontend" style="--depth:0">
-        <span class="rag-process-dot"></span>
-        <span class="rag-process-label">frontend HTTP request → FastAPI</span>
-        <span class="rag-process-meta">送出</span>
-      </div>
     </div>
-    <div class="rag-process-hint">完成後會自動收合；點擊摘要可展開完整流程，點擊 + 可顯示父流程耗時。</div>
-  </details>
-  <button type="button" class="rag-process-collapse" aria-label="收合後端處理流程" title="收合後端處理流程">
-    ${icon("chevronDown", 11)}<span>收合後端處理流程</span>
-  </button>`;
+    <div class="rag-process-body" id="rag-process-body">
+      <div class="rag-process-list" id="rag-process-list">
+        <div class="rag-process-item is-running" data-process-key="frontend" style="--depth:0">
+          <span class="rag-process-dot"></span>
+          <span class="rag-process-label">frontend HTTP request → FastAPI</span>
+          <span class="rag-process-meta">送出</span>
+        </div>
+      </div>
+      <div class="rag-process-hint">完成後會自動收合；點擊按鈕可展開完整流程，點擊 + 可顯示父流程耗時。</div>
+    </div>
+  </div>`;
 }
 
 function createProcessController(answerCard) {
@@ -240,14 +253,9 @@ function createProcessController(answerCard) {
         ? `完成 · ${stepCount} 步 · ${elapsed}`
         : `失敗 · ${stepCount} 步`;
     }
-    panel.open = false;
     panel.classList.add("is-complete");
-    const collapse = panel.nextElementSibling;
-    return `${panel.outerHTML}${
-      collapse?.classList.contains("rag-process-collapse")
-        ? collapse.outerHTML
-        : ""
-    }`;
+    setProcessExpanded(panel, false);
+    return panel.outerHTML;
   };
 
   return { step, finish };
@@ -1261,10 +1269,12 @@ export async function render(root) {
   });
 
   answerCard.addEventListener("click", (event) => {
-    const processCollapse = event.target.closest(".rag-process-collapse");
-    if (processCollapse) {
-      const panel = processCollapse.previousElementSibling;
-      if (panel?.matches("details.rag-process")) panel.open = false;
+    const processToggle = event.target.closest(".rag-process-toggle");
+    if (processToggle) {
+      const panel = processToggle.closest(".rag-process");
+      const expanded =
+        processToggle.getAttribute("aria-expanded") === "true";
+      setProcessExpanded(panel, !expanded);
       return;
     }
     const durationToggle = event.target.closest(".rag-process-time-toggle");
