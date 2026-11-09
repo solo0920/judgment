@@ -112,7 +112,7 @@ uv run judgment-backfill-law-articles --data-dir ./data/laws
 uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 ```
 
-`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、探測 x570 Ollama 的 `bge-m3`，在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端。若 x570 不可用，`up.sh` 會立即把 `EMBEDDING_URL` 改成本機 Ollama；x570 可用時則以本機作為 runtime fallback。查詢 embedding 前會先做 3 秒健康檢查，非本機 Ollama 未回應即直接改用本機；實際 embedding 若超過 `EMBEDDING_QUERY_TIMEOUT_SECONDS`（預設 10 秒）未回應，也會改用本機 Ollama。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端與控制器（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器。
+`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、探測 x570 Ollama 的 `bge-m3`，在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端。若 x570 不可用，`up.sh` 會立即把 `EMBEDDING_URL` 改成本機 Ollama；x570 可用時則以本機作為 runtime fallback。查詢 embedding 前會先做 2 秒健康檢查，非本機 Ollama 未回應即直接改用本機；實際 embedding 若超過 `EMBEDDING_QUERY_TIMEOUT_SECONDS`（預設 2 秒）未回應，也會改用本機 Ollama。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端與控制器（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器。
 
 開啟 <http://127.0.0.1:9200/>，預設進入 RAG 提問頁。主控台是純靜態的 Vanilla JS SPA，由 FastAPI 直接服務，原始碼模式不需要 Node.js 建置步驟。若要以 `file://` 直接開啟，或部署到 Cloudflare Pages，請先產生 `frontend/`，見〈靜態前端與部署〉。
 
@@ -196,11 +196,11 @@ cd /Volumes/USB/judgment-backup-20261108
 | `EMBEDDING_FALLBACK_URL` | 空 | 主要 embedding API 無法連線時的本機 fallback；`up.sh` 會自動設定 |
 | `JUDGMENT_X570_EMBEDDING_URL` | `http://x570:11434` | `up.sh` 啟動時探測的 x570 Ollama |
 | `JUDGMENT_LOCAL_EMBEDDING_URL` | `http://127.0.0.1:11434` | x570 不可用時使用的本機 Ollama |
-| `JUDGMENT_EMBEDDING_PROBE_TIMEOUT` | `3` | `up.sh` 探測 Ollama 的逾時秒數 |
+| `JUDGMENT_EMBEDDING_PROBE_TIMEOUT` | `2` | `up.sh` 探測 Ollama 的逾時秒數 |
 | `EMBEDDING_MODEL` | `bge-m3` | 判決與查詢使用的 embedding 模型（1024 維） |
 | `EMBEDDING_TIMEOUT_SECONDS` | `120` | Embedding 請求逾時 |
-| `EMBEDDING_QUERY_TIMEOUT_SECONDS` | `10` | 查詢向量使用主要 Ollama 的逾時；超過即改用 fallback（本機 Ollama） |
-| `EMBEDDING_HEALTH_TIMEOUT_SECONDS` | `3` | 使用非本機 Ollama 前的健康檢查逾時；未回應即直接改用本機 Ollama |
+| `EMBEDDING_QUERY_TIMEOUT_SECONDS` | `2` | 非本機 Ollama 查詢 embedding 的逾時；超過即改用 fallback（本機 Ollama）；本機 primary 使用 `EMBEDDING_TIMEOUT_SECONDS` |
+| `EMBEDDING_HEALTH_TIMEOUT_SECONDS` | `2` | 使用非本機 Ollama 前的健康檢查逾時；未回應即直接改用本機 Ollama |
 | `LLM_URL` | 空 | Ollama API 位址；本機預設 `http://127.0.0.1:11434` |
 | `LLM_MODEL` | 空 | RAG 回答模型；`.env.example` 快速預設 `gemma3:4b`，品質優先可改 `gemma3:27b` |
 | `LLM_TIMEOUT_SECONDS` | `180` | LLM 請求逾時 |
@@ -926,7 +926,7 @@ curl "http://127.0.0.1:9200/api/index-alias/reconcile"
 - 已刪除或不再符合資格的判決會從新 collection 刪除。
 - 驗證失敗不得切換；第一階段保留 active＋前一個成功版本，不自動刪除舊 collection。
 - `JUDGMENT_VECTOR_ALIAS` 預設 `judgments_current`，`JUDGMENT_VECTOR_COLLECTION_PREFIX` 預設 `judgments`。
-- 目前本機可將 `EMBEDDING_URL` 指向 x570 Ollama、`EMBEDDING_FALLBACK_URL` 指向 MBP `http://127.0.0.1:11434`；x570 關機或查詢 embedding 超過 10 秒未回應時自動改用本機，兩端必須使用同一個 `bge-m3` digest。
+- 目前本機可將 `EMBEDDING_URL` 指向 x570 Ollama、`EMBEDDING_FALLBACK_URL` 指向 MBP `http://127.0.0.1:11434`；x570 關機或查詢 embedding 超過 2 秒未回應時自動改用本機，兩端必須使用同一個 `bge-m3` digest。
 
 #### 全量索引：自動接續
 

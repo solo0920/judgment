@@ -91,13 +91,13 @@ def test_query_embedding_uses_short_primary_timeout_then_local_fallback(
         "http://primary.test",
         "bge-m3",
         timeout=120,
-        query_timeout=10,
+        query_timeout=2,
         fallback_base_url="http://127.0.0.1:11434",
     )
     vector = embedder.embed_query("測試")
     assert len(vector) == 4
     assert calls == [
-        ("http://primary.test/api/embed", 10.0),
+        ("http://primary.test/api/embed", 2.0),
         ("http://127.0.0.1:11434/api/embed", 120.0),
     ]
     assert embedder.using_fallback is True
@@ -121,7 +121,7 @@ def test_primary_timeout_cooldown_skips_primary_for_next_query(monkeypatch) -> N
         "http://primary.test",
         "bge-m3",
         timeout=120,
-        query_timeout=10,
+        query_timeout=2,
         fallback_base_url="http://127.0.0.1:11434",
     )
     assert first.embed_query("第一次") == [0.1, 0.2]
@@ -134,7 +134,7 @@ def test_primary_timeout_cooldown_skips_primary_for_next_query(monkeypatch) -> N
         "http://primary.test",
         "bge-m3",
         timeout=120,
-        query_timeout=10,
+        query_timeout=2,
         fallback_base_url="http://127.0.0.1:11434",
     )
     assert second.embed_query("第二次") == [0.1, 0.2]
@@ -166,12 +166,12 @@ def test_non_local_primary_health_check_failure_uses_local_without_embedding(
         "http://primary.test",
         "bge-m3",
         timeout=120,
-        query_timeout=10,
-        health_timeout=3,
+        query_timeout=2,
+        health_timeout=2,
         fallback_base_url="http://127.0.0.1:11434",
     )
     assert embedder.embed_query("測試") == [0.1, 0.2]
-    assert health_calls == [("http://primary.test", 3.0)]
+    assert health_calls == [("http://primary.test", 2.0)]
     assert embedding_calls == ["http://127.0.0.1:11434/api/embed"]
     assert embedder.using_fallback is True
 
@@ -181,7 +181,7 @@ def test_local_primary_skips_health_check(monkeypatch) -> None:
     embedding_calls = []
 
     def fake_post(url, **kwargs):
-        embedding_calls.append(url)
+        embedding_calls.append((url, kwargs.get("timeout")))
         return FakeResponse([[0.1, 0.2]])
 
     def fake_health(url, timeout=0):
@@ -194,10 +194,10 @@ def test_local_primary_skips_health_check(monkeypatch) -> None:
         "http://127.0.0.1:11434",
         "bge-m3",
         timeout=120,
-        query_timeout=10,
-        health_timeout=3,
+        query_timeout=2,
+        health_timeout=2,
         fallback_base_url="http://fallback.test",
     )
     assert embedder.embed_query("測試") == [0.1, 0.2]
     assert health_calls == []
-    assert embedding_calls == ["http://127.0.0.1:11434/api/embed"]
+    assert embedding_calls == [("http://127.0.0.1:11434/api/embed", 120.0)]

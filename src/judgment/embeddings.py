@@ -112,8 +112,8 @@ class OllamaEmbedder:
         model: str = "bge-m3",
         *,
         timeout: Optional[float] = 120.0,
-        query_timeout: Optional[float] = 10.0,
-        health_timeout: Optional[float] = 3.0,
+        query_timeout: Optional[float] = 2.0,
+        health_timeout: Optional[float] = 2.0,
         fallback_base_url: str = "",
         fallback_cooldown_seconds: float = 60.0,
     ) -> None:
@@ -272,9 +272,14 @@ class OllamaEmbedder:
         raise EmbeddingError("沒有可用的 embedding provider")
 
     def embed_query(self, text: str) -> List[float]:
+        primary_timeout = (
+            self.timeout
+            if _is_local_url(self.base_url)
+            else self.query_timeout
+        )
         vectors = self.embed(
             [text],
-            primary_timeout=self.query_timeout,
+            primary_timeout=primary_timeout,
             check_primary_health=True,
         )
         if not vectors:
