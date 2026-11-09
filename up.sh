@@ -10,8 +10,22 @@ RUN_DIR=".run"
 WEB_LOG="${RUN_DIR}/web.log"
 AGENT_LOG="${RUN_DIR}/agent.log"
 PID_FILE="${RUN_DIR}/web.pid"
+AGENT_PID_FILE="${RUN_DIR}/agent.pid"
 
 mkdir -p "${RUN_DIR}"
+
+cleanup_stale_pid() {
+  local file="$1"
+  [[ -f "${file}" ]] || return 0
+  local pid
+  pid="$(cat "${file}" 2>/dev/null || true)"
+  if [[ -z "${pid}" ]] || ! kill -0 "${pid}" 2>/dev/null; then
+    rm -f "${file}"
+  fi
+}
+
+cleanup_stale_pid "${PID_FILE}"
+cleanup_stale_pid "${AGENT_PID_FILE}"
 
 if [[ ! -f .env ]]; then
   export LAW_DATA_DIR="${LAW_DATA_DIR:-./data/laws}"
@@ -26,53 +40,69 @@ if [[ ! -f .env ]]; then
   export LLM_MODEL="${LLM_MODEL:-gemma3:27b}"
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "錯誤：找不到 docker。"
-  exit 1
-fi
-if ! docker info >/dev/null 2>&1; then
-  echo "錯誤：Docker daemon 沒有執行，請先啟動 Docker Desktop。"
-  exit 1
+need_frontend_build() {
+  [[ -f frontend/index.html ]] || return 0
+  find src/judgment/web/static -type f -newer frontend/index.html -print -quit \
+    2>/dev/null | grep -q .
+}
+
+if need_frontend_build; then
+  echo "建置 standalone frontend…"
+  uv run python scripts/build_frontend.py
 fi
 
-echo "啟動 Docker 服務（postgres、qdrant）…"
-if [[ "${JUDGMENT_SKIP_QDRANT:-0}" == "1" ]]; then
-  docker compose up -d postgres
+if [[ "${JUDGMENT_SKIP_DOCKER:-0}" == "1" ]]; then
+  echo "略過 Docker 啟動（JUDGMENT_SKIP_DOCKER=1）。"
 else
-  docker compose up -d postgres qdrant
-fi
-
-echo -n "等待 PostgreSQL 健康檢查"
-for _ in {1..30}; do
-  status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' judgment-postgres 2>/dev/null || true)"
-  if [[ "${status}" == "healthy" || "${status}" == "running" ]]; then
-    echo " OK"
-    break
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "錯誤：找不到 docker。"
+    exit 1
   fi
-  echo -n "."
-  sleep 1
-done
-if [[ "${status:-}" != "healthy" && "${status:-}" != "running" ]]; then
-  echo
-  echo "錯誤：PostgreSQL 未就緒，請檢查 docker compose logs postgres。"
-  exit 1
-fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "錯誤：Docker daemon 沒有執行，請先啟動 Docker Desktop。"
+    exit 1
+  fi
 
-if [[ "${JUDGMENT_SKIP_QDRANT:-0}" != "1" ]]; then
-  echo -n "等待 Qdrant"
-  qdrant_ready=0
+  compose_services=(postgres)
+  if [[ "${JUDGMENT_SKIP_QDRANT:-0}" != "1" ]]; then
+    compose_services+=(qdrant)
+  fi
+  echo "啟動 Docker 服務（${compose_services[*]}）…"
+  docker compose up -d "${compose_services[@]}"
+
+  echo -n "等待 PostgreSQL 健康檢查"
+  status=""
   for _ in {1..30}; do
-    if curl -fsS --max-time 2 "http://127.0.0.1:6333/collections" >/dev/null 2>&1; then
-      qdrant_ready=1
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' judgment-postgres 2>/dev/null || true)"
+    if [[ "${status}" == "healthy" || "${status}" == "running" ]]; then
       echo " OK"
       break
     fi
     echo -n "."
     sleep 1
   done
-  if [[ "${qdrant_ready}" != "1" ]]; then
+  if [[ "${status:-}" != "healthy" && "${status:-}" != "running" ]]; then
     echo
-    echo "警告：Qdrant 未就緒，資料頁與 RAG 會顯示降級狀態。請檢查 docker compose logs qdrant。"
+    echo "錯誤：PostgreSQL 未就緒，請檢查 docker compose logs postgres。"
+    exit 1
+  fi
+
+  if [[ "${JUDGMENT_SKIP_QDRANT:-0}" != "1" ]]; then
+    echo -n "等待 Qdrant"
+    qdrant_ready=0
+    for _ in {1..30}; do
+      if curl -fsS --max-time 2 "http://127.0.0.1:6333/collections" >/dev/null 2>&1; then
+        qdrant_ready=1
+        echo " OK"
+        break
+      fi
+      echo -n "."
+      sleep 1
+    done
+    if [[ "${qdrant_ready}" != "1" ]]; then
+      echo
+      echo "警告：Qdrant 未就緒，資料頁與 RAG 會顯示降級狀態。請檢查 docker compose logs qdrant。"
+    fi
   fi
 fi
 
@@ -112,23 +142,29 @@ else
   fi
 fi
 
-if ! curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
-  echo "啟動電源控制器（127.0.0.1:${AGENT_PORT}）…"
-  nohup uv run judgment-power-agent --backend-port "${PORT}" >"${AGENT_LOG}" 2>&1 &
-  for _ in {1..20}; do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.25
-  done
-fi
-
-if curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
-  echo "電源控制器：http://127.0.0.1:${AGENT_PORT}/api/power/status"
+if [[ "${JUDGMENT_POWER_AGENT:-1}" == "0" ]]; then
+  echo "略過電源控制器（JUDGMENT_POWER_AGENT=0）。"
 else
-  echo "警告：電源控制器未就緒，header 電源開關可能無法使用。"
+  if ! curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
+    echo "啟動電源控制器（127.0.0.1:${AGENT_PORT}）…"
+    nohup uv run judgment-power-agent --backend-port "${PORT}" >"${AGENT_LOG}" 2>&1 &
+    echo $! >"${AGENT_PID_FILE}"
+    for _ in {1..20}; do
+      if curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.25
+    done
+  fi
+
+  if curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
+    echo "電源控制器：http://127.0.0.1:${AGENT_PORT}/api/power/status"
+  else
+    echo "警告：電源控制器未就緒，本機電源 API 可能無法使用。"
+  fi
 fi
 
 echo "完成。"
 echo "後端：http://${HOST}:${PORT}/"
+echo "系統測試：http://${HOST}:${PORT}/#/tests"
 echo "日誌：${WEB_LOG}"

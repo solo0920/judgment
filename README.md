@@ -112,7 +112,7 @@ uv run judgment-backfill-law-articles --data-dir ./data/laws
 uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 ```
 
-`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端。日誌位於 `.run/web.log`。`down.sh` 會先停止後端與控制器，再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant 啟動。
+`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端與控制器（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器。
 
 開啟 <http://127.0.0.1:9200/>，預設進入 RAG 提問頁。主控台是純靜態的 Vanilla JS SPA，由 FastAPI 直接服務，原始碼模式不需要 Node.js 建置步驟。若要以 `file://` 直接開啟，或部署到 Cloudflare Pages，請先產生 `frontend/`，見〈靜態前端與部署〉。
 
