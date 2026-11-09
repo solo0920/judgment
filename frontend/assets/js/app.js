@@ -1482,7 +1482,7 @@ LIMIT ${l} OFFSET ${S}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         data-rag-action="toggle-pin" data-history-id="${n(String(r))}"
         title="${e.pinned?"\u53D6\u6D88\u91D8\u9078":"\u91D8\u9078\u6B64\u9805\u76EE"}"
         aria-label="${e.pinned?"\u53D6\u6D88\u91D8\u9078":"\u91D8\u9078\u6B64\u9805\u76EE"}"
-        aria-pressed="${e.pinned?"true":"false"}">${p("pin",13)}</button>
+        aria-pressed="${e.pinned?"true":"false"}">${p("pin",14)}</button>
       <button class="rag-history-more" type="button"
         data-rag-action="open-history-menu" data-history-id="${n(String(r))}"
         title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="menu" aria-expanded="false">${p("more",14)}</button>

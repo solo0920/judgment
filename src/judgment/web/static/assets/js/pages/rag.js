@@ -922,7 +922,7 @@ function renderHistoryItem(
         data-rag-action="toggle-pin" data-history-id="${escapeHtml(String(id))}"
         title="${entry.pinned ? "取消釘選" : "釘選此項目"}"
         aria-label="${entry.pinned ? "取消釘選" : "釘選此項目"}"
-        aria-pressed="${entry.pinned ? "true" : "false"}">${icon("pin", 13)}</button>
+        aria-pressed="${entry.pinned ? "true" : "false"}">${icon("pin", 14)}</button>
       <button class="rag-history-more" type="button"
         data-rag-action="open-history-menu" data-history-id="${escapeHtml(String(id))}"
         title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false">${icon(

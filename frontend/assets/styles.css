@@ -2053,6 +2053,8 @@ button.chip:hover {
 }
 
 .rag-history-open {
+  position: relative;
+  z-index: 2;
   flex: 1;
   min-width: 0;
   padding: 6px 7px;
@@ -2064,25 +2066,64 @@ button.chip:hover {
 }
 
 .rag-history-open .history-question {
-  font-size: 10.5px;
+  font-size: 12px;
+  line-height: 1.45;
   -webkit-line-clamp: 2;
 }
 
 .rag-history-open .history-meta {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 7px;
+  z-index: 4;
+  display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  max-width: 230px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--faint);
   font-size: 8.5px;
+  line-height: 1.5;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  pointer-events: none;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0.14s ease;
+}
+
+.rag-history-open:hover .history-meta,
+.rag-history-open:focus-visible .history-meta {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 .rag-history-pin,
 .rag-history-more {
+  display: grid;
+  place-items: center;
   flex: none;
-  padding: 6px 5px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--faint);
   transition: color 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+.rag-history-pin svg,
+.rag-history-more svg {
+  width: 14px;
+  height: 14px;
 }
 
 .rag-history-pin {
