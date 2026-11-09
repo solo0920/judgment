@@ -492,6 +492,37 @@ def test_static_console_is_served(web_client) -> None:
     assert favicon.headers["content-type"].startswith("image/svg")
 
 
+def test_system_usage_endpoint_returns_resources(web_client, monkeypatch) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    payload = {
+        "status": "operational",
+        "checked_at": "2026-11-09T00:00:00+00:00",
+        "host": {
+            "cpu": {"percent": 10.0, "logical_cores": 8},
+            "memory": {"total": 1024, "used": 512, "percent": 50.0},
+        },
+        "disk": [{"label": "系統磁碟", "total": 2048, "used": 1024}],
+        "docker": {"available": True, "containers": [], "system": []},
+        "databases": [
+            {"id": "postgres", "name": "PostgreSQL", "status": "operational"},
+            {"id": "qdrant", "name": "Qdrant", "status": "operational"},
+        ],
+    }
+    monkeypatch.setattr(
+        app_module,
+        "build_system_usage",
+        lambda **kwargs: payload,
+    )
+    response = web_client.get("/api/system-usage")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "operational"
+    assert body["host"]["cpu"]["percent"] == 10.0
+    assert [item["id"] for item in body["databases"]] == ["postgres", "qdrant"]
+
+
 def test_status_endpoint_reports_real_services(web_client) -> None:
     response = web_client.get("/api/status")
     assert response.status_code == 200

@@ -56,6 +56,7 @@ from .query import (
     schema_suggestions,
 )
 from .status import build_status
+from .system_usage import build_system_usage
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def _incoming_request_id(request: Request) -> str:
 
 PERFORMANCE_TARGETS = {
     "/api/status": ("服務狀態", "judgment.web.status.build_status"),
+    "/api/system-usage": ("系統資源使用", "judgment.web.system_usage.build_system_usage"),
     "/api/catalog": ("資料庫 catalog", "judgment.web.catalog.build_catalog"),
     "/api/query": ("資料查詢", "judgment.web.query.run_query"),
     "/api/law": ("法規明細", "judgment.web.query.get_law_detail"),
@@ -281,6 +283,20 @@ def create_app(
             params={},
         ):
             return build_status(
+                session_factory=app.state.session_factory,
+                data_dir=app.state.data_dir,
+                settings=settings,
+            )
+
+    @app.get("/api/system-usage")
+    def system_usage() -> Dict[str, Any]:
+        with trace_segment(
+            "api.endpoint",
+            module=__name__,
+            function="system_usage",
+            params={},
+        ):
+            return build_system_usage(
                 session_factory=app.state.session_factory,
                 data_dir=app.state.data_dir,
                 settings=settings,

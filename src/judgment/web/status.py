@@ -509,6 +509,7 @@ def build_status(
         },
         "endpoints": [
             {"method": "GET", "path": "/api/status", "label": "服務狀態"},
+            {"method": "GET", "path": "/api/system-usage", "label": "系統資源使用"},
             {"method": "GET", "path": "/api/catalog", "label": "資料庫與 metadata 選項"},
             {"method": "POST", "path": "/api/query", "label": "資料查詢"},
             {"method": "GET", "path": "/api/law", "label": "單一法規完整報表"},

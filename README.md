@@ -422,7 +422,7 @@ uv run judgment-normalize-courts --all
 | `#/quality` | 資料品質 | DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。無法取得的數值顯示「—」。 |
 | `#/performance` | 效能報表 | 上方測試流程圖表顯示目前／歷史模型測試進度；中段「索引效能」面板顯示當次執行筆數、平均每秒筆數、耗時、平均每批時間與吞吐／時間組成／進度圖表；下方記錄每次執行按鈕的完整 Flow、模組、函式、參數、模型與區段耗時；可展開時間軸、篩選、分頁與匯出。 |
 | `#/processing` | 資料處理 | 判決、法規、命令三條即時流程圖；判決壓縮檔逐檔進度；RAR 解壓縮、原始 Parquet 備份、金融法規篩選、PostgreSQL metadata、Qdrant 各階段子進度與顏色；依實際階段耗時組成的整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
-| `#/status` | 系統狀態 | 核心與 AI 服務健康、判決索引覆蓋率、資料量、前後端架構圖、API 端點、最新版本與最近下載執行。 |
+| `#/status` | 系統狀態 | 左側分類切換服務總覽、系統資料使用、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。 |
 
 ### HTTP API
 
@@ -430,6 +430,7 @@ uv run judgment-normalize-courts --all
 | --- | --- | --- |
 | `GET` | `/api/health` | 存活檢查，回傳版本。 |
 | `GET` | `/api/status` | 服務狀態、資料筆數、架構、最近版本與下載執行。 |
+| `GET` | `/api/system-usage` | 主機 CPU／RAM／Swap、Docker 容器與 system df、PostgreSQL／Qdrant 資源與容量、磁碟空間。 |
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
@@ -831,6 +832,7 @@ uv run judgment-index-vectors --recreate --batch-size 16
 - 每次執行都會寫入 `performance_records`，可在效能報表查看掃描數、索引數、耗時與 coverage。
 - 本機實測 embedding 吞吐量約 7.7–8.1 筆/秒（含 Qdrant 寫入與 PostgreSQL 記錄）。2026-11-08 完成第一段全量索引：141,554 筆、耗時 4 小時 52 分 43 秒、8.06 筆/秒、1,106 批、平均每批約 15.9 秒。索引可分批或中斷後重跑，不需一次完成。
 - 狀態頁與 RAG 側欄會顯示「已索引／判決總數／索引覆蓋率／collection points」；未建立 collection 或服務離線時會明確標示，不以其他數字代替。
+- 狀態頁左側提供分類 sidebar；「系統資料使用」分頁呼叫 `GET /api/system-usage`，顯示主機 CPU／RAM／Swap、Docker 容器 CPU／RAM／Net I/O／Block I/O／PIDs、Docker images／containers／volumes／build cache、PostgreSQL 資料庫與前 6 大資料表容量、Qdrant collection／points／segments，以及磁碟 total／used／free／百分比。
 
 #### 全量索引：自動接續
 
@@ -938,7 +940,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：125 passed（含靜態資源、服務狀態、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：129 passed（含靜態資源、服務狀態、系統資源使用、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
@@ -961,6 +963,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 保險業務員招攬責任類問題會額外先列「相關法規的責任架構」表（法規、條文、規範重點）與法規來源，再顯示 LLM 回答；目前規則涵蓋保險業務員管理規則第 15、19 條與金融消費者保護法第 8、9、10、11、11-3 條。
 - 以 Playwright 驗證法規／命令卡 dialog：點擊 `證券交易法` 卡可從本地 Parquet 一次讀取並列出 229 條原文，顯示來源快照、法規沿革與來源網站；沒有分頁控制，對話框內可連續捲動全部條文，並可以 X／返回回答／點擊外部關閉。點擊卡內的單一條文預覽（例如 `保險法` 第 163 條）只顯示該條完整內容（1 條），標題為「法規 · 條號」，不顯示其他條文與法規沿革；390px 無水平溢出、無 console error。
 - 以 Playwright 驗證 Qdrant 資料頁：語意查詢、Top K、相似度門檻、相似度／案號／法院／案由／裁判日期／命中法規欄位、點選案號開啟判決原文，以及返回後查詢條件保留；RAG 頁驗證索引覆蓋率、4 筆判決引用與引用編號，狀態頁驗證 Qdrant／Embedding／RAG／LLM 均為正常；390px 無水平溢出、無 console error。
+- 以 Playwright 驗證狀態頁 sidebar：6 個分類切換、服務總覽、系統資料使用、架構、資料版本與最近下載；系統資料使用顯示 CPU／RAM／Swap、Docker 2 個容器、PostgreSQL／Qdrant 資源與磁碟空間；390px 無水平溢出、無 console error。
 - 效能 Flow 實測：快速 profile 的 RAG 請求產生約 20 段 Flow，包含 `http.request`、`rag.answer_question`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm`、`rag.validate_citations` 與 `client.render`；`summary.models` 為 `bge-m3`、`gemma3:4b`。伺服器端 LLM 區段約 1–4 秒，前端 client 全流程與伺服器總耗時接近。時間軸以每個點位的 `started_at` 顯示開始時間，主要數字為「本點到下一點」區間；「累計」採流水線累加，例如 `http.request` 顯示 1 ms 並累計 1 ms，`rag.coverage` 顯示 30 ms 並累計 32 ms，`rag.llm_request` 顯示 2.9 s，最後 `client.render` 才累計到整體 3.9–4.0 秒。
 - 以 Playwright 驗證效能 Flow 頁：模型篩選、21 段巢狀時間軸、每點實際開始時間、點到點區間、流水線累計、module／function／params、時間軸比例條、模型統計、最慢區段、Flow JSON 展開、390px 無水平溢出與 0 console error。
 - 以 Playwright 驗證十種主題切換與持久化、四個頁面、法規／判決類別切換、判決命中法規查詢、匯入紀錄查詢、查詢報表、法規明細、判決原文與返回流程、服務狀態與 390px 行動版；無 console error、無失敗請求、無水平溢出。

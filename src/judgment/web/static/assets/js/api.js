@@ -357,6 +357,10 @@ export const api = {
     return request("/api/status", { trackClient: false });
   },
 
+  systemUsage() {
+    return request("/api/system-usage", { trackClient: false });
+  },
+
   catalog() {
     return request("/api/catalog");
   },
