@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { createQuestionBankController } from "./question_bank.js";
 import {
   downloadText,
   emptyState,
@@ -313,27 +314,82 @@ export async function render(root) {
         </button>
       </div>
     </div>
-    <div id="quality-content">${`<div class="report-card">
-      <div class="report-head">
-        <div class="report-title-group">
-          <div class="report-kicker">DUCKDB DATA QUALITY</div>
-          <div class="report-title">讀取原始 Parquet 統計</div>
-          <div class="report-sub">正在掃描最新 manifest 與查詢欄位…</div>
+    <div class="status-layout quality-layout">
+      <aside class="status-sidebar quality-sidebar" aria-label="資料品質功能">
+        <div class="status-sidebar-head">
+          <div class="eyebrow">DATA QUALITY</div>
+          <div class="status-sidebar-title">品質與題庫</div>
         </div>
-        <span class="spinner" aria-hidden="true"></span>
-      </div>
-      <div class="report-loading">
-        <div class="skeleton skeleton-line" style="width:92%"></div>
-        <div class="skeleton skeleton-line" style="width:84%"></div>
-        <div class="skeleton skeleton-line" style="width:68%;margin-bottom:0"></div>
-      </div>
-    </div>`}</div>
+        <nav class="status-tab-list" aria-label="資料品質功能">
+          <button class="status-tab is-active" type="button" data-quality-tab="overview" aria-current="page">
+            <span class="status-tab-icon">${icon("activity", 15)}</span>
+            <span class="status-tab-copy"><strong>品質總覽</strong><small>DuckDB 原始資料與覆蓋檢查</small></span>
+            <span class="badge badge-neutral" id="quality-badge-overview">—</span>
+          </button>
+          <button class="status-tab" type="button" data-quality-tab="create">
+            <span class="status-tab-icon">${icon("plus", 15)}</span>
+            <span class="status-tab-copy"><strong>題庫新增</strong><small>建立題目、標註與 JSON 匯入</small></span>
+          </button>
+          <button class="status-tab" type="button" data-quality-tab="manage">
+            <span class="status-tab-icon">${icon("database", 15)}</span>
+            <span class="status-tab-copy"><strong>題庫管理</strong><small>版本、狀態、標籤與刪除</small></span>
+            <span class="badge badge-neutral" id="quality-badge-manage">—</span>
+          </button>
+          <button class="status-tab" type="button" data-quality-tab="suite">
+            <span class="status-tab-icon">${icon("cube", 15)}</span>
+            <span class="status-tab-copy"><strong>Benchmark 題庫</strong><small>凍結 suite 與 benchmark-ready 題目</small></span>
+            <span class="badge badge-neutral" id="quality-badge-suite">—</span>
+          </button>
+          <button class="status-tab" type="button" data-quality-tab="review">
+            <span class="status-tab-icon">${icon("shield", 15)}</span>
+            <span class="status-tab-copy"><strong>題庫人工驗收批注</strong><small>待審、批注、核准與退回</small></span>
+            <span class="badge badge-warn" id="quality-badge-review">—</span>
+          </button>
+        </nav>
+        <div class="status-sidebar-foot">
+          <span>題目驗證</span>
+          <span class="mono">現行法規條文 + 判決 jid</span>
+        </div>
+      </aside>
+      <section class="status-panel quality-panel">
+        <div id="quality-panel-overview">
+          <div id="quality-content">${`<div class="report-card">
+            <div class="report-head">
+              <div class="report-title-group">
+                <div class="report-kicker">DUCKDB DATA QUALITY</div>
+                <div class="report-title">讀取原始 Parquet 統計</div>
+                <div class="report-sub">正在掃描最新 manifest 與查詢欄位…</div>
+              </div>
+              <span class="spinner" aria-hidden="true"></span>
+            </div>
+            <div class="report-loading">
+              <div class="skeleton skeleton-line" style="width:92%"></div>
+              <div class="skeleton skeleton-line" style="width:84%"></div>
+              <div class="skeleton skeleton-line" style="width:68%;margin-bottom:0"></div>
+            </div>
+          </div>`}</div>
+        </div>
+        <div id="quality-panel-question-create" hidden></div>
+        <div id="quality-panel-question-manage" hidden></div>
+        <div id="quality-panel-benchmark-bank" hidden></div>
+        <div id="quality-panel-question-review" hidden></div>
+      </section>
+    </div>
   </section>`;
 
   const content = root.querySelector("#quality-content");
   const refresh = root.querySelector("#quality-refresh");
   const meta = root.querySelector("#quality-meta");
+  const tabs = [...root.querySelectorAll("[data-quality-tab]")];
+  const panels = {
+    overview: root.querySelector("#quality-panel-overview"),
+    create: root.querySelector("#quality-panel-question-create"),
+    manage: root.querySelector("#quality-panel-question-manage"),
+    suite: root.querySelector("#quality-panel-benchmark-bank"),
+    review: root.querySelector("#quality-panel-question-review"),
+  };
   let current = null;
+  let activeTab = "overview";
 
   const paint = () => {
     if (!current) return;
@@ -341,6 +397,50 @@ export async function render(root) {
     meta.textContent = `DUCKDB · ${formatNumber(current.totals?.rows)} 筆 · ${formatDuration(
       current.scan_ms || 0,
     )}`;
+    const badge = root.querySelector("#quality-badge-overview");
+    if (badge) badge.textContent = formatNumber(current.totals?.rows || 0);
+  };
+
+  const syncTab = (tab) => {
+    activeTab = tab === "overview" ? "overview" : tab;
+    for (const button of tabs) {
+      const active = button.dataset.qualityTab === activeTab;
+      button.classList.toggle("is-active", active);
+      if (active) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+    for (const [name, panel] of Object.entries(panels)) {
+      if (panel) panel.hidden = name !== activeTab;
+    }
+    if (activeTab !== "overview") {
+      meta.textContent = "QUESTION BANK · 題庫工作區";
+    } else if (current) {
+      paint();
+    }
+  };
+
+  const controller = createQuestionBankController(root, {
+    onNavigate: (tab) => syncTab(tab),
+    onStats: (stats) => {
+      const values = stats || {};
+      const manageBadge = root.querySelector("#quality-badge-manage");
+      const suiteBadge = root.querySelector("#quality-badge-suite");
+      const reviewBadge = root.querySelector("#quality-badge-review");
+      if (manageBadge) manageBadge.textContent = formatNumber(values.total || 0);
+      if (suiteBadge) {
+        suiteBadge.textContent = formatNumber(values.benchmark_ready || 0);
+      }
+      if (reviewBadge) {
+        reviewBadge.textContent = formatNumber(
+          (values.pending_review || 0) + (values.changes_requested || 0),
+        );
+      }
+    },
+  });
+
+  const activate = (tab) => {
+    syncTab(tab);
+    if (tab !== "overview") controller.show(tab);
   };
 
   const load = async () => {
@@ -372,7 +472,17 @@ export async function render(root) {
     }
   };
 
-  refresh.addEventListener("click", load);
+  const onRefresh = async () => {
+    if (activeTab === "overview") await load();
+    else await controller.refresh();
+  };
+
+  refresh.addEventListener("click", onRefresh);
+  root.addEventListener("click", (event) => {
+    const tabButton = event.target.closest("[data-quality-tab]");
+    if (!tabButton) return;
+    activate(tabButton.dataset.qualityTab || "overview");
+  });
   content.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action='export-quality']");
     if (!button || !current) return;
@@ -383,5 +493,6 @@ export async function render(root) {
     );
   });
 
+  syncTab("overview");
   await load();
 }

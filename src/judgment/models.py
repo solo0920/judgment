@@ -432,3 +432,192 @@ class DownloadRun(Base):
         Index("ix_download_runs_source_started", "source_type", "started_at"),
         Index("ix_download_runs_status", "status"),
     )
+
+
+class QuestionBankItem(Base):
+    __tablename__ = "question_bank_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    lineage_id = Column(String(64), nullable=False, default="", index=True)
+    fingerprint = Column(String(64), nullable=False, unique=True, index=True)
+    question = Column(Text, nullable=False)
+    question_type = Column(String(32), nullable=False, default="general", index=True)
+    difficulty = Column(String(16), nullable=False, default="medium", index=True)
+    status = Column(String(24), nullable=False, default="draft", index=True)
+    version = Column(Integer, nullable=False, default=1)
+    expected_laws = Column(JSON, nullable=False, default=list)
+    expected_articles = Column(JSON, nullable=False, default=list)
+    expected_judgments = Column(JSON, nullable=False, default=list)
+    reference_answer = Column(Text, nullable=False, default="")
+    rubric = Column(JSON, nullable=False, default=dict)
+    tags = Column(JSON, nullable=False, default=list)
+    visibility = Column(String(16), nullable=False, default="shared")
+    source = Column(String(32), nullable=False, default="manual")
+    notes = Column(Text, nullable=False, default="")
+    created_by = Column(String(120), nullable=False, default="")
+    reviewed_by = Column(String(120), nullable=False, default="")
+    review_comment = Column(Text, nullable=False, default="")
+    content_hash = Column(String(64), nullable=False, default="")
+    stale = Column(Boolean, nullable=False, default=False, index=True)
+    stale_reason = Column(Text, nullable=False, default="")
+    last_reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_question_bank_status_updated", "status", "updated_at"),
+        Index("ix_question_bank_type_difficulty", "question_type", "difficulty"),
+    )
+
+
+class QuestionBankItemVersion(Base):
+    __tablename__ = "question_bank_item_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(
+        Integer, ForeignKey("question_bank_items.id"), nullable=False, index=True
+    )
+    version = Column(Integer, nullable=False)
+    snapshot = Column(JSON, nullable=False, default=dict)
+    editor = Column(String(120), nullable=False, default="")
+    change_note = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "version", name="uq_question_bank_item_version"),
+        Index("ix_question_bank_versions_item_version", "item_id", "version"),
+    )
+
+
+class QuestionBankReview(Base):
+    __tablename__ = "question_bank_reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(
+        Integer, ForeignKey("question_bank_items.id"), nullable=False, index=True
+    )
+    item_version = Column(Integer, nullable=False)
+    reviewer = Column(String(120), nullable=False, default="")
+    decision = Column(String(24), nullable=False, default="", index=True)
+    rubric_scores = Column(JSON, nullable=False, default=dict)
+    comment = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_question_bank_reviews_item_created", "item_id", "created_at"),
+    )
+
+
+class BenchmarkSuite(Base):
+    __tablename__ = "benchmark_suites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False, unique=True, index=True)
+    tier = Column(String(16), nullable=False, default="core", index=True)
+    version = Column(Integer, nullable=False, default=1)
+    description = Column(Text, nullable=False, default="")
+    status = Column(String(16), nullable=False, default="draft", index=True)
+    created_by = Column(String(120), nullable=False, default="")
+    frozen_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class BenchmarkSuiteItem(Base):
+    __tablename__ = "benchmark_suite_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(
+        Integer, ForeignKey("benchmark_suites.id"), nullable=False, index=True
+    )
+    item_id = Column(
+        Integer, ForeignKey("question_bank_items.id"), nullable=False, index=True
+    )
+    item_version = Column(Integer, nullable=False, default=1)
+    weight = Column(Integer, nullable=False, default=1)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("suite_id", "item_id", name="uq_benchmark_suite_item"),
+        Index("ix_benchmark_suite_items_suite", "suite_id"),
+    )
+
+
+class BenchmarkRun(Base):
+    __tablename__ = "benchmark_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), nullable=False, unique=True, index=True)
+    suite_id = Column(
+        Integer, ForeignKey("benchmark_suites.id"), nullable=False, index=True
+    )
+    label = Column(String(200), nullable=False, default="")
+    status = Column(String(16), nullable=False, default="running", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    total_cases = Column(Integer, nullable=False, default=0)
+    completed_cases = Column(Integer, nullable=False, default=0)
+    suite_version = Column(Integer, nullable=False, default=1)
+    config = Column(JSON, nullable=False, default=dict)
+    config_hash = Column(String(64), nullable=False, default="")
+    suite_snapshot = Column(JSON, nullable=False, default=dict)
+    index_version = Column(JSON, nullable=False, default=dict)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    summary = Column(JSON, nullable=False, default=dict)
+    error_message = Column(Text, nullable=True)
+    created_by = Column(String(120), nullable=False, default="")
+
+    __table_args__ = (
+        Index("ix_benchmark_runs_status_started", "status", "started_at"),
+        Index("ix_benchmark_runs_suite_started", "suite_id", "started_at"),
+    )
+
+
+class BenchmarkCaseResult(Base):
+    __tablename__ = "benchmark_case_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(
+        String(64), ForeignKey("benchmark_runs.run_id"), nullable=False, index=True
+    )
+    item_id = Column(Integer, nullable=False, index=True)
+    item_version = Column(Integer, nullable=False, default=1)
+    fingerprint = Column(String(64), nullable=False, default="", index=True)
+    repeat_index = Column(Integer, nullable=False, default=0)
+    question = Column(Text, nullable=False, default="")
+    status = Column(String(24), nullable=False, default="pending", index=True)
+    answer = Column(Text, nullable=False, default="")
+    answer_source = Column(String(32), nullable=False, default="")
+    citations = Column(JSON, nullable=False, default=list)
+    law_sources = Column(JSON, nullable=False, default=list)
+    retrieval = Column(JSON, nullable=False, default=dict)
+    coverage = Column(JSON, nullable=False, default=dict)
+    metrics = Column(JSON, nullable=False, default=dict)
+    stage_ms = Column(JSON, nullable=False, default=dict)
+    flow = Column(JSON, nullable=True, default=dict)
+    judge = Column(JSON, nullable=False, default=dict)
+    human_review = Column(JSON, nullable=False, default=dict)
+    duration_ms = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "item_id",
+            "item_version",
+            "repeat_index",
+            name="uq_benchmark_case_result",
+        ),
+        Index("ix_benchmark_case_results_run_status", "run_id", "status"),
+    )

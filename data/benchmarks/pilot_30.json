@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "name": "Pilot 30",
+  "description": "30 題 RAG benchmark pilot，涵蓋法規概念、指定條文、結構化問題與拒絕回答。",
+  "items": [
+    {
+      "question": "證券交易法對內線交易有什麼規範？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "證券交易法", "article_no": "第 157-1 條"},
+        {"law_name": "證券交易法", "article_no": "第 171 條"}
+      ],
+      "reference_answer": "證券交易法第157-1條禁止內部人於實際知悉重大影響股票價格消息後、未公開前或公開後18小時內交易；第171條規定內線交易的刑事責任。",
+      "tags": ["內線交易", "證券交易法", "刑事責任"]
+    },
+    {
+      "question": "證券交易法第171條對內線交易的行為如何處罰？",
+      "question_type": "article_lookup",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "證券交易法", "article_no": "第 171 條"},
+        {"law_name": "證券交易法", "article_no": "第 157-1 條"}
+      ],
+      "reference_answer": "違反第157-1條第1項或第2項者，依第171條第1項第1款處三年以上十年以下有期徒刑，得併科罰金；犯罪所得達一定金額時另有加重規定。",
+      "tags": ["內線交易", "第171條", "刑責"]
+    },
+    {
+      "question": "證券交易法如何禁止操縱市場？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "證券交易法", "article_no": "第 155 條"},
+        {"law_name": "證券交易法", "article_no": "第 171 條"}
+      ],
+      "reference_answer": "第155條禁止抬高、壓低交易價格、連續高價買入或低價賣出、相對成交、散布流言等操縱行為；第171條規定刑責。",
+      "tags": ["操縱市場", "證券交易法"]
+    },
+    {
+      "question": "證券交易法對短線交易的利益歸屬有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "證券交易法", "article_no": "第 157 條"}],
+      "reference_answer": "公司董事、監察人、經理人或持股超過10%的股東，於取得後六個月內賣出或賣出後六個月內買進而獲利者，公司得請求將利益歸入公司。",
+      "tags": ["短線交易", "證券交易法"]
+    },
+    {
+      "question": "證券交易法對公開收購有什麼申報義務？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "證券交易法", "article_no": "第 43-1 條"},
+        {"law_name": "證券交易法", "article_no": "第 43-2 條"}
+      ],
+      "reference_answer": "公開收購應依第43-1條申報並公告，且依第43-2條以同一收購條件進行，不得任意變更收購條件。",
+      "tags": ["公開收購", "證券交易法"]
+    },
+    {
+      "question": "證券交易法對財務報告不實的責任有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "證券交易法", "article_no": "第 20 條"},
+        {"law_name": "證券交易法", "article_no": "第 20-1 條"}
+      ],
+      "reference_answer": "第20條禁止財務報告虛偽或隱匿；第20-1條規定發行人、負責人、職員及簽證會計師等對善意取得人、出賣人或持有人的賠償責任與免責要件。",
+      "tags": ["財報不實", "證券交易法", "賠償"]
+    },
+    {
+      "question": "證券交易法對私募有價證券有什麼限制？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "證券交易法", "article_no": "第 43-6 條"}],
+      "reference_answer": "第43-6條規定私募對象、人數、程序與股東會決議要求，並限制私募有價證券的再行賣出。",
+      "tags": ["私募", "證券交易法"]
+    },
+    {
+      "question": "證券交易法對非常規交易的刑責是什麼？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "證券交易法", "article_no": "第 171 條"}],
+      "reference_answer": "公司董事、監察人、經理人或受僱人使公司為不利益且不合營業常規的交易，致公司遭受重大損害者，依第171條處罰。",
+      "tags": ["非常規交易", "證券交易法", "第171條"]
+    },
+    {
+      "question": "證券交易法對公開說明書不實的責任有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "證券交易法", "article_no": "第 31 條"},
+        {"law_name": "證券交易法", "article_no": "第 32 條"}
+      ],
+      "reference_answer": "第31條要求交付公開說明書；第32條規定公開說明書主要內容有虛偽或隱匿時，發行人、負責人、職員、承銷商及簽證專業人員的連帶賠償責任。",
+      "tags": ["公開說明書", "證券交易法"]
+    },
+    {
+      "question": "證券交易法所稱有價證券包括哪些？",
+      "question_type": "law_concept",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "證券交易法", "article_no": "第 6 條"}],
+      "reference_answer": "第6條所稱有價證券包括政府債券、公司股票、公司債券及經主管機關核定的其他有價證券；新股認購權利證書等相關憑證亦視為有價證券。",
+      "tags": ["有價證券", "證券交易法"]
+    },
+    {
+      "question": "證券交易法的主管機關是誰？",
+      "question_type": "article_lookup",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "證券交易法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "證券交易法", "article_no": "第 3 條"}],
+      "reference_answer": "證券交易法第3條規定主管機關為金融監督管理委員會。",
+      "tags": ["主管機關", "證券交易法"]
+    },
+    {
+      "question": "銀行法所稱收受存款是什麼？",
+      "question_type": "law_concept",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "銀行法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "銀行法", "article_no": "第 5-1 條"},
+        {"law_name": "銀行法", "article_no": "第 29 條"}
+      ],
+      "reference_answer": "第5-1條定義收受存款為向不特定多數人收受款項或吸收資金，並約定返還本金或給付相當或高於本金的行為；第29條限制非銀行經營收受存款業務。",
+      "tags": ["銀行法", "收受存款"]
+    },
+    {
+      "question": "銀行法所稱授信是什麼？",
+      "question_type": "law_concept",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "銀行法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "銀行法", "article_no": "第 5-2 條"}],
+      "reference_answer": "第5-2條所稱授信包括放款、透支、貼現、保證、承兌、開發信用狀、進出口押匯、應收帳款承購等業務。",
+      "tags": ["銀行法", "授信"]
+    },
+    {
+      "question": "銀行法對利害關係人交易有什麼限制？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "銀行法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "銀行法", "article_no": "第 44-2 條"},
+        {"law_name": "銀行法", "article_no": "第 75 條"}
+      ],
+      "reference_answer": "第44-2條限制銀行對利害關係人辦理授信；第75條限制銀行對其負責人、職員或主要股東等利害關係人為無擔保授信。",
+      "tags": ["銀行法", "利害關係人", "授信"]
+    },
+    {
+      "question": "銀行法對資本適足性有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "銀行法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "銀行法", "article_no": "第 44 條"}],
+      "reference_answer": "第44條要求銀行自有資本與風險性資產比率不得低於一定標準，主管機關並得依銀行業務風險訂定資本適足性管理辦法。",
+      "tags": ["銀行法", "資本適足"]
+    },
+    {
+      "question": "銀行法對內部控制制度有什麼要求？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "銀行法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "銀行法", "article_no": "第 45-1 條"}],
+      "reference_answer": "第45-1條要求銀行建立內部控制及稽核制度，並由主管機關訂定相關辦法。",
+      "tags": ["銀行法", "內部控制"]
+    },
+    {
+      "question": "洗錢防制法所稱洗錢行為包括哪些？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "洗錢防制法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "洗錢防制法", "article_no": "第 2 條"}],
+      "reference_answer": "第2條所稱洗錢包括隱匿或掩飾特定犯罪所得、收受或持有特定犯罪所得，以及使用、交付或轉換特定犯罪所得等行為。",
+      "tags": ["洗錢防制法", "洗錢定義"]
+    },
+    {
+      "question": "洗錢防制法對確認客戶身分有什麼要求？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "洗錢防制法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "洗錢防制法", "article_no": "第 8 條"},
+        {"law_name": "洗錢防制法", "article_no": "第 9 條"}
+      ],
+      "reference_answer": "第8條要求金融機構及指定非金融事業或人員確認客戶身分；第9條規定無法完成確認時應拒絕建立業務關係或交易。",
+      "tags": ["洗錢防制法", "KYC"]
+    },
+    {
+      "question": "洗錢防制法對金融機構申報義務有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "洗錢防制法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "洗錢防制法", "article_no": "第 11 條"}],
+      "reference_answer": "第11條要求金融機構及指定非金融事業或人員對疑似洗錢或資恐交易向調查局申報。",
+      "tags": ["洗錢防制法", "申報"]
+    },
+    {
+      "question": "保險法如何定義與管理保險業務員？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "保險法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "保險法", "article_no": "第 8-1 條"},
+        {"law_name": "保險法", "article_no": "第 177 條"}
+      ],
+      "reference_answer": "第8-1條定義保險業務員並要求具備資格、受保險業授權招攬；第177條授權主管機關訂定業務員管理規則。",
+      "tags": ["保險法", "保險業務員"]
+    },
+    {
+      "question": "保險法對不當招攬有什麼規範？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "保險法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "保險法", "article_no": "第 8-1 條"},
+        {"law_name": "保險法", "article_no": "第 148-3 條"}
+      ],
+      "reference_answer": "第8-1條要求業務員依保險業授權招攬；第148-3條要求保險業建立招攬品質與不當招攬處理機制。",
+      "tags": ["保險法", "不當招攬"]
+    },
+    {
+      "question": "金融消費者保護法對適合度義務有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "金融消費者保護法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "金融消費者保護法", "article_no": "第 9 條"}],
+      "reference_answer": "第9條要求金融服務業了解金融消費者的風險承受度，並確保商品或服務適合其屬性。",
+      "tags": ["金融消費者保護法", "適合度"]
+    },
+    {
+      "question": "金融消費者保護法對廣告與招攬有什麼限制？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "金融消費者保護法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "金融消費者保護法", "article_no": "第 8 條"}],
+      "reference_answer": "第8條禁止金融服務業在廣告、招攬或促銷中為不實、詐欺、隱匿或其他足致他人誤信的行為。",
+      "tags": ["金融消費者保護法", "招攬"]
+    },
+    {
+      "question": "金融消費者保護法對損害賠償有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "hard",
+      "expected_laws": [{"law_name": "金融消費者保護法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "金融消費者保護法", "article_no": "第 11 條"},
+        {"law_name": "金融消費者保護法", "article_no": "第 11-3 條"}
+      ],
+      "reference_answer": "第11條規定金融服務業違反相關義務造成損害的賠償責任；第11-3條規定故意或重大過失時得請求懲罰性賠償。",
+      "tags": ["金融消費者保護法", "損害賠償"]
+    },
+    {
+      "question": "個人資料保護法對蒐集、處理及利用個人資料有什麼原則？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "個人資料保護法", "source_type": "law"}],
+      "expected_articles": [
+        {"law_name": "個人資料保護法", "article_no": "第 5 條"},
+        {"law_name": "個人資料保護法", "article_no": "第 6 條"}
+      ],
+      "reference_answer": "第5條要求蒐集、處理或利用個人資料應尊重當事人權益、依法令規定並在必要範圍內為之；第6條限制病歷、醫療、基因等特種個資的蒐集處理利用。",
+      "tags": ["個人資料保護法", "蒐集利用"]
+    },
+    {
+      "question": "公司法如何定義公司負責人？",
+      "question_type": "law_concept",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "公司法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "公司法", "article_no": "第 8 條"}],
+      "reference_answer": "第8條定義公司負責人，包括無限公司、兩合公司執行業務或代表公司的股東，有限公司及股份有限公司的董事，以及經理人、清算人等。",
+      "tags": ["公司法", "負責人"]
+    },
+    {
+      "question": "公司法對公司設立資本額有什麼規定？",
+      "question_type": "law_concept",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "公司法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "公司法", "article_no": "第 7 條"}],
+      "reference_answer": "第7條規定公司申請設立登記的資本額應經會計師查核簽證，並得由主管機關訂定最低資本額。",
+      "tags": ["公司法", "資本額"]
+    },
+    {
+      "question": "期貨交易法所稱期貨交易是什麼？",
+      "question_type": "law_concept",
+      "difficulty": "easy",
+      "expected_laws": [{"law_name": "期貨交易法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "期貨交易法", "article_no": "第 3 條"}],
+      "reference_answer": "第3條所稱期貨交易包括依國內外期貨交易所或其他期貨市場的規則或實務從事的期貨契約、選擇權契約、期貨選擇權契約等交易。",
+      "tags": ["期貨交易法", "期貨交易"]
+    },
+    {
+      "question": "證券投資信託及顧問法對經營證券投資信託及顧問業務有什麼許可規定？",
+      "question_type": "law_concept",
+      "difficulty": "medium",
+      "expected_laws": [{"law_name": "證券投資信託及顧問法", "source_type": "law"}],
+      "expected_articles": [{"law_name": "證券投資信託及顧問法", "article_no": "第 6 條"}],
+      "reference_answer": "第6條規定非依本法不得經營證券投資信託、證券投資顧問及全權委託投資業務。",
+      "tags": ["投信投顧法", "業務許可"]
+    },
+    {
+      "question": "刑法對竊盜罪的規定是什麼？",
+      "question_type": "refusal",
+      "difficulty": "easy",
+      "expected_laws": [],
+      "expected_articles": [],
+      "expected_judgments": [],
+      "reference_answer": "此問題超出目前金融法規與判決檢索範圍，系統應說明資料不足以回答，不應生成刑法條文。",
+      "rubric": {"must_refuse": true},
+      "tags": ["拒絕回答", "超出範圍"]
+    }
+  ]
+}

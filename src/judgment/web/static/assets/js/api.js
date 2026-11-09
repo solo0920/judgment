@@ -503,6 +503,196 @@ export const api = {
     });
   },
 
+  questionBankStats() {
+    return request("/api/question-bank/stats", { trackClient: false });
+  },
+
+  questionBankItems(filters = {}, limit = 50, offset = 0) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value === null || value === undefined || value === "") continue;
+      params.set(key, String(value));
+    }
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    return request(`/api/question-bank/items?${params.toString()}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  questionBankItem(itemId) {
+    return request(`/api/question-bank/items/${encodeURIComponent(itemId)}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  createQuestionBankItem(payload) {
+    return request("/api/question-bank/items", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  updateQuestionBankItem(itemId, payload) {
+    return request(`/api/question-bank/items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  deleteQuestionBankItem(itemId) {
+    return request(`/api/question-bank/items/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  reviewQuestionBankItem(itemId, payload) {
+    return request(
+      `/api/question-bank/items/${encodeURIComponent(itemId)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  importQuestionBank(payload) {
+    return request("/api/question-bank/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  exportQuestionBank({ status = "accepted" } = {}) {
+    const params = new URLSearchParams({ status });
+    return request(`/api/question-bank/export?${params.toString()}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  revalidateQuestionBank() {
+    return request("/api/question-bank/revalidate", {
+      method: "POST",
+      body: JSON.stringify({}),
+      timeout: 120000,
+      trackClient: false,
+    });
+  },
+
+  benchmarkReadyQuestions(limit = 200) {
+    return request(`/api/question-bank/benchmark-ready?limit=${limit}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  benchmarkSuites() {
+    return request("/api/benchmark/suites", {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  createBenchmarkSuite(payload) {
+    return request("/api/benchmark/suites", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  updateBenchmarkSuite(suiteId, payload) {
+    return request(`/api/benchmark/suites/${encodeURIComponent(suiteId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  deleteBenchmarkSuite(suiteId) {
+    return request(`/api/benchmark/suites/${encodeURIComponent(suiteId)}`, {
+      method: "DELETE",
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  benchmarkRuns(limit = 20) {
+    return request(`/api/benchmark/runs?limit=${limit}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  startBenchmarkRun(payload) {
+    return request("/api/benchmark/runs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  benchmarkRun(runId, includeCases = true) {
+    return request(
+      `/api/benchmark/runs/${encodeURIComponent(runId)}?include_cases=${includeCases}`,
+      { timeout: 45000, trackClient: false },
+    );
+  },
+
+  stopBenchmarkRun(runId) {
+    return request(
+      `/api/benchmark/runs/${encodeURIComponent(runId)}/stop`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  reviewBenchmarkResult(resultId, payload) {
+    return request(
+      `/api/benchmark/results/${encodeURIComponent(resultId)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  benchmarkModels() {
+    return request("/api/benchmark/models", {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  benchmarkFingerprintHistory(fingerprint, limit = 50) {
+    return request(
+      `/api/benchmark/fingerprints/${encodeURIComponent(fingerprint)}?limit=${limit}`,
+      { timeout: 45000, trackClient: false },
+    );
+  },
+
   processingPlan() {
     return request("/api/processing/plan", {
       timeout: 45000,

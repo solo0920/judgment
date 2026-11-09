@@ -373,6 +373,27 @@ WHERE citation_count > 0 AND jid <> ''
 
 品質頁面位於 `#/quality`，會標示每項檢查的通過／注意／需處理狀態與比例；資料不足或查詢失敗時顯示「—」或錯誤訊息，不以推測值補齊。實測 24 個 archive（2,485,151 筆）DuckDB 掃描約 0.6–0.8 秒。
 
+### 題庫與 RAG Benchmark（Pilot 30）
+
+`#/quality` 的 sidebar 提供題庫工作區：
+
+- **題庫新增**：手動建立或貼上 JSON 匯入；預期法規、條文與判決 jid 會對現行 PostgreSQL metadata／條文驗證。
+- **題庫管理**：狀態、版本、fingerprint、標籤、stale 標記、soft delete 與 JSON 匯出。
+- **Benchmark 題庫**：只允許 accepted、未 stale 的題目；可建立 smoke／core／full suite、凍結版本。
+- **題庫人工驗收批注**：approve／changes requested／reject、rubric 分數、批注與審核紀錄。
+- 題目修改會建立新版本；法規條文內容變更時，啟動與「重新驗證」會自動標記 stale，提醒人工重新驗收。
+- 題目 fingerprint 以正規化問題文字計算，跨版本保留相同題目身份，供長期同題比較。
+
+`#/performance` 的 sidebar 新增 **RAG Benchmark**：
+
+- 以正式 `judgments_current` alias 執行，保存 suite 版本、config hash、index version（含 physical collection）、題目版本與 fingerprint。
+- 可選 embedding model、LLM model、judge model、Top K、相似度門檻、重複次數與法規檢索開關。
+- 儲存逐題 answer、citations、law sources、stage timing、Flow、deterministic metrics、LLM judge 與人工 rubric。
+- 指標包含 Law Recall、Article Recall、Citation Valid Rate、Refusal Accuracy、人工／LLM 分數、p50／p95 與成功／失敗數。
+- 每題可查詢同 fingerprint 的跨 run 歷史。
+
+Pilot 題庫檔位於 `data/benchmarks/pilot_30.json`；執行 `uv run python scripts/seed_question_bank.py` 可建立 30 題並凍結 `Pilot 30` suite。若題目已存在則跳過，不覆寫人工修改。
+
 收錄欄位包含：案號、年度／字別／號碼、裁判日期、法院、正規化法院、案由、判決全文、PDF 連結、來源壓縮檔、命中法規清單、引用條號、引用數與內容雜湊。
 
 ### 原始判決 Parquet 與原判決連結
@@ -427,8 +448,8 @@ uv run judgment-normalize-courts --all
 | --- | --- | --- |
 | `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。 |
 | `#/data` | 資料庫查詢 | 先切換「法規命令／判決」，再選擇資料庫；側欄提供「查詢／Schema」切換，Schema 模式列出該資料庫的資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
-| `#/quality` | 資料品質 | DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。無法取得的數值顯示「—」。 |
-| `#/performance` | 效能報表 | 上方測試流程圖表顯示目前／歷史模型測試進度；中段「索引效能」面板顯示當次執行筆數、平均每秒筆數、耗時、平均每批時間與吞吐／時間組成／進度圖表；下方記錄每次執行按鈕的完整 Flow、模組、函式、參數、模型與區段耗時；可展開時間軸、篩選、分頁與匯出。 |
+| `#/quality` | 資料品質 | 左側 sidebar：品質總覽、題庫新增、題庫管理、Benchmark 題庫、題庫人工驗收批注。品質總覽以 DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。題庫工作區支援法規／條文／判決驗證、版本、JSON 匯入匯出、suite 凍結與人工批注。 |
+| `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
 | `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 8 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。另含判決、法規、命令三條即時流程圖、判決壓縮檔逐檔進度、各階段子進度與顏色、整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
 | `#/status` | 系統狀態 | 左側分類切換服務總覽、系統資料使用、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。 |
 
@@ -446,6 +467,20 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/index-alias/reconcile` | 比對 Qdrant alias 與 PostgreSQL active 版本，可加 `?repair=true`。 |
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
+| `GET` | `/api/question-bank/items` | 題庫列表；支援搜尋、狀態、題型、難度、標籤與 stale 篩選。 |
+| `POST` | `/api/question-bank/items` | 新增題目；驗證現行法規、條文與判決 jid，並建立 fingerprint 與版本 1。 |
+| `GET` / `PATCH` / `DELETE` | `/api/question-bank/items/{id}` | 讀取、修改建立新版本、soft delete（retired）。 |
+| `POST` | `/api/question-bank/items/{id}/review` | 人工驗收：approved／rejected／changes_requested、rubric 分數與批注。 |
+| `POST` | `/api/question-bank/import` | JSON 批次匯入；以 fingerprint upsert。 |
+| `GET` | `/api/question-bank/export` | 匯出題庫 JSON。 |
+| `POST` | `/api/question-bank/revalidate` | 重新驗證全部題目；法規條文內容變更時標記 stale。 |
+| `GET` / `POST` | `/api/benchmark/suites` | 列出／建立 benchmark suite；只允許 accepted、未 stale 的題目。 |
+| `PATCH` / `DELETE` | `/api/benchmark/suites/{id}` | 更新題目清單、凍結版本或 soft delete suite。 |
+| `GET` / `POST` | `/api/benchmark/runs` | 列出或啟動 benchmark；使用正式 `judgments_current` alias，保存 suite／config／index 快照。 |
+| `GET` | `/api/benchmark/runs/{run_id}` | 讀取 run、逐題結果、LLM judge、人工評分、stage timing 與 Flow。 |
+| `POST` | `/api/benchmark/runs/{run_id}/stop` | 停止 benchmark；未執行題目標記 skipped。 |
+| `POST` | `/api/benchmark/results/{id}/review` | 儲存單題人工 rubric 分數與批注。 |
+| `GET` | `/api/benchmark/fingerprints/{fingerprint}` | 以題目 fingerprint 查詢跨 run 的同題歷史。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
 | `GET` | `/api/law` | 依 `law_key`（或法規名稱）取得單一法規的 metadata、沿革、附件、條文版本清單與指定版本條文；可加 `source_type`、`version_id`、`article_no`。指定 `article_no` 時只回傳該條文，未指定時使用目前版本。 |
 | `GET` | `/api/judgment` | 依 `jid` 取得單一判決的 metadata、命中法規、引用與判決全文；`source=parquet` 改從原始判決 Parquet 讀取。 |
@@ -998,7 +1033,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：143 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：147 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。

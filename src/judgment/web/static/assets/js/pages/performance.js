@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { createBenchmarkPanel } from "./benchmark_page.js";
 import {
   copyText,
   downloadText,
@@ -1224,30 +1225,57 @@ export async function render(root, ctx) {
         </button>
       </div>
     </div>
-    <div class="data-layout">
-      <aside class="card query-sidebar" aria-label="效能篩選">
-        <form id="performance-filter-form" autocomplete="off">
-          <div class="filter-block">
-            <div class="filter-head">
-              <span class="filter-title">Metadata 條件</span>
-              <button class="filter-reset" type="button" data-action="reset">重設</button>
-            </div>
-            <div class="filter-fields" id="performance-filter-fields">
-              <div class="skeleton skeleton-line" style="width:90%"></div>
-              <div class="skeleton skeleton-line" style="width:72%"></div>
-            </div>
-          </div>
-          <div class="sidebar-actions">
-            <button class="btn btn-primary" type="submit" id="performance-run">
-              ${icon("search", 15)}<span>執行查詢</span>
-            </button>
-          </div>
-        </form>
-        <div class="sidebar-note">Flow 寫入 PostgreSQL 的 performance_records.flow（JSON），預設保留至少 90 天；可依模型、程序、模組與耗時篩選。</div>
+    <div class="status-layout performance-layout">
+      <aside class="status-sidebar performance-sidebar" aria-label="效能報表功能">
+        <div class="status-sidebar-head">
+          <div class="eyebrow">PERFORMANCE</div>
+          <div class="status-sidebar-title">效能與 Benchmark</div>
+        </div>
+        <nav class="status-tab-list" aria-label="效能報表功能">
+          <button class="status-tab is-active" type="button" data-performance-tab="overview" aria-current="page">
+            <span class="status-tab-icon">${icon("activity", 15)}</span>
+            <span class="status-tab-copy"><strong>效能總覽</strong><small>Flow、區段耗時與索引效能</small></span>
+          </button>
+          <button class="status-tab" type="button" data-performance-tab="benchmark">
+            <span class="status-tab-icon">${icon("brain", 15)}</span>
+            <span class="status-tab-copy"><strong>RAG Benchmark</strong><small>題庫、模型、評分與同題歷史</small></span>
+          </button>
+        </nav>
+        <div class="status-sidebar-foot">
+          <span>Benchmark 索引</span>
+          <span class="mono">judgments_current</span>
+        </div>
       </aside>
-      <section class="query-main" id="performance-main" aria-label="效能報表" aria-live="polite">
-        <div id="performance-test-flow"></div>
-        <div id="performance-report">${reportLoading({ label: "效能報表" })}</div>
+      <section class="status-panel performance-panel">
+        <div id="performance-panel-overview">
+          <div class="data-layout performance-data-layout">
+            <aside class="card query-sidebar" aria-label="效能篩選">
+              <form id="performance-filter-form" autocomplete="off">
+                <div class="filter-block">
+                  <div class="filter-head">
+                    <span class="filter-title">Metadata 條件</span>
+                    <button class="filter-reset" type="button" data-action="reset">重設</button>
+                  </div>
+                  <div class="filter-fields" id="performance-filter-fields">
+                    <div class="skeleton skeleton-line" style="width:90%"></div>
+                    <div class="skeleton skeleton-line" style="width:72%"></div>
+                  </div>
+                </div>
+                <div class="sidebar-actions">
+                  <button class="btn btn-primary" type="submit" id="performance-run">
+                    ${icon("search", 15)}<span>執行查詢</span>
+                  </button>
+                </div>
+              </form>
+              <div class="sidebar-note">Flow 寫入 PostgreSQL 的 performance_records.flow（JSON），預設保留至少 90 天；可依模型、程序、模組與耗時篩選。</div>
+            </aside>
+            <section class="query-main" id="performance-main" aria-label="效能報表" aria-live="polite">
+              <div id="performance-test-flow"></div>
+              <div id="performance-report">${reportLoading({ label: "效能報表" })}</div>
+            </section>
+          </div>
+        </div>
+        <div id="performance-panel-benchmark" hidden></div>
       </section>
     </div>
   </section>`;
@@ -1258,6 +1286,44 @@ export async function render(root, ctx) {
   const reportBox = root.querySelector("#performance-report");
   const metaBadge = root.querySelector("#performance-meta");
   const refreshButton = root.querySelector("#performance-refresh");
+  const performanceTabs = [...root.querySelectorAll("[data-performance-tab]")];
+  const performancePanels = {
+    overview: root.querySelector("#performance-panel-overview"),
+    benchmark: root.querySelector("#performance-panel-benchmark"),
+  };
+  let activePerformanceTab = "overview";
+
+  const syncPerformanceTab = (tab) => {
+    activePerformanceTab = tab;
+    for (const button of performanceTabs) {
+      const active = button.dataset.performanceTab === tab;
+      button.classList.toggle("is-active", active);
+      if (active) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+    for (const [name, panel] of Object.entries(performancePanels)) {
+      if (panel) panel.hidden = name !== tab;
+    }
+    if (tab === "benchmark") {
+      metaBadge.textContent = "BENCHMARK · RAG";
+    }
+  };
+
+  const benchmarkController = createBenchmarkPanel(root, {
+    onNavigate: (tab) => syncPerformanceTab(tab),
+  });
+
+  const activatePerformanceTab = (tab) => {
+    syncPerformanceTab(tab);
+    if (tab === "benchmark") benchmarkController.show();
+  };
+
+  root.addEventListener("click", (event) => {
+    const tabButton = event.target.closest("[data-performance-tab]");
+    if (!tabButton) return;
+    activatePerformanceTab(tabButton.dataset.performanceTab || "overview");
+  });
+
   let testRun = null;
   let testRuns = [];
   let selectedTestRunId = "";
@@ -1397,6 +1463,15 @@ export async function render(root, ctx) {
   });
 
   refreshButton.addEventListener("click", async () => {
+    if (activePerformanceTab === "benchmark") {
+      setBusy(refreshButton, true, "整理中…");
+      try {
+        await benchmarkController.refresh();
+      } finally {
+        if (!disposed) setBusy(refreshButton, false);
+      }
+      return;
+    }
     filters = readFilterForm();
     refreshButton.disabled = true;
     setBusy(refreshButton, true, "整理中…");
@@ -1473,5 +1548,6 @@ export async function render(root, ctx) {
   return () => {
     disposed = true;
     if (testPollTimer) window.clearTimeout(testPollTimer);
+    benchmarkController.destroy();
   };
 }

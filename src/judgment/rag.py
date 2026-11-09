@@ -562,6 +562,7 @@ def answer_question(
     on_partial: Optional[Callable[[Dict[str, Any]], None]] = None,
     on_token: Optional[Callable[[str], None]] = None,
     on_token_reset: Optional[Callable[[], None]] = None,
+    enable_law_retrieval: bool = True,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     question = str(question or "").strip()
@@ -629,29 +630,36 @@ def answer_question(
 
     law_sources: List[Dict[str, Any]] = []
     law_stats: Dict[str, Any] = {}
-    stat_entity = extract_stat_entity(question) if is_citation_stats_question(question) else ""
-    try:
-        with trace_segment(
-            "rag.law_retrieval",
-            module=__name__,
-            function="law_sources_for_question",
-            params={
-                "question_length": len(question),
-                "stat_entity": stat_entity or None,
-            },
-        ):
-            if stat_entity:
-                law_stats = judgment_law_stats(session_factory, stat_entity)
-            law_sources = law_sources_for_question(
-                session_factory,
-                settings.law_data_dir,
-                question,
-                stats=law_stats,
-            )
-    except Exception as exc:
-        logger.warning("law/order retrieval failed: %s", exc)
-        law_sources = []
-        law_stats = {}
+    stat_entity = (
+        extract_stat_entity(question)
+        if enable_law_retrieval and is_citation_stats_question(question)
+        else ""
+    )
+    if enable_law_retrieval:
+        try:
+            with trace_segment(
+                "rag.law_retrieval",
+                module=__name__,
+                function="law_sources_for_question",
+                params={
+                    "question_length": len(question),
+                    "stat_entity": stat_entity or None,
+                },
+            ):
+                if stat_entity:
+                    law_stats = judgment_law_stats(
+                        session_factory, stat_entity
+                    )
+                law_sources = law_sources_for_question(
+                    session_factory,
+                    settings.law_data_dir,
+                    question,
+                    stats=law_stats,
+                )
+        except Exception as exc:
+            logger.warning("law/order retrieval failed: %s", exc)
+            law_sources = []
+            law_stats = {}
 
     def assign_law_indexes(sources: Sequence[Dict[str, Any]], start: int = 1) -> None:
         for offset, source in enumerate(sources, start=start):

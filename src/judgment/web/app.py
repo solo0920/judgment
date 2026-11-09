@@ -38,10 +38,29 @@ from ..performance_test import (
     get_test_run,
     list_test_runs,
 )
+from ..benchmark import BenchmarkManager
+from ..question_bank import (
+    QuestionBankError,
+    benchmark_ready_items,
+    create_item,
+    create_suite,
+    delete_item,
+    delete_suite,
+    get_item,
+    get_suite,
+    import_items,
+    list_items,
+    list_suites,
+    revalidate_items,
+    review_item,
+    update_item,
+    update_suite,
+)
 from ..rag import answer_question
 from ..vector_store import QdrantStore
 from ..index_versions import (
     activate_version,
+    active_version,
     get_version,
     list_versions,
     reconcile_alias,
@@ -93,6 +112,25 @@ class ClientTimingRequest(BaseModel):
 
 class TestModeRequest(BaseModel):
     enabled: bool
+
+
+class QuestionBankReviewRequest(BaseModel):
+    decision: Literal["approved", "rejected", "changes_requested"]
+    reviewer: str = Field(default="", max_length=120)
+    rubric_scores: Dict[str, Any] = Field(default_factory=dict)
+    comment: str = Field(default="", max_length=4000)
+
+
+class BenchmarkRunRequest(BaseModel):
+    suite_id: int = Field(gt=0)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    actor: str = Field(default="", max_length=120)
+
+
+class BenchmarkReviewRequest(BaseModel):
+    reviewer: str = Field(default="", max_length=120)
+    scores: Dict[str, Any] = Field(default_factory=dict)
+    comment: str = Field(default="", max_length=4000)
 
 
 class ProcessingUpdateRequest(BaseModel):
@@ -153,6 +191,16 @@ def create_app(
                 init_db(engine)
             app.state.engine = engine
             app.state.session_factory = build_session_factory(engine)
+            app.state.benchmark_manager.session_factory = app.state.session_factory
+            try:
+                revalidated = revalidate_items(app.state.session_factory)
+                if revalidated.get("stale"):
+                    logger.info(
+                        "question bank revalidation marked %s stale items",
+                        revalidated["stale"],
+                    )
+            except Exception:
+                logger.warning("question bank startup revalidation failed", exc_info=True)
         try:
             yield
         finally:
@@ -176,13 +224,17 @@ def create_app(
         settings=settings,
         session_factory=session_factory,
     )
+    app.state.benchmark_manager = BenchmarkManager(
+        settings=settings,
+        session_factory=session_factory,
+    )
 
     if settings.cors_allow_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(settings.cors_allow_origins),
             allow_credentials=False,
-            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=["*"],
             expose_headers=["*"],
             max_age=600,
@@ -196,6 +248,8 @@ def create_app(
             or path.startswith("/api/performance")
             or path.startswith("/api/processing")
             or path.startswith("/api/quality")
+            or path.startswith("/api/question-bank")
+            or path.startswith("/api/benchmark")
             or path == "/api/rag/query/stream"
             or path.startswith("/api/test-")
             or path in {"/api/health", "/api/docs", "/api/openapi.json"}
@@ -454,6 +508,277 @@ def create_app(
                 status_code=500,
                 detail=f"資料品質掃描失敗：{exc.__class__.__name__}: {exc}",
             ) from exc
+
+    def _actor(request: Request, fallback: str = "") -> str:
+        header = str(request.headers.get("X-Judgment-Actor") or "").strip()
+        return (header or fallback or "anonymous")[:120]
+
+    def _question_bank_error(exc: QuestionBankError) -> HTTPException:
+        return HTTPException(
+            status_code=422,
+            detail={
+                "message": str(exc),
+                "errors": exc.errors,
+                "warnings": exc.warnings,
+            },
+        )
+
+    @app.get("/api/question-bank/stats")
+    def question_bank_summary() -> Dict[str, Any]:
+        listing = list_items(app.state.session_factory, limit=1)
+        return listing["stats"]
+
+    @app.get("/api/question-bank/items")
+    def question_bank_list(
+        query: str = "",
+        status: str = "",
+        question_type: str = "",
+        difficulty: str = "",
+        tag: str = "",
+        stale: Optional[bool] = None,
+        include_deleted: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        return list_items(
+            app.state.session_factory,
+            query=query,
+            status=status,
+            question_type=question_type,
+            difficulty=difficulty,
+            tag=tag,
+            stale=stale,
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.post("/api/question-bank/items")
+    def question_bank_create(
+        payload: Dict[str, Any], request: Request
+    ) -> Dict[str, Any]:
+        try:
+            return create_item(
+                app.state.session_factory,
+                payload,
+                actor=_actor(request, str(payload.get("created_by") or "")),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.get("/api/question-bank/items/{item_id}")
+    def question_bank_detail(item_id: int) -> Dict[str, Any]:
+        item = get_item(app.state.session_factory, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="找不到題目。")
+        return item
+
+    @app.patch("/api/question-bank/items/{item_id}")
+    def question_bank_update(
+        item_id: int,
+        payload: Dict[str, Any],
+        request: Request,
+    ) -> Dict[str, Any]:
+        try:
+            return update_item(
+                app.state.session_factory,
+                item_id,
+                payload,
+                actor=_actor(request, str(payload.get("created_by") or "")),
+                change_note=str(payload.get("change_note") or ""),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.delete("/api/question-bank/items/{item_id}")
+    def question_bank_delete(item_id: int, request: Request) -> Dict[str, Any]:
+        deleted = delete_item(
+            app.state.session_factory,
+            item_id,
+            actor=_actor(request),
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="找不到題目。")
+        return {"status": "deleted", "id": item_id}
+
+    @app.post("/api/question-bank/items/{item_id}/review")
+    def question_bank_review(
+        item_id: int,
+        request_body: QuestionBankReviewRequest,
+        request: Request,
+    ) -> Dict[str, Any]:
+        try:
+            return review_item(
+                app.state.session_factory,
+                item_id,
+                decision=request_body.decision,
+                reviewer=_actor(request, request_body.reviewer),
+                rubric_scores=request_body.rubric_scores,
+                comment=request_body.comment,
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.post("/api/question-bank/import")
+    def question_bank_import(
+        payload: Dict[str, Any], request: Request
+    ) -> Dict[str, Any]:
+        try:
+            return import_items(
+                app.state.session_factory,
+                payload,
+                actor=_actor(request, str(payload.get("created_by") or "")),
+                mode=str(payload.get("mode") or "upsert"),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.get("/api/question-bank/export")
+    def question_bank_export(
+        status: str = "accepted",
+        include_deleted: bool = False,
+    ) -> Dict[str, Any]:
+        listing = list_items(
+            app.state.session_factory,
+            status=status,
+            include_deleted=include_deleted,
+            limit=200,
+        )
+        return {
+            "version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "items": listing["items"],
+        }
+
+    @app.post("/api/question-bank/revalidate")
+    def question_bank_revalidate() -> Dict[str, Any]:
+        return revalidate_items(app.state.session_factory)
+
+    @app.get("/api/question-bank/benchmark-ready")
+    def question_bank_benchmark_ready(limit: int = 200) -> Dict[str, Any]:
+        return {"items": benchmark_ready_items(app.state.session_factory, limit=limit)}
+
+    @app.get("/api/benchmark/suites")
+    def benchmark_suites() -> Dict[str, Any]:
+        return {"suites": list_suites(app.state.session_factory)}
+
+    @app.post("/api/benchmark/suites")
+    def benchmark_suite_create(
+        payload: Dict[str, Any], request: Request
+    ) -> Dict[str, Any]:
+        try:
+            return create_suite(
+                app.state.session_factory,
+                name=str(payload.get("name") or ""),
+                tier=str(payload.get("tier") or "core"),
+                description=str(payload.get("description") or ""),
+                item_ids=payload.get("item_ids") or [],
+                actor=_actor(request, str(payload.get("created_by") or "")),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.get("/api/benchmark/suites/{suite_id}")
+    def benchmark_suite_detail(suite_id: int) -> Dict[str, Any]:
+        suite = get_suite(app.state.session_factory, suite_id)
+        if suite is None:
+            raise HTTPException(status_code=404, detail="找不到 benchmark 題庫。")
+        return suite
+
+    @app.patch("/api/benchmark/suites/{suite_id}")
+    def benchmark_suite_update(
+        suite_id: int, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            return update_suite(
+                app.state.session_factory,
+                suite_id,
+                name=payload.get("name"),
+                tier=payload.get("tier"),
+                description=payload.get("description"),
+                item_ids=payload.get("item_ids"),
+                freeze=payload.get("freeze"),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.delete("/api/benchmark/suites/{suite_id}")
+    def benchmark_suite_delete(suite_id: int) -> Dict[str, Any]:
+        if not delete_suite(app.state.session_factory, suite_id):
+            raise HTTPException(status_code=404, detail="找不到 benchmark 題庫。")
+        return {"status": "deleted", "id": suite_id}
+
+    @app.get("/api/benchmark/runs")
+    def benchmark_run_list(limit: int = 20) -> Dict[str, Any]:
+        return {"runs": app.state.benchmark_manager.list_runs(limit=limit)}
+
+    @app.post("/api/benchmark/runs")
+    def benchmark_run_start(request_body: BenchmarkRunRequest) -> Dict[str, Any]:
+        try:
+            return app.state.benchmark_manager.start_run(
+                suite_id=request_body.suite_id,
+                config=request_body.config,
+                actor=request_body.actor,
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/benchmark/runs/{run_id}")
+    def benchmark_run_detail(
+        run_id: str, include_cases: bool = True
+    ) -> Dict[str, Any]:
+        run = app.state.benchmark_manager.get_run(
+            run_id, include_cases=include_cases
+        )
+        if run is None:
+            raise HTTPException(status_code=404, detail="找不到 benchmark run。")
+        return run
+
+    @app.post("/api/benchmark/runs/{run_id}/stop")
+    def benchmark_run_stop(run_id: str) -> Dict[str, Any]:
+        try:
+            return app.state.benchmark_manager.stop_run(run_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/benchmark/fingerprints/{fingerprint}")
+    def benchmark_fingerprint_history(
+        fingerprint: str, limit: int = 50
+    ) -> Dict[str, Any]:
+        return {
+            "fingerprint": fingerprint,
+            "cases": app.state.benchmark_manager.fingerprint_history(
+                fingerprint, limit=limit
+            ),
+        }
+
+    @app.post("/api/benchmark/results/{result_id}/review")
+    def benchmark_result_review(
+        result_id: int,
+        request_body: BenchmarkReviewRequest,
+        request: Request,
+    ) -> Dict[str, Any]:
+        try:
+            return app.state.benchmark_manager.review_case(
+                result_id,
+                reviewer=_actor(request, request_body.reviewer),
+                scores=request_body.scores,
+                comment=request_body.comment,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/benchmark/models")
+    def benchmark_models() -> Dict[str, Any]:
+        return {
+            "models": available_test_models(settings),
+            "index_version": active_version(
+                app.state.session_factory,
+                alias_name=settings.judgment_vector_alias,
+            ),
+        }
 
     @app.get("/api/catalog")
     def catalog() -> Dict[str, Any]:
