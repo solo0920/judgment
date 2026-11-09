@@ -2224,6 +2224,51 @@ button.chip:hover {
   font-size: 8.5px;
 }
 
+.rag-process-time-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rag-process-time-toggle:hover,
+.rag-process-time-toggle:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.rag-process-time-sign {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.rag-process-time-toggle:hover .rag-process-time-sign,
+.rag-process-time-toggle:focus-visible .rag-process-time-sign {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rag-process-time-value[hidden] {
+  display: none;
+}
+
 .rag-process-hint {
   padding: 0 12px 9px;
   color: var(--faint);
