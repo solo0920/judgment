@@ -920,7 +920,7 @@ function renderHistoryItem(
     <div class="rag-history-actions">
       <button class="rag-history-pin${entry.pinned ? " is-pinned" : ""}" type="button"
         data-rag-action="toggle-pin" data-history-id="${escapeHtml(String(id))}"
-        title="${entry.pinned ? "取消釘選" : "釘選此項目"}"
+        data-tooltip="${entry.pinned ? "取消釘選" : "釘選"}"
         aria-label="${entry.pinned ? "取消釘選" : "釘選此項目"}"
         aria-pressed="${entry.pinned ? "true" : "false"}">${icon("pin", 14)}</button>
       <button class="rag-history-more" type="button"

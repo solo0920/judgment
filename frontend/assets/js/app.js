@@ -1480,7 +1480,7 @@ LIMIT ${l} OFFSET ${S}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     <div class="rag-history-actions">
       <button class="rag-history-pin${e.pinned?" is-pinned":""}" type="button"
         data-rag-action="toggle-pin" data-history-id="${n(String(r))}"
-        title="${e.pinned?"\u53D6\u6D88\u91D8\u9078":"\u91D8\u9078\u6B64\u9805\u76EE"}"
+        data-tooltip="${e.pinned?"\u53D6\u6D88\u91D8\u9078":"\u91D8\u9078"}"
         aria-label="${e.pinned?"\u53D6\u6D88\u91D8\u9078":"\u91D8\u9078\u6B64\u9805\u76EE"}"
         aria-pressed="${e.pinned?"true":"false"}">${p("pin",14)}</button>
       <button class="rag-history-more" type="button"

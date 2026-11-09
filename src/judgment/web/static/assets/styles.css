@@ -2050,6 +2050,20 @@ button.chip:hover {
   display: flex;
   align-items: flex-start;
   flex: none;
+  color: var(--ink);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.rag-history-item:hover .rag-history-actions,
+.rag-history-item:focus-within .rag-history-actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.rag-history-item.is-active .rag-history-actions {
+  color: var(--accent);
 }
 
 .rag-history-open {
@@ -2116,8 +2130,8 @@ button.chip:hover {
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--faint);
-  transition: color 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+  color: inherit;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .rag-history-pin svg,
@@ -2127,20 +2141,37 @@ button.chip:hover {
 }
 
 .rag-history-pin {
-  opacity: 0.45;
+  position: relative;
 }
 
-.rag-history-more {
-  opacity: 0.55;
+.rag-history-pin::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 8;
+  padding: 3px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0.14s ease;
 }
 
-.rag-history-item:hover .rag-history-pin,
-.rag-history-pin.is-pinned,
-.rag-history-item.is-active .rag-history-pin,
-.rag-history-item:hover .rag-history-more,
-.rag-history-more[aria-expanded="true"],
-.rag-history-item.is-active .rag-history-more {
+.rag-history-pin:hover::after,
+.rag-history-pin:focus-visible::after {
   opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 .rag-history-pin.is-pinned {
@@ -2151,6 +2182,13 @@ button.chip:hover {
 .rag-history-more:hover {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+@media (hover: none) {
+  .rag-history-actions {
+    opacity: 1;
+    visibility: visible;
+  }
 }
 
 .rag-history-menu {
