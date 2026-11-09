@@ -80,25 +80,6 @@ function formatProcessMs(value) {
   return `${formatNumber(Math.max(0, Math.round(number)))} ms`;
 }
 
-function processTimeToggleMarkup(durationMs) {
-  return `<button type="button" class="rag-process-time-toggle"
-    aria-expanded="false" aria-label="顯示耗時" title="顯示耗時"
-  ><span class="rag-process-time-sign">+</span><span class="rag-process-time-value" hidden>${escapeHtml(
-    formatProcessMs(durationMs),
-  )}</span></button>`;
-}
-
-function toggleProcessDuration(button) {
-  const expanded = button.getAttribute("aria-expanded") === "true";
-  button.setAttribute("aria-expanded", String(!expanded));
-  button.setAttribute("aria-label", expanded ? "顯示耗時" : "隱藏耗時");
-  button.title = expanded ? "顯示耗時" : "隱藏耗時";
-  const sign = button.querySelector(".rag-process-time-sign");
-  const value = button.querySelector(".rag-process-time-value");
-  if (sign) sign.textContent = expanded ? "+" : "-";
-  if (value) value.hidden = expanded;
-}
-
 function setProcessExpanded(panel, expanded) {
   if (!panel) return;
   panel.classList.toggle("is-open", expanded);
@@ -130,7 +111,7 @@ function processPanelMarkup() {
           <span class="rag-process-meta">送出</span>
         </div>
       </div>
-      <div class="rag-process-hint">完成後會自動收合；點擊按鈕可展開完整流程，點擊 + 可顯示父流程耗時。</div>
+      <div class="rag-process-hint">完成後會自動收合；點擊按鈕可展開完整流程。</div>
     </div>
   </div>`;
 }
@@ -152,31 +133,11 @@ function createProcessController(answerCard) {
       updateText(item.element, ".rag-process-meta", "失敗");
       return;
     }
-    if (item.hasChildren) {
-      const meta = item.element.querySelector(".rag-process-meta");
-      if (meta) meta.innerHTML = processTimeToggleMarkup(item.durationMs);
-      return;
-    }
     updateText(
       item.element,
       ".rag-process-meta",
       formatProcessMs(item.durationMs),
     );
-  };
-
-  const markAncestors = (depth) => {
-    let target = depth - 1;
-    const previous = [...items.values()].reverse();
-    for (const item of previous) {
-      if (target < 0) break;
-      if (item.depth <= target) {
-        if (!item.hasChildren) {
-          item.hasChildren = true;
-          if (item.finished) renderFinishedMeta(item);
-        }
-        target = item.depth - 1;
-      }
-    }
   };
 
   const ensureItem = (segment) => {
@@ -188,7 +149,6 @@ function createProcessController(answerCard) {
         0,
         Math.min(6, Number(segment?.depth) || 0),
       );
-      markAncestors(depth);
       const element = document.createElement("div");
       element.className = "rag-process-item is-running";
       element.dataset.processKey = key;
@@ -199,10 +159,6 @@ function createProcessController(answerCard) {
       list.appendChild(element);
       item = {
         element,
-        segment,
-        depth,
-        hasChildren: false,
-        finished: false,
         failed: false,
         durationMs: 0,
       };
@@ -227,7 +183,6 @@ function createProcessController(answerCard) {
       const failed = segment.status === "error";
       item.element.classList.remove("is-running");
       item.element.classList.toggle("is-error", failed);
-      item.finished = true;
       item.failed = failed;
       item.durationMs = Number(segment.duration_ms) || 0;
       renderFinishedMeta(item);
@@ -1275,11 +1230,6 @@ export async function render(root) {
       const expanded =
         processToggle.getAttribute("aria-expanded") === "true";
       setProcessExpanded(panel, !expanded);
-      return;
-    }
-    const durationToggle = event.target.closest(".rag-process-time-toggle");
-    if (durationToggle) {
-      toggleProcessDuration(durationToggle);
       return;
     }
     const target = event.target.closest(
