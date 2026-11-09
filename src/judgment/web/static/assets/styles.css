@@ -9026,15 +9026,88 @@ button.chip:hover {
 
 .bench-progress {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
   color: var(--muted);
   font-size: 10px;
 }
 
+.bench-progress-head,
+.bench-progress-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.bench-progress-head strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.bench-progress-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.bench-progress-state .spinner {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+}
+
+.bench-progress-eta {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .bench-progress .processing-bar {
-  flex: 1;
+  width: 100%;
+  flex: none;
   margin: 0;
+}
+
+.bench-progress-bar.is-waiting::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.4;
+  animation: bench-progress-waiting 1.5s ease-in-out infinite;
+}
+
+@keyframes bench-progress-waiting {
+  0% {
+    left: -30%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.bench-progress .processing-bar-fill {
+  background: var(--accent);
+  transition: width 1s linear;
+}
+
+.bench-progress-foot {
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.bench-progress-foot [data-bench-slot="progress-elapsed"] {
+  color: var(--muted);
 }
 
 .bench-metrics {
