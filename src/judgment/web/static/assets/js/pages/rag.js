@@ -41,6 +41,41 @@ function answerPlaceholder() {
   </div>`;
 }
 
+function emptyConversationMarkup() {
+  return `<section class="card answer-card rag-empty-answer">${answerPlaceholder()}</section>`;
+}
+
+function turnMarkup(question, answerHtml) {
+  return `<div class="rag-turn">
+    <div class="rag-user-bubble">${escapeHtml(question)}</div>
+    <section class="card rag-assistant-turn" data-rag-answer>${answerHtml}</section>
+  </div>`;
+}
+
+function compactAnswerPayload(payload) {
+  return {
+    status: payload.status,
+    answer: payload.answer,
+    answer_source: payload.answer_source,
+    notice: payload.notice,
+    citations: Array.isArray(payload.citations) ? payload.citations : [],
+    judgments: Array.isArray(payload.judgments) ? payload.judgments : [],
+    law_sources: Array.isArray(payload.law_sources) ? payload.law_sources : [],
+    matched_terms: Array.isArray(payload.matched_terms)
+      ? payload.matched_terms
+      : [],
+    law_answer: payload.law_answer,
+    law_framework: payload.law_framework,
+    llm_model: payload.llm_model,
+    embedding_model: payload.embedding_model,
+    duration_ms: payload.duration_ms,
+    show_sources: payload.show_sources,
+    test_run: payload.test_run || null,
+    partial: false,
+    streaming: false,
+  };
+}
+
 const PROCESS_LABELS = {
   "http.request": "FastAPI 接收請求",
   "http.response": "回傳結果給前端",
@@ -839,7 +874,10 @@ function renderAnswerError(error, processHtml = "") {
 }
 
 function historySourceCount(entry) {
-  const payload = entry.payload || {};
+  const turns = Array.isArray(entry.turns) ? entry.turns : [];
+  const payload = turns.length
+    ? turns[turns.length - 1].payload || {}
+    : entry.payload || {};
   const citations = Array.isArray(payload.citations)
     ? payload.citations.length
     : 0;
@@ -856,13 +894,16 @@ function renderHistoryItem(entry, projectsById, index) {
   const id = entry.id ?? index;
   const sources = historySourceCount(entry);
   const project = projectsById.get(String(entry.project_id || ""));
+  const turns = Array.isArray(entry.turns) ? entry.turns : [];
+  const updatedAt = entry.updated_at || entry.created_at;
   return `<div class="rag-history-item${entry.pinned ? " is-pinned" : ""}">
     <button class="rag-history-open" type="button" data-history-open data-history-id="${escapeHtml(String(id))}">
       <span class="history-question">${escapeHtml(entry.title || "未命名提問")}</span>
       <span class="history-meta">
-        <span>${escapeHtml(formatRelativeTime(entry.created_at))}</span>
+        <span>${escapeHtml(formatRelativeTime(updatedAt))}</span>
         ${project ? `<span>· ${escapeHtml(project.name)}</span>` : ""}
         <span>· ${sources ? `${sources} 筆來源` : "無引用"}</span>
+        ${turns.length > 1 ? `<span>· ${turns.length} 輪</span>` : ""}
       </span>
     </button>
     <button class="rag-history-pin${entry.pinned ? " is-pinned" : ""}" type="button"
@@ -919,6 +960,9 @@ export async function render(root) {
   let recentLimit = 8;
   let lastQuestion = "";
   let requestSeq = 0;
+  let currentConversationId = null;
+  let conversationTurns = [];
+  let conversationActive = false;
   let testMode = false;
   let testModels = { embedding: [], llm: [] };
 
@@ -999,8 +1043,21 @@ export async function render(root) {
       </div>
     </header>
 
-    <section class="card answer-card" id="answer-card" aria-live="polite">
-      ${answerPlaceholder()}
+    <section class="rag-conversation" id="rag-conversation" aria-live="polite">
+      <div class="rag-turns" id="rag-turns">
+        ${emptyConversationMarkup()}
+      </div>
+      <form class="rag-followup" id="rag-followup-form" hidden>
+        <label class="sr-only" for="rag-followup-question">繼續提問</label>
+        <textarea class="rag-followup-input" id="rag-followup-question" name="question" rows="1"
+          maxlength="500" placeholder="繼續問下一個問題…" aria-label="繼續提問"></textarea>
+        <div class="rag-followup-actions">
+          <span class="rag-followup-hint"><kbd>Enter</kbd> 送出 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 換行</span>
+          <button class="btn btn-primary" type="submit" id="rag-followup-submit">
+            ${icon("sparkles", 15)}<span>繼續檢索</span>
+          </button>
+        </div>
+      </form>
     </section>
       </div>
     </div>
@@ -1012,7 +1069,11 @@ export async function render(root) {
   const form = root.querySelector("#rag-form");
   const input = root.querySelector("#rag-question");
   const submit = root.querySelector("#rag-submit");
-  const answerCard = root.querySelector("#answer-card");
+  const page = root.querySelector(".rag-page");
+  const turnsBox = root.querySelector("#rag-turns");
+  const followupForm = root.querySelector("#rag-followup-form");
+  const followupInput = root.querySelector("#rag-followup-question");
+  const followupSubmit = root.querySelector("#rag-followup-submit");
   const historyBox = root.querySelector("#rag-history");
   const storageNote = root.querySelector("#rag-storage-note");
   const clearButton = root.querySelector("#rag-clear-history");
@@ -1041,6 +1102,72 @@ export async function render(root) {
   const resizeInput = () => {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
+  };
+
+  const resizeFollowupInput = () => {
+    followupInput.style.height = "auto";
+    followupInput.style.height = `${Math.min(followupInput.scrollHeight, 160)}px`;
+  };
+
+  const setConversationMode = (active) => {
+    conversationActive = Boolean(active);
+    page.classList.toggle("has-conversation", conversationActive);
+  };
+
+  const showFollowup = () => {
+    if (!conversationActive) return;
+    followupForm.hidden = false;
+    resizeFollowupInput();
+  };
+
+  const hideFollowup = () => {
+    followupForm.hidden = true;
+  };
+
+  const appendConversationTurn = (question, answerHtml) => {
+    const placeholder = turnsBox.querySelector(".rag-empty-answer");
+    if (placeholder) placeholder.remove();
+    turnsBox.insertAdjacentHTML("beforeend", turnMarkup(question, answerHtml));
+    const turnElement = turnsBox.lastElementChild;
+    const answerElement = turnElement?.querySelector("[data-rag-answer]");
+    window.requestAnimationFrame(() => {
+      turnElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return { turnElement, answerElement };
+  };
+
+  const renderStoredConversation = () => {
+    turnsBox.innerHTML = conversationTurns.length
+      ? conversationTurns
+          .map((turn) =>
+            turnMarkup(
+              turn.question,
+              renderAnswer(turn.question, turn.payload || {}, ""),
+            ),
+          )
+          .join("")
+      : emptyConversationMarkup();
+  };
+
+  const openConversation = (entry) => {
+    const turns = Array.isArray(entry.turns) ? entry.turns : [];
+    if (!turns.length) return false;
+    requestSeq += 1;
+    stopFlowPoll();
+    paintTestFlow(null);
+    currentConversationId = entry.id ?? null;
+    conversationTurns = turns.map((turn) => ({ ...turn }));
+    lastQuestion =
+      conversationTurns[conversationTurns.length - 1]?.question || "";
+    setConversationMode(true);
+    renderStoredConversation();
+    showFollowup();
+    setBusy(submit, false);
+    setBusy(followupSubmit, false);
+    window.setTimeout(() => {
+      followupForm.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 50);
+    return true;
   };
 
   const renderLibrary = () => {
@@ -1207,10 +1334,17 @@ export async function render(root) {
     stopFlowPoll();
     paintTestFlow(null);
     lastQuestion = "";
+    currentConversationId = null;
+    conversationTurns = [];
+    setConversationMode(false);
+    hideFollowup();
+    turnsBox.innerHTML = emptyConversationMarkup();
     input.value = "";
     resizeInput();
-    answerCard.innerHTML = answerPlaceholder();
+    followupInput.value = "";
+    resizeFollowupInput();
     setBusy(submit, false);
+    setBusy(followupSubmit, false);
     if (judgmentDialog?.open) judgmentDialog.close();
     if (lawDialog?.open) lawDialog.close();
     input.focus();
@@ -1234,6 +1368,61 @@ export async function render(root) {
       renderLibrary();
       historyBox.innerHTML = `<div class="rag-library-empty">無法讀取本機紀錄。</div>`;
     }
+  };
+
+  const recordTurn = async (question, payload, projectId, requestToken) => {
+    const turns = conversationTurns;
+    const conversationId = currentConversationId;
+    turns.push({
+      question,
+      asked_at: new Date().toISOString(),
+      payload: compactAnswerPayload(payload),
+    });
+    const citations = Array.isArray(payload.citations) ? payload.citations : [];
+    const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
+    const summary = {
+      question,
+      status: payload.status,
+      citations: citations.map((item) => item.law_name),
+      judgments: judgments.map((item) => item.jid),
+    };
+    const detail = `${payload.status || "preview"} · ${turns.length} 輪`;
+    const updatedAt = new Date().toISOString();
+    const applyId = (id) => {
+      if (requestToken === requestSeq) currentConversationId = id;
+    };
+    if (conversationId) {
+      const updated = await updateHistoryEntry(conversationId, {
+        turns,
+        detail,
+        payload: summary,
+        updated_at: updatedAt,
+      });
+      if (!updated) {
+        const id = await addHistory({
+          kind: "rag",
+          title: turns[0]?.question || question,
+          detail,
+          project_id: projectId,
+          turns,
+          payload: summary,
+          updated_at: updatedAt,
+        });
+        applyId(id);
+      }
+    } else {
+      const id = await addHistory({
+        kind: "rag",
+        title: turns[0]?.question || question,
+        detail,
+        project_id: projectId,
+        turns,
+        payload: summary,
+        updated_at: updatedAt,
+      });
+      applyId(id);
+    }
+    await refreshHistory();
   };
 
   const loadModeNotice = async () => {
@@ -1715,7 +1904,7 @@ export async function render(root) {
     if (outside) judgmentDialog.close();
   });
 
-  answerCard.addEventListener("click", (event) => {
+  turnsBox.addEventListener("click", (event) => {
     const processToggle = event.target.closest(".rag-process-toggle");
     if (processToggle) {
       const panel = processToggle.closest(".rag-process");
@@ -1739,7 +1928,7 @@ export async function render(root) {
     openParquetJudgment(target.dataset.jid || "");
   });
 
-  answerCard.addEventListener("keydown", (event) => {
+  turnsBox.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const target = event.target.closest(
       '[data-action="open-parquet-judgment"], [data-action="open-law-source"]',
@@ -1757,21 +1946,41 @@ export async function render(root) {
     openParquetJudgment(target.dataset.jid || "");
   });
 
-  const runQuestion = async (question) => {
+  const runQuestion = async (
+    question,
+    { fresh = false, source = "hero" } = {},
+  ) => {
     const trimmed = question.trim();
     if (!trimmed) {
       toast("請先輸入問題。", "warn");
-      input.focus();
+      (source === "followup" ? followupInput : input).focus();
       return;
+    }
+    if (fresh || !conversationActive) {
+      currentConversationId = null;
+      conversationTurns = [];
+      turnsBox.innerHTML = "";
     }
     const requestToken = ++requestSeq;
     const isStale = () => disposed || requestToken !== requestSeq;
     const projectId = activeProjectId;
     lastQuestion = trimmed;
-    input.value = trimmed;
-    resizeInput();
-    answerCard.innerHTML = answerLoading(trimmed, testMode);
-    const processController = testMode ? null : createProcessController(answerCard);
+    setConversationMode(true);
+    hideFollowup();
+    if (source === "followup") {
+      followupInput.value = "";
+      resizeFollowupInput();
+    } else {
+      input.value = "";
+      resizeInput();
+    }
+    const { answerElement } = appendConversationTurn(
+      trimmed,
+      answerLoading(trimmed, testMode),
+    );
+    const processController = testMode
+      ? null
+      : createProcessController(answerElement);
     if (testMode) {
       paintTestFlow(null);
       startFlowPoll();
@@ -1780,17 +1989,18 @@ export async function render(root) {
       paintTestFlow(null);
     }
     setBusy(submit, true, "檢索中…");
+    setBusy(followupSubmit, true, "檢索中…");
     let partialPayload = null;
     let partialAnswer = "";
     const applyPartialAnswer = (payload) => {
       if (isStale() || !payload?.partial) return;
-      const body = answerCard.querySelector(".answer-body");
+      const body = answerElement.querySelector(".answer-body");
       if (!body) return;
       partialPayload = payload;
       partialAnswer = String(payload.answer || "");
       body.innerHTML = renderAnswerBody(payload);
       processController?.collapse?.();
-      const title = answerCard.querySelector(".answer-head-title");
+      const title = answerElement.querySelector(".answer-head-title");
       if (title) {
         title.textContent = payload.streaming
           ? "LLM 回答生成中"
@@ -1800,13 +2010,13 @@ export async function render(root) {
     const appendPartialToken = (text) => {
       if (isStale() || !text || !partialPayload?.streaming) return;
       partialAnswer += text;
-      const target = answerCard.querySelector("[data-partial-answer]");
+      const target = answerElement.querySelector("[data-partial-answer]");
       if (target) target.textContent = partialAnswer;
     };
     const resetPartialTokens = () => {
       if (isStale() || !partialPayload?.streaming) return;
       partialAnswer = "";
-      const target = answerCard.querySelector("[data-partial-answer]");
+      const target = answerElement.querySelector("[data-partial-answer]");
       if (target) target.textContent = "正在重新生成回答…";
     };
     try {
@@ -1823,45 +2033,39 @@ export async function render(root) {
       if (isStale()) return;
       stopFlowPoll();
       const processHtml = processController?.finish(true) || "";
-      answerCard.innerHTML = renderAnswer(trimmed, payload, processHtml);
+      answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
       if (payload.test_run?.run_id) {
         await loadExactTestFlow(payload.test_run.run_id);
       } else {
         paintTestFlow(null);
       }
-      const citations = Array.isArray(payload.citations) ? payload.citations : [];
-      const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
-      const sources = citations.length + judgments.length;
-      await addHistory({
-        kind: "rag",
-        title: trimmed,
-        detail: `${payload.status || "preview"} · ${sources} 筆來源`,
-        project_id: projectId,
-        payload: {
-          question: trimmed,
-          status: payload.status,
-          citations: citations.map((item) => item.law_name),
-          judgments: judgments.map((item) => item.jid),
-        },
-      });
-      await refreshHistory();
+      await recordTurn(trimmed, payload, projectId, requestToken);
+      if (isStale()) return;
+      showFollowup();
     } catch (error) {
       if (isStale()) return;
       stopFlowPoll();
       const processHtml = processController?.finish(false) || "";
-      answerCard.innerHTML = renderAnswerError(error, processHtml);
+      answerElement.innerHTML = renderAnswerError(error, processHtml);
+      showFollowup();
       toast(error.message || "檢索失敗。", "danger");
     } finally {
       if (!isStale()) {
         stopFlowPoll();
         setBusy(submit, false);
+        setBusy(followupSubmit, false);
       }
     }
   };
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    runQuestion(input.value);
+    runQuestion(input.value, { fresh: true, source: "hero" });
+  });
+
+  followupForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runQuestion(followupInput.value, { fresh: false, source: "followup" });
   });
 
   input.addEventListener("input", resizeInput);
@@ -1869,6 +2073,14 @@ export async function render(root) {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       form.requestSubmit();
+    }
+  });
+
+  followupInput.addEventListener("input", resizeFollowupInput);
+  followupInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      followupForm.requestSubmit();
     }
   });
 
@@ -1927,9 +2139,10 @@ export async function render(root) {
     if (!entry) return;
     activeProjectId = String(entry.project_id || "");
     renderLibrary();
-    input.value = entry.title;
-    resizeInput();
-    runQuestion(entry.title);
+    if (openConversation(entry)) return;
+    currentConversationId = null;
+    conversationTurns = [];
+    runQuestion(entry.title, { fresh: true, source: "history" });
   });
 
   library.addEventListener("submit", async (event) => {
@@ -1966,7 +2179,7 @@ export async function render(root) {
     window.removeEventListener("judgment:test-mode", onTestModeChange);
     if (lastQuestion) {
       // Keep the last question available for screen readers after navigation.
-      answerCard.setAttribute("data-last-question", lastQuestion);
+      turnsBox.setAttribute("data-last-question", lastQuestion);
     }
   };
 }

@@ -101,9 +101,11 @@ function normalizeEntry(entry) {
     title: String(entry.title || ""),
     detail: String(entry.detail || ""),
     payload: entry.payload || {},
+    turns: Array.isArray(entry.turns) ? entry.turns : [],
     pinned: Boolean(entry.pinned),
     project_id: String(entry.project_id || ""),
     created_at: createdAt,
+    updated_at: entry.updated_at || createdAt,
   };
 }
 
@@ -201,7 +203,11 @@ export async function listHistory({ keyword = "", limit = 50 } = {}) {
           .toLowerCase()
           .includes(needle);
       })
-      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .sort((a, b) =>
+        String(b.updated_at || b.created_at).localeCompare(
+          String(a.updated_at || a.created_at),
+        ),
+      )
       .slice(0, limit);
   } catch (error) {
     degraded = true;
@@ -213,7 +219,11 @@ export async function listHistory({ keyword = "", limit = 50 } = {}) {
           .includes(needle);
       })
       .slice()
-      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .sort((a, b) =>
+        String(b.updated_at || b.created_at).localeCompare(
+          String(a.updated_at || a.created_at),
+        ),
+      )
       .slice(0, limit);
   }
 }
