@@ -540,6 +540,7 @@ def run_test_mode(
                     model,
                     timeout=None,
                     query_timeout=None,
+                    health_timeout=None,
                 )
                 vector = embedder.embed_query(question)
                 vectors[model] = vector

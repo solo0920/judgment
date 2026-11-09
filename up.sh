@@ -109,7 +109,7 @@ fi
 probe_ollama_model() {
   local url="$1"
   local model="$2"
-  local timeout="${JUDGMENT_EMBEDDING_PROBE_TIMEOUT:-2}"
+  local timeout="${JUDGMENT_EMBEDDING_PROBE_TIMEOUT:-3}"
   local tags
   tags="$(curl -fsS --max-time "${timeout}" "${url}/api/tags" 2>/dev/null || true)"
   [[ -n "${tags}" ]] || return 1

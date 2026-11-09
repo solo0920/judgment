@@ -1904,6 +1904,7 @@ def _query_qdrant(
         settings.embedding_model,
         timeout=settings.embedding_timeout_seconds,
         query_timeout=settings.embedding_query_timeout_seconds,
+        health_timeout=settings.embedding_health_timeout_seconds,
         fallback_base_url=settings.embedding_fallback_url,
     )
     embed_started = time.perf_counter()

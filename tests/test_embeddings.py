@@ -83,6 +83,10 @@ def test_query_embedding_uses_short_primary_timeout_then_local_fallback(
         return FakeResponse([[0.1, 0.2, 0.3, 0.4]])
 
     monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    monkeypatch.setattr(
+        "judgment.embeddings.ollama_health_ok",
+        lambda *args, **kwargs: True,
+    )
     embedder = OllamaEmbedder(
         "http://primary.test",
         "bge-m3",
@@ -109,6 +113,10 @@ def test_primary_timeout_cooldown_skips_primary_for_next_query(monkeypatch) -> N
         return FakeResponse([[0.1, 0.2]])
 
     monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    monkeypatch.setattr(
+        "judgment.embeddings.ollama_health_ok",
+        lambda *args, **kwargs: True,
+    )
     first = OllamaEmbedder(
         "http://primary.test",
         "bge-m3",
@@ -136,3 +144,60 @@ def test_primary_timeout_cooldown_skips_primary_for_next_query(monkeypatch) -> N
         "http://127.0.0.1:11434/api/embed",
     ]
     assert second.using_fallback is True
+
+
+def test_non_local_primary_health_check_failure_uses_local_without_embedding(
+    monkeypatch,
+) -> None:
+    embedding_calls = []
+    health_calls = []
+
+    def fake_post(url, **kwargs):
+        embedding_calls.append(url)
+        return FakeResponse([[0.1, 0.2]])
+
+    def fake_health(url, timeout=0):
+        health_calls.append((url, timeout))
+        return False
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    monkeypatch.setattr("judgment.embeddings.ollama_health_ok", fake_health)
+    embedder = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=120,
+        query_timeout=10,
+        health_timeout=3,
+        fallback_base_url="http://127.0.0.1:11434",
+    )
+    assert embedder.embed_query("測試") == [0.1, 0.2]
+    assert health_calls == [("http://primary.test", 3.0)]
+    assert embedding_calls == ["http://127.0.0.1:11434/api/embed"]
+    assert embedder.using_fallback is True
+
+
+def test_local_primary_skips_health_check(monkeypatch) -> None:
+    health_calls = []
+    embedding_calls = []
+
+    def fake_post(url, **kwargs):
+        embedding_calls.append(url)
+        return FakeResponse([[0.1, 0.2]])
+
+    def fake_health(url, timeout=0):
+        health_calls.append((url, timeout))
+        return False
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    monkeypatch.setattr("judgment.embeddings.ollama_health_ok", fake_health)
+    embedder = OllamaEmbedder(
+        "http://127.0.0.1:11434",
+        "bge-m3",
+        timeout=120,
+        query_timeout=10,
+        health_timeout=3,
+        fallback_base_url="http://fallback.test",
+    )
+    assert embedder.embed_query("測試") == [0.1, 0.2]
+    assert health_calls == []
+    assert embedding_calls == ["http://127.0.0.1:11434/api/embed"]

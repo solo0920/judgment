@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlparse
 
 import httpx
 
@@ -11,6 +12,27 @@ logger = logging.getLogger(__name__)
 
 _PRIMARY_COOLDOWNS: Dict[str, float] = {}
 _COOLDOWN_LOCK = threading.Lock()
+_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+
+
+def _is_local_url(url: str) -> bool:
+    hostname = (urlparse(str(url or "")).hostname or "").lower()
+    return hostname in _LOCAL_HOSTNAMES or hostname.startswith("127.")
+
+
+def ollama_health_ok(base_url: str, timeout: float = 3.0) -> bool:
+    """Return True when the Ollama HTTP service answers within the timeout."""
+    if not base_url:
+        return False
+    try:
+        response = httpx.get(
+            f"{base_url.rstrip('/')}/api/tags",
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return True
+    except Exception:
+        return False
 
 
 def _primary_cooldown_key(base_url: str, model: str) -> str:
@@ -91,6 +113,7 @@ class OllamaEmbedder:
         *,
         timeout: Optional[float] = 120.0,
         query_timeout: Optional[float] = 10.0,
+        health_timeout: Optional[float] = 3.0,
         fallback_base_url: str = "",
         fallback_cooldown_seconds: float = 60.0,
     ) -> None:
@@ -100,6 +123,9 @@ class OllamaEmbedder:
         self.timeout = None if timeout is None else float(timeout)
         self.query_timeout = (
             None if query_timeout is None else float(query_timeout)
+        )
+        self.health_timeout = (
+            None if health_timeout is None else float(health_timeout)
         )
         self.fallback_cooldown_seconds = max(
             0.0, float(fallback_cooldown_seconds)
@@ -159,6 +185,7 @@ class OllamaEmbedder:
         texts: Sequence[str],
         *,
         primary_timeout: Optional[float] = None,
+        check_primary_health: bool = False,
     ) -> List[List[float]]:
         values = [str(text or "") for text in texts]
         if not values:
@@ -172,29 +199,57 @@ class OllamaEmbedder:
         )
         primary_error: Optional[Exception] = None
         if primary_available:
-            try:
-                result = self._embed_at(
-                    self.base_url,
-                    values,
-                    timeout=primary_timeout,
+            health_failed = bool(
+                check_primary_health
+                and self.health_timeout
+                and not _is_local_url(self.base_url)
+                and not ollama_health_ok(
+                    self.base_url, timeout=self.health_timeout
                 )
-                if self._using_fallback:
-                    logger.info("Embedding primary recovered: %s", self.base_url)
-                self._using_fallback = False
-                _clear_primary_down(self._cooldown_key)
-                return result
-            except EmbeddingError as exc:
-                primary_error = exc
+            )
+            if health_failed:
+                primary_error = EmbeddingError(
+                    "Embedding API 健康檢查失敗或逾時"
+                    f"（{self.health_timeout}s）：{self.base_url}"
+                )
                 _mark_primary_down(
                     self._cooldown_key, self.fallback_cooldown_seconds
                 )
                 if not self.fallback_base_url:
-                    raise
+                    raise primary_error
                 logger.warning(
-                    "Embedding primary unavailable; using fallback %s: %s",
+                    "Embedding primary health check failed; "
+                    "using fallback %s: %s",
                     self.fallback_base_url,
-                    exc,
+                    primary_error,
                 )
+            else:
+                try:
+                    result = self._embed_at(
+                        self.base_url,
+                        values,
+                        timeout=primary_timeout,
+                    )
+                    if self._using_fallback:
+                        logger.info(
+                            "Embedding primary recovered: %s", self.base_url
+                        )
+                    self._using_fallback = False
+                    _clear_primary_down(self._cooldown_key)
+                    return result
+                except EmbeddingError as exc:
+                    primary_error = exc
+                    _mark_primary_down(
+                        self._cooldown_key, self.fallback_cooldown_seconds
+                    )
+                    if not self.fallback_base_url:
+                        raise
+                    logger.warning(
+                        "Embedding primary unavailable; "
+                        "using fallback %s: %s",
+                        self.fallback_base_url,
+                        exc,
+                    )
         elif self.fallback_base_url:
             logger.debug(
                 "Embedding primary cooling down; using fallback %s",
@@ -217,7 +272,11 @@ class OllamaEmbedder:
         raise EmbeddingError("沒有可用的 embedding provider")
 
     def embed_query(self, text: str) -> List[float]:
-        vectors = self.embed([text], primary_timeout=self.query_timeout)
+        vectors = self.embed(
+            [text],
+            primary_timeout=self.query_timeout,
+            check_primary_health=True,
+        )
         if not vectors:
             raise EmbeddingError("Embedding API 沒有回傳查詢向量")
         return vectors[0]
