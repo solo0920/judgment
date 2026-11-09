@@ -133,11 +133,31 @@ function createProcessController(answerCard) {
       updateText(item.element, ".rag-process-meta", "失敗");
       return;
     }
+    if (item.hasChildren) {
+      updateText(item.element, ".rag-process-meta", "");
+      return;
+    }
     updateText(
       item.element,
       ".rag-process-meta",
       formatProcessMs(item.durationMs),
     );
+  };
+
+  const markAncestors = (depth) => {
+    let target = depth - 1;
+    const previous = [...items.values()].reverse();
+    for (const item of previous) {
+      if (target < 0) break;
+      if (item.depth <= target) {
+        if (!item.hasChildren) {
+          item.hasChildren = true;
+          item.element.dataset.hasChildren = "true";
+          if (item.finished) renderFinishedMeta(item);
+        }
+        target = item.depth - 1;
+      }
+    }
   };
 
   const ensureItem = (segment) => {
@@ -149,6 +169,7 @@ function createProcessController(answerCard) {
         0,
         Math.min(6, Number(segment?.depth) || 0),
       );
+      markAncestors(depth);
       const element = document.createElement("div");
       element.className = "rag-process-item is-running";
       element.dataset.processKey = key;
@@ -159,6 +180,9 @@ function createProcessController(answerCard) {
       list.appendChild(element);
       item = {
         element,
+        depth,
+        hasChildren: false,
+        finished: false,
         failed: false,
         durationMs: 0,
       };
@@ -183,6 +207,7 @@ function createProcessController(answerCard) {
       const failed = segment.status === "error";
       item.element.classList.remove("is-running");
       item.element.classList.toggle("is-error", failed);
+      item.finished = true;
       item.failed = failed;
       item.durationMs = Number(segment.duration_ms) || 0;
       renderFinishedMeta(item);
@@ -199,7 +224,12 @@ function createProcessController(answerCard) {
     if (!panel) return "";
     panel.querySelectorAll(".rag-process-item.is-running").forEach((element) => {
       element.classList.remove("is-running");
-      updateText(element, ".rag-process-meta", ok ? "完成" : "中斷");
+      const hasChildren = element.dataset.hasChildren === "true";
+      updateText(
+        element,
+        ".rag-process-meta",
+        hasChildren ? "" : ok ? "完成" : "中斷",
+      );
     });
     const stepCount = list?.children.length || items.size;
     const elapsed = formatProcessMs(Math.max(0, performance.now() - started));
