@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
@@ -95,6 +96,23 @@ def _parse_json_lines(output: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def _path_bytes(path: Path) -> int:
+    root = Path(path).expanduser()
+    try:
+        if root.is_file():
+            return int(root.stat().st_size)
+    except OSError:
+        return 0
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                continue
+    return total
+
+
 def _docker_usage() -> Dict[str, Any]:
     if shutil.which("docker") is None:
         return {
@@ -121,12 +139,28 @@ def _docker_usage() -> Dict[str, Any]:
     df_result = _run(
         ["docker", "system", "df", "--format", "{{json .}}"], timeout=8
     )
+    detail_result = _run(
+        ["docker", "system", "df", "-v", "--format", "{{json .}}"], timeout=8
+    )
 
     ps_rows = _parse_json_lines(ps_result.stdout if ps_result else "")
     stats_rows = _parse_json_lines(stats_result.stdout if stats_result else "")
     df_rows = _parse_json_lines(df_result.stdout if df_result else "")
+    detail_payload: Dict[str, Any] = {}
+    if detail_result and detail_result.stdout.strip():
+        try:
+            raw_detail = json.loads(detail_result.stdout)
+            if isinstance(raw_detail, dict):
+                detail_payload = raw_detail
+        except json.JSONDecodeError:
+            detail_payload = {}
     stats_by_name = {
         str(row.get("Name") or ""): row for row in stats_rows if row.get("Name")
+    }
+    container_sizes = {
+        str(row.get("Names") or ""): _parse_bytes(row.get("Size"))
+        for row in (detail_payload.get("Containers") or [])
+        if row.get("Names")
     }
 
     containers: List[Dict[str, Any]] = []
@@ -142,6 +176,7 @@ def _docker_usage() -> Dict[str, Any]:
                 "state": row.get("State") or "",
                 "status": row.get("Status") or "",
                 "service": DOCKER_DB_CONTAINERS.get(name),
+                "size_bytes": container_sizes.get(name),
                 "cpu_percent": _parse_percent(stats.get("CPUPerc")),
                 "memory_used": memory_used,
                 "memory_limit": memory_limit,
@@ -164,11 +199,53 @@ def _docker_usage() -> Dict[str, Any]:
         }
         for row in df_rows
     ]
+
+    image_bytes = sum(
+        _parse_bytes(row.get("UniqueSize") or row.get("Size")) or 0
+        for row in (detail_payload.get("Images") or [])
+    )
+    container_bytes = sum(
+        _parse_bytes(row.get("Size")) or 0
+        for row in (detail_payload.get("Containers") or [])
+    )
+    build_cache_bytes = sum(
+        _parse_bytes(row.get("Size")) or 0
+        for row in (detail_payload.get("BuildCache") or [])
+    )
+    volume_rows = detail_payload.get("Volumes") or []
+    volume_bytes = sum(_parse_bytes(row.get("Size")) or 0 for row in volume_rows)
+    judgment_volumes: Dict[str, Dict[str, Any]] = {}
+    for row in volume_rows:
+        name = str(row.get("Name") or "")
+        size_bytes = _parse_bytes(row.get("Size"))
+        if name.endswith("judgment_pgdata") or name.endswith(
+            "judgment_postgres_data"
+        ):
+            judgment_volumes["postgres"] = {
+                "name": name,
+                "size": row.get("Size") or "",
+                "size_bytes": size_bytes,
+            }
+        elif name.endswith("judgment_qdrant"):
+            judgment_volumes["qdrant"] = {
+                "name": name,
+                "size": row.get("Size") or "",
+                "size_bytes": size_bytes,
+            }
+
     return {
         "available": True,
         "detail": f"Docker {version.stdout.strip() or 'daemon'}",
         "containers": containers,
         "system": system,
+        "breakdown": {
+            "images_bytes": image_bytes,
+            "containers_bytes": container_bytes,
+            "build_cache_bytes": build_cache_bytes,
+            "volumes_bytes": volume_bytes,
+            "layers_bytes": image_bytes + container_bytes + build_cache_bytes,
+        },
+        "judgment_volumes": judgment_volumes,
     }
 
 
@@ -352,6 +429,9 @@ def build_system_usage(
 
     postgres_container = _find_container(containers, "judgment-postgres")
     qdrant_container = _find_container(containers, "judgment-qdrant")
+    judgment_volumes = docker.get("judgment_volumes") or {}
+    postgres_volume = judgment_volumes.get("postgres") or {}
+    qdrant_volume = judgment_volumes.get("qdrant") or {}
 
     databases = [
         {
@@ -364,6 +444,8 @@ def build_system_usage(
             "memory_used": (postgres_container or {}).get("memory_used"),
             "memory_limit": (postgres_container or {}).get("memory_limit"),
             "memory_percent": (postgres_container or {}).get("memory_percent"),
+            "volume_name": postgres_volume.get("name"),
+            "volume_bytes": postgres_volume.get("size_bytes"),
             **postgres,
         },
         {
@@ -376,11 +458,41 @@ def build_system_usage(
             "memory_used": (qdrant_container or {}).get("memory_used"),
             "memory_limit": (qdrant_container or {}).get("memory_limit"),
             "memory_percent": (qdrant_container or {}).get("memory_percent"),
+            "volume_name": qdrant_volume.get("name"),
+            "volume_bytes": qdrant_volume.get("size_bytes"),
             **qdrant,
         },
     ]
 
     project_root = Path(__file__).resolve().parents[3]
+    frontend_path = project_root / "frontend"
+    backend_path = project_root / "src" / "judgment"
+    law_parquet_path = Path(data_dir) / "raw_parquet"
+    judgment_data_root = Path(settings.judgment_data_dir).expanduser()
+    judgment_parquet_path = judgment_data_root / "parquet" / "raw_judgments"
+    if not judgment_parquet_path.exists():
+        legacy_path = judgment_data_root / "raw_parquet"
+        if legacy_path.exists():
+            judgment_parquet_path = legacy_path
+    law_parquet_path = law_parquet_path.resolve()
+    judgment_parquet_path = judgment_parquet_path.resolve()
+    frontend_bytes = _path_bytes(frontend_path)
+    backend_bytes = _path_bytes(backend_path)
+    law_parquet_bytes = _path_bytes(law_parquet_path)
+    judgment_parquet_bytes = _path_bytes(judgment_parquet_path)
+    parquet_bytes = law_parquet_bytes + judgment_parquet_bytes
+    docker_breakdown = docker.get("breakdown") or {}
+    docker_layers_bytes = int(docker_breakdown.get("layers_bytes") or 0)
+    postgres_volume_bytes = int(postgres_volume.get("size_bytes") or 0)
+    qdrant_volume_bytes = int(qdrant_volume.get("size_bytes") or 0)
+    judgment_total_bytes = (
+        frontend_bytes
+        + backend_bytes
+        + docker_layers_bytes
+        + postgres_volume_bytes
+        + qdrant_volume_bytes
+        + parquet_bytes
+    )
     disks = _disk_usage(
         [
             ("系統磁碟", Path("/")),
@@ -388,6 +500,7 @@ def build_system_usage(
             ("資料目錄", Path(data_dir)),
         ]
     )
+    filesystem = disks[0] if disks else {}
 
     overall = "operational"
     if postgres["status"] == "unavailable":
@@ -402,6 +515,42 @@ def build_system_usage(
         "disk": disks,
         "docker": docker,
         "databases": databases,
+        "storage": {
+            "application": {
+                "frontend_bytes": frontend_bytes,
+                "frontend_path": str(frontend_path),
+                "backend_bytes": backend_bytes,
+                "backend_path": str(backend_path),
+            },
+            "parquet": {
+                "law_bytes": law_parquet_bytes,
+                "law_path": str(law_parquet_path),
+                "judgment_bytes": judgment_parquet_bytes,
+                "judgment_path": str(judgment_parquet_path),
+                "total_bytes": parquet_bytes,
+            },
+            "docker": {
+                "layers_bytes": docker_layers_bytes,
+                "images_bytes": int(docker_breakdown.get("images_bytes") or 0),
+                "containers_bytes": int(
+                    docker_breakdown.get("containers_bytes") or 0
+                ),
+                "build_cache_bytes": int(
+                    docker_breakdown.get("build_cache_bytes") or 0
+                ),
+            },
+            "volumes": {
+                "postgres": postgres_volume,
+                "qdrant": qdrant_volume,
+                "total_bytes": postgres_volume_bytes + qdrant_volume_bytes,
+            },
+            "judgment_total_bytes": judgment_total_bytes,
+            "filesystem": {
+                "used_bytes": filesystem.get("used"),
+                "total_bytes": filesystem.get("total"),
+                "free_bytes": filesystem.get("free"),
+            },
+        },
         "paths": {
             "project": str(project_root),
             "data": str(Path(data_dir).expanduser().resolve()),

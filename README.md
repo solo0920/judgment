@@ -430,7 +430,7 @@ uv run judgment-normalize-courts --all
 | --- | --- | --- |
 | `GET` | `/api/health` | 存活檢查，回傳版本。 |
 | `GET` | `/api/status` | 服務狀態、資料筆數、架構、最近版本與下載執行。 |
-| `GET` | `/api/system-usage` | 主機 CPU／RAM／Swap、Docker 容器與 system df、PostgreSQL／Qdrant 資源與容量、磁碟空間。 |
+| `GET` | `/api/system-usage` | 主機 CPU／RAM／Swap、Docker 容器與 system df、前端／後端程式大小、PostgreSQL／Qdrant volume 與資料庫容量、Parquet 容量、磁碟空間與元件合計。 |
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
@@ -832,7 +832,7 @@ uv run judgment-index-vectors --recreate --batch-size 16
 - 每次執行都會寫入 `performance_records`，可在效能報表查看掃描數、索引數、耗時與 coverage。
 - 本機實測 embedding 吞吐量約 7.7–8.1 筆/秒（含 Qdrant 寫入與 PostgreSQL 記錄）。2026-11-08 完成第一段全量索引：141,554 筆、耗時 4 小時 52 分 43 秒、8.06 筆/秒、1,106 批、平均每批約 15.9 秒。索引可分批或中斷後重跑，不需一次完成。
 - 狀態頁與 RAG 側欄會顯示「已索引／判決總數／索引覆蓋率／collection points」；未建立 collection 或服務離線時會明確標示，不以其他數字代替。
-- 狀態頁左側提供分類 sidebar；「系統資料使用」分頁呼叫 `GET /api/system-usage`，顯示主機 CPU／RAM／Swap、Docker 容器 CPU／RAM／Net I/O／Block I/O／PIDs、Docker images／containers／volumes／build cache、PostgreSQL 資料庫與前 6 大資料表容量、Qdrant collection／points／segments，以及磁碟 total／used／free／百分比。
+- 狀態頁左側提供分類 sidebar；「系統資料使用」分頁呼叫 `GET /api/system-usage`，顯示主機 CPU／RAM／Swap、Docker 容器 CPU／RAM／Net I/O／Block I/O／PIDs、Docker images／containers／volumes／build cache、PostgreSQL 資料庫與前 6 大資料表容量、Qdrant collection／points／segments，以及磁碟 total／used／free／百分比。硬碟使用組成另列前端、後端、Docker 映像／容器／快取、PostgreSQL volume、Qdrant volume、Parquet（法規＋判決）與 Judgment 元件合計，並顯示目前 HDD 已使用量。
 
 #### 全量索引：自動接續
 
@@ -940,7 +940,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：129 passed（含靜態資源、服務狀態、系統資源使用、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：130 passed（含靜態資源、服務狀態、系統資源使用、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。

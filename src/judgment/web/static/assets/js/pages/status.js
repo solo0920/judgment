@@ -586,8 +586,18 @@ function renderDatabaseUsage(usage) {
       const details = isPostgres
         ? `${detailRow("資料庫", `<code>${escapeHtml(database.database || "—")}</code>`)}
            ${detailRow("資料庫大小", `<strong>${formatBytes(database.storage_bytes)}</strong>`)}
+           ${detailRow("Docker volume", `<strong>${formatBytes(database.volume_bytes)}</strong>${
+             database.volume_name
+               ? ` <code>${escapeHtml(database.volume_name)}</code>`
+               : ""
+           }`)}
            ${detailRow("連線數", `<strong>${formatNumber(database.connections)}</strong>`)}`
         : `${detailRow("Collection", `<code>${escapeHtml(database.collection || "—")}</code>`)}
+           ${detailRow("Docker volume", `<strong>${formatBytes(database.volume_bytes)}</strong>${
+             database.volume_name
+               ? ` <code>${escapeHtml(database.volume_name)}</code>`
+               : ""
+           }`)}
            ${detailRow("向量點數", `<strong>${formatNumber(database.points_count)}</strong>`)}
            ${detailRow("Collections", `<strong>${formatNumber(database.collections)}</strong>`)}
            ${detailRow("Segments", `<strong>${formatNumber(database.segments_count)}</strong>`)}`;
@@ -645,11 +655,97 @@ function renderDatabaseUsage(usage) {
     <div class="resource-db-grid">${cards.join("")}</div>`;
 }
 
+function storageRow(label, bytes, detail, total) {
+  const value = Number(bytes) || 0;
+  const percent = total ? (value / total) * 100 : 0;
+  return `<div class="storage-row">
+    <div class="storage-row-head">
+      <span>${escapeHtml(label)}</span>
+      <strong>${formatBytes(value)}</strong>
+    </div>
+    ${usageBar(percent)}
+    <div class="storage-row-detail">${detail}</div>
+  </div>`;
+}
+
+function renderStorageBreakdown(usage) {
+  const storage = usage.storage || {};
+  const application = storage.application || {};
+  const parquet = storage.parquet || {};
+  const docker = storage.docker || {};
+  const volumes = storage.volumes || {};
+  const postgresVolume = volumes.postgres || {};
+  const qdrantVolume = volumes.qdrant || {};
+  const total = Number(storage.judgment_total_bytes || 0);
+  return `<section class="card data-section storage-section">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("database", 14)}硬碟使用組成</span>
+      <span class="badge badge-neutral badge-mono">${formatBytes(total)}</span>
+    </div>
+    <div class="storage-list">
+      ${storageRow(
+        "前端",
+        application.frontend_bytes,
+        `<span class="mono">${escapeHtml(application.frontend_path || "—")}</span>`,
+        total,
+      )}
+      ${storageRow(
+        "後端",
+        application.backend_bytes,
+        `<span class="mono">${escapeHtml(application.backend_path || "—")}</span>`,
+        total,
+      )}
+      ${storageRow(
+        "Docker 映像／容器／快取",
+        docker.layers_bytes,
+        `Images ${formatBytes(docker.images_bytes)} · Containers ${formatBytes(
+          docker.containers_bytes,
+        )} · Build cache ${formatBytes(docker.build_cache_bytes)}`,
+        total,
+      )}
+      ${storageRow(
+        "PostgreSQL volume",
+        postgresVolume.size_bytes,
+        `<span class="mono">${escapeHtml(postgresVolume.name || "—")}</span>`,
+        total,
+      )}
+      ${storageRow(
+        "Qdrant volume",
+        qdrantVolume.size_bytes,
+        `<span class="mono">${escapeHtml(qdrantVolume.name || "—")}</span>`,
+        total,
+      )}
+      ${storageRow(
+        "Parquet",
+        parquet.total_bytes,
+        `法規 ${formatBytes(parquet.law_bytes)} · 判決 ${formatBytes(
+          parquet.judgment_bytes,
+        )}`,
+        total,
+      )}
+    </div>
+    <div class="storage-total">
+      <span>Judgment 元件合計</span>
+      <strong>${formatBytes(total)}</strong>
+    </div>
+    <div class="side-card-foot">
+      前端＋後端程式、Docker 映像／容器／建置快取、PostgreSQL／Qdrant volume 與原始 Parquet；不含 .venv 與其他非 Judgment Docker volume。
+    </div>
+  </section>`;
+}
+
 function renderResources(usage) {
   const host = usage.host || {};
   const cpu = host.cpu || {};
   const memory = host.memory || {};
   const swap = host.swap || {};
+  const storage = usage.storage || {};
+  const filesystem = storage.filesystem || {};
+  const componentTotal = Number(storage.judgment_total_bytes || 0);
+  const diskList = Array.isArray(usage.disk) ? usage.disk : [];
+  const primaryDisk = diskList[0] || {};
+  const diskTotal = Number(filesystem.total_bytes || primaryDisk.total || 0);
+  const componentPercent = diskTotal ? (componentTotal / diskTotal) * 100 : 0;
   const load = [cpu.load_1, cpu.load_5, cpu.load_15]
     .map((value) => (value === null || value === undefined ? "—" : value))
     .join(" / ");
@@ -657,8 +753,32 @@ function renderResources(usage) {
     host.uptime_seconds === null || host.uptime_seconds === undefined
       ? "—"
       : formatDuration(Number(host.uptime_seconds) * 1000);
-  const disks = (Array.isArray(usage.disk) ? usage.disk : [])
-    .map((disk) =>
+  const diskCards = [
+    primaryDisk.label
+      ? resourceCard(
+          "HDD 已使用",
+          "database",
+          `${formatNumber(primaryDisk.percent)}%`,
+          `${formatBytes(primaryDisk.used)} / ${formatBytes(
+            primaryDisk.total,
+          )} · 剩餘 ${formatBytes(
+            primaryDisk.free,
+          )}<br><span class="mono">${escapeHtml(primaryDisk.path || "")}</span>`,
+          primaryDisk.percent,
+        )
+      : "",
+    componentTotal
+      ? resourceCard(
+          "Judgment 元件合計",
+          "layers",
+          formatBytes(componentTotal),
+          `約占 HDD ${formatNumber(
+            componentPercent,
+          )}% · 前端／後端／Docker／DB volume／Parquet`,
+          componentPercent,
+        )
+      : "",
+    ...diskList.slice(1).map((disk) =>
       resourceCard(
         `硬碟 · ${disk.label}`,
         "layers",
@@ -670,7 +790,9 @@ function renderResources(usage) {
         )}</span>`,
         disk.percent,
       ),
-    )
+    ),
+  ]
+    .filter(Boolean)
     .join("");
   return `<div class="resource-section-head">
       <div>
@@ -715,8 +837,9 @@ function renderResources(usage) {
       )}
     </div>
     <div class="resource-grid resource-disk-grid">${
-      disks || `<div class="report-empty-inline">找不到可讀取的磁碟。</div>`
+      diskCards || `<div class="report-empty-inline">找不到可讀取的磁碟。</div>`
     }</div>
+    ${renderStorageBreakdown(usage)}
     ${renderDockerUsage(usage)}
     ${renderDatabaseUsage(usage)}`;
 }

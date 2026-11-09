@@ -4,6 +4,7 @@ from judgment.web.system_usage import (
     _parse_bytes,
     _parse_mem_usage,
     _parse_percent,
+    _path_bytes,
 )
 
 
@@ -27,3 +28,10 @@ def test_parse_docker_memory_usage() -> None:
         int(7.65 * 1024**3),
     )
     assert _parse_mem_usage("not available") == (None, None)
+
+
+def test_path_bytes_sums_nested_files(tmp_path) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "one.txt").write_bytes(b"1234")
+    (tmp_path / "two.txt").write_bytes(b"123456")
+    assert _path_bytes(tmp_path) == 10
