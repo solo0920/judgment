@@ -1,23 +1,23 @@
-(()=>{var ha=Object.defineProperty;var Qe=(e,t)=>{for(var s in t)ha(e,s,{get:t[s],enumerable:!0})};var Bt="judgment.api_base",Ot="http://127.0.0.1:9200",ve=class extends Error{constructor(t,s=0,a=null){super(t),this.name="ApiError",this.status=s,this.detail=a}};function fs(e){return["localhost","127.0.0.1","::1","[::1]"].includes(e)}function Oe(e){let t=String(e??"").trim();if(!t||t==="/")return"";t=t.replace(/\/+$/,""),!/^https?:\/\//i.test(t)&&!t.startsWith("/")&&(t=`${fs(t.split(":")[0])?"http":"https"}://${t}`);try{let s=new URL(t,window.location.href);return s.protocol!=="http:"&&s.protocol!=="https:"?"":`${s.origin}${s.pathname==="/"?"":s.pathname.replace(/\/+$/,"")}`}catch{return t}}function Ft(e){let t=Oe(e);if(!t)return!0;try{let s=new URL(t);return s.protocol==="http:"||s.protocol==="https:"}catch{return!1}}function Ht(){try{let e=new URLSearchParams(window.location.search);return e.has("api")?Oe(e.get("api")):null}catch{return null}}function Ut(){try{let e=window.localStorage.getItem(Bt);return e===null?null:Oe(e)}catch{return null}}function zt(){let e=window.JUDGMENT_CONFIG&&window.JUDGMENT_CONFIG.apiBase;return Oe(e||"")}function Fe(){let e=Ht();if(e!==null)return e;let t=Ut();if(t!==null)return t;let s=zt();return s||(window.location.protocol==="file:"?Ot:"")}function ba(){if(Ht()!==null)return!0;let e=Ut();return e!==null?!!e:!!zt()}function He(){return Ht()!==null?"query":Ut()!==null?"storage":zt()?"config":window.location.protocol==="file:"?"file-default":"same-origin"}function gt(){return ba()||window.location.protocol==="file:"||!window.JUDGMENT_CONFIG?!1:!fs(window.location.hostname)}function Gt(e){let t=Oe(e);try{t?window.localStorage.setItem(Bt,t):window.localStorage.removeItem(Bt)}catch{}return t}function Je(e=Fe()){return e||"\u540C\u6E90\uFF08\u76EE\u524D\u7DB2\u57DF\uFF09"}function je(e,t=Fe()){return t?`${t}${e.startsWith("/")?e:`/${e}`}`:e}function Qt(e){return`\u7121\u6CD5\u9023\u7DDA\u5230\u4F3A\u670D\u5668${e?`\uFF08${e}\uFF09`:""}\uFF0C\u8ACB\u78BA\u8A8D\u5F8C\u7AEF\u662F\u5426\u555F\u52D5\uFF0C\u6216\u5230\u300C\u7CFB\u7D71\u6E2C\u8A66\u300D\u9801\u8A2D\u5B9A\u5F8C\u7AEF\u4F4D\u5740\u3002`}async function Z(e,t={}){let s=Fe(),a=new AbortController,r=t.timeout===void 0?3e4:t.timeout,i=r>0?window.setTimeout(()=>a.abort(),r):null,o=Date.now(),l=performance.now(),m=t.requestId||hs(),f={Accept:"application/json",...t.body?{"Content-Type":"application/json"}:{},"X-Judgment-Request-Id":m,"X-Judgment-Client-Started-At":String(o),...t.headers||{}},_;try{_=await fetch(je(e,s),{...t,headers:f,signal:a.signal})}catch(y){throw y.name==="AbortError"?new ve("\u8ACB\u6C42\u903E\u6642\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002",0,null):new ve(Qt(s),0,y)}finally{i&&window.clearTimeout(i)}let b=null;if((_.headers.get("content-type")||"").includes("application/json"))try{b=await _.json()}catch{b=null}else try{b=await _.text()}catch{b=null}let k=performance.now(),h=_.headers.get("X-Judgment-Request-Id")||m;if(t.trackClient!==!1&&h){let y=Math.round(performance.now()-l);window.requestAnimationFrame(()=>{window.requestAnimationFrame(()=>{bs({request_id:h,route:`${window.location.pathname}${window.location.hash||""}`,total_ms:y,render_ms:Math.max(0,Math.round(performance.now()-k)),status:_.ok?"success":"failed"})})})}if(!_.ok){let y=b&&typeof b=="object"?b.detail||b.message:b,C=typeof y=="string"&&y?y:`\u4F3A\u670D\u5668\u56DE\u61C9 ${_.status}\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002`;throw new ve(C,_.status,y)}return b}function hs(){try{if(window.crypto&&typeof window.crypto.randomUUID=="function")return window.crypto.randomUUID().replace(/-/g,"").slice(0,32)}catch{}return`req${Date.now().toString(36)}${Math.random().toString(36).slice(2,10)}`}function bs(e){try{fetch(je("/api/performance/client",Fe()),{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify(e),keepalive:!0}).catch(()=>{})}catch{}}async function $s(e){let t=Oe(e);if(!Ft(t))throw new ve("API \u4F4D\u5740\u683C\u5F0F\u4E0D\u6B63\u78BA\uFF0C\u8ACB\u8F38\u5165 http:// \u6216 https:// \u958B\u982D\u7684\u7DB2\u5740\u3002");let s=performance.now(),a=new AbortController,r=window.setTimeout(()=>a.abort(),1e4);try{let i=await fetch(je("/api/health",t),{headers:{Accept:"application/json"},signal:a.signal});if(!i.ok)throw new ve(`API \u56DE\u61C9 ${i.status}\u3002`,i.status);let o=await i.json();return{base:t,version:o.version||"\u2014",duration_ms:Math.round(performance.now()-s)}}catch(i){throw i instanceof ve?i:i.name==="AbortError"?new ve("\u9023\u7DDA\u6E2C\u8A66\u903E\u6642\uFF0C\u8ACB\u78BA\u8A8D API \u4F4D\u5740\u8207\u7DB2\u8DEF\u3002",0,i):new ve(Qt(t),0,i)}finally{window.clearTimeout(r)}}var U={health(){return Z("/api/health")},status(){return Z("/api/status",{trackClient:!1})},systemUsage(){return Z("/api/system-usage",{trackClient:!1})},indexVersions(){return Z("/api/index-versions",{trackClient:!1})},indexVersion(e){return Z(`/api/index-versions/${encodeURIComponent(e)}`,{trackClient:!1})},validateIndexVersion(e){return Z(`/api/index-versions/${encodeURIComponent(e)}/validate`,{method:"POST",trackClient:!1})},activateIndexVersion(e){return Z(`/api/index-versions/${encodeURIComponent(e)}/activate`,{method:"POST",trackClient:!1})},rollbackIndexVersion(){return Z("/api/index-versions/rollback",{method:"POST",trackClient:!1})},reconcileIndexAlias(e=!1){let t=new URLSearchParams({repair:e?"true":"false"});return Z(`/api/index-alias/reconcile?${t.toString()}`,{trackClient:!1})},catalog(){return Z("/api/catalog")},query({database:e,filters:t,page:s=1,pageSize:a=25}){return Z("/api/query",{method:"POST",body:JSON.stringify({database:e,filters:t,page:s,page_size:a})})},schemaSuggest({database:e,table:t,column:s,query:a,limit:r=1e3}){let i=new URLSearchParams({database:e,table:t,column:s,q:a||"",limit:String(r)});return Z(`/api/schema/suggest?${i.toString()}`,{timeout:3e4})},lawDetail(e,t="",s="",a=""){let r=new URLSearchParams({law_key:e});return t&&r.set("source_type",t),s&&r.set("version_id",String(s)),a&&r.set("article_no",String(a)),Z(`/api/law?${r.toString()}`,{timeout:45e3})},judgmentDetail(e,t=""){let s=new URLSearchParams({jid:e});return t&&s.set("source",t),Z(`/api/judgment?${s.toString()}`,{timeout:45e3})},testMode(){return Z("/api/test-mode",{trackClient:!1})},setTestMode(e){return Z("/api/test-mode",{method:"POST",body:JSON.stringify({enabled:!!e}),trackClient:!1})},testRuns(e=20){let t=new URLSearchParams({limit:String(e)});return Z(`/api/test-runs?${t.toString()}`,{trackClient:!1})},testRunCurrent(){return Z("/api/test-runs/current",{trackClient:!1})},testRun(e){return Z(`/api/test-runs/${encodeURIComponent(e)}`,{trackClient:!1})},performanceOptions(){return Z("/api/performance/options",{trackClient:!1})},performance(e={},t=1,s=25){let a=new URLSearchParams;for(let[r,i]of Object.entries(e))i==null||i===""||a.set(r,String(i));return a.set("page",String(t)),a.set("page_size",String(s)),Z(`/api/performance?${a.toString()}`,{timeout:45e3,trackClient:!1})},quality(){return Z("/api/quality",{timeout:18e4,trackClient:!1})},processing(){return Z("/api/processing",{timeout:45e3,trackClient:!1})},processingPlan(){return Z("/api/processing/plan",{timeout:45e3,trackClient:!1})},startProcessingUpdate(e=!1){return Z("/api/processing/update",{method:"POST",body:JSON.stringify({index:!!e}),timeout:45e3,trackClient:!1})},stopProcessingUpdate(){return Z("/api/processing/stop",{method:"POST",body:JSON.stringify({}),timeout:45e3,trackClient:!1})},rag(e,t={}){return Z("/api/rag/query",{method:"POST",body:JSON.stringify({question:e}),timeout:t.testMode?0:3e5})},async ragStream(e,{testMode:t=!1,onStep:s=null,onPartial:a=null,onToken:r=null,onTokenReset:i=null}={}){let o=Fe(),l=new AbortController,m=t?0:3e5,f=m>0?window.setTimeout(()=>l.abort(),m):null,_=Date.now(),b=performance.now(),g=hs(),k={Accept:"text/event-stream","Content-Type":"application/json","X-Judgment-Request-Id":g,"X-Judgment-Client-Started-At":String(_)},h;try{h=await fetch(je("/api/rag/query/stream",o),{method:"POST",headers:k,body:JSON.stringify({question:e}),signal:l.signal})}catch(R){throw R.name==="AbortError"?new ve("\u8ACB\u6C42\u903E\u6642\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002",0,null):new ve(Qt(o),0,R)}finally{f&&window.clearTimeout(f)}if(!h.ok){let R=null;try{R=await h.json()}catch{R=null}let G=R&&typeof R=="object"&&R.detail?String(R.detail):`\u4F3A\u670D\u5668\u56DE\u61C9 ${h.status}\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002`;throw new ve(G,h.status,R)}if(!h.body)throw new ve("\u4F3A\u670D\u5668\u6C92\u6709\u56DE\u50B3\u53EF\u8B80\u53D6\u7684\u6D41\u7A0B\u4E32\u6D41\u3002",0,null);let y=h.body.getReader(),C=new TextDecoder,T="",w=null,A=null;try{for(;;){let{value:R,done:G}=await y.read();if(G)break;T+=C.decode(R,{stream:!0});let ee=T.indexOf(`
+(()=>{var wa=Object.defineProperty;var Qe=(e,t)=>{for(var s in t)wa(e,s,{get:t[s],enumerable:!0})};var Bt="judgment.api_base",Ot="http://127.0.0.1:9200",ve=class extends Error{constructor(t,s=0,a=null){super(t),this.name="ApiError",this.status=s,this.detail=a}};function fs(e){return["localhost","127.0.0.1","::1","[::1]"].includes(e)}function Oe(e){let t=String(e??"").trim();if(!t||t==="/")return"";t=t.replace(/\/+$/,""),!/^https?:\/\//i.test(t)&&!t.startsWith("/")&&(t=`${fs(t.split(":")[0])?"http":"https"}://${t}`);try{let s=new URL(t,window.location.href);return s.protocol!=="http:"&&s.protocol!=="https:"?"":`${s.origin}${s.pathname==="/"?"":s.pathname.replace(/\/+$/,"")}`}catch{return t}}function Ft(e){let t=Oe(e);if(!t)return!0;try{let s=new URL(t);return s.protocol==="http:"||s.protocol==="https:"}catch{return!1}}function Ht(){try{let e=new URLSearchParams(window.location.search);return e.has("api")?Oe(e.get("api")):null}catch{return null}}function Ut(){try{let e=window.localStorage.getItem(Bt);return e===null?null:Oe(e)}catch{return null}}function zt(){let e=window.JUDGMENT_CONFIG&&window.JUDGMENT_CONFIG.apiBase;return Oe(e||"")}function Fe(){let e=Ht();if(e!==null)return e;let t=Ut();if(t!==null)return t;let s=zt();return s||(window.location.protocol==="file:"?Ot:"")}function _a(){if(Ht()!==null)return!0;let e=Ut();return e!==null?!!e:!!zt()}function He(){return Ht()!==null?"query":Ut()!==null?"storage":zt()?"config":window.location.protocol==="file:"?"file-default":"same-origin"}function gt(){return _a()||window.location.protocol==="file:"||!window.JUDGMENT_CONFIG?!1:!fs(window.location.hostname)}function Gt(e){let t=Oe(e);try{t?window.localStorage.setItem(Bt,t):window.localStorage.removeItem(Bt)}catch{}return t}function Je(e=Fe()){return e||"\u540C\u6E90\uFF08\u76EE\u524D\u7DB2\u57DF\uFF09"}function Ee(e,t=Fe()){return t?`${t}${e.startsWith("/")?e:`/${e}`}`:e}function Qt(e){return`\u7121\u6CD5\u9023\u7DDA\u5230\u4F3A\u670D\u5668${e?`\uFF08${e}\uFF09`:""}\uFF0C\u8ACB\u78BA\u8A8D\u5F8C\u7AEF\u662F\u5426\u555F\u52D5\uFF0C\u6216\u5230\u300C\u7CFB\u7D71\u6E2C\u8A66\u300D\u9801\u8A2D\u5B9A\u5F8C\u7AEF\u4F4D\u5740\u3002`}async function Z(e,t={}){let s=Fe(),a=new AbortController,r=t.timeout===void 0?3e4:t.timeout,i=r>0?window.setTimeout(()=>a.abort(),r):null,o=Date.now(),l=performance.now(),m=t.requestId||hs(),b={Accept:"application/json",...t.body?{"Content-Type":"application/json"}:{},"X-Judgment-Request-Id":m,"X-Judgment-Client-Started-At":String(o),...t.headers||{}},w;try{w=await fetch(Ee(e,s),{...t,headers:b,signal:a.signal})}catch(y){throw y.name==="AbortError"?new ve("\u8ACB\u6C42\u903E\u6642\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002",0,null):new ve(Qt(s),0,y)}finally{i&&window.clearTimeout(i)}let f=null;if((w.headers.get("content-type")||"").includes("application/json"))try{f=await w.json()}catch{f=null}else try{f=await w.text()}catch{f=null}let S=performance.now(),h=w.headers.get("X-Judgment-Request-Id")||m;if(t.trackClient!==!1&&h){let y=Math.round(performance.now()-l);window.requestAnimationFrame(()=>{window.requestAnimationFrame(()=>{bs({request_id:h,route:`${window.location.pathname}${window.location.hash||""}`,total_ms:y,render_ms:Math.max(0,Math.round(performance.now()-S)),status:w.ok?"success":"failed"})})})}if(!w.ok){let y=f&&typeof f=="object"?f.detail||f.message:f,C=typeof y=="string"&&y?y:`\u4F3A\u670D\u5668\u56DE\u61C9 ${w.status}\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002`;throw new ve(C,w.status,y)}return f}function hs(){try{if(window.crypto&&typeof window.crypto.randomUUID=="function")return window.crypto.randomUUID().replace(/-/g,"").slice(0,32)}catch{}return`req${Date.now().toString(36)}${Math.random().toString(36).slice(2,10)}`}function bs(e){try{fetch(Ee("/api/performance/client",Fe()),{method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify(e),keepalive:!0}).catch(()=>{})}catch{}}async function $s(e){let t=Oe(e);if(!Ft(t))throw new ve("API \u4F4D\u5740\u683C\u5F0F\u4E0D\u6B63\u78BA\uFF0C\u8ACB\u8F38\u5165 http:// \u6216 https:// \u958B\u982D\u7684\u7DB2\u5740\u3002");let s=performance.now(),a=new AbortController,r=window.setTimeout(()=>a.abort(),1e4);try{let i=await fetch(Ee("/api/health",t),{headers:{Accept:"application/json"},signal:a.signal});if(!i.ok)throw new ve(`API \u56DE\u61C9 ${i.status}\u3002`,i.status);let o=await i.json();return{base:t,version:o.version||"\u2014",duration_ms:Math.round(performance.now()-s)}}catch(i){throw i instanceof ve?i:i.name==="AbortError"?new ve("\u9023\u7DDA\u6E2C\u8A66\u903E\u6642\uFF0C\u8ACB\u78BA\u8A8D API \u4F4D\u5740\u8207\u7DB2\u8DEF\u3002",0,i):new ve(Qt(t),0,i)}finally{window.clearTimeout(r)}}var U={health(){return Z("/api/health")},status(){return Z("/api/status",{trackClient:!1})},systemUsage(){return Z("/api/system-usage",{trackClient:!1})},indexVersions(){return Z("/api/index-versions",{trackClient:!1})},indexVersion(e){return Z(`/api/index-versions/${encodeURIComponent(e)}`,{trackClient:!1})},validateIndexVersion(e){return Z(`/api/index-versions/${encodeURIComponent(e)}/validate`,{method:"POST",trackClient:!1})},activateIndexVersion(e){return Z(`/api/index-versions/${encodeURIComponent(e)}/activate`,{method:"POST",trackClient:!1})},rollbackIndexVersion(){return Z("/api/index-versions/rollback",{method:"POST",trackClient:!1})},reconcileIndexAlias(e=!1){let t=new URLSearchParams({repair:e?"true":"false"});return Z(`/api/index-alias/reconcile?${t.toString()}`,{trackClient:!1})},catalog(){return Z("/api/catalog")},query({database:e,filters:t,page:s=1,pageSize:a=25}){return Z("/api/query",{method:"POST",body:JSON.stringify({database:e,filters:t,page:s,page_size:a})})},schemaSuggest({database:e,table:t,column:s,query:a,limit:r=1e3}){let i=new URLSearchParams({database:e,table:t,column:s,q:a||"",limit:String(r)});return Z(`/api/schema/suggest?${i.toString()}`,{timeout:3e4})},lawDetail(e,t="",s="",a=""){let r=new URLSearchParams({law_key:e});return t&&r.set("source_type",t),s&&r.set("version_id",String(s)),a&&r.set("article_no",String(a)),Z(`/api/law?${r.toString()}`,{timeout:45e3})},judgmentDetail(e,t=""){let s=new URLSearchParams({jid:e});return t&&s.set("source",t),Z(`/api/judgment?${s.toString()}`,{timeout:45e3})},testMode(){return Z("/api/test-mode",{trackClient:!1})},setTestMode(e){return Z("/api/test-mode",{method:"POST",body:JSON.stringify({enabled:!!e}),trackClient:!1})},testRuns(e=20){let t=new URLSearchParams({limit:String(e)});return Z(`/api/test-runs?${t.toString()}`,{trackClient:!1})},testRunCurrent(){return Z("/api/test-runs/current",{trackClient:!1})},testRun(e){return Z(`/api/test-runs/${encodeURIComponent(e)}`,{trackClient:!1})},performanceOptions(){return Z("/api/performance/options",{trackClient:!1})},performance(e={},t=1,s=25){let a=new URLSearchParams;for(let[r,i]of Object.entries(e))i==null||i===""||a.set(r,String(i));return a.set("page",String(t)),a.set("page_size",String(s)),Z(`/api/performance?${a.toString()}`,{timeout:45e3,trackClient:!1})},quality(){return Z("/api/quality",{timeout:18e4,trackClient:!1})},processing(){return Z("/api/processing",{timeout:45e3,trackClient:!1})},processingPlan(){return Z("/api/processing/plan",{timeout:45e3,trackClient:!1})},startProcessingWorkflow(e){return Z(`/api/processing/workflows/${encodeURIComponent(e)}/run`,{method:"POST",body:JSON.stringify({})})},startProcessingUpdate(e=!1){return Z("/api/processing/update",{method:"POST",body:JSON.stringify({index:!!e}),timeout:45e3,trackClient:!1})},stopProcessingUpdate(){return Z("/api/processing/stop",{method:"POST",body:JSON.stringify({}),timeout:45e3,trackClient:!1})},rag(e,t={}){return Z("/api/rag/query",{method:"POST",body:JSON.stringify({question:e}),timeout:t.testMode?0:3e5})},async ragStream(e,{testMode:t=!1,onStep:s=null,onPartial:a=null,onToken:r=null,onTokenReset:i=null}={}){let o=Fe(),l=new AbortController,m=t?0:3e5,b=m>0?window.setTimeout(()=>l.abort(),m):null,w=Date.now(),f=performance.now(),g=hs(),S={Accept:"text/event-stream","Content-Type":"application/json","X-Judgment-Request-Id":g,"X-Judgment-Client-Started-At":String(w)},h;try{h=await fetch(Ee("/api/rag/query/stream",o),{method:"POST",headers:S,body:JSON.stringify({question:e}),signal:l.signal})}catch(G){throw G.name==="AbortError"?new ve("\u8ACB\u6C42\u903E\u6642\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002",0,null):new ve(Qt(o),0,G)}finally{b&&window.clearTimeout(b)}if(!h.ok){let G=null;try{G=await h.json()}catch{G=null}let X=G&&typeof G=="object"&&G.detail?String(G.detail):`\u4F3A\u670D\u5668\u56DE\u61C9 ${h.status}\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002`;throw new ve(X,h.status,G)}if(!h.body)throw new ve("\u4F3A\u670D\u5668\u6C92\u6709\u56DE\u50B3\u53EF\u8B80\u53D6\u7684\u6D41\u7A0B\u4E32\u6D41\u3002",0,null);let y=h.body.getReader(),C=new TextDecoder,M="",_=null,E=null;try{for(;;){let{value:G,done:X}=await y.read();if(X)break;M+=C.decode(G,{stream:!0});let se=M.indexOf(`
 
-`);for(;ee>=0;){let z=T.slice(0,ee).replace(/\r/g,"");T=T.slice(ee+2);let Y="message",E=[];for(let P of z.split(`
-`))P.startsWith("event:")?Y=P.slice(6).trim():P.startsWith("data:")&&E.push(P.slice(5).trimStart());if(E.length){let P=null;try{P=JSON.parse(E.join(`
-`))}catch{P=null}if(P)if(Y==="step"&&typeof s=="function")try{s(P)}catch{}else if(Y==="partial"){if(typeof a=="function")try{a(P)}catch{}}else if(Y==="token"){if(typeof r=="function")try{r(String(P.text||""))}catch{}}else if(Y==="token_reset"){if(typeof i=="function")try{i()}catch{}}else Y==="result"?w=P:Y==="error"&&(A=new ve(P.message||P.detail||"RAG \u6D41\u7A0B\u5931\u6557\u3002",0,P))}ee=T.indexOf(`
+`);for(;se>=0;){let R=M.slice(0,se).replace(/\r/g,"");M=M.slice(se+2);let P="message",k=[];for(let q of R.split(`
+`))q.startsWith("event:")?P=q.slice(6).trim():q.startsWith("data:")&&k.push(q.slice(5).trimStart());if(k.length){let q=null;try{q=JSON.parse(k.join(`
+`))}catch{q=null}if(q)if(P==="step"&&typeof s=="function")try{s(q)}catch{}else if(P==="partial"){if(typeof a=="function")try{a(q)}catch{}}else if(P==="token"){if(typeof r=="function")try{r(String(q.text||""))}catch{}}else if(P==="token_reset"){if(typeof i=="function")try{i()}catch{}}else P==="result"?_=q:P==="error"&&(E=new ve(q.message||q.detail||"RAG \u6D41\u7A0B\u5931\u6557\u3002",0,q))}se=M.indexOf(`
 
-`)}}}finally{try{await y.cancel()}catch{}f&&window.clearTimeout(f)}if(A)throw A;if(!w)throw new ve("\u6D41\u7A0B\u4E32\u6D41\u7D50\u675F\uFF0C\u4F46\u6C92\u6709\u6536\u5230\u6700\u7D42\u56DE\u7B54\u3002",0,null);let j=Math.round(performance.now()-b);return bs({request_id:g,route:`${window.location.pathname}${window.location.hash||""}`,total_ms:j,render_ms:0,status:"success"}),w}};var $a={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},ya={operational:{label:"\u6B63\u5E38",tone:"ok"},success:{label:"\u6210\u529F",tone:"ok"},ok:{label:"\u6B63\u5E38",tone:"ok"},healthy:{label:"\u6B63\u5E38",tone:"ok"},degraded:{label:"\u964D\u7D1A",tone:"warn"},warning:{label:"\u6CE8\u610F",tone:"warn"},empty:{label:"\u7121\u8CC7\u6599",tone:"warn"},no_change:{label:"\u7121\u8B8A\u66F4",tone:"info"},running:{label:"\u57F7\u884C\u4E2D",tone:"info"},pending:{label:"\u7B49\u5F85",tone:"idle"},skipped:{label:"\u7565\u904E",tone:"idle"},partial:{label:"\u90E8\u5206\u6210\u529F",tone:"warn"},preview:{label:"\u9810\u89BD\u6A21\u5F0F",tone:"info"},retrieval_only:{label:"\u50C5\u6AA2\u7D22\u7D50\u679C",tone:"warn"},not_indexed:{label:"\u5C1A\u672A\u7D22\u5F15",tone:"warn"},missing_query:{label:"\u7B49\u5F85\u67E5\u8A62",tone:"idle"},client_side:{label:"\u700F\u89BD\u5668\u7AEF",tone:"info"},not_configured:{label:"\u672A\u8A2D\u5B9A",tone:"idle"},unavailable:{label:"\u96E2\u7DDA",tone:"danger"},failed:{label:"\u5931\u6557",tone:"danger"},error:{label:"\u932F\u8AA4",tone:"danger"}},wa={ok:"badge-ok",warn:"badge-warn",danger:"badge-danger",info:"badge-info",idle:"badge-neutral"},_a={ok:"is-ok",warn:"is-warn",danger:"is-danger",info:"is-idle",idle:"is-idle"},ys={search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',send:'<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>',refresh:'<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 4v5.5H15"/>',copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',check:'<path d="m5 12 4.2 4.2L19 6.5"/>',x:'<path d="m6 6 12 12M18 6 6 18"/>',external:'<path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4"/>',message:'<path d="M21 12a8.5 8.5 0 0 1-8.5 8.5H6l-3 2 1.3-4.2A8.5 8.5 0 1 1 21 12Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/>',history:'<path d="M3.2 12a8.8 8.8 0 1 0 2.8-6.3L3.2 8.5"/><path d="M3 3.5v5h5"/><path d="M12 7.5V12l3 1.8"/>',database:'<ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/><path d="M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/>',layers:'<path d="m12 3 9 4.8-9 4.8-9-4.8L12 3Z"/><path d="m3 12.2 9 4.8 9-4.8"/><path d="m3 16.7 9 4.8 9-4.8"/>',cube:'<path d="m12 2.8 8.2 4.6v9.2L12 21.2l-8.2-4.6V7.4L12 2.8Z"/><path d="m3.8 7.4 8.2 4.6 8.2-4.6"/><path d="M12 12v9.2"/>',browser:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6.5 6.5h.01"/>',download:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',chevronLeft:'<path d="m14.5 5-7 7 7 7"/>',chevronRight:'<path d="m9.5 5 7 7-7 7"/>',chevronDown:'<path d="m5 9 7 7 7-7"/>',arrowRight:'<path d="M4 12h15"/><path d="m13 6 6 6-6 6"/>',alert:'<path d="M12 3 2.5 20.5h19L12 3Z"/><path d="M12 9v4.5"/><path d="M12 17.5h.01"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',sparkles:'<path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z"/>',table:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M9 9.5V20M15 9.5V20"/>',sliders:'<path d="M4 7h8M16 7h4M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="14" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/>',server:'<rect x="3" y="4" width="18" height="6" rx="1.6"/><rect x="3" y="14" width="18" height="6" rx="1.6"/><path d="M7 7h.01M7 17h.01"/>',brain:'<path d="M9.7 4.2a2.8 2.8 0 0 0-3 2.8 2.8 2.8 0 0 0-1.1 5.2A2.9 2.9 0 0 0 7.8 18a2.9 2.9 0 0 0 3.9 2V4.2a2.8 2.8 0 0 0-2 0Z"/><path d="M14.3 4.2a2.8 2.8 0 0 1 3 2.8 2.8 2.8 0 0 1 1.1 5.2A2.9 2.9 0 0 1 16.2 18a2.9 2.9 0 0 1-3.9 2"/>',cloud:'<path d="M7 18.5h10.5a3.5 3.5 0 0 0 .4-7 5.5 5.5 0 0 0-10.6-1.3A4.2 4.2 0 0 0 7 18.5Z"/>',code:'<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',play:'<path d="M7 4.5v15l13-7.5-13-7.5Z"/>',file:'<path d="M6 2.8h8l4.5 4.5v13.9H6V2.8Z"/><path d="M14 2.8V7.5h5"/>',activity:'<path d="M3 12h4l2.2-5 4.1 10 2.2-5H21"/>',shield:'<path d="M12 2.8 20 6v6c0 4.7-3.2 8-8 9.2C7.2 20 4 16.7 4 12V6l8-3.2Z"/><path d="m8.8 12 2.2 2.2 4.4-4.4"/>',terminal:'<path d="m5 7 5 5-5 5"/><path d="M12 17h7"/>',filter:'<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',link:'<path d="M10 13a5 5 0 0 0 7.1 0l1.4-1.4a5 5 0 0 0-7.1-7.1L10.2 5.7"/><path d="M14 11a5 5 0 0 0-7.1 0l-1.4 1.4a5 5 0 0 0 7.1 7.1l1.2-1.2"/>',grid:'<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/>',cpu:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 9.5h5v5h-5z"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>'};function n(e){return String(e??"").replace(/[&<>"']/g,t=>$a[t])}function $(e,t=16,s=""){let a=ys[e]||ys.info;return`<svg${s?` class="${n(s)}"`:""} width="${t}" height="${t}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a}</svg>`}function c(e,t="\u2014"){if(e==null||e==="")return t;let s=Number(e);return Number.isFinite(s)?new Intl.NumberFormat("zh-TW").format(s):t}function B(e){if(e==null||e==="")return"\u2014";let t=Number(e);if(!Number.isFinite(t))return"\u2014";let s=["B","KB","MB","GB","TB"],a=0;for(;t>=1024&&a<s.length-1;)t/=1024,a+=1;return a===0?`${t.toFixed(0)} B`:`${t.toFixed(1)} ${s[a]}`}function Jt(e){if(e instanceof Date)return e;if(typeof e=="number"){let r=new Date(e);return Number.isNaN(r.getTime())?null:r}let t=String(e??"").trim();if(!t)return null;if(/^\d{8}$/.test(t))return new Date(Number(t.slice(0,4)),Number(t.slice(4,6))-1,Number(t.slice(6,8)));let s=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(t),a=new Date(s?`${t}Z`:t);return Number.isNaN(a.getTime())?null:a}function Pe(e){let t=Jt(e);return t?new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"2-digit",day:"2-digit"}).format(t):e?n(e):"\u2014"}function se(e){let t=Jt(e);return t?new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:!1}).format(t):e?n(e):"\u2014"}function tt(e){let t=Jt(e);if(!t)return"";let s=Date.now()-t.getTime();return s<45e3?"\u525B\u525B":s<36e5?`${Math.max(1,Math.round(s/6e4))} \u5206\u9418\u524D`:s<864e5?`${Math.round(s/36e5)} \u5C0F\u6642\u524D`:s<6048e5?`${Math.round(s/864e5)} \u5929\u524D`:Pe(t)}function F(e){if(e==null||e==="")return"\u2014";let t=Number(e);if(!Number.isFinite(t))return"\u2014";if(t<1e3)return`${Math.round(t)} ms`;if(t<6e4)return`${(t/1e3).toFixed(1)} s`;let s=Math.floor(t/6e4),a=Math.round(t%6e4/1e3);return`${s}m ${a}s`}function Ce(e){return ya[e]||{label:e?String(e):"\u672A\u77E5",tone:"idle"}}function V(e,t){let s=Ce(e);return`<span class="badge ${wa[s.tone]}"><span class="status-dot ${_a[s.tone]}"></span>${n(t||s.label)}</span>`}function ka(e){return e==="law"?'<span class="badge badge-info">\u6CD5\u898F</span>':e==="order"?'<span class="badge badge-neutral">\u547D\u4EE4</span>':e?`<span class="badge badge-neutral">${n(e)}</span>`:'<span class="cell-empty">\u2014</span>'}function ft(e,t){let s=String(e??"");return s.length>t?`${s.slice(0,t)}\u2026`:s}function ht(e,t="text"){if(e==null||e==="")return'<span class="cell-empty">\u2014</span>';switch(t){case"boolean":return e?'<span class="badge badge-ok">\u662F</span>':'<span class="badge badge-neutral">\u5426</span>';case"status":return V(String(e));case"source":return ka(String(e));case"number":return`<span class="mono">${c(e)}</span>`;case"duration":return`<span class="mono">${F(e)}</span>`;case"datetime":return`<span class="mono">${se(e)}</span>`;case"date":return`<span class="mono">${Pe(e)}</span>`;case"url":{let s=String(e),a=ft(s.replace(/^https?:\/\//,""),46);return`<span class="cell-url"><a href="${n(s)}" target="_blank" rel="noopener noreferrer" title="${n(s)}">${$("external",10)}${n(a)}</a></span>`}case"mono":{let s=String(e);return`<span class="cell-mono cell-truncate" title="${n(s)}">${n(ft(s,54))}</span>`}case"longtext":{let s=String(e);return`<span class="cell-truncate" title="${n(s)}">${n(ft(s,100))}</span>`}default:{let s=String(e);return`<span class="cell-truncate" title="${n(s)}">${n(ft(s,90))}</span>`}}}function K({tone:e="info",title:t,text:s,iconName:a="info"}){let r=e==="ok"?"check":e==="danger"||e==="warn"?"alert":"i";return`<div class="notice notice-${e}" role="status">
+`)}}}finally{try{await y.cancel()}catch{}b&&window.clearTimeout(b)}if(E)throw E;if(!_)throw new ve("\u6D41\u7A0B\u4E32\u6D41\u7D50\u675F\uFF0C\u4F46\u6C92\u6709\u6536\u5230\u6700\u7D42\u56DE\u7B54\u3002",0,null);let z=Math.round(performance.now()-f);return bs({request_id:g,route:`${window.location.pathname}${window.location.hash||""}`,total_ms:z,render_ms:0,status:"success"}),_}};var ka={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},xa={operational:{label:"\u6B63\u5E38",tone:"ok"},success:{label:"\u6210\u529F",tone:"ok"},ok:{label:"\u6B63\u5E38",tone:"ok"},healthy:{label:"\u6B63\u5E38",tone:"ok"},degraded:{label:"\u964D\u7D1A",tone:"warn"},warning:{label:"\u6CE8\u610F",tone:"warn"},empty:{label:"\u7121\u8CC7\u6599",tone:"warn"},no_change:{label:"\u7121\u8B8A\u66F4",tone:"info"},running:{label:"\u57F7\u884C\u4E2D",tone:"info"},pending:{label:"\u7B49\u5F85",tone:"idle"},skipped:{label:"\u7565\u904E",tone:"idle"},partial:{label:"\u90E8\u5206\u6210\u529F",tone:"warn"},preview:{label:"\u9810\u89BD\u6A21\u5F0F",tone:"info"},retrieval_only:{label:"\u50C5\u6AA2\u7D22\u7D50\u679C",tone:"warn"},not_indexed:{label:"\u5C1A\u672A\u7D22\u5F15",tone:"warn"},missing_query:{label:"\u7B49\u5F85\u67E5\u8A62",tone:"idle"},client_side:{label:"\u700F\u89BD\u5668\u7AEF",tone:"info"},not_configured:{label:"\u672A\u8A2D\u5B9A",tone:"idle"},unavailable:{label:"\u96E2\u7DDA",tone:"danger"},failed:{label:"\u5931\u6557",tone:"danger"},error:{label:"\u932F\u8AA4",tone:"danger"}},Sa={ok:"badge-ok",warn:"badge-warn",danger:"badge-danger",info:"badge-info",idle:"badge-neutral"},Aa={ok:"is-ok",warn:"is-warn",danger:"is-danger",info:"is-idle",idle:"is-idle"},ys={search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',send:'<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>',refresh:'<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 4v5.5H15"/>',copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',check:'<path d="m5 12 4.2 4.2L19 6.5"/>',x:'<path d="m6 6 12 12M18 6 6 18"/>',external:'<path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4"/>',message:'<path d="M21 12a8.5 8.5 0 0 1-8.5 8.5H6l-3 2 1.3-4.2A8.5 8.5 0 1 1 21 12Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/>',history:'<path d="M3.2 12a8.8 8.8 0 1 0 2.8-6.3L3.2 8.5"/><path d="M3 3.5v5h5"/><path d="M12 7.5V12l3 1.8"/>',database:'<ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/><path d="M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/>',layers:'<path d="m12 3 9 4.8-9 4.8-9-4.8L12 3Z"/><path d="m3 12.2 9 4.8 9-4.8"/><path d="m3 16.7 9 4.8 9-4.8"/>',cube:'<path d="m12 2.8 8.2 4.6v9.2L12 21.2l-8.2-4.6V7.4L12 2.8Z"/><path d="m3.8 7.4 8.2 4.6 8.2-4.6"/><path d="M12 12v9.2"/>',browser:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6.5 6.5h.01"/>',download:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',chevronLeft:'<path d="m14.5 5-7 7 7 7"/>',chevronRight:'<path d="m9.5 5 7 7-7 7"/>',chevronDown:'<path d="m5 9 7 7 7-7"/>',arrowRight:'<path d="M4 12h15"/><path d="m13 6 6 6-6 6"/>',alert:'<path d="M12 3 2.5 20.5h19L12 3Z"/><path d="M12 9v4.5"/><path d="M12 17.5h.01"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',sparkles:'<path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z"/>',table:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M9 9.5V20M15 9.5V20"/>',sliders:'<path d="M4 7h8M16 7h4M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="14" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/>',server:'<rect x="3" y="4" width="18" height="6" rx="1.6"/><rect x="3" y="14" width="18" height="6" rx="1.6"/><path d="M7 7h.01M7 17h.01"/>',brain:'<path d="M9.7 4.2a2.8 2.8 0 0 0-3 2.8 2.8 2.8 0 0 0-1.1 5.2A2.9 2.9 0 0 0 7.8 18a2.9 2.9 0 0 0 3.9 2V4.2a2.8 2.8 0 0 0-2 0Z"/><path d="M14.3 4.2a2.8 2.8 0 0 1 3 2.8 2.8 2.8 0 0 1 1.1 5.2A2.9 2.9 0 0 1 16.2 18a2.9 2.9 0 0 1-3.9 2"/>',cloud:'<path d="M7 18.5h10.5a3.5 3.5 0 0 0 .4-7 5.5 5.5 0 0 0-10.6-1.3A4.2 4.2 0 0 0 7 18.5Z"/>',code:'<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',play:'<path d="M7 4.5v15l13-7.5-13-7.5Z"/>',file:'<path d="M6 2.8h8l4.5 4.5v13.9H6V2.8Z"/><path d="M14 2.8V7.5h5"/>',activity:'<path d="M3 12h4l2.2-5 4.1 10 2.2-5H21"/>',shield:'<path d="M12 2.8 20 6v6c0 4.7-3.2 8-8 9.2C7.2 20 4 16.7 4 12V6l8-3.2Z"/><path d="m8.8 12 2.2 2.2 4.4-4.4"/>',terminal:'<path d="m5 7 5 5-5 5"/><path d="M12 17h7"/>',filter:'<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',link:'<path d="M10 13a5 5 0 0 0 7.1 0l1.4-1.4a5 5 0 0 0-7.1-7.1L10.2 5.7"/><path d="M14 11a5 5 0 0 0-7.1 0l-1.4 1.4a5 5 0 0 0 7.1 7.1l1.2-1.2"/>',grid:'<rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/>',cpu:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 9.5h5v5h-5z"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>'};function n(e){return String(e??"").replace(/[&<>"']/g,t=>ka[t])}function $(e,t=16,s=""){let a=ys[e]||ys.info;return`<svg${s?` class="${n(s)}"`:""} width="${t}" height="${t}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a}</svg>`}function c(e,t="\u2014"){if(e==null||e==="")return t;let s=Number(e);return Number.isFinite(s)?new Intl.NumberFormat("zh-TW").format(s):t}function F(e){if(e==null||e==="")return"\u2014";let t=Number(e);if(!Number.isFinite(t))return"\u2014";let s=["B","KB","MB","GB","TB"],a=0;for(;t>=1024&&a<s.length-1;)t/=1024,a+=1;return a===0?`${t.toFixed(0)} B`:`${t.toFixed(1)} ${s[a]}`}function Jt(e){if(e instanceof Date)return e;if(typeof e=="number"){let r=new Date(e);return Number.isNaN(r.getTime())?null:r}let t=String(e??"").trim();if(!t)return null;if(/^\d{8}$/.test(t))return new Date(Number(t.slice(0,4)),Number(t.slice(4,6))-1,Number(t.slice(6,8)));let s=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(t),a=new Date(s?`${t}Z`:t);return Number.isNaN(a.getTime())?null:a}function Pe(e){let t=Jt(e);return t?new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"2-digit",day:"2-digit"}).format(t):e?n(e):"\u2014"}function ee(e){let t=Jt(e);return t?new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:!1}).format(t):e?n(e):"\u2014"}function tt(e){let t=Jt(e);if(!t)return"";let s=Date.now()-t.getTime();return s<45e3?"\u525B\u525B":s<36e5?`${Math.max(1,Math.round(s/6e4))} \u5206\u9418\u524D`:s<864e5?`${Math.round(s/36e5)} \u5C0F\u6642\u524D`:s<6048e5?`${Math.round(s/864e5)} \u5929\u524D`:Pe(t)}function H(e){if(e==null||e==="")return"\u2014";let t=Number(e);if(!Number.isFinite(t))return"\u2014";if(t<1e3)return`${Math.round(t)} ms`;if(t<6e4)return`${(t/1e3).toFixed(1)} s`;let s=Math.floor(t/6e4),a=Math.round(t%6e4/1e3);return`${s}m ${a}s`}function Ce(e){return xa[e]||{label:e?String(e):"\u672A\u77E5",tone:"idle"}}function K(e,t){let s=Ce(e);return`<span class="badge ${Sa[s.tone]}"><span class="status-dot ${Aa[s.tone]}"></span>${n(t||s.label)}</span>`}function La(e){return e==="law"?'<span class="badge badge-info">\u6CD5\u898F</span>':e==="order"?'<span class="badge badge-neutral">\u547D\u4EE4</span>':e?`<span class="badge badge-neutral">${n(e)}</span>`:'<span class="cell-empty">\u2014</span>'}function ft(e,t){let s=String(e??"");return s.length>t?`${s.slice(0,t)}\u2026`:s}function ht(e,t="text"){if(e==null||e==="")return'<span class="cell-empty">\u2014</span>';switch(t){case"boolean":return e?'<span class="badge badge-ok">\u662F</span>':'<span class="badge badge-neutral">\u5426</span>';case"status":return K(String(e));case"source":return La(String(e));case"number":return`<span class="mono">${c(e)}</span>`;case"duration":return`<span class="mono">${H(e)}</span>`;case"datetime":return`<span class="mono">${ee(e)}</span>`;case"date":return`<span class="mono">${Pe(e)}</span>`;case"url":{let s=String(e),a=ft(s.replace(/^https?:\/\//,""),46);return`<span class="cell-url"><a href="${n(s)}" target="_blank" rel="noopener noreferrer" title="${n(s)}">${$("external",10)}${n(a)}</a></span>`}case"mono":{let s=String(e);return`<span class="cell-mono cell-truncate" title="${n(s)}">${n(ft(s,54))}</span>`}case"longtext":{let s=String(e);return`<span class="cell-truncate" title="${n(s)}">${n(ft(s,100))}</span>`}default:{let s=String(e);return`<span class="cell-truncate" title="${n(s)}">${n(ft(s,90))}</span>`}}}function Y({tone:e="info",title:t,text:s,iconName:a="info"}){let r=e==="ok"?"check":e==="danger"||e==="warn"?"alert":"i";return`<div class="notice notice-${e}" role="status">
     <span class="notice-icon" aria-hidden="true">${r==="i"?"i":$(r,12)}</span>
     <div class="notice-body">
       ${t?`<strong>${n(t)}</strong>`:""}
       ${s?`<p>${s}</p>`:""}
     </div>
-  </div>`}function $e({iconName:e="search",title:t,text:s="",actions:a="",className:r=""}){return`<div class="empty-state ${r}">
+  </div>`}function ye({iconName:e="search",title:t,text:s="",actions:a="",className:r=""}){return`<div class="empty-state ${r}">
     <span class="empty-icon">${$(e,24)}</span>
     <h3 class="empty-title">${n(t)}</h3>
     ${s?`<p class="empty-text">${s}</p>`:""}
     ${a?`<div class="empty-actions">${a}</div>`:""}
-  </div>`}function W(e,t,s="\u8655\u7406\u4E2D\u2026"){e&&(t?(e.dataset.idleHtml||(e.dataset.idleHtml=e.innerHTML),e.disabled=!0,e.classList.add("is-loading"),e.innerHTML=`<span class="spinner" aria-hidden="true"></span><span>${n(s)}</span>`):(e.disabled=!1,e.classList.remove("is-loading"),e.dataset.idleHtml&&(e.innerHTML=e.dataset.idleHtml,delete e.dataset.idleHtml)))}function O(e,t="info",s=4200){let a=document.getElementById("toast-region");if(!a)return null;let r={info:"i",ok:"\u2713",warn:"!",danger:"\xD7"},i=document.createElement("div");i.className=`toast toast-${t}`,i.setAttribute("role",t==="danger"?"alert":"status"),i.innerHTML=`<span class="toast-mark" aria-hidden="true">${r[t]||"i"}</span>
+  </div>`}function V(e,t,s="\u8655\u7406\u4E2D\u2026"){e&&(t?(e.dataset.idleHtml||(e.dataset.idleHtml=e.innerHTML),e.disabled=!0,e.classList.add("is-loading"),e.innerHTML=`<span class="spinner" aria-hidden="true"></span><span>${n(s)}</span>`):(e.disabled=!1,e.classList.remove("is-loading"),e.dataset.idleHtml&&(e.innerHTML=e.dataset.idleHtml,delete e.dataset.idleHtml)))}function D(e,t="info",s=4200){let a=document.getElementById("toast-region");if(!a)return null;let r={info:"i",ok:"\u2713",warn:"!",danger:"\xD7"},i=document.createElement("div");i.className=`toast toast-${t}`,i.setAttribute("role",t==="danger"?"alert":"status"),i.innerHTML=`<span class="toast-mark" aria-hidden="true">${r[t]||"i"}</span>
     <div class="toast-body">${n(e)}</div>
-    <button class="toast-close" type="button" aria-label="\u95DC\u9589\u901A\u77E5">\xD7</button>`;let o=()=>{i.isConnected&&(i.classList.add("is-leaving"),window.setTimeout(()=>i.remove(),190))};return i.querySelector(".toast-close").addEventListener("click",o),a.appendChild(i),s>0&&window.setTimeout(o,s),i}async function bt(e){try{return await navigator.clipboard.writeText(e),!0}catch{let s=document.createElement("textarea");s.value=e,s.setAttribute("readonly",""),s.style.position="fixed",s.style.opacity="0",document.body.appendChild(s),s.select();let a=!1;try{a=document.execCommand("copy")}catch{a=!1}return s.remove(),a}}function Ue(e,t,s="text/plain;charset=utf-8"){let a=new Blob([t],{type:s}),r=URL.createObjectURL(a),i=document.createElement("a");i.href=r,i.download=e,document.body.appendChild(i),i.click(),i.remove(),window.setTimeout(()=>URL.revokeObjectURL(r),1e3)}var _s="judgment.theme",Vt="nvidia",ks=[{id:"vercel",name:"Vercel",description:"\u9ED1\u767D\u7CBE\u6E96 \xB7 Geist \xB7 \u5E7E\u4F55\u7559\u767D",swatches:["#171717","#0070f3","#fafafa"],metaColor:"#ffffff"},{id:"apple",name:"Apple",description:"SF Pro \xB7 \u5927\u5713\u89D2 \xB7 \u6C89\u6D78\u7559\u767D",swatches:["#1d1d1f","#0071e3","#f5f5f7"],metaColor:"#fbfbfd"},{id:"meta",name:"Meta",description:"Optimistic \xB7 \u660E\u4EAE\u85CD \xB7 \u81A0\u56CA\u5143\u4EF6",swatches:["#0064e0","#0091ff","#f1f4f7"],metaColor:"#ffffff"},{id:"nvidia",name:"NVIDIA",description:"GPU \u7DA0 \xB7 \u9ED1\u5E95 \xB7 \u92B3\u5229\u76F4\u89D2",swatches:["#76b900","#000000","#f7f7f7"],metaColor:"#000000"},{id:"ibm",name:"IBM",description:"Carbon \xB7 Plex Sans \xB7 \u4F01\u696D\u85CD",swatches:["#0f62fe","#161616","#f4f4f4"],metaColor:"#161616"},{id:"stripe",name:"Stripe",description:"\u7D2B\u975B\u6F38\u5C64 \xB7 \u7CBE\u5BC6\u91D1\u878D\u611F",swatches:["#635bff","#ea2261","#f6f9fc"],metaColor:"#ffffff"},{id:"linear",name:"Linear",description:"\u6DF1\u7A7A\u9ED1 \xB7 \u975B\u7D2B \xB7 \u6975\u7C21\u7DDA\u689D",swatches:["#5e6ad2","#010102","#e8e8ec"],metaColor:"#010102"},{id:"figma",name:"Figma",description:"\u591A\u5F69\u8272\u584A \xB7 \u5354\u4F5C\u611F \xB7 \u85CD\u8272\u7126\u9EDE",swatches:["#f24e1e","#a259ff","#0acf83"],metaColor:"#ffffff"},{id:"notion",name:"Notion",description:"\u6696\u767D\u7D19\u5F35 \xB7 \u896F\u7DDA\u6A19\u984C \xB7 \u77E5\u8B58\u5EAB",swatches:["#191918","#0075de","#f7f6f3"],metaColor:"#ffffff"},{id:"openai",name:"OpenAI",description:"\u6696\u7070\u756B\u5E03 \xB7 \u9ED1\u8272\u884C\u52D5 \xB7 \u7DA0\u8272\u8A0A\u865F",swatches:["#10a37f","#0d0d0d","#f9f9f7"],metaColor:"#f9f9f7"}],Wt=new Map(ks.map(e=>[e.id,e]));function xa(e){return Wt.has(e)}function Sa(e){return Wt.get(e)||Wt.get(Vt)}function Aa(){try{let e=window.localStorage.getItem(_s);return xa(e)?e:Vt}catch{return Vt}}function ws(e,{persist:t=!0}={}){let s=Sa(e);document.documentElement.dataset.theme=s.id;let a=document.getElementById("theme-color-meta");a&&a.setAttribute("content",s.metaColor);let r=document.getElementById("theme-label");r&&(r.textContent=s.name);let i=document.getElementById("theme-swatches");if(i&&(i.innerHTML=s.swatches.map(o=>`<i class="style-swatch" style="--swatch:${n(o)}"></i>`).join("")),document.querySelectorAll(".theme-option").forEach(o=>{let l=o.dataset.themeId===s.id;o.classList.toggle("is-active",l),o.setAttribute("aria-checked",l?"true":"false")}),t)try{window.localStorage.setItem(_s,s.id)}catch{}return window.dispatchEvent(new CustomEvent("judgment:theme",{detail:{theme:s.id}})),s}function La(e){let t=ks.map((s,a)=>{let r=s.swatches.map(i=>`<i style="--swatch:${n(i)}"></i>`).join("");return`<button class="theme-option" type="button" role="menuitemradio"
+    <button class="toast-close" type="button" aria-label="\u95DC\u9589\u901A\u77E5">\xD7</button>`;let o=()=>{i.isConnected&&(i.classList.add("is-leaving"),window.setTimeout(()=>i.remove(),190))};return i.querySelector(".toast-close").addEventListener("click",o),a.appendChild(i),s>0&&window.setTimeout(o,s),i}async function bt(e){try{return await navigator.clipboard.writeText(e),!0}catch{let s=document.createElement("textarea");s.value=e,s.setAttribute("readonly",""),s.style.position="fixed",s.style.opacity="0",document.body.appendChild(s),s.select();let a=!1;try{a=document.execCommand("copy")}catch{a=!1}return s.remove(),a}}function Ue(e,t,s="text/plain;charset=utf-8"){let a=new Blob([t],{type:s}),r=URL.createObjectURL(a),i=document.createElement("a");i.href=r,i.download=e,document.body.appendChild(i),i.click(),i.remove(),window.setTimeout(()=>URL.revokeObjectURL(r),1e3)}var _s="judgment.theme",Vt="nvidia",ks=[{id:"vercel",name:"Vercel",description:"\u9ED1\u767D\u7CBE\u6E96 \xB7 Geist \xB7 \u5E7E\u4F55\u7559\u767D",swatches:["#171717","#0070f3","#fafafa"],metaColor:"#ffffff"},{id:"apple",name:"Apple",description:"SF Pro \xB7 \u5927\u5713\u89D2 \xB7 \u6C89\u6D78\u7559\u767D",swatches:["#1d1d1f","#0071e3","#f5f5f7"],metaColor:"#fbfbfd"},{id:"meta",name:"Meta",description:"Optimistic \xB7 \u660E\u4EAE\u85CD \xB7 \u81A0\u56CA\u5143\u4EF6",swatches:["#0064e0","#0091ff","#f1f4f7"],metaColor:"#ffffff"},{id:"nvidia",name:"NVIDIA",description:"GPU \u7DA0 \xB7 \u9ED1\u5E95 \xB7 \u92B3\u5229\u76F4\u89D2",swatches:["#76b900","#000000","#f7f7f7"],metaColor:"#000000"},{id:"ibm",name:"IBM",description:"Carbon \xB7 Plex Sans \xB7 \u4F01\u696D\u85CD",swatches:["#0f62fe","#161616","#f4f4f4"],metaColor:"#161616"},{id:"stripe",name:"Stripe",description:"\u7D2B\u975B\u6F38\u5C64 \xB7 \u7CBE\u5BC6\u91D1\u878D\u611F",swatches:["#635bff","#ea2261","#f6f9fc"],metaColor:"#ffffff"},{id:"linear",name:"Linear",description:"\u6DF1\u7A7A\u9ED1 \xB7 \u975B\u7D2B \xB7 \u6975\u7C21\u7DDA\u689D",swatches:["#5e6ad2","#010102","#e8e8ec"],metaColor:"#010102"},{id:"figma",name:"Figma",description:"\u591A\u5F69\u8272\u584A \xB7 \u5354\u4F5C\u611F \xB7 \u85CD\u8272\u7126\u9EDE",swatches:["#f24e1e","#a259ff","#0acf83"],metaColor:"#ffffff"},{id:"notion",name:"Notion",description:"\u6696\u767D\u7D19\u5F35 \xB7 \u896F\u7DDA\u6A19\u984C \xB7 \u77E5\u8B58\u5EAB",swatches:["#191918","#0075de","#f7f6f3"],metaColor:"#ffffff"},{id:"openai",name:"OpenAI",description:"\u6696\u7070\u756B\u5E03 \xB7 \u9ED1\u8272\u884C\u52D5 \xB7 \u7DA0\u8272\u8A0A\u865F",swatches:["#10a37f","#0d0d0d","#f9f9f7"],metaColor:"#f9f9f7"}],Wt=new Map(ks.map(e=>[e.id,e]));function Ma(e){return Wt.has(e)}function Ta(e){return Wt.get(e)||Wt.get(Vt)}function qa(){try{let e=window.localStorage.getItem(_s);return Ma(e)?e:Vt}catch{return Vt}}function ws(e,{persist:t=!0}={}){let s=Ta(e);document.documentElement.dataset.theme=s.id;let a=document.getElementById("theme-color-meta");a&&a.setAttribute("content",s.metaColor);let r=document.getElementById("theme-label");r&&(r.textContent=s.name);let i=document.getElementById("theme-swatches");if(i&&(i.innerHTML=s.swatches.map(o=>`<i class="style-swatch" style="--swatch:${n(o)}"></i>`).join("")),document.querySelectorAll(".theme-option").forEach(o=>{let l=o.dataset.themeId===s.id;o.classList.toggle("is-active",l),o.setAttribute("aria-checked",l?"true":"false")}),t)try{window.localStorage.setItem(_s,s.id)}catch{}return window.dispatchEvent(new CustomEvent("judgment:theme",{detail:{theme:s.id}})),s}function ja(e){let t=ks.map((s,a)=>{let r=s.swatches.map(i=>`<i style="--swatch:${n(i)}"></i>`).join("");return`<button class="theme-option" type="button" role="menuitemradio"
         data-theme-id="${s.id}" aria-checked="false">
         <span class="theme-option-index">${String(a+1).padStart(2,"0")}</span>
         <span class="theme-option-body">
@@ -29,7 +29,7 @@
       </button>`}).join("");e.innerHTML=`<div class="style-menu-head">
       <strong>\u9078\u64C7\u4ECB\u9762\u98A8\u683C</strong>
       <span>10 \u7A2E\u79D1\u6280\u54C1\u724C\u8A9E\u8A00</span>
-    </div>${t}`}function xs(){let e=document.getElementById("style-picker"),t=document.getElementById("style-trigger"),s=document.getElementById("style-menu");if(!e||!t||!s)return;La(s),ws(Aa(),{persist:!1});let a=()=>Array.from(s.querySelectorAll(".theme-option")),r=()=>{s.hidden=!1,t.setAttribute("aria-expanded","true");let o=s.querySelector(".theme-option.is-active")||a()[0];o&&o.focus()},i=({restoreFocus:o=!1}={})=>{s.hidden||(s.hidden=!0,t.setAttribute("aria-expanded","false"),o&&t.focus())};t.addEventListener("click",()=>{s.hidden?r():i({restoreFocus:!0})}),t.addEventListener("keydown",o=>{(o.key==="ArrowDown"||o.key==="ArrowUp")&&(o.preventDefault(),r())}),s.addEventListener("click",o=>{let l=o.target.closest(".theme-option");l&&(ws(l.dataset.themeId),i({restoreFocus:!0}))}),s.addEventListener("keydown",o=>{let l=a(),m=l.indexOf(document.activeElement);if(o.key==="Escape"){o.preventDefault(),i({restoreFocus:!0});return}if(o.key==="ArrowDown"||o.key==="ArrowUp"){o.preventDefault();let f=o.key==="ArrowDown"?1:-1,_=l[(m+f+l.length)%l.length];_&&_.focus();return}if(o.key==="Home"||o.key==="End"){o.preventDefault();let f=o.key==="Home"?l[0]:l[l.length-1];f&&f.focus()}}),document.addEventListener("pointerdown",o=>{e.contains(o.target)||i()}),document.addEventListener("keydown",o=>{o.key==="Escape"&&i()})}var ls={};Qe(ls,{render:()=>Jn});var Ma="judgment-console";var Ne="query_history",ze="settings";var Re={history:[],settings:new Map,nextId:1},$t=null,ye=!("indexedDB"in window);function ot(e){return new Promise((t,s)=>{e.onsuccess=()=>t(e.result),e.onerror=()=>s(e.error)})}function Ve(e){return new Promise((t,s)=>{e.oncomplete=()=>t(),e.onerror=()=>s(e.error),e.onabort=()=>s(e.error||new Error("transaction aborted"))})}function We(){return $t||($t=new Promise((e,t)=>{if(!("indexedDB"in window)){ye=!0,t(new Error("IndexedDB is unavailable"));return}let s;try{s=window.indexedDB.open(Ma,1)}catch(a){ye=!0,t(a);return}s.onupgradeneeded=()=>{let a=s.result;if(!a.objectStoreNames.contains(Ne)){let r=a.createObjectStore(Ne,{keyPath:"id",autoIncrement:!0});r.createIndex("created_at","created_at"),r.createIndex("kind","kind")}a.objectStoreNames.contains(ze)||a.createObjectStore(ze,{keyPath:"key"})},s.onsuccess=()=>{let a=s.result;a.onversionchange=()=>a.close(),e(a)},s.onerror=()=>{ye=!0,t(s.error||new Error("Unable to open IndexedDB"))},s.onblocked=()=>{ye=!0,t(new Error("IndexedDB upgrade blocked by another tab"))}}),$t)}function Ss(){return"indexedDB"in window}function As(){return ye}function yt(){return ye?"memory":"indexeddb"}function Ta(e){let t=e.created_at||new Date().toISOString();return{kind:e.kind||"query",title:String(e.title||""),detail:String(e.detail||""),payload:e.payload||{},created_at:t}}async function qa(){try{let t=(await We()).transaction(Ne,"readwrite"),s=t.objectStore(Ne),a=await ot(s.count());if(a>120){let r=a-120,i=s.index("created_at").openCursor();await new Promise((o,l)=>{i.onsuccess=()=>{let m=i.result;if(!m||r<=0){o();return}m.delete(),r-=1,m.continue()},i.onerror=()=>l(i.error)})}await Ve(t)}catch{ye=!0}}async function wt(e){let t=Ta(e);try{let a=(await We()).transaction(Ne,"readwrite"),r=a.objectStore(Ne),i=await ot(r.add(t));return await Ve(a),await qa(),i}catch{ye=!0;let a=Re.nextId++;return Re.history.push({id:a,...t}),Re.history.length>120&&Re.history.shift(),a}}async function _t({keyword:e="",limit:t=50}={}){let s=e.trim().toLowerCase();try{let r=(await We()).transaction(Ne,"readonly"),i=r.objectStore(Ne),o=await ot(i.getAll());return await Ve(r),o.filter(l=>s?`${l.kind} ${l.title} ${l.detail}`.toLowerCase().includes(s):!0).sort((l,m)=>String(m.created_at).localeCompare(String(l.created_at))).slice(0,t)}catch{return ye=!0,Re.history.filter(r=>s?`${r.kind} ${r.title} ${r.detail}`.toLowerCase().includes(s):!0).slice().sort((r,i)=>String(i.created_at).localeCompare(String(r.created_at))).slice(0,t)}}async function Ls(){try{let t=(await We()).transaction(Ne,"readwrite");t.objectStore(Ne).clear(),await Ve(t)}catch{ye=!0}Re.history=[]}async function Ms(e,t){let s={key:String(e),value:t,updated_at:new Date().toISOString()};try{let r=(await We()).transaction(ze,"readwrite");return r.objectStore(ze).put(s),await Ve(r),s}catch{return ye=!0,Re.settings.set(s.key,s),s}}async function lt(e,t=null){try{let a=(await We()).transaction(ze,"readonly"),r=a.objectStore(ze),i=await ot(r.get(String(e)));return await Ve(a),i?i.value:t}catch{ye=!0;let a=Re.settings.get(String(e));return a?a.value:t}}async function Ts({keyword:e=""}={}){let t=e.trim().toLowerCase();try{let a=(await We()).transaction(ze,"readonly"),r=a.objectStore(ze),i=await ot(r.getAll());return await Ve(a),i.filter(o=>t?`${o.key} ${JSON.stringify(o.value)}`.toLowerCase().includes(t):!0).sort((o,l)=>String(o.key).localeCompare(String(l.key)))}catch{return ye=!0,Array.from(Re.settings.values()).filter(a=>t?`${a.key} ${JSON.stringify(a.value)}`.toLowerCase().includes(t):!0)}}function qs(e){if(typeof e=="string")return e;try{return JSON.stringify(e)}catch{return String(e)}}var is={};Qe(is,{render:()=>Pn,renderTestFlowPanel:()=>at});var ns={};Qe(ns,{exportCsv:()=>Mt,exportableResult:()=>Tt,render:()=>pn,renderReport:()=>St,reportError:()=>Lt,reportLoading:()=>ct});var Is=[10,25,50,100],Ea=500,ja=["law_name","law_level","law_category","law_modified_date","article_count"],Pa=["jid","court_normalized","title","jdate","matched_laws","citation_count"],Ca={A:"\u689D\u6587",C:"\u7AE0\u7BC0"};function At(e){return e?.label||e?.id||"\u8CC7\u6599\u5EAB"}function kt(e,t){let s={};for(let a of e.fields||[]){let r=a.type==="checkbox"?!1:a.type==="multiselect"?[]:"",i=a.default===void 0?r:a.default;s[a.key]=Array.isArray(i)?[...i]:i}return{values:s,page:1,pageSize:t,result:null,sort:null,columnFilters:{}}}function Na(e,t){let s=e.visibleWhen;if(!s)return!0;for(let[a,r]of Object.entries(s))if(Array.isArray(r)&&!r.map(String).includes(String(t[a]??"")))return!1;return!0}function as(e,t){return(e.fields||[]).filter(s=>Na(s,t))}function Ra(e,t){return`filter-${e.id}-${t}`}function Ke(e){return e==null?"":n(String(e))}function Kt(e,t,s){let a=s[t.key],r=Ra(e,t.key),i=t.help?`<span class="field-help">${n(t.help)}</span>`:"";if(t.type==="checkbox")return`<div class="field">
+    </div>${t}`}function xs(){let e=document.getElementById("style-picker"),t=document.getElementById("style-trigger"),s=document.getElementById("style-menu");if(!e||!t||!s)return;ja(s),ws(qa(),{persist:!1});let a=()=>Array.from(s.querySelectorAll(".theme-option")),r=()=>{s.hidden=!1,t.setAttribute("aria-expanded","true");let o=s.querySelector(".theme-option.is-active")||a()[0];o&&o.focus()},i=({restoreFocus:o=!1}={})=>{s.hidden||(s.hidden=!0,t.setAttribute("aria-expanded","false"),o&&t.focus())};t.addEventListener("click",()=>{s.hidden?r():i({restoreFocus:!0})}),t.addEventListener("keydown",o=>{(o.key==="ArrowDown"||o.key==="ArrowUp")&&(o.preventDefault(),r())}),s.addEventListener("click",o=>{let l=o.target.closest(".theme-option");l&&(ws(l.dataset.themeId),i({restoreFocus:!0}))}),s.addEventListener("keydown",o=>{let l=a(),m=l.indexOf(document.activeElement);if(o.key==="Escape"){o.preventDefault(),i({restoreFocus:!0});return}if(o.key==="ArrowDown"||o.key==="ArrowUp"){o.preventDefault();let b=o.key==="ArrowDown"?1:-1,w=l[(m+b+l.length)%l.length];w&&w.focus();return}if(o.key==="Home"||o.key==="End"){o.preventDefault();let b=o.key==="Home"?l[0]:l[l.length-1];b&&b.focus()}}),document.addEventListener("pointerdown",o=>{e.contains(o.target)||i()}),document.addEventListener("keydown",o=>{o.key==="Escape"&&i()})}var ls={};Qe(ls,{render:()=>Yn});var Ea="judgment-console";var Ne="query_history",ze="settings";var Re={history:[],settings:new Map,nextId:1},$t=null,we=!("indexedDB"in window);function ot(e){return new Promise((t,s)=>{e.onsuccess=()=>t(e.result),e.onerror=()=>s(e.error)})}function Ve(e){return new Promise((t,s)=>{e.oncomplete=()=>t(),e.onerror=()=>s(e.error),e.onabort=()=>s(e.error||new Error("transaction aborted"))})}function We(){return $t||($t=new Promise((e,t)=>{if(!("indexedDB"in window)){we=!0,t(new Error("IndexedDB is unavailable"));return}let s;try{s=window.indexedDB.open(Ea,1)}catch(a){we=!0,t(a);return}s.onupgradeneeded=()=>{let a=s.result;if(!a.objectStoreNames.contains(Ne)){let r=a.createObjectStore(Ne,{keyPath:"id",autoIncrement:!0});r.createIndex("created_at","created_at"),r.createIndex("kind","kind")}a.objectStoreNames.contains(ze)||a.createObjectStore(ze,{keyPath:"key"})},s.onsuccess=()=>{let a=s.result;a.onversionchange=()=>a.close(),e(a)},s.onerror=()=>{we=!0,t(s.error||new Error("Unable to open IndexedDB"))},s.onblocked=()=>{we=!0,t(new Error("IndexedDB upgrade blocked by another tab"))}}),$t)}function Ss(){return"indexedDB"in window}function As(){return we}function yt(){return we?"memory":"indexeddb"}function Pa(e){let t=e.created_at||new Date().toISOString();return{kind:e.kind||"query",title:String(e.title||""),detail:String(e.detail||""),payload:e.payload||{},created_at:t}}async function Ca(){try{let t=(await We()).transaction(Ne,"readwrite"),s=t.objectStore(Ne),a=await ot(s.count());if(a>120){let r=a-120,i=s.index("created_at").openCursor();await new Promise((o,l)=>{i.onsuccess=()=>{let m=i.result;if(!m||r<=0){o();return}m.delete(),r-=1,m.continue()},i.onerror=()=>l(i.error)})}await Ve(t)}catch{we=!0}}async function wt(e){let t=Pa(e);try{let a=(await We()).transaction(Ne,"readwrite"),r=a.objectStore(Ne),i=await ot(r.add(t));return await Ve(a),await Ca(),i}catch{we=!0;let a=Re.nextId++;return Re.history.push({id:a,...t}),Re.history.length>120&&Re.history.shift(),a}}async function _t({keyword:e="",limit:t=50}={}){let s=e.trim().toLowerCase();try{let r=(await We()).transaction(Ne,"readonly"),i=r.objectStore(Ne),o=await ot(i.getAll());return await Ve(r),o.filter(l=>s?`${l.kind} ${l.title} ${l.detail}`.toLowerCase().includes(s):!0).sort((l,m)=>String(m.created_at).localeCompare(String(l.created_at))).slice(0,t)}catch{return we=!0,Re.history.filter(r=>s?`${r.kind} ${r.title} ${r.detail}`.toLowerCase().includes(s):!0).slice().sort((r,i)=>String(i.created_at).localeCompare(String(r.created_at))).slice(0,t)}}async function Ls(){try{let t=(await We()).transaction(Ne,"readwrite");t.objectStore(Ne).clear(),await Ve(t)}catch{we=!0}Re.history=[]}async function Ms(e,t){let s={key:String(e),value:t,updated_at:new Date().toISOString()};try{let r=(await We()).transaction(ze,"readwrite");return r.objectStore(ze).put(s),await Ve(r),s}catch{return we=!0,Re.settings.set(s.key,s),s}}async function lt(e,t=null){try{let a=(await We()).transaction(ze,"readonly"),r=a.objectStore(ze),i=await ot(r.get(String(e)));return await Ve(a),i?i.value:t}catch{we=!0;let a=Re.settings.get(String(e));return a?a.value:t}}async function Ts({keyword:e=""}={}){let t=e.trim().toLowerCase();try{let a=(await We()).transaction(ze,"readonly"),r=a.objectStore(ze),i=await ot(r.getAll());return await Ve(a),i.filter(o=>t?`${o.key} ${JSON.stringify(o.value)}`.toLowerCase().includes(t):!0).sort((o,l)=>String(o.key).localeCompare(String(l.key)))}catch{return we=!0,Array.from(Re.settings.values()).filter(a=>t?`${a.key} ${JSON.stringify(a.value)}`.toLowerCase().includes(t):!0)}}function qs(e){if(typeof e=="string")return e;try{return JSON.stringify(e)}catch{return String(e)}}var is={};Qe(is,{render:()=>In,renderTestFlowPanel:()=>at});var ns={};Qe(ns,{exportCsv:()=>Mt,exportableResult:()=>Tt,render:()=>fn,renderReport:()=>St,reportError:()=>Lt,reportLoading:()=>ct});var Ds=[10,25,50,100],Na=500,Ra=["law_name","law_level","law_category","law_modified_date","article_count"],Ia=["jid","court_normalized","title","jdate","matched_laws","citation_count"],Da={A:"\u689D\u6587",C:"\u7AE0\u7BC0"};function At(e){return e?.label||e?.id||"\u8CC7\u6599\u5EAB"}function kt(e,t){let s={};for(let a of e.fields||[]){let r=a.type==="checkbox"?!1:a.type==="multiselect"?[]:"",i=a.default===void 0?r:a.default;s[a.key]=Array.isArray(i)?[...i]:i}return{values:s,page:1,pageSize:t,result:null,sort:null,columnFilters:{}}}function Ba(e,t){let s=e.visibleWhen;if(!s)return!0;for(let[a,r]of Object.entries(s))if(Array.isArray(r)&&!r.map(String).includes(String(t[a]??"")))return!1;return!0}function as(e,t){return(e.fields||[]).filter(s=>Ba(s,t))}function Oa(e,t){return`filter-${e.id}-${t}`}function Ke(e){return e==null?"":n(String(e))}function Kt(e,t,s){let a=s[t.key],r=Oa(e,t.key),i=t.help?`<span class="field-help">${n(t.help)}</span>`:"";if(t.type==="checkbox")return`<div class="field">
       <label class="checkbox-field" for="${r}">
         <input type="checkbox" id="${r}" name="${n(t.key)}" ${a?"checked":""} />
         <span class="checkbox-copy">
@@ -43,9 +43,9 @@
     </label>`;if(t.type==="select"){let l=(t.options||[]).map(m=>`<option value="${Ke(m.value)}" ${String(m.value)===String(a??"")?"selected":""}>${n(m.label??m.value)}</option>`).join("");return`<div class="field">${o}
       <select class="select" id="${r}" name="${n(t.key)}">${l}</select>
       ${i}
-    </div>`}if(t.type==="multiselect"){let l=new Set((Array.isArray(a)?a:[]).map(String)),m=(t.options||[]).map(f=>`<label class="multi-option">
-          <input type="checkbox" name="${n(t.key)}" value="${Ke(f.value)}" ${l.has(String(f.value))?"checked":""} />
-          <span>${n(f.label??f.value)}</span>
+    </div>`}if(t.type==="multiselect"){let l=new Set((Array.isArray(a)?a:[]).map(String)),m=(t.options||[]).map(b=>`<label class="multi-option">
+          <input type="checkbox" name="${n(t.key)}" value="${Ke(b.value)}" ${l.has(String(b.value))?"checked":""} />
+          <span>${n(b.label??b.value)}</span>
         </label>`).join("");return`<div class="field">${o}
       <div class="multi-select">${m}</div>
       ${i}
@@ -79,7 +79,7 @@
         ${$("search",15)}<span>\u57F7\u884C\u67E5\u8A62</span>
       </button>
     </div>
-  </form>`}function xt(e,t,s){let a={...s.values};for(let r of as(t,a))if(r.type==="checkbox"){let i=e.querySelector(`[name="${r.key}"]`);a[r.key]=!!i?.checked}else if(r.type==="multiselect")a[r.key]=Array.from(e.querySelectorAll(`[name="${r.key}"]:checked`)).map(i=>i.value);else{let i=e.querySelector(`[name="${r.key}"]`);a[r.key]=i?i.value:""}return a}function Bs(e,t){let s={};for(let a of as(e,t.values)){let r=t.values[a.key];a.type==="checkbox"?s[a.key]=!!r:a.type==="multiselect"?s[a.key]=Array.isArray(r)?r:[]:a.type==="number"?s[a.key]=r===""||r===null?"":Number(r):s[a.key]=r??""}return s}function Xt(e,t){let s=Bs(e,t);return(e.id==="postgres"||e.id==="parquet")&&t.sort?.key&&(s.sort=`${t.sort.key}:${t.sort.direction}`,s.schema_preview=!0),t.columnFilters&&Object.keys(t.columnFilters).length>0&&(s.column_filters=t.columnFilters),s}function Es(e){if(e.status==="operational")return"";let t=e.status==="unavailable"?"danger":e.status==="degraded"?"warn":"info";return`<div class="sidebar-notice">${K({tone:t,title:`${At(e)} ${Ce(e.status).label}`,text:n(e.detail||"\u76EE\u524D\u7121\u6CD5\u4F7F\u7528\u9019\u500B\u8CC7\u6599\u4F86\u6E90\u3002")})}</div>`}function Da(e,t){return`<div class="db-options" role="radiogroup" aria-label="\u9078\u64C7\u8CC7\u6599\u5EAB">
+  </form>`}function xt(e,t,s){let a={...s.values};for(let r of as(t,a))if(r.type==="checkbox"){let i=e.querySelector(`[name="${r.key}"]`);a[r.key]=!!i?.checked}else if(r.type==="multiselect")a[r.key]=Array.from(e.querySelectorAll(`[name="${r.key}"]:checked`)).map(i=>i.value);else{let i=e.querySelector(`[name="${r.key}"]`);a[r.key]=i?i.value:""}return a}function Bs(e,t){let s={};for(let a of as(e,t.values)){let r=t.values[a.key];a.type==="checkbox"?s[a.key]=!!r:a.type==="multiselect"?s[a.key]=Array.isArray(r)?r:[]:a.type==="number"?s[a.key]=r===""||r===null?"":Number(r):s[a.key]=r??""}return s}function Xt(e,t){let s=Bs(e,t);return(e.id==="postgres"||e.id==="parquet")&&t.sort?.key&&(s.sort=`${t.sort.key}:${t.sort.direction}`,s.schema_preview=!0),t.columnFilters&&Object.keys(t.columnFilters).length>0&&(s.column_filters=t.columnFilters),s}function js(e){if(e.status==="operational")return"";let t=e.status==="unavailable"?"danger":e.status==="degraded"?"warn":"info";return`<div class="sidebar-notice">${Y({tone:t,title:`${At(e)} ${Ce(e.status).label}`,text:n(e.detail||"\u76EE\u524D\u7121\u6CD5\u4F7F\u7528\u9019\u500B\u8CC7\u6599\u4F86\u6E90\u3002")})}</div>`}function Fa(e,t){return`<div class="db-options" role="radiogroup" aria-label="\u9078\u64C7\u8CC7\u6599\u5EAB">
     ${e.map(s=>{let a=Ce(s.status);return`<label class="db-option">
           <input type="radio" name="database" value="${n(s.id)}" ${s.id===t?"checked":""} />
           <span class="db-option-body">
@@ -94,7 +94,7 @@
             </span>
           </span>
         </label>`}).join("")}
-  </div>`}function Ia(e){return`<div class="sidebar-view-switch" role="tablist" aria-label="\u67E5\u8A62\u6216 schema">
+  </div>`}function Ha(e){return`<div class="sidebar-view-switch" role="tablist" aria-label="\u67E5\u8A62\u6216 schema">
     <button class="sidebar-view-button ${e==="query"?"is-active":""}"
       type="button" role="tab" aria-selected="${e==="query"}"
       data-action="sidebar-view" data-view="query">${$("search",13)}<span>\u67E5\u8A62</span></button>
@@ -117,7 +117,7 @@
     </div>
     <div class="schema-list">${r}</div>
     <div class="sidebar-note">\u9EDE\u9078\u8CC7\u6599\u8868\uFF0C\u5728\u53F3\u5074\u9810\u89BD\u6B04\u4F4D\u540D\u7A31\u3001\u524D 10 \u7B46\u8CC7\u6599\u8207\u7E3D\u7B46\u6578\u3002</div>
-  </div>`}function js(e,t){return`<div class="category-options" role="radiogroup" aria-label="\u8CC7\u6599\u985E\u578B">
+  </div>`}function Es(e,t){return`<div class="category-options" role="radiogroup" aria-label="\u8CC7\u6599\u985E\u578B">
     ${e.map(s=>{let a=s.id===t,r=s.id==="judgment"&&s.count!==void 0?`${c(s.count)} \u7B46\u5DF2\u7BE9\u9078\u5224\u6C7A`:s.description||"";return`<label class="category-option${a?" is-selected":""}">
           <input type="radio" name="category" value="${n(s.id)}" ${a?"checked":""} />
           <span class="category-option-body">
@@ -125,8 +125,8 @@
             <span class="category-option-desc">${n(r)}</span>
           </span>
         </label>`}).join("")}
-  </div>`}function Ps(e){return{postgres:"PostgreSQL \u67E5\u8A62\u4F7F\u7528\u53C3\u6578\u5316\u689D\u4EF6\u8207\u5206\u9801\uFF0C\u50C5\u8B80\u53D6\u8CC7\u6599\u3002",parquet:"Parquet \u67E5\u8A62\u76F4\u63A5\u6383\u63CF\u76EE\u524D\u6700\u65B0\u7684\u5FEB\u7167\uFF1B\u52FE\u9078\u539F\u59CB JSON \u6703\u589E\u52A0\u56DE\u50B3\u91CF\u8207\u6E32\u67D3\u6642\u9593\u3002",qdrant:"Qdrant \u4EE5 embedding \u76F8\u4F3C\u5EA6\u6AA2\u7D22\u5224\u6C7A\uFF1B\u9700\u8981\u5148\u5B8C\u6210\u5411\u91CF\u7D22\u5F15\u3002\u6AA2\u7D22\u7D50\u679C\u53EA\u5305\u542B\u7D22\u5F15\u4E2D\u5BE6\u969B\u5B58\u5728\u7684\u5224\u6C7A\uFF0C\u4E0D\u6703\u7522\u751F\u865B\u69CB\u8CC7\u6599\u3002",indexeddb:"IndexedDB \u53EA\u5728\u9019\u500B\u700F\u89BD\u5668\u5167\u67E5\u8A62\uFF0C\u4E0D\u6703\u7D93\u904E\u4F3A\u670D\u5668\uFF1B\u6E05\u9664\u7DB2\u7AD9\u8CC7\u6599\u5F8C\u7D00\u9304\u6703\u6D88\u5931\u3002"}[e.id]||n(e.detail||"")}function Ba(e){return`<div class="report-empty">
-    ${$e({iconName:"table",title:"\u67E5\u8A62\u5831\u8868\u6703\u986F\u793A\u5728\u9019\u88E1",text:n({postgres:"\u9078\u64C7\u8CC7\u6599\u8868\u8207 metadata \u689D\u4EF6\uFF0C\u57F7\u884C\u5F8C\u6703\u7522\u751F SQL\u3001\u6458\u8981\u3001\u5206\u5E03\u8207\u8CC7\u6599\u5217\u3002",parquet:"\u9078\u64C7\u8CC7\u6599\u96C6\u8207\u56DE\u50B3\u6B04\u4F4D\uFF0C\u76F4\u63A5\u6383\u63CF\u539F\u59CB Parquet\u3002",qdrant:"\u8F38\u5165\u8A9E\u610F\u67E5\u8A62\u5F8C\uFF0C\u4EE5 embedding \u76F8\u4F3C\u5EA6\u6AA2\u7D22\u5DF2\u5EFA\u7ACB\u5411\u91CF\u7D22\u5F15\u7684\u5224\u6C7A\uFF1B\u672A\u7D22\u5F15\u6642\u6703\u660E\u78BA\u986F\u793A\u72C0\u614B\u3002",indexeddb:"\u67E5\u8A62\u5B58\u5728\u9019\u500B\u700F\u89BD\u5668\u7684\u63D0\u554F\u7D00\u9304\u8207\u8A2D\u5B9A\uFF0C\u4E0D\u9700\u8981\u4F3A\u670D\u5668\u3002"}[e.id]||"\u8A2D\u5B9A\u689D\u4EF6\u5F8C\u57F7\u884C\u67E5\u8A62\u3002")})}
+  </div>`}function Ps(e){return{postgres:"PostgreSQL \u67E5\u8A62\u4F7F\u7528\u53C3\u6578\u5316\u689D\u4EF6\u8207\u5206\u9801\uFF0C\u50C5\u8B80\u53D6\u8CC7\u6599\u3002",parquet:"Parquet \u67E5\u8A62\u76F4\u63A5\u6383\u63CF\u76EE\u524D\u6700\u65B0\u7684\u5FEB\u7167\uFF1B\u52FE\u9078\u539F\u59CB JSON \u6703\u589E\u52A0\u56DE\u50B3\u91CF\u8207\u6E32\u67D3\u6642\u9593\u3002",qdrant:"Qdrant \u4EE5 embedding \u76F8\u4F3C\u5EA6\u6AA2\u7D22\u5224\u6C7A\uFF1B\u9700\u8981\u5148\u5B8C\u6210\u5411\u91CF\u7D22\u5F15\u3002\u6AA2\u7D22\u7D50\u679C\u53EA\u5305\u542B\u7D22\u5F15\u4E2D\u5BE6\u969B\u5B58\u5728\u7684\u5224\u6C7A\uFF0C\u4E0D\u6703\u7522\u751F\u865B\u69CB\u8CC7\u6599\u3002",indexeddb:"IndexedDB \u53EA\u5728\u9019\u500B\u700F\u89BD\u5668\u5167\u67E5\u8A62\uFF0C\u4E0D\u6703\u7D93\u904E\u4F3A\u670D\u5668\uFF1B\u6E05\u9664\u7DB2\u7AD9\u8CC7\u6599\u5F8C\u7D00\u9304\u6703\u6D88\u5931\u3002"}[e.id]||n(e.detail||"")}function Ua(e){return`<div class="report-empty">
+    ${ye({iconName:"table",title:"\u67E5\u8A62\u5831\u8868\u6703\u986F\u793A\u5728\u9019\u88E1",text:n({postgres:"\u9078\u64C7\u8CC7\u6599\u8868\u8207 metadata \u689D\u4EF6\uFF0C\u57F7\u884C\u5F8C\u6703\u7522\u751F SQL\u3001\u6458\u8981\u3001\u5206\u5E03\u8207\u8CC7\u6599\u5217\u3002",parquet:"\u9078\u64C7\u8CC7\u6599\u96C6\u8207\u56DE\u50B3\u6B04\u4F4D\uFF0C\u76F4\u63A5\u6383\u63CF\u539F\u59CB Parquet\u3002",qdrant:"\u8F38\u5165\u8A9E\u610F\u67E5\u8A62\u5F8C\uFF0C\u4EE5 embedding \u76F8\u4F3C\u5EA6\u6AA2\u7D22\u5DF2\u5EFA\u7ACB\u5411\u91CF\u7D22\u5F15\u7684\u5224\u6C7A\uFF1B\u672A\u7D22\u5F15\u6642\u6703\u660E\u78BA\u986F\u793A\u72C0\u614B\u3002",indexeddb:"\u67E5\u8A62\u5B58\u5728\u9019\u500B\u700F\u89BD\u5668\u7684\u63D0\u554F\u7D00\u9304\u8207\u8A2D\u5B9A\uFF0C\u4E0D\u9700\u8981\u4F3A\u670D\u5668\u3002"}[e.id]||"\u8A2D\u5B9A\u689D\u4EF6\u5F8C\u57F7\u884C\u67E5\u8A62\u3002")})}
     <div class="query-hint-grid">
       <div class="query-hint">
         <strong>01 \xB7 \u9078\u64C7\u8CC7\u6599\u5EAB</strong>
@@ -165,33 +165,33 @@
       </div>
     </div>
     <div class="report-section">
-      ${K({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u67E5\u8A62\u7D50\u679C",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
+      ${Y({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u67E5\u8A62\u7D50\u679C",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
       <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
         <button class="btn btn-secondary btn-sm" type="button" data-action="retry">
           ${$("refresh",14)}<span>\u91CD\u8A66</span>
         </button>
       </div>
     </div>
-  </div>`}function Oa(e){if(!e.length)return'<div class="report-empty-inline">\u9019\u6B21\u67E5\u8A62\u6C92\u6709\u53EF\u5448\u73FE\u7684\u5206\u5E03\u8CC7\u6599\u3002</div>';let t=Math.max(...e.map(s=>Number(s.value)||0),1);return`<div class="distribution">
+  </div>`}function za(e){if(!e.length)return'<div class="report-empty-inline">\u9019\u6B21\u67E5\u8A62\u6C92\u6709\u53EF\u5448\u73FE\u7684\u5206\u5E03\u8CC7\u6599\u3002</div>';let t=Math.max(...e.map(s=>Number(s.value)||0),1);return`<div class="distribution">
     ${e.map(s=>{let a=Number(s.value)||0,r=Math.max(1.5,a/t*100);return`<div class="dist-row">
           <span class="dist-label" title="${n(s.label||"\u672A\u5206\u985E")}">${n(s.label||"\u672A\u5206\u985E")}</span>
           <span class="dist-track"><span class="dist-bar" style="width:${r.toFixed(1)}%"></span></span>
           <span class="dist-value">${c(a)}</span>
         </div>`}).join("")}
-  </div>`}function Os(e){return e&&(e.database==="postgres"||e.database==="parquet")&&e.table==="law_documents"}function Fa(e){return e&&(e.database==="postgres"||e.database==="parquet")&&e.table==="judgment_documents"}function Ha(e){return e&&e.database==="qdrant"&&String(e.table||"").startsWith("judgment")}function Ua(e){let t=e._jid||e.jid;return t?`<button class="law-link judgment-link" type="button" data-action="open-judgment"
+  </div>`}function Os(e){return e&&(e.database==="postgres"||e.database==="parquet")&&e.table==="law_documents"}function Ga(e){return e&&(e.database==="postgres"||e.database==="parquet")&&e.table==="judgment_documents"}function Qa(e){return e&&e.database==="qdrant"&&String(e.table||"").startsWith("judgment")}function Ja(e){let t=e._jid||e.jid;return t?`<button class="law-link judgment-link" type="button" data-action="open-judgment"
     data-jid="${n(String(t))}"
-    title="\u6AA2\u8996\u300C${n(String(t))}\u300D\u7684\u5224\u6C7A\u539F\u6587">${n(String(t))}${$("chevronRight",12,"law-link-icon")}</button>`:"\u2014"}var za={jid:"jid",court:"court",court_normalized:"court",title:"title",jdate:"jdate",matched_laws:"matched_laws",citation_count:"citation_count",full_text_length:"full_text_length"};function Ga(e,t,s,a=!1,r=!0,i=!1){let o=a?e.key:e.label||e.key,l=r?t?za[e.key]||e.key:i?e.key:null:null;if(!l)return`<th scope="col">${n(o)}</th>`;let m=s?.key===l,f=m?s.direction:null,_=f==="asc"?"ascending":f==="desc"?"descending":"none",b=f==="asc"?"\u2191":f==="desc"?"\u2193":"\u2195";return`<th scope="col" aria-sort="${_}">
+    title="\u6AA2\u8996\u300C${n(String(t))}\u300D\u7684\u5224\u6C7A\u539F\u6587">${n(String(t))}${$("chevronRight",12,"law-link-icon")}</button>`:"\u2014"}var Va={jid:"jid",court:"court",court_normalized:"court",title:"title",jdate:"jdate",matched_laws:"matched_laws",citation_count:"citation_count",full_text_length:"full_text_length"};function Wa(e,t,s,a=!1,r=!0,i=!1){let o=a?e.key:e.label||e.key,l=r?t?Va[e.key]||e.key:i?e.key:null:null;if(!l)return`<th scope="col">${n(o)}</th>`;let m=s?.key===l,b=m?s.direction:null,w=b==="asc"?"ascending":b==="desc"?"descending":"none",f=b==="asc"?"\u2191":b==="desc"?"\u2193":"\u2195";return`<th scope="col" aria-sort="${w}">
     <button class="table-sort${m?" is-active":""}" type="button"
       data-action="sort-column" data-sort-key="${n(l)}"
       title="\u4F9D${n(o)}\u6392\u5E8F">
       <span>${n(o)}</span>
-      <span class="table-sort-icon" aria-hidden="true">${b}</span>
+      <span class="table-sort-icon" aria-hidden="true">${f}</span>
     </button>
-  </th>`}function Qa(e,t){if(!Os(e)||!t)return null;let s=t._law_key||t.law_name;if(!s)return null;let a=e.meta?.dataset,r=t._law_source_type||(a&&a!=="all"?a:"");return{lawKey:String(s),sourceType:String(r||""),lawName:String(t.law_name||"")}}function Ja(e,t,s){let a=e[t.key];return a==null||a===""?"\u2014":`<button class="law-link" type="button" data-action="open-law"
+  </th>`}function Ka(e,t){if(!Os(e)||!t)return null;let s=t._law_key||t.law_name;if(!s)return null;let a=e.meta?.dataset,r=t._law_source_type||(a&&a!=="all"?a:"");return{lawKey:String(s),sourceType:String(r||""),lawName:String(t.law_name||"")}}function Ya(e,t,s){let a=e[t.key];return a==null||a===""?"\u2014":`<button class="law-link" type="button" data-action="open-law"
     data-law-key="${n(s.lawKey)}"
     data-law-source="${n(s.sourceType)}"
     data-law-name="${n(s.lawName)}"
-    title="\u6AA2\u8996\u300C${n(String(a))}\u300D\u7684\u5B8C\u6574\u6CD5\u898F\u5831\u8868">${n(String(a))}${$("chevronRight",12,"law-link-icon")}</button>`}function Fs(e,{useColumnKeys:t=!1,sortable:s=!0,sortableAll:a=!1,searchValues:r=null,compact:i=!1}={}){let o=Array.isArray(e.columns)?e.columns:[],l=Array.isArray(e.rows)?e.rows:[],m=(e.page-1)*e.page_size,f=Os(e),_=Fa(e),b=Ha(e),g=e.meta?.sort||null,k=r?`<tr class="schema-search-row">
+    title="\u6AA2\u8996\u300C${n(String(a))}\u300D\u7684\u5B8C\u6574\u6CD5\u898F\u5831\u8868">${n(String(a))}${$("chevronRight",12,"law-link-icon")}</button>`}function Fs(e,{useColumnKeys:t=!1,sortable:s=!0,sortableAll:a=!1,searchValues:r=null,compact:i=!1}={}){let o=Array.isArray(e.columns)?e.columns:[],l=Array.isArray(e.rows)?e.rows:[],m=(e.page-1)*e.page_size,b=Os(e),w=Ga(e),f=Qa(e),g=e.meta?.sort||null,S=r?`<tr class="schema-search-row">
         <th scope="col" class="cell-index-head"></th>
         ${o.map(h=>`<th scope="col">
               <div class="schema-search-wrap">
@@ -204,18 +204,18 @@
             </th>`).join("")}
       </tr>`:"";return o.length?l.length?`<div class="report-table-head">
       <span class="report-section-title">\u8CC7\u6599\u5217</span>
-      <span class="muted" style="font-size:10px">${c(l.length)} rows \xB7 \u7B2C ${e.page} \u9801${f?" \xB7 \u9EDE\u9078\u6CD5\u898F\u540D\u7A31\u53EF\u6AA2\u8996\u5B8C\u6574\u689D\u6587":_?" \xB7 \u9EDE\u9078\u6848\u865F\u53EF\u6AA2\u8996\u5224\u6C7A\u539F\u6587 \xB7 \u6B04\u4F4D\u6A19\u984C\u53EF\u6392\u5E8F":b?" \xB7 \u9EDE\u9078\u6848\u865F\u53EF\u6AA2\u8996\u5224\u6C7A\u539F\u6587 \xB7 \u4F9D\u76F8\u4F3C\u5EA6\u6392\u5E8F":""}</span>
+      <span class="muted" style="font-size:10px">${c(l.length)} rows \xB7 \u7B2C ${e.page} \u9801${b?" \xB7 \u9EDE\u9078\u6CD5\u898F\u540D\u7A31\u53EF\u6AA2\u8996\u5B8C\u6574\u689D\u6587":w?" \xB7 \u9EDE\u9078\u6848\u865F\u53EF\u6AA2\u8996\u5224\u6C7A\u539F\u6587 \xB7 \u6B04\u4F4D\u6A19\u984C\u53EF\u6392\u5E8F":f?" \xB7 \u9EDE\u9078\u6848\u865F\u53EF\u6AA2\u8996\u5224\u6C7A\u539F\u6587 \xB7 \u4F9D\u76F8\u4F3C\u5EA6\u6392\u5E8F":""}</span>
     </div>
     <div class="table-wrap">
       <table class="data-table${i?" is-compact":""}">
-        <thead>${k}<tr>
+        <thead>${S}<tr>
           <th scope="col" class="cell-index-head">#</th>
-          ${o.map(h=>Ga(h,_,g,t,s,a)).join("")}
+          ${o.map(h=>Wa(h,w,g,t,s,a)).join("")}
         </tr></thead>
         <tbody>
           ${l.map((h,y)=>`<tr>
                 <td class="cell-mono cell-empty cell-index">${m+y+1}</td>
-                ${o.map(C=>{if((_||b)&&C.key==="jid")return`<td class="cell-jid">${Ua(h)}</td>`;let T=f&&C.key==="law_name"?Qa(e,h):null;if(T)return`<td>${Ja(h,C,T)}</td>`;let A={date:"cell-date",datetime:"cell-datetime",duration:"cell-duration",number:"cell-number"}[C.type];return`<td${A?` class="${A}"`:""}>${ht(h[C.key],C.type||"text")}</td>`}).join("")}
+                ${o.map(C=>{if((w||f)&&C.key==="jid")return`<td class="cell-jid">${Ja(h)}</td>`;let M=b&&C.key==="law_name"?Ka(e,h):null;if(M)return`<td>${Ya(h,C,M)}</td>`;let E={date:"cell-date",datetime:"cell-datetime",duration:"cell-duration",number:"cell-number"}[C.type];return`<td${E?` class="${E}"`:""}>${ht(h[C.key],C.type||"text")}</td>`}).join("")}
               </tr>`).join("")}
         </tbody>
       </table>
@@ -223,10 +223,10 @@
         <span class="report-section-title">\u8CC7\u6599\u5217</span>
         <span class="muted" style="font-size:10px">0 rows</span>
       </div>
-      ${$e({iconName:"filter",title:"\u6C92\u6709\u7B26\u5408\u689D\u4EF6\u7684\u8CC7\u6599",text:"\u653E\u5BEC\u65E5\u671F\u5340\u9593\u3001\u964D\u4F4E\u689D\u6587\u6578\u4E0B\u9650\uFF0C\u6216\u6E05\u9664\u95DC\u9375\u5B57\u5F8C\u518D\u8A66\u4E00\u6B21\u3002"})}`:`<div class="report-table-head">
+      ${ye({iconName:"filter",title:"\u6C92\u6709\u7B26\u5408\u689D\u4EF6\u7684\u8CC7\u6599",text:"\u653E\u5BEC\u65E5\u671F\u5340\u9593\u3001\u964D\u4F4E\u689D\u6587\u6578\u4E0B\u9650\uFF0C\u6216\u6E05\u9664\u95DC\u9375\u5B57\u5F8C\u518D\u8A66\u4E00\u6B21\u3002"})}`:`<div class="report-table-head">
       <span class="report-section-title">\u8CC7\u6599\u5217</span>
       <span class="muted" style="font-size:10px">\u6B64\u8CC7\u6599\u4F86\u6E90\u6C92\u6709\u8868\u683C\u6B04\u4F4D</span>
-    </div>`}function Va(e){let t=Number(e.total)||0,s=Number(e.page_size)||25,a=Number(e.page)||1,r=Math.max(1,Math.ceil(t/s)),i=t?(a-1)*s+1:0,o=Math.min(a*s,t);return`<div class="pagination-bar">
+    </div>`}function Xa(e){let t=Number(e.total)||0,s=Number(e.page_size)||25,a=Number(e.page)||1,r=Math.max(1,Math.ceil(t/s)),i=t?(a-1)*s+1:0,o=Math.min(a*s,t);return`<div class="pagination-bar">
     <div class="pagination-info">
       \u7B2C <strong>${a}</strong> / ${r} \u9801 \xB7
       \u986F\u793A ${c(i)}\u2013${c(o)} / ${c(t)} \u7B46
@@ -234,25 +234,25 @@
     <div class="pagination-actions">
       <label class="page-size">\u6BCF\u9801
         <select class="select" data-page-size aria-label="\u6BCF\u9801\u7B46\u6578">
-          ${Is.map(l=>`<option value="${l}" ${l===s?"selected":""}>${l}</option>`).join("")}
+          ${Ds.map(l=>`<option value="${l}" ${l===s?"selected":""}>${l}</option>`).join("")}
         </select>
       </label>
       <button class="page-btn" type="button" data-action="prev-page" ${a<=1?"disabled":""} aria-label="\u4E0A\u4E00\u9801">${$("chevronLeft",13)}</button>
       <span class="page-btn" aria-hidden="true">${a}</span>
       <button class="page-btn" type="button" data-action="next-page" ${a>=r?"disabled":""} aria-label="\u4E0B\u4E00\u9801">${$("chevronRight",13)}</button>
     </div>
-  </div>`}function Hs(e){return!Array.isArray(e)||!e.length?"":`<div class="warnings">${e.map(t=>`<div class="warning-line">${n(t)}</div>`).join("")}</div>`}function St(e){let t=Array.isArray(e.rows)?e.rows:[],s=Array.isArray(e.columns)?e.columns:[],a=Array.isArray(e.summary)?e.summary:[],r=Array.isArray(e.distribution)?e.distribution:[],i=Number(e.total)||0,o=e.query_text||"",l=e.database||"",m=e.status||"ok",f=e.meta?.table_label||e.table||e.label||"query result";return`<div class="report-card" data-database="${n(l)}">
+  </div>`}function Hs(e){return!Array.isArray(e)||!e.length?"":`<div class="warnings">${e.map(t=>`<div class="warning-line">${n(t)}</div>`).join("")}</div>`}function St(e){let t=Array.isArray(e.rows)?e.rows:[],s=Array.isArray(e.columns)?e.columns:[],a=Array.isArray(e.summary)?e.summary:[],r=Array.isArray(e.distribution)?e.distribution:[],i=Number(e.total)||0,o=e.query_text||"",l=e.database||"",m=e.status||"ok",b=e.meta?.table_label||e.table||e.label||"query result";return`<div class="report-card" data-database="${n(l)}">
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">QUERY REPORT \xB7 ${n(String(l).toUpperCase())}</div>
         <div class="report-title">
           ${n(e.label||l)}
-          ${V(m)}
-          <span class="chip">${n(f)}</span>
+          ${K(m)}
+          <span class="chip">${n(b)}</span>
         </div>
         <div class="report-sub">
           ${c(i)} \u7B46\u7B26\u5408 \xB7
-          ${F(e.duration_ms)} \xB7
+          ${H(e.duration_ms)} \xB7
           ${n(String(l).toUpperCase())} / ${n(String(e.table||"\u2014"))}
         </div>
       </div>
@@ -262,12 +262,12 @@
       </div>
     </div>
 
-    ${e.message?`<div class="report-alert">${K({tone:m==="not_configured"?"info":m==="danger"?"danger":"warn",title:"\u8CC7\u6599\u4F86\u6E90\u63D0\u793A",text:n(e.message)})}</div>`:""}
+    ${e.message?`<div class="report-alert">${Y({tone:m==="not_configured"?"info":m==="danger"?"danger":"warn",title:"\u8CC7\u6599\u4F86\u6E90\u63D0\u793A",text:n(e.message)})}</div>`:""}
 
     ${a.length?`<div class="summary-strip">
-            ${a.slice(0,4).map(_=>`<div class="summary-item">
-                  <div class="summary-label">${n(_.label)}</div>
-                  <div class="summary-value">${n(_.value)}</div>
+            ${a.slice(0,4).map(w=>`<div class="summary-item">
+                  <div class="summary-label">${n(w.label)}</div>
+                  <div class="summary-value">${n(w.value)}</div>
                 </div>`).join("")}
           </div>`:""}
 
@@ -277,7 +277,7 @@
           <span class="report-section-title">\u7D50\u679C\u5206\u5E03</span>
           <span class="muted" style="font-size:9.5px">${r.length} groups</span>
         </div>
-        ${Oa(r)}
+        ${za(r)}
       </div>
       <div class="report-section">
         <div class="report-section-head">
@@ -295,7 +295,7 @@
     </div>
 
     ${s.length||t.length?Fs(e,{compact:!0,sortableAll:!0,searchValues:e.meta?.searchable?e.meta.column_filters||{}:null}):""}
-    ${i||s.length?Va({...e,total:i,page:Number(e.page)||1,page_size:Number(e.page_size)||25}):""}
+    ${i||s.length?Xa({...e,total:i,page:Number(e.page)||1,page_size:Number(e.page_size)||25}):""}
   </div>`}function Cs(e){return`<div class="report-card schema-preview">
     <div class="report-head">
       <div class="report-title-group">
@@ -310,13 +310,13 @@
       <div class="skeleton skeleton-line" style="width:76%"></div>
       <div class="skeleton skeleton-line" style="width:84%"></div>
     </div>
-  </div>`}function es(e,t,{columnFilters:s={},searchEnabled:a=!1}={}){let r=Array.isArray(e.columns)?e.columns:[],i=Array.isArray(e.rows)?e.rows:[],o=e.message?`<div class="report-alert">${K({tone:e.status==="ok"?"info":"warn",title:"\u8CC7\u6599\u4F86\u6E90\u63D0\u793A",text:n(e.message)})}</div>`:"";return`<div class="report-card schema-preview">
+  </div>`}function es(e,t,{columnFilters:s={},searchEnabled:a=!1}={}){let r=Array.isArray(e.columns)?e.columns:[],i=Array.isArray(e.rows)?e.rows:[],o=e.message?`<div class="report-alert">${Y({tone:e.status==="ok"?"info":"warn",title:"\u8CC7\u6599\u4F86\u6E90\u63D0\u793A",text:n(e.message)})}</div>`:"";return`<div class="report-card schema-preview">
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">SCHEMA PREVIEW \xB7 ${n(String(e.database||"").toUpperCase())}</div>
         <div class="report-title">
           ${n(t||e.table||"\u8CC7\u6599\u8868")}
-          ${V(e.status||"ok")}
+          ${K(e.status||"ok")}
         </div>
         <div class="report-sub">
           ${n(String(e.database||""))} / ${n(String(e.table||"\u2014"))} \xB7 ${r.length} \u6B04\u4F4D \xB7 \u524D ${i.length} \u7B46
@@ -338,25 +338,25 @@
         <div class="report-sub">\u7121\u6CD5\u8B80\u53D6\u8CC7\u6599\u8868\u9810\u89BD\u3002</div>
       </div>
     </div>
-    ${K({tone:"danger",title:"\u8B80\u53D6\u5931\u6557",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
-  </div>`}function Wa(e){return`<div class="report-empty">
-    ${$e({iconName:"table",title:"\u9078\u64C7\u8CC7\u6599\u8868\u9810\u89BD",text:`\u5F9E\u5DE6\u5074 ${At(e)} \u7684 Schema \u6E05\u55AE\u9EDE\u9078\u8CC7\u6599\u8868\uFF0C\u9019\u88E1\u6703\u986F\u793A\u6B04\u4F4D\u540D\u7A31\u3001\u524D 10 \u7B46\u8CC7\u6599\u8207\u7E3D\u7B46\u6578\u3002`})}
-  </div>`}function ts(e){return e.is_current===!0?V("ok","\u73FE\u884C"):e.law_abandon_note?V("empty","\u5DF2\u5EE2\u6B62"):e.is_current===!1?V("empty","\u6B77\u53F2\u7248\u672C"):V("not_configured","\u72C0\u614B\u672A\u63D0\u4F9B")}function ae(e,t){return`<div class="law-meta-item">
+    ${Y({tone:"danger",title:"\u8B80\u53D6\u5931\u6557",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
+  </div>`}function Za(e){return`<div class="report-empty">
+    ${ye({iconName:"table",title:"\u9078\u64C7\u8CC7\u6599\u8868\u9810\u89BD",text:`\u5F9E\u5DE6\u5074 ${At(e)} \u7684 Schema \u6E05\u55AE\u9EDE\u9078\u8CC7\u6599\u8868\uFF0C\u9019\u88E1\u6703\u986F\u793A\u6B04\u4F4D\u540D\u7A31\u3001\u524D 10 \u7B46\u8CC7\u6599\u8207\u7E3D\u7B46\u6578\u3002`})}
+  </div>`}function ts(e){return e.is_current===!0?K("ok","\u73FE\u884C"):e.law_abandon_note?K("empty","\u5DF2\u5EE2\u6B62"):e.is_current===!1?K("empty","\u6B77\u53F2\u7248\u672C"):K("not_configured","\u72C0\u614B\u672A\u63D0\u4F9B")}function ae(e,t){return`<div class="law-meta-item">
     <div class="law-meta-label">${n(e)}</div>
     <div class="law-meta-value">${t||"\u2014"}</div>
-  </div>`}function Ye(e){return e?Pe(e):"\u2014"}function Ka(e){return e?.meta?.metadata_source==="postgresql"?"PostgreSQL metadata":e?.meta?.metadata_source==="parquet"?"Parquet snapshot":"\u2014"}function ss(e,t){return t?`<div class="report-section">
+  </div>`}function Ye(e){return e?Pe(e):"\u2014"}function en(e){return e?.meta?.metadata_source==="postgresql"?"PostgreSQL metadata":e?.meta?.metadata_source==="parquet"?"Parquet snapshot":"\u2014"}function ss(e,t){return t?`<div class="report-section">
     <div class="report-section-head">
       <span class="report-section-title">${n(e)}</span>
     </div>
     <div class="law-text-block">${n(String(t).trim())}</div>
-  </div>`:""}function Ya(e,t,{open:s=!1}={}){return t?`<details class="report-section law-disclosure" data-law-history ${s?"open":""}>
+  </div>`:""}function tn(e,t,{open:s=!1}={}){return t?`<details class="report-section law-disclosure" data-law-history ${s?"open":""}>
     <summary class="law-disclosure-summary">
       <span class="report-section-title">${n(e)}</span>
       <span class="law-disclosure-hint">\u9810\u8A2D\u6536\u5408 \xB7 \u9EDE\u64CA\u5C55\u958B</span>
       ${$("chevronDown",14,"law-disclosure-chevron")}
     </summary>
     <div class="law-text-block">${n(String(t).trim())}</div>
-  </details>`:""}function Xa(e){let t=Array.isArray(e)?e:[],s=t.map(a=>{let r=a?.name||a?.url||"";return r?a.url?`<a class="law-attachment" href="${n(a.url)}" target="_blank" rel="noopener noreferrer">
+  </details>`:""}function sn(e){let t=Array.isArray(e)?e:[],s=t.map(a=>{let r=a?.name||a?.url||"";return r?a.url?`<a class="law-attachment" href="${n(a.url)}" target="_blank" rel="noopener noreferrer">
           ${$("file",12)}<span>${n(r)}</span>${$("external",11)}
         </a>`:`<span class="law-attachment">${$("file",12)}<span>${n(r)}</span></span>`:""}).filter(Boolean).join("");return s?`<div class="report-section">
     <div class="report-section-head">
@@ -364,7 +364,7 @@
       <span class="muted">${c(t.length)}</span>
     </div>
     <div class="law-attachment-list">${s}</div>
-  </div>`:""}function Us(e){return String(e||"").replace(/\s+/g,"").replace(/^第/,"").replace(/條$/,"").replace(/之/g,"-")}function Za(e){let t=Array.isArray(e.articles)?e.articles:[],s=t.filter(o=>o.article_type==="C").length,a=t.length-s,r=s?`${c(a)} \u689D \xB7 ${c(s)} \u7AE0\u7BC0`:`${c(a)} \u689D`,i=t.map(o=>{let l=String(o.article_content||"").trim();if(!l)return"";if(o.article_type==="C")return`<div class="law-chapter">${n(l)}</div>`;let m=Ca[o.article_type]||o.article_type;return`<article class="law-article"
+  </div>`:""}function Us(e){return String(e||"").replace(/\s+/g,"").replace(/^第/,"").replace(/條$/,"").replace(/之/g,"-")}function an(e){let t=Array.isArray(e.articles)?e.articles:[],s=t.filter(o=>o.article_type==="C").length,a=t.length-s,r=s?`${c(a)} \u689D \xB7 ${c(s)} \u7AE0\u7BC0`:`${c(a)} \u689D`,i=t.map(o=>{let l=String(o.article_content||"").trim();if(!l)return"";if(o.article_type==="C")return`<div class="law-chapter">${n(l)}</div>`;let m=Da[o.article_type]||o.article_type;return`<article class="law-article"
         data-article-no="${n(Us(o.article_no))}">
         <div class="law-article-head">
           <span class="law-article-no">${n(o.article_no||"\u689D\u6587")}</span>
@@ -386,7 +386,7 @@
       </div>
     </div>
     ${i?`<div class="law-article-list">${i}</div>`:'<div class="report-empty-inline">\u9019\u500B\u6CD5\u898F\u76EE\u524D\u6C92\u6709\u53EF\u986F\u793A\u7684\u689D\u6587\u5167\u5BB9\u3002</div>'}
-  </div>`}function en(){return`<div class="law-jump-float">
+  </div>`}function nn(){return`<div class="law-jump-float">
     <input class="input law-article-jump-input law-jump-input"
       id="law-article-jump-float" type="text" inputmode="numeric"
       autocomplete="off" placeholder="\u8DF3\u81F3\u7B2C\u5E7E\u689D" aria-label="\u8DF3\u81F3\u6307\u5B9A\u689D\u6587" />
@@ -394,7 +394,7 @@
       data-action="jump-article" data-jump-input="law-article-jump-float">\u8DF3\u81F3</button>
   </div>`}function st(){return`<button class="btn btn-secondary btn-sm" type="button" data-action="back-to-results">
     ${$("chevronLeft",14)}<span>\u8FD4\u56DE\u67E5\u8A62\u7D50\u679C</span>
-  </button>`}function tn(e){return`<div class="law-report">
+  </button>`}function rn(e){return`<div class="law-report">
     <div class="law-report-topbar">
       ${st()}
       <span class="law-report-origin">\u6B63\u5728\u8F09\u5165\u6CD5\u898F\u5831\u8868\u2026</span>
@@ -414,7 +414,7 @@
         <div class="skeleton skeleton-line" style="width:86%"></div>
       </div>
     </div>
-  </div>`}function sn(e,t){return`<div class="law-report">
+  </div>`}function on(e,t){return`<div class="law-report">
     <div class="law-report-topbar">
       ${st()}
       <span class="law-report-origin">\u6CD5\u898F\u5831\u8868\u8F09\u5165\u5931\u6557</span>
@@ -428,33 +428,33 @@
         </div>
       </div>
       <div class="report-section">
-        ${K({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u6CD5\u898F\u5831\u8868",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
+        ${Y({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u6CD5\u898F\u5831\u8868",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
       </div>
     </div>
-  </div>`}function an(e){let t=Array.isArray(e.versions)?e.versions:[];if(t.length<1)return"";let s=e.selected_version_id??"";return`<label class="law-version-select">
+  </div>`}function ln(e){let t=Array.isArray(e.versions)?e.versions:[];if(t.length<1)return"";let s=e.selected_version_id??"";return`<label class="law-version-select">
     <span>\u689D\u6587\u7248\u672C</span>
     <select class="select" data-action="select-law-version" aria-label="\u9078\u64C7\u6CD5\u898F\u689D\u6587\u7248\u672C">
       ${t.map(a=>{let r=String(a.update_date||"").match(/\d{4}\/\d{1,2}\/\d{1,2}/)?.[0]||"",i=[`#${a.version_id}`,a.is_current?"\u76EE\u524D":"\u6B77\u53F2",r,a.article_count_for_law?`${c(a.article_count_for_law)} \u7B46`:"\u7121\u689D\u6587\u5FEB\u7167"].filter(Boolean).join(" \xB7 ");return`<option value="${n(a.version_id)}" ${String(a.version_id)===String(s)?"selected":""}>${n(i)}</option>`}).join("")}
     </select>
-  </label>`}function nn(e){let t=e.change_summary||{},s=Object.values(t).reduce((o,l)=>o+(Number(l)||0),0),a=Array.isArray(e.changes)?e.changes:[];if(!e.changes_available&&!s)return"";let r={added:"\u65B0\u589E",modified:"\u4FEE\u6539",removed:"\u79FB\u9664"},i=["added","modified","removed"].map(o=>`${r[o]} ${c(t[o]||0)}`).join(" \xB7 ");return`<details class="report-section law-version-changes">
+  </label>`}function cn(e){let t=e.change_summary||{},s=Object.values(t).reduce((o,l)=>o+(Number(l)||0),0),a=Array.isArray(e.changes)?e.changes:[];if(!e.changes_available&&!s)return"";let r={added:"\u65B0\u589E",modified:"\u4FEE\u6539",removed:"\u79FB\u9664"},i=["added","modified","removed"].map(o=>`${r[o]} ${c(t[o]||0)}`).join(" \xB7 ");return`<details class="report-section law-version-changes">
     <summary>
       <span class="report-section-title">\u7248\u672C\u8B8A\u66F4</span>
       <span class="muted">${n(i)}</span>
     </summary>
     <div class="law-version-change-list">
-      ${a.length?a.slice(0,20).map(o=>{let l=o.change_type==="added"?"badge-ok":o.change_type==="removed"?"badge-danger":"badge-warn",m=o.before_content?`<details><summary>\u8B8A\u66F4\u524D</summary><pre>${n(o.before_content)}</pre></details>`:"",f=o.after_content?`<details><summary>\u8B8A\u66F4\u5F8C</summary><pre>${n(o.after_content)}</pre></details>`:"";return`<div class="law-version-change">
+      ${a.length?a.slice(0,20).map(o=>{let l=o.change_type==="added"?"badge-ok":o.change_type==="removed"?"badge-danger":"badge-warn",m=o.before_content?`<details><summary>\u8B8A\u66F4\u524D</summary><pre>${n(o.before_content)}</pre></details>`:"",b=o.after_content?`<details><summary>\u8B8A\u66F4\u5F8C</summary><pre>${n(o.after_content)}</pre></details>`:"";return`<div class="law-version-change">
                   <div class="law-version-change-head">
                     <span class="badge ${l}">${n(r[o.change_type]||o.change_type)}</span>
                     <strong>${n(o.article_no||o.article_key)}</strong>
                   </div>
-                  ${m}${f}
+                  ${m}${b}
                 </div>`}).join(""):'<div class="report-empty-inline">\u6B64\u7248\u672C\u6C92\u6709\u53EF\u986F\u793A\u7684\u689D\u6587\u8B8A\u66F4\u3002</div>'}
       ${e.changes_truncated?'<div class="report-empty-inline">\u50C5\u986F\u793A\u524D 20 \u7B46\u8B8A\u66F4\uFF1BAPI \u56DE\u50B3\u4E0A\u9650 200 \u7B46\u3002</div>':""}
     </div>
-  </details>`}function rn(e,{database:t="",lawPage:s=1,historyOpen:a=!1}={}){let r=Array.isArray(e.warnings)?e.warnings:[],i=e.law_name||e.law_key||"\u6CD5\u898F",o=(Array.isArray(e.articles)?e.articles:[]).filter(y=>y.article_type!=="C").length,l=Ka(e),m=e.meta?.articles_source==="postgresql"?"PostgreSQL \u689D\u6587\u7248\u672C":e.meta?.articles_source==="parquet"?"Parquet \u689D\u6587":"\u689D\u6587\u672A\u63D0\u4F9B",f=e.meta?.snapshot||"",_=e.meta?.articles_source==="postgresql"&&e.selected_version_id!==null&&e.selected_version_id!==void 0?`\u689D\u6587\u7248\u672C #${e.selected_version_id}`:"",b=[l,m,_,f].filter(Boolean).join(" \xB7 "),g=e.source_type==="law"?"\u6CD5\u5F8B":e.source_type==="order"?"\u547D\u4EE4":e.source_type||"\u2014",k=e.version||{},h=[ae("\u6CD5\u898F\u4F4D\u968E",n(e.law_level||"\u2014")),ae("\u6CD5\u898F\u985E\u5225",n(e.law_category||"\u2014")),ae("\u7570\u52D5\u65E5\u671F",Ye(e.law_modified_date)),ae("\u751F\u6548\u65E5\u671F",Ye(e.law_effective_date)),ae("\u689D\u6587\u6578",c(e.article_count)),ae("\u8CC7\u6599\u72C0\u614B",ts(e)),ae("\u82F1\u8B6F\u540D\u7A31",n(e.eng_law_name||"\u2014")),ae("\u6CD5\u898F\u8B58\u5225",`<span class="mono">${n(e.law_key||"\u2014")}</span>`)];return k.first_seen_version_id!==null&&k.first_seen_version_id!==void 0&&h.push(ae("\u9996\u6B21\u6536\u9304\u7248\u672C",`#${n(k.first_seen_version_id)}`)),k.last_seen_version_id!==null&&k.last_seen_version_id!==void 0&&h.push(ae("\u6700\u5F8C\u6536\u9304\u7248\u672C",`#${n(k.last_seen_version_id)}`)),k.last_seen_at&&h.push(ae("\u6700\u5F8C\u6536\u9304\u6642\u9593",n(se(k.last_seen_at)))),k.selected_version_id!==null&&k.selected_version_id!==void 0&&h.push(ae("\u689D\u6587\u7248\u672C",`#${n(k.selected_version_id)} \xB7 ${e.meta?.selected_version_is_current?"\u76EE\u524D":"\u6B77\u53F2"}`)),`<div class="law-report">
+  </details>`}function dn(e,{database:t="",lawPage:s=1,historyOpen:a=!1}={}){let r=Array.isArray(e.warnings)?e.warnings:[],i=e.law_name||e.law_key||"\u6CD5\u898F",o=(Array.isArray(e.articles)?e.articles:[]).filter(y=>y.article_type!=="C").length,l=en(e),m=e.meta?.articles_source==="postgresql"?"PostgreSQL \u689D\u6587\u7248\u672C":e.meta?.articles_source==="parquet"?"Parquet \u689D\u6587":"\u689D\u6587\u672A\u63D0\u4F9B",b=e.meta?.snapshot||"",w=e.meta?.articles_source==="postgresql"&&e.selected_version_id!==null&&e.selected_version_id!==void 0?`\u689D\u6587\u7248\u672C #${e.selected_version_id}`:"",f=[l,m,w,b].filter(Boolean).join(" \xB7 "),g=e.source_type==="law"?"\u6CD5\u5F8B":e.source_type==="order"?"\u547D\u4EE4":e.source_type||"\u2014",S=e.version||{},h=[ae("\u6CD5\u898F\u4F4D\u968E",n(e.law_level||"\u2014")),ae("\u6CD5\u898F\u985E\u5225",n(e.law_category||"\u2014")),ae("\u7570\u52D5\u65E5\u671F",Ye(e.law_modified_date)),ae("\u751F\u6548\u65E5\u671F",Ye(e.law_effective_date)),ae("\u689D\u6587\u6578",c(e.article_count)),ae("\u8CC7\u6599\u72C0\u614B",ts(e)),ae("\u82F1\u8B6F\u540D\u7A31",n(e.eng_law_name||"\u2014")),ae("\u6CD5\u898F\u8B58\u5225",`<span class="mono">${n(e.law_key||"\u2014")}</span>`)];return S.first_seen_version_id!==null&&S.first_seen_version_id!==void 0&&h.push(ae("\u9996\u6B21\u6536\u9304\u7248\u672C",`#${n(S.first_seen_version_id)}`)),S.last_seen_version_id!==null&&S.last_seen_version_id!==void 0&&h.push(ae("\u6700\u5F8C\u6536\u9304\u7248\u672C",`#${n(S.last_seen_version_id)}`)),S.last_seen_at&&h.push(ae("\u6700\u5F8C\u6536\u9304\u6642\u9593",n(ee(S.last_seen_at)))),S.selected_version_id!==null&&S.selected_version_id!==void 0&&h.push(ae("\u689D\u6587\u7248\u672C",`#${n(S.selected_version_id)} \xB7 ${e.meta?.selected_version_is_current?"\u76EE\u524D":"\u6B77\u53F2"}`)),`<div class="law-report">
     <div class="law-report-topbar">
       ${st()}
-      <span class="law-report-origin" title="${n(b)}">${n(b)}</span>
+      <span class="law-report-origin" title="${n(f)}">${n(f)}</span>
     </div>
     <div class="report-card law-report-card" data-database="${n(t)}">
       <div class="report-head">
@@ -470,12 +470,12 @@
           </div>
         </div>
         <div class="report-actions">
-          ${an(e)}
+          ${ln(e)}
           ${e.law_url?`<a class="btn btn-secondary btn-sm" href="${n(e.law_url)}" target="_blank" rel="noopener noreferrer">${$("external",14)}<span>\u4F86\u6E90\u7DB2\u7AD9</span></a>`:""}
         </div>
       </div>
 
-      ${r.length?`<div class="report-alert">${K({tone:e.status==="degraded"?"warn":"info",title:"\u8CC7\u6599\u4F86\u6E90\u63D0\u793A",text:r.map(y=>n(y)).join("<br />")})}</div>`:""}
+      ${r.length?`<div class="report-alert">${Y({tone:e.status==="degraded"?"warn":"info",title:"\u8CC7\u6599\u4F86\u6E90\u63D0\u793A",text:r.map(y=>n(y)).join("<br />")})}</div>`:""}
 
       <div class="summary-strip">
         <div class="summary-item">
@@ -504,16 +504,16 @@
         <div class="law-meta-grid">${h.join("")}</div>
       </div>
 
-      ${nn(e)}
+      ${cn(e)}
       ${ss("\u6CD5\u898F\u524D\u8A00",e.law_foreword)}
-      ${Ya("\u6CD5\u898F\u6CBF\u9769",e.law_histories,{open:a})}
+      ${tn("\u6CD5\u898F\u6CBF\u9769",e.law_histories,{open:a})}
       ${ss("\u751F\u6548\u8AAA\u660E",e.law_effective_note)}
       ${ss("\u5EE2\u6B62\u8AAA\u660E",e.law_abandon_note)}
-      ${Xa(e.attachments)}
-      ${Za(e)}
+      ${sn(e.attachments)}
+      ${an(e)}
     </div>
-    ${o>100?en():""}
-  </div>`}function on(e){return`<div class="law-report judgment-report">
+    ${o>100?nn():""}
+  </div>`}function un(e){return`<div class="law-report judgment-report">
     <div class="law-report-topbar">
       ${st()}
       <span class="law-report-origin">\u6B63\u5728\u8F09\u5165\u5224\u6C7A\u539F\u6587\u2026</span>
@@ -533,7 +533,7 @@
         <div class="skeleton skeleton-line" style="width:86%"></div>
       </div>
     </div>
-  </div>`}function ln(e,t){return`<div class="law-report judgment-report">
+  </div>`}function pn(e,t){return`<div class="law-report judgment-report">
     <div class="law-report-topbar">
       ${st()}
       <span class="law-report-origin">\u5224\u6C7A\u539F\u6587\u8F09\u5165\u5931\u6557</span>
@@ -547,15 +547,15 @@
         </div>
       </div>
       <div class="report-section">
-        ${K({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u5224\u6C7A\u539F\u6587",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
+        ${Y({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u5224\u6C7A\u539F\u6587",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
       </div>
     </div>
-  </div>`}function cn(e){let t=new Map;for(let s of Array.isArray(e.citations)?e.citations:[]){let a=String(s.law_name||"").trim();if(!a)continue;t.has(a)||t.set(a,new Set);let r=String(s.article_no||"").trim();r&&t.get(a).add(r)}return t.size?`<div class="judgment-citation-groups">
+  </div>`}function mn(e){let t=new Map;for(let s of Array.isArray(e.citations)?e.citations:[]){let a=String(s.law_name||"").trim();if(!a)continue;t.has(a)||t.set(a,new Set);let r=String(s.article_no||"").trim();r&&t.get(a).add(r)}return t.size?`<div class="judgment-citation-groups">
     ${[...t.entries()].map(([s,a])=>`<div class="judgment-citation-group">
           <span class="judgment-citation-law">${n(s)}</span>
           <span class="judgment-citation-articles">${[...a].map(r=>n(r)).join("\u3001")||"\u2014"}</span>
         </div>`).join("")}
-  </div>`:'<div class="report-empty-inline">\u9019\u7B46\u5224\u6C7A\u6C92\u6709\u53EF\u986F\u793A\u7684\u5F15\u7528\u660E\u7D30\u3002</div>'}function dn(e,{database:t="postgres"}={}){let s=Array.isArray(e.matched_laws)?e.matched_laws:[],a=e.title||e.jid||"\u5224\u6C7A",r=String(e.full_text||""),i=Number(e.full_text_length)||r.length||0,o=["PostgreSQL \u5224\u6C7A\u6587\u4EF6",e.source_archive].filter(Boolean).join(" \xB7 "),l=[ae("\u6848\u865F",n(e.jid||"\u2014")),ae("\u5E74\u5EA6",n(e.jyear||"\u2014")),ae("\u5B57\u5225",n(e.jcase||"\u2014")),ae("\u865F\u78BC",n(e.jno||"\u2014")),ae("\u6CD5\u9662",n(e.court||"\u2014")),ae("\u6848\u7531",n(e.title||"\u2014")),ae("\u88C1\u5224\u65E5\u671F",Ye(e.jdate)),ae("\u4F86\u6E90\u58D3\u7E2E\u6A94",n(e.source_archive||"\u2014")),ae("\u5168\u6587\u9577\u5EA6",`${c(i)} \u5B57`),ae("\u5F15\u7528\u6578",c(e.citation_count))];return e.import_run_id!==null&&e.import_run_id!==void 0&&l.push(ae("\u532F\u5165 Run",`#${n(e.import_run_id)}`)),`<div class="law-report judgment-report">
+  </div>`:'<div class="report-empty-inline">\u9019\u7B46\u5224\u6C7A\u6C92\u6709\u53EF\u986F\u793A\u7684\u5F15\u7528\u660E\u7D30\u3002</div>'}function vn(e,{database:t="postgres"}={}){let s=Array.isArray(e.matched_laws)?e.matched_laws:[],a=e.title||e.jid||"\u5224\u6C7A",r=String(e.full_text||""),i=Number(e.full_text_length)||r.length||0,o=["PostgreSQL \u5224\u6C7A\u6587\u4EF6",e.source_archive].filter(Boolean).join(" \xB7 "),l=[ae("\u6848\u865F",n(e.jid||"\u2014")),ae("\u5E74\u5EA6",n(e.jyear||"\u2014")),ae("\u5B57\u5225",n(e.jcase||"\u2014")),ae("\u865F\u78BC",n(e.jno||"\u2014")),ae("\u6CD5\u9662",n(e.court||"\u2014")),ae("\u6848\u7531",n(e.title||"\u2014")),ae("\u88C1\u5224\u65E5\u671F",Ye(e.jdate)),ae("\u4F86\u6E90\u58D3\u7E2E\u6A94",n(e.source_archive||"\u2014")),ae("\u5168\u6587\u9577\u5EA6",`${c(i)} \u5B57`),ae("\u5F15\u7528\u6578",c(e.citation_count))];return e.import_run_id!==null&&e.import_run_id!==void 0&&l.push(ae("\u532F\u5165 Run",`#${n(e.import_run_id)}`)),`<div class="law-report judgment-report">
     <div class="law-report-topbar">
       ${st()}
       <span class="law-report-origin" title="${n(o)}">${n(o)}</span>
@@ -610,7 +610,7 @@
           <span class="report-section-title">\u547D\u4E2D\u6CD5\u898F\u8207\u5F15\u7528</span>
           <span class="muted">${c(s.length)} \u6CD5\u898F \xB7 ${c(e.citation_count)} \u5F15\u7528</span>
         </div>
-        ${cn(e)}
+        ${mn(e)}
       </div>
 
       <div class="report-section judgment-text-section">
@@ -622,11 +622,11 @@
       </div>
     </div>
   </div>`}function Rs(e){return`"${(e==null?"":typeof e=="object"?JSON.stringify(e):String(e)).replace(/"/g,'""')}"`}function Mt(e){let t=e.columns||[],s=e.rows||[],a=[["#",...t.map(i=>i.label||i.key)].map(Rs).join(",")],r=((Number(e.page)||1)-1)*(Number(e.page_size)||25);return s.forEach((i,o)=>{a.push([r+o+1,...t.map(l=>i[l.key])].map(Rs).join(","))}),`\uFEFF${a.join(`\r
-`)}`}function Tt(e){return{...e,rows:(e.rows||[]).map(t=>{let s={};for(let[a,r]of Object.entries(t))a.startsWith("_")||(s[a]=r);return s})}}function un(e){return e==="rag"?"RAG \u63D0\u554F":e==="data"?"\u8CC7\u6599\u67E5\u8A62":e||"\u5176\u4ED6"}async function Ds(e,t){let s=performance.now(),a=Bs(e,t),r=String(a.store||"query_history"),i=String(a.keyword||""),o=t.page,l=t.pageSize,m=[],f=[],_=[],b=[];if(r==="settings"){f=(await Ts({keyword:i})).map(A=>({key:A.key,value:qs(A.value),updated_at:A.updated_at})),_=[{key:"key",label:"\u8A2D\u5B9A\u9375",type:"mono"},{key:"value",label:"\u503C",type:"longtext"},{key:"updated_at",label:"\u66F4\u65B0\u6642\u9593",type:"datetime"}];let w=new Map;f.forEach(A=>{let j=String(A.key||"").split(".")[0]||"\u5176\u4ED6";w.set(j,(w.get(j)||0)+1)}),b=Array.from(w.entries()).map(([A,j])=>({label:A,value:j})).sort((A,j)=>j.value-A.value)}else{f=(await _t({keyword:i,limit:Ea})).map(A=>({kind:un(A.kind),title:A.title,detail:A.detail,created_at:A.created_at})),_=[{key:"kind",label:"\u985E\u578B",type:"text"},{key:"title",label:"\u67E5\u8A62\u5167\u5BB9",type:"longtext"},{key:"detail",label:"\u6458\u8981",type:"longtext"},{key:"created_at",label:"\u6642\u9593",type:"datetime"}];let w=new Map;f.forEach(A=>w.set(A.kind,(w.get(A.kind)||0)+1)),b=Array.from(w.entries()).map(([A,j])=>({label:A,value:j})).sort((A,j)=>j.value-A.value)}let g=f.length,k=(o-1)*l,h=f.slice(k,k+l),y=Math.round(performance.now()-s),C=As();return C&&m.push("IndexedDB \u7121\u6CD5\u4F7F\u7528\uFF0C\u8CC7\u6599\u66AB\u5B58\u5728\u8A18\u61B6\u9AD4\uFF0C\u91CD\u65B0\u6574\u7406\u5F8C\u6703\u6D88\u5931\u3002"),{database:"indexeddb",label:"IndexedDB",status:C?"degraded":"ok",message:C?"\u700F\u89BD\u5668\u4E0D\u5141\u8A31\u4F7F\u7528 IndexedDB\uFF0C\u672C\u9801\u6539\u7528\u8A18\u61B6\u9AD4\u66AB\u5B58\u3002":null,table:r,columns:_,rows:h,total:g,page:o,page_size:l,duration_ms:y,summary:[{label:"\u7B26\u5408\u7B46\u6578",value:String(g)},{label:"\u76EE\u524D\u9801\u9762",value:`${h.length} \u7B46`},{label:"\u5132\u5B58\u6A21\u5F0F",value:yt()==="indexeddb"?"IndexedDB":"\u8A18\u61B6\u9AD4"},{label:"\u67E5\u8A62\u8017\u6642",value:`${y} ms`}],distribution:b,query_text:`INDEXEDDB OPEN 'judgment-console'
+`)}`}function Tt(e){return{...e,rows:(e.rows||[]).map(t=>{let s={};for(let[a,r]of Object.entries(t))a.startsWith("_")||(s[a]=r);return s})}}function gn(e){return e==="rag"?"RAG \u63D0\u554F":e==="data"?"\u8CC7\u6599\u67E5\u8A62":e||"\u5176\u4ED6"}async function Is(e,t){let s=performance.now(),a=Bs(e,t),r=String(a.store||"query_history"),i=String(a.keyword||""),o=t.page,l=t.pageSize,m=[],b=[],w=[],f=[];if(r==="settings"){b=(await Ts({keyword:i})).map(E=>({key:E.key,value:qs(E.value),updated_at:E.updated_at})),w=[{key:"key",label:"\u8A2D\u5B9A\u9375",type:"mono"},{key:"value",label:"\u503C",type:"longtext"},{key:"updated_at",label:"\u66F4\u65B0\u6642\u9593",type:"datetime"}];let _=new Map;b.forEach(E=>{let z=String(E.key||"").split(".")[0]||"\u5176\u4ED6";_.set(z,(_.get(z)||0)+1)}),f=Array.from(_.entries()).map(([E,z])=>({label:E,value:z})).sort((E,z)=>z.value-E.value)}else{b=(await _t({keyword:i,limit:Na})).map(E=>({kind:gn(E.kind),title:E.title,detail:E.detail,created_at:E.created_at})),w=[{key:"kind",label:"\u985E\u578B",type:"text"},{key:"title",label:"\u67E5\u8A62\u5167\u5BB9",type:"longtext"},{key:"detail",label:"\u6458\u8981",type:"longtext"},{key:"created_at",label:"\u6642\u9593",type:"datetime"}];let _=new Map;b.forEach(E=>_.set(E.kind,(_.get(E.kind)||0)+1)),f=Array.from(_.entries()).map(([E,z])=>({label:E,value:z})).sort((E,z)=>z.value-E.value)}let g=b.length,S=(o-1)*l,h=b.slice(S,S+l),y=Math.round(performance.now()-s),C=As();return C&&m.push("IndexedDB \u7121\u6CD5\u4F7F\u7528\uFF0C\u8CC7\u6599\u66AB\u5B58\u5728\u8A18\u61B6\u9AD4\uFF0C\u91CD\u65B0\u6574\u7406\u5F8C\u6703\u6D88\u5931\u3002"),{database:"indexeddb",label:"IndexedDB",status:C?"degraded":"ok",message:C?"\u700F\u89BD\u5668\u4E0D\u5141\u8A31\u4F7F\u7528 IndexedDB\uFF0C\u672C\u9801\u6539\u7528\u8A18\u61B6\u9AD4\u66AB\u5B58\u3002":null,table:r,columns:w,rows:h,total:g,page:o,page_size:l,duration_ms:y,summary:[{label:"\u7B26\u5408\u7B46\u6578",value:String(g)},{label:"\u76EE\u524D\u9801\u9762",value:`${h.length} \u7B46`},{label:"\u5132\u5B58\u6A21\u5F0F",value:yt()==="indexeddb"?"IndexedDB":"\u8A18\u61B6\u9AD4"},{label:"\u67E5\u8A62\u8017\u6642",value:`${y} ms`}],distribution:f,query_text:`INDEXEDDB OPEN 'judgment-console'
 OBJECT STORE '${r}'
 FILTER ${i?`keyword \u2248 '${i}'`:"1 = 1"}
 ORDER BY created_at DESC
-LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}async function pn(e,t){let s=!1,a=null,r=[],i="law",o=null,l={},m=0,f=25,_="query",b=null,g=null,k=0,h=[],y=null,C=-1,T=0,w=null,A=null;e.innerHTML=`<section class="page data-page">
+LIMIT ${l} OFFSET ${S}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}async function fn(e,t){let s=!1,a=null,r=[],i="law",o=null,l={},m=0,b=25,w="query",f=null,g=null,S=0,h=[],y=null,C=-1,M=0,_=null,E=null;e.innerHTML=`<section class="page data-page">
     <div class="page-header">
       <div class="data-page-heading">
         <div class="eyebrow">DATA EXPLORER</div>
@@ -666,22 +666,22 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </section>
     </div>
     <div id="schema-suggest-popover" class="schema-suggest-popover" hidden></div>
-  </section>`;let j=e.querySelector("#query-sidebar"),R=e.querySelector("#category-switch"),G=e.querySelector("#db-options-wrap"),ee=e.querySelector("#sidebar-view-switch"),z=e.querySelector("#filter-area"),Y=e.querySelector("#schema-area"),E=e.querySelector("#query-main"),P=e.querySelector("#schema-suggest-popover"),H=e.querySelector("#catalog-meta"),X=e.querySelector("#refresh-catalog"),he=d=>r.find(p=>p.id===d),Te=()=>he(i)?.databases||[],le=d=>Te().find(p=>p.id===d),be=(d,p)=>`${d}:${p}`,I=(d,p=i)=>l[be(p,d.id)],de=(d,p)=>{Ms(d,p).catch(()=>{})},De=()=>{if(!a){H.textContent="CATALOG \xB7 \u96E2\u7DDA",H.className="badge badge-danger badge-mono";return}let d=Te(),p=d.filter(x=>x.available).length,v=he(i);H.textContent=`CATALOG \xB7 ${v?.label||i} \xB7 ${p}/${d.length} \u53EF\u7528`,H.className="badge badge-neutral badge-mono"},Se=d=>{E.innerHTML=Ba(d)},qe=()=>{let d=w?.returnScroll??A?.returnScroll;w=null,A=null;let p=le(o),v=p?I(p):null;_==="schema"&&g?.result?E.innerHTML=es(g.result,S(p,g.tableId),{columnFilters:g.columnFilters||{},searchEnabled:p.id==="postgres"||p.id==="parquet"}):v?.result?E.innerHTML=St(v.result):p&&Se(p),typeof d=="number"&&window.requestAnimationFrame(()=>window.scrollTo({top:d,behavior:"smooth"}))},Ae=(d="law-article-jump")=>{let p=E.querySelector(`#${d}`),v=Us(p?.value);if(!v){O("\u8ACB\u8F38\u5165\u8981\u8DF3\u81F3\u7684\u689D\u865F\uFF0C\u4F8B\u5982 100 \u6216 \u7B2C100\u689D\u3002","warn"),p?.focus();return}let M=[...E.querySelectorAll("[data-article-no]")].find(L=>L.dataset.articleNo===v);if(!M){O(`\u627E\u4E0D\u5230\u7B2C ${v} \u689D\u3002`,"warn");return}M.scrollIntoView({behavior:"instant",block:"center"}),M.classList.add("is-jump-target"),window.setTimeout(()=>M.classList.remove("is-jump-target"),2400)},Ie=async({lawKey:d,sourceType:p="",lawName:v="",versionId:x=""})=>{let M=le(o),L=M?I(M):null,q=_==="schema"?g?.result:null;if(!M||!L?.result&&!q||!d)return;let J=++m;w={seq:J,lawKey:d,sourceType:p,lawName:v,versionId:x?String(x):"",page:1,detail:null,database:M.id,returnScroll:window.scrollY},A=null,E.innerHTML=tn(v||d),E.scrollIntoView({behavior:"smooth",block:"start"});try{let ue=await U.lawDetail(d,p,w.versionId);if(s||!w||w.seq!==J)return;w.detail=ue,w.page=1,E.innerHTML=rn(ue,{database:w.database,lawPage:w.page})}catch(ue){if(s||!w||w.seq!==J)return;E.innerHTML=sn(ue,v||d),O(ue.message||"\u7121\u6CD5\u53D6\u5F97\u6CD5\u898F\u5831\u8868\u3002","danger")}},N=async({jid:d})=>{let p=le(o),v=p?I(p):null,x=_==="schema"?g?.result:null;if(!p||!v?.result&&!x||!d)return;let M=++m;w=null;let L=p.id==="parquet"?"parquet":"postgres";A={seq:M,jid:d,detail:null,database:p.id,source:L,returnScroll:window.scrollY},E.innerHTML=on(d),E.scrollIntoView({behavior:"smooth",block:"start"});try{let q=await U.judgmentDetail(d,L);if(s||!A||A.seq!==M)return;A.detail=q,E.innerHTML=dn(q,{database:A.database})}catch(q){if(s||!A||A.seq!==M)return;E.innerHTML=ln(q,d),O(q.message||"\u7121\u6CD5\u53D6\u5F97\u5224\u6C7A\u539F\u6587\u3002","danger")}},u=(d,p)=>`${i}:${d.id}:${p}`,S=(d,p)=>(d.tables||[]).find(v=>v.id===p)?.label||p,D=(d,p,{sort:v=null,columnFilters:x={}}={})=>{let M={column_filters:x};return d.id==="postgres"?(M.table=p,M.schema_preview=!0):d.id==="parquet"&&i==="judgment"?(M.table="judgment_documents",M.columns=Pa):d.id==="parquet"&&(M.dataset="all",M.columns=ja),v?.key&&(M.sort=`${v.key}:${v.direction}`),M},ne=async(d,p,{sort:v=null,columnFilters:x={}}={})=>{if(!p)return;ke();let M=u(d,p),L=++k;b={tableId:p},g={key:M,tableId:p,loading:!0,result:null,error:null,sort:v,columnFilters:x},Y.innerHTML=Zt(d,he(i)?.label||i,p),E.innerHTML=Cs(S(d,p));try{let q;if(d.id==="indexeddb"){let J=kt(d,10);J.values.store=p,J.page=1,q=await Ds(d,J)}else d.id==="qdrant"?q={database:"qdrant",label:"Qdrant",status:"not_configured",message:"Qdrant collection \u9700\u8981\u8A9E\u610F\u67E5\u8A62\uFF1BSchema \u50C5\u63D0\u4F9B collection \u540D\u7A31\uFF0C\u4E0D\u5217\u51FA\u524D 10 \u7B46\u8CC7\u6599\u3002",table:p,columns:[],rows:[],total:0,page:1,page_size:10,duration_ms:0,summary:[],distribution:[],query_text:"",warnings:[],meta:{}}:(q=await U.query({database:d.id,filters:D(d,p,{sort:v,columnFilters:x}),page:1,pageSize:10}),v?.key&&(q.meta={...q.meta||{},sort:v}));if(s||L!==k)return;g={key:M,tableId:p,loading:!1,result:q,error:null,sort:v,columnFilters:x},_==="schema"&&b?.tableId===p&&(Y.innerHTML=Zt(d,he(i)?.label||i,p),E.innerHTML=es(q,S(d,p),{columnFilters:x,searchEnabled:d.id==="postgres"||d.id==="parquet"}))}catch(q){if(s||L!==k)return;g={key:M,tableId:p,loading:!1,result:null,error:q,sort:v,columnFilters:x},_==="schema"&&b?.tableId===p&&(E.innerHTML=Ns(q,S(d,p)))}},ce=()=>{let d=le(o);if(!d)return null;if(_==="schema"&&g?.result)return{db:d,tableId:g.tableId,columnFilters:g.columnFilters||{},sort:g.sort||null,mode:"schema"};let p=d?I(d):null,v=p?.result;return v&&(d.id==="postgres"||d.id==="parquet")?{db:d,tableId:v.table,columnFilters:p.columnFilters||{},sort:p.sort||null,mode:"query"}:null},re=(d,p,v)=>{if(!d)return;let x=`${d.db.id}:${d.tableId}:${p}`,M=pe.get(x);M&&(window.clearTimeout(M),pe.delete(x)),ke();let L={...d.columnFilters||{}},q=String(v||"").trim();if(q?L[p]=q:delete L[p],d.mode==="schema"){ne(d.db,d.tableId,{sort:d.sort,columnFilters:L});return}let J=I(d.db);J.columnFilters=L,J.page=1,Ge(1)},pe=new Map,ie=()=>{T+=1,h=[],y=null,C=-1,P&&(P.hidden=!0,P.innerHTML="")},Q=(d,p)=>{let v=String(d||""),x=v.toLocaleLowerCase(),M=String(p||"").toLocaleLowerCase(),L=new Array(v.length).fill(!1),q=(oe,Me)=>{for(let fe=oe;fe<oe+Me;fe+=1)fe>=0&&fe<L.length&&(L[fe]=!0)},J=x.indexOf(M);if(J>=0)for(;J>=0;)q(J,M.length),J=x.indexOf(M,J+M.length);else{let oe=[];for(let Me of M.match(/[一-鿿]{2,}/g)||[])for(let fe=0;fe<Me.length-1;fe+=1)oe.push(Me.slice(fe,fe+2));oe.push(...M.match(/[a-z0-9]+/g)||[]);for(let Me of oe){let fe=x.indexOf(Me);for(;fe>=0;)q(fe,Me.length),fe=x.indexOf(Me,fe+Me.length)}}let ue="",me=0;for(;me<v.length;)if(L[me]){let oe=me;for(;oe<v.length&&L[oe];)oe+=1;ue+=`<mark>${n(v.slice(me,oe))}</mark>`,me=oe}else{let oe=me;for(;oe<v.length&&!L[oe];)oe+=1;ue+=n(v.slice(me,oe)),me=oe}return ue||n(v)},ge=(d,p)=>{if(!P)return;let v=d.getBoundingClientRect(),x=Math.min(420,Math.max(220,v.width)),M=Math.min(360,34+p*30),L=v.bottom+4;L+M>window.innerHeight-8&&(L=Math.max(8,v.top-M-4));let q=Math.min(window.innerWidth-x-8,Math.max(8,v.left));P.style.width=`${x}px`,P.style.left=`${q}px`,P.style.top=`${L}px`},Le=d=>{if(!P)return;let p=[...P.querySelectorAll(".schema-suggest-item")];p.length&&(C=Math.max(0,Math.min(p.length-1,d)),p.forEach((v,x)=>{v.classList.toggle("is-active",x===C)}),p[C].scrollIntoView({block:"nearest"}))},_e=d=>{let p=h[d],v=y;!p||!v||(ie(),re(v,v.column,p))},Be=async(d,p,v,x)=>{if(!d||!v.trim()){ie();return}let M=++T;y={...d,column:p,input:x},C=-1;try{let L=await U.schemaSuggest({database:d.db.id,table:d.tableId,column:p,query:v,limit:1e3});if(M!==T||document.activeElement!==x||!P)return;let q=Array.isArray(L.values)?L.values:[];if(h=q,!q.length){ie();return}let J=Number(L.total)>q.length?`\u5171 ${c(L.total)} \u500B\u7B26\u5408\uFF0C\u986F\u793A\u524D ${c(q.length)} \u500B`:`\u5171 ${c(L.total)} \u500B\u7B26\u5408`;P.innerHTML=`<div class="schema-suggest-head">${n(J)}</div>${q.map((ue,me)=>`<button class="schema-suggest-item" type="button"
+  </section>`;let z=e.querySelector("#query-sidebar"),G=e.querySelector("#category-switch"),X=e.querySelector("#db-options-wrap"),se=e.querySelector("#sidebar-view-switch"),R=e.querySelector("#filter-area"),P=e.querySelector("#schema-area"),k=e.querySelector("#query-main"),q=e.querySelector("#schema-suggest-popover"),B=e.querySelector("#catalog-meta"),Q=e.querySelector("#refresh-catalog"),be=d=>r.find(p=>p.id===d),Te=()=>be(i)?.databases||[],le=d=>Te().find(p=>p.id===d),$e=(d,p)=>`${d}:${p}`,O=(d,p=i)=>l[$e(p,d.id)],de=(d,p)=>{Ms(d,p).catch(()=>{})},Ie=()=>{if(!a){B.textContent="CATALOG \xB7 \u96E2\u7DDA",B.className="badge badge-danger badge-mono";return}let d=Te(),p=d.filter(x=>x.available).length,v=be(i);B.textContent=`CATALOG \xB7 ${v?.label||i} \xB7 ${p}/${d.length} \u53EF\u7528`,B.className="badge badge-neutral badge-mono"},Se=d=>{k.innerHTML=Ua(d)},qe=()=>{let d=_?.returnScroll??E?.returnScroll;_=null,E=null;let p=le(o),v=p?O(p):null;w==="schema"&&g?.result?k.innerHTML=es(g.result,A(p,g.tableId),{columnFilters:g.columnFilters||{},searchEnabled:p.id==="postgres"||p.id==="parquet"}):v?.result?k.innerHTML=St(v.result):p&&Se(p),typeof d=="number"&&window.requestAnimationFrame(()=>window.scrollTo({top:d,behavior:"smooth"}))},Ae=(d="law-article-jump")=>{let p=k.querySelector(`#${d}`),v=Us(p?.value);if(!v){D("\u8ACB\u8F38\u5165\u8981\u8DF3\u81F3\u7684\u689D\u865F\uFF0C\u4F8B\u5982 100 \u6216 \u7B2C100\u689D\u3002","warn"),p?.focus();return}let T=[...k.querySelectorAll("[data-article-no]")].find(L=>L.dataset.articleNo===v);if(!T){D(`\u627E\u4E0D\u5230\u7B2C ${v} \u689D\u3002`,"warn");return}T.scrollIntoView({behavior:"instant",block:"center"}),T.classList.add("is-jump-target"),window.setTimeout(()=>T.classList.remove("is-jump-target"),2400)},De=async({lawKey:d,sourceType:p="",lawName:v="",versionId:x=""})=>{let T=le(o),L=T?O(T):null,j=w==="schema"?g?.result:null;if(!T||!L?.result&&!j||!d)return;let W=++m;_={seq:W,lawKey:d,sourceType:p,lawName:v,versionId:x?String(x):"",page:1,detail:null,database:T.id,returnScroll:window.scrollY},E=null,k.innerHTML=rn(v||d),k.scrollIntoView({behavior:"smooth",block:"start"});try{let ue=await U.lawDetail(d,p,_.versionId);if(s||!_||_.seq!==W)return;_.detail=ue,_.page=1,k.innerHTML=dn(ue,{database:_.database,lawPage:_.page})}catch(ue){if(s||!_||_.seq!==W)return;k.innerHTML=on(ue,v||d),D(ue.message||"\u7121\u6CD5\u53D6\u5F97\u6CD5\u898F\u5831\u8868\u3002","danger")}},N=async({jid:d})=>{let p=le(o),v=p?O(p):null,x=w==="schema"?g?.result:null;if(!p||!v?.result&&!x||!d)return;let T=++m;_=null;let L=p.id==="parquet"?"parquet":"postgres";E={seq:T,jid:d,detail:null,database:p.id,source:L,returnScroll:window.scrollY},k.innerHTML=un(d),k.scrollIntoView({behavior:"smooth",block:"start"});try{let j=await U.judgmentDetail(d,L);if(s||!E||E.seq!==T)return;E.detail=j,k.innerHTML=vn(j,{database:E.database})}catch(j){if(s||!E||E.seq!==T)return;k.innerHTML=pn(j,d),D(j.message||"\u7121\u6CD5\u53D6\u5F97\u5224\u6C7A\u539F\u6587\u3002","danger")}},u=(d,p)=>`${i}:${d.id}:${p}`,A=(d,p)=>(d.tables||[]).find(v=>v.id===p)?.label||p,I=(d,p,{sort:v=null,columnFilters:x={}}={})=>{let T={column_filters:x};return d.id==="postgres"?(T.table=p,T.schema_preview=!0):d.id==="parquet"&&i==="judgment"?(T.table="judgment_documents",T.columns=Ia):d.id==="parquet"&&(T.dataset="all",T.columns=Ra),v?.key&&(T.sort=`${v.key}:${v.direction}`),T},ne=async(d,p,{sort:v=null,columnFilters:x={}}={})=>{if(!p)return;xe();let T=u(d,p),L=++S;f={tableId:p},g={key:T,tableId:p,loading:!0,result:null,error:null,sort:v,columnFilters:x},P.innerHTML=Zt(d,be(i)?.label||i,p),k.innerHTML=Cs(A(d,p));try{let j;if(d.id==="indexeddb"){let W=kt(d,10);W.values.store=p,W.page=1,j=await Is(d,W)}else d.id==="qdrant"?j={database:"qdrant",label:"Qdrant",status:"not_configured",message:"Qdrant collection \u9700\u8981\u8A9E\u610F\u67E5\u8A62\uFF1BSchema \u50C5\u63D0\u4F9B collection \u540D\u7A31\uFF0C\u4E0D\u5217\u51FA\u524D 10 \u7B46\u8CC7\u6599\u3002",table:p,columns:[],rows:[],total:0,page:1,page_size:10,duration_ms:0,summary:[],distribution:[],query_text:"",warnings:[],meta:{}}:(j=await U.query({database:d.id,filters:I(d,p,{sort:v,columnFilters:x}),page:1,pageSize:10}),v?.key&&(j.meta={...j.meta||{},sort:v}));if(s||L!==S)return;g={key:T,tableId:p,loading:!1,result:j,error:null,sort:v,columnFilters:x},w==="schema"&&f?.tableId===p&&(P.innerHTML=Zt(d,be(i)?.label||i,p),k.innerHTML=es(j,A(d,p),{columnFilters:x,searchEnabled:d.id==="postgres"||d.id==="parquet"}))}catch(j){if(s||L!==S)return;g={key:T,tableId:p,loading:!1,result:null,error:j,sort:v,columnFilters:x},w==="schema"&&f?.tableId===p&&(k.innerHTML=Ns(j,A(d,p)))}},ce=()=>{let d=le(o);if(!d)return null;if(w==="schema"&&g?.result)return{db:d,tableId:g.tableId,columnFilters:g.columnFilters||{},sort:g.sort||null,mode:"schema"};let p=d?O(d):null,v=p?.result;return v&&(d.id==="postgres"||d.id==="parquet")?{db:d,tableId:v.table,columnFilters:p.columnFilters||{},sort:p.sort||null,mode:"query"}:null},re=(d,p,v)=>{if(!d)return;let x=`${d.db.id}:${d.tableId}:${p}`,T=pe.get(x);T&&(window.clearTimeout(T),pe.delete(x)),xe();let L={...d.columnFilters||{}},j=String(v||"").trim();if(j?L[p]=j:delete L[p],d.mode==="schema"){ne(d.db,d.tableId,{sort:d.sort,columnFilters:L});return}let W=O(d.db);W.columnFilters=L,W.page=1,Ge(1)},pe=new Map,ie=()=>{M+=1,h=[],y=null,C=-1,q&&(q.hidden=!0,q.innerHTML="")},J=(d,p)=>{let v=String(d||""),x=v.toLocaleLowerCase(),T=String(p||"").toLocaleLowerCase(),L=new Array(v.length).fill(!1),j=(oe,Me)=>{for(let fe=oe;fe<oe+Me;fe+=1)fe>=0&&fe<L.length&&(L[fe]=!0)},W=x.indexOf(T);if(W>=0)for(;W>=0;)j(W,T.length),W=x.indexOf(T,W+T.length);else{let oe=[];for(let Me of T.match(/[一-鿿]{2,}/g)||[])for(let fe=0;fe<Me.length-1;fe+=1)oe.push(Me.slice(fe,fe+2));oe.push(...T.match(/[a-z0-9]+/g)||[]);for(let Me of oe){let fe=x.indexOf(Me);for(;fe>=0;)j(fe,Me.length),fe=x.indexOf(Me,fe+Me.length)}}let ue="",me=0;for(;me<v.length;)if(L[me]){let oe=me;for(;oe<v.length&&L[oe];)oe+=1;ue+=`<mark>${n(v.slice(me,oe))}</mark>`,me=oe}else{let oe=me;for(;oe<v.length&&!L[oe];)oe+=1;ue+=n(v.slice(me,oe)),me=oe}return ue||n(v)},ge=(d,p)=>{if(!q)return;let v=d.getBoundingClientRect(),x=Math.min(420,Math.max(220,v.width)),T=Math.min(360,34+p*30),L=v.bottom+4;L+T>window.innerHeight-8&&(L=Math.max(8,v.top-T-4));let j=Math.min(window.innerWidth-x-8,Math.max(8,v.left));q.style.width=`${x}px`,q.style.left=`${j}px`,q.style.top=`${L}px`},Le=d=>{if(!q)return;let p=[...q.querySelectorAll(".schema-suggest-item")];p.length&&(C=Math.max(0,Math.min(p.length-1,d)),p.forEach((v,x)=>{v.classList.toggle("is-active",x===C)}),p[C].scrollIntoView({block:"nearest"}))},ke=d=>{let p=h[d],v=y;!p||!v||(ie(),re(v,v.column,p))},Be=async(d,p,v,x)=>{if(!d||!v.trim()){ie();return}let T=++M;y={...d,column:p,input:x},C=-1;try{let L=await U.schemaSuggest({database:d.db.id,table:d.tableId,column:p,query:v,limit:1e3});if(T!==M||document.activeElement!==x||!q)return;let j=Array.isArray(L.values)?L.values:[];if(h=j,!j.length){ie();return}let W=Number(L.total)>j.length?`\u5171 ${c(L.total)} \u500B\u7B26\u5408\uFF0C\u986F\u793A\u524D ${c(j.length)} \u500B`:`\u5171 ${c(L.total)} \u500B\u7B26\u5408`;q.innerHTML=`<div class="schema-suggest-head">${n(W)}</div>${j.map((ue,me)=>`<button class="schema-suggest-item" type="button"
             data-schema-suggest-index="${me}"
-            title="${n(ue)}">${Q(ue,v)}</button>`).join("")}`,ge(x,q.length),P.hidden=!1}catch{ie()}},ke=()=>{let d=document.activeElement;d instanceof HTMLElement&&d.matches("[data-schema-search]")&&d.blur(),ie()},mt=(d,{resetReport:p=!1}={})=>{ke();let v=I(d);if(R.innerHTML=js(r,i),G.innerHTML=Da(Te(),d.id),ee.innerHTML=Ia(_),_==="schema"?(z.hidden=!0,z.innerHTML="",Y.hidden=!1,Y.innerHTML=Zt(d,he(i)?.label||i,b?.tableId||"")):(Y.hidden=!0,Y.innerHTML="",z.hidden=!1,z.innerHTML=`${Es(d)}${Yt(d,v)}<div class="sidebar-note">${Ps(d)}</div>`),De(),_==="schema"){let x=b?u(d,b.tableId):"";if(g&&g.key===x){let M=S(d,g.tableId);g.loading?E.innerHTML=Cs(M):g.error?E.innerHTML=Ns(g.error,M):E.innerHTML=es(g.result,M,{columnFilters:g.columnFilters||{},searchEnabled:d.id==="postgres"||d.id==="parquet"})}else E.innerHTML=Wa(d);return}p?Se(d):v.result?E.innerHTML=St(v.result):Se(d)},vt=(d,{persist:p=!0,resetReport:v=!1}={})=>{let x=Te(),M=x.find(q=>q.id===d)||x[0];if(!M)return;w=null,A=null,b=null,g=null,k+=1,o=M.id;let L=be(i,M.id);l[L]||(l[L]=kt(M,f)),mt(M,{resetReport:v}),p&&(de(`data.last_database.${i}`,M.id),de("data.last_category",i))},Ee=(d,{persist:p=!0,resetReport:v=!0,databaseId:x=null}={})=>{let M=he(d)||r[0];if(!M)return;i=M.id,w=null,A=null;let L=M.databases||[],q=x&&L.find(J=>J.id===x)||L.find(J=>J.id===o)||L[0];if(o=q?.id||null,!q){R.innerHTML=js(r,i),G.innerHTML=`<div class="sidebar-notice">${K({tone:"warn",title:"\u6C92\u6709\u53EF\u7528\u7684\u8CC7\u6599\u4F86\u6E90",text:"\u9019\u500B\u985E\u5225\u76EE\u524D\u6C92\u6709\u8CC7\u6599\u5EAB\u9078\u9805\u3002"})}</div>`,z.innerHTML="",De();return}vt(q.id,{persist:!1,resetReport:v}),p&&(de("data.last_category",M.id),de(`data.last_database.${M.id}`,q.id))},it=d=>{let p=I(d),v=z.querySelector("#data-filter-form");v&&(p.values=xt(v,d,p))},Ge=async(d=null)=>{let p=le(o);if(!p)return;ke();let v=I(p);it(p),d!==null&&(v.page=d),(!Number.isFinite(v.page)||v.page<1)&&(v.page=1);let x=++m;w=null,A=null,E.innerHTML=ct(p);let M=z.querySelector("#run-query");W(M,!0,"\u67E5\u8A62\u4E2D\u2026");try{let L;if(p.id==="indexeddb"?L=await Ds(p,v):L=await U.query({database:p.id,filters:Xt(p,v),page:v.page,pageSize:v.pageSize}),s||x!==m)return;L.meta={...L.meta||{},column_filters:v.columnFilters||{},searchable:p.id==="postgres"||p.id==="parquet",sort:v.sort||L.meta?.sort||null},v.result=L,v.page=Number(L.page)||v.page,v.pageSize=Number(L.page_size)||v.pageSize,E.innerHTML=St(L);let q=he(i)?.label||i;await wt({kind:"data",title:`${q} \xB7 ${p.label} \xB7 ${L.table||L.label||"query"}`,detail:`${c(L.total)} \u7B46 \xB7 ${F(L.duration_ms)}`,payload:{category:i,database:p.id,filters:Xt(p,v),page:v.page,page_size:v.pageSize}}),de("data.last_query",{category:i,database:p.id,filters:Xt(p,v),page:v.page,page_size:v.pageSize,at:new Date().toISOString()})}catch(L){if(s||x!==m)return;E.innerHTML=Lt(L,p),O(L.message||"\u67E5\u8A62\u5931\u6557\u3002","danger")}finally{!s&&x===m&&W(M,!1)}},It=async()=>{X.disabled=!0,W(X,!0,"\u6574\u7406\u4E2D\u2026");try{let[d,p,v,x,M]=await Promise.all([U.catalog(),lt("data.last_category","law"),lt("data.last_database.law","postgres"),lt("data.last_database.judgment","postgres"),lt("data.page_size",25)]);if(s)return;a=d,r=Array.isArray(a.categories)?a.categories:[],f=Is.includes(Number(M))?Number(M):25;for(let J of r)for(let ue of J.databases||[]){let me=be(J.id,ue.id);l[me]||(l[me]=kt(ue,f))}let L=r.find(J=>J.id===p)||r[0];if(!L){R.innerHTML="",G.innerHTML=`<div class="sidebar-notice">${K({tone:"danger",title:"\u6C92\u6709\u53EF\u7528\u7684\u5206\u985E",text:"Catalog \u6C92\u6709\u56DE\u50B3\u6CD5\u898F\u547D\u4EE4\u6216\u5224\u6C7A\u5206\u985E\u3002"})}</div>`;return}let q=L.id==="judgment"?x:v;if(i=L.id,o=null,Ee(L.id,{persist:!1,resetReport:!0,databaseId:q}),s)return;O("\u8CC7\u6599\u5EAB catalog \u5DF2\u66F4\u65B0\u3002","ok",2200)}catch(d){if(s)return;a=null,r=[],R.innerHTML="",De(),G.innerHTML=`<div class="sidebar-notice">${K({tone:"danger",title:"\u7121\u6CD5\u8B80\u53D6 catalog",text:n(d.message||"\u8ACB\u78BA\u8A8D API \u662F\u5426\u555F\u52D5\u3002")})}
+            title="${n(ue)}">${J(ue,v)}</button>`).join("")}`,ge(x,j.length),q.hidden=!1}catch{ie()}},xe=()=>{let d=document.activeElement;d instanceof HTMLElement&&d.matches("[data-schema-search]")&&d.blur(),ie()},mt=(d,{resetReport:p=!1}={})=>{xe();let v=O(d);if(G.innerHTML=Es(r,i),X.innerHTML=Fa(Te(),d.id),se.innerHTML=Ha(w),w==="schema"?(R.hidden=!0,R.innerHTML="",P.hidden=!1,P.innerHTML=Zt(d,be(i)?.label||i,f?.tableId||"")):(P.hidden=!0,P.innerHTML="",R.hidden=!1,R.innerHTML=`${js(d)}${Yt(d,v)}<div class="sidebar-note">${Ps(d)}</div>`),Ie(),w==="schema"){let x=f?u(d,f.tableId):"";if(g&&g.key===x){let T=A(d,g.tableId);g.loading?k.innerHTML=Cs(T):g.error?k.innerHTML=Ns(g.error,T):k.innerHTML=es(g.result,T,{columnFilters:g.columnFilters||{},searchEnabled:d.id==="postgres"||d.id==="parquet"})}else k.innerHTML=Za(d);return}p?Se(d):v.result?k.innerHTML=St(v.result):Se(d)},vt=(d,{persist:p=!0,resetReport:v=!1}={})=>{let x=Te(),T=x.find(j=>j.id===d)||x[0];if(!T)return;_=null,E=null,f=null,g=null,S+=1,o=T.id;let L=$e(i,T.id);l[L]||(l[L]=kt(T,b)),mt(T,{resetReport:v}),p&&(de(`data.last_database.${i}`,T.id),de("data.last_category",i))},je=(d,{persist:p=!0,resetReport:v=!0,databaseId:x=null}={})=>{let T=be(d)||r[0];if(!T)return;i=T.id,_=null,E=null;let L=T.databases||[],j=x&&L.find(W=>W.id===x)||L.find(W=>W.id===o)||L[0];if(o=j?.id||null,!j){G.innerHTML=Es(r,i),X.innerHTML=`<div class="sidebar-notice">${Y({tone:"warn",title:"\u6C92\u6709\u53EF\u7528\u7684\u8CC7\u6599\u4F86\u6E90",text:"\u9019\u500B\u985E\u5225\u76EE\u524D\u6C92\u6709\u8CC7\u6599\u5EAB\u9078\u9805\u3002"})}</div>`,R.innerHTML="",Ie();return}vt(j.id,{persist:!1,resetReport:v}),p&&(de("data.last_category",T.id),de(`data.last_database.${T.id}`,j.id))},it=d=>{let p=O(d),v=R.querySelector("#data-filter-form");v&&(p.values=xt(v,d,p))},Ge=async(d=null)=>{let p=le(o);if(!p)return;xe();let v=O(p);it(p),d!==null&&(v.page=d),(!Number.isFinite(v.page)||v.page<1)&&(v.page=1);let x=++m;_=null,E=null,k.innerHTML=ct(p);let T=R.querySelector("#run-query");V(T,!0,"\u67E5\u8A62\u4E2D\u2026");try{let L;if(p.id==="indexeddb"?L=await Is(p,v):L=await U.query({database:p.id,filters:Xt(p,v),page:v.page,pageSize:v.pageSize}),s||x!==m)return;L.meta={...L.meta||{},column_filters:v.columnFilters||{},searchable:p.id==="postgres"||p.id==="parquet",sort:v.sort||L.meta?.sort||null},v.result=L,v.page=Number(L.page)||v.page,v.pageSize=Number(L.page_size)||v.pageSize,k.innerHTML=St(L);let j=be(i)?.label||i;await wt({kind:"data",title:`${j} \xB7 ${p.label} \xB7 ${L.table||L.label||"query"}`,detail:`${c(L.total)} \u7B46 \xB7 ${H(L.duration_ms)}`,payload:{category:i,database:p.id,filters:Xt(p,v),page:v.page,page_size:v.pageSize}}),de("data.last_query",{category:i,database:p.id,filters:Xt(p,v),page:v.page,page_size:v.pageSize,at:new Date().toISOString()})}catch(L){if(s||x!==m)return;k.innerHTML=Lt(L,p),D(L.message||"\u67E5\u8A62\u5931\u6557\u3002","danger")}finally{!s&&x===m&&V(T,!1)}},Dt=async()=>{Q.disabled=!0,V(Q,!0,"\u6574\u7406\u4E2D\u2026");try{let[d,p,v,x,T]=await Promise.all([U.catalog(),lt("data.last_category","law"),lt("data.last_database.law","postgres"),lt("data.last_database.judgment","postgres"),lt("data.page_size",25)]);if(s)return;a=d,r=Array.isArray(a.categories)?a.categories:[],b=Ds.includes(Number(T))?Number(T):25;for(let W of r)for(let ue of W.databases||[]){let me=$e(W.id,ue.id);l[me]||(l[me]=kt(ue,b))}let L=r.find(W=>W.id===p)||r[0];if(!L){G.innerHTML="",X.innerHTML=`<div class="sidebar-notice">${Y({tone:"danger",title:"\u6C92\u6709\u53EF\u7528\u7684\u5206\u985E",text:"Catalog \u6C92\u6709\u56DE\u50B3\u6CD5\u898F\u547D\u4EE4\u6216\u5224\u6C7A\u5206\u985E\u3002"})}</div>`;return}let j=L.id==="judgment"?x:v;if(i=L.id,o=null,je(L.id,{persist:!1,resetReport:!0,databaseId:j}),s)return;D("\u8CC7\u6599\u5EAB catalog \u5DF2\u66F4\u65B0\u3002","ok",2200)}catch(d){if(s)return;a=null,r=[],G.innerHTML="",Ie(),X.innerHTML=`<div class="sidebar-notice">${Y({tone:"danger",title:"\u7121\u6CD5\u8B80\u53D6 catalog",text:n(d.message||"\u8ACB\u78BA\u8A8D API \u662F\u5426\u555F\u52D5\u3002")})}
       <button class="btn btn-secondary btn-sm" type="button" id="catalog-retry" style="margin-top:10px">
         ${$("refresh",14)}<span>\u91CD\u8A66</span>
-      </button></div>`,E.innerHTML=`<div class="report-empty">${$e({iconName:"server",title:"API \u76EE\u524D\u7121\u6CD5\u9023\u7DDA",text:"\u67E5\u8A62\u5831\u8868\u9700\u8981 FastAPI \u63D0\u4F9B catalog \u8207\u8CC7\u6599\u67E5\u8A62 API\u3002\u8ACB\u78BA\u8A8D judgment-web \u5DF2\u555F\u52D5\u3002"})}</div>`}finally{s||(X.disabled=!1,W(X,!1))}};j.addEventListener("change",d=>{let p=d.target;if(p.name==="category"){Ee(p.value);return}if(p.name==="database"){vt(p.value);return}let v=le(o);if(!v)return;let x=I(v),M=z.querySelector("#data-filter-form");!M||!p.name||(x.values=xt(M,v,x),x.page=1,p.name==="table"&&(w=null,A=null,x.sort=null,x.columnFilters={},x.result=null,z.innerHTML=Yt(v,x),Se(v)))}),j.addEventListener("input",d=>{let p=le(o);if(!p)return;let v=z.querySelector("#data-filter-form");if(!v||!d.target.name||d.target.name==="table")return;let x=I(p);x.values=xt(v,p,x)}),j.addEventListener("submit",d=>{d.target.id==="data-filter-form"&&(d.preventDefault(),Ge(1))}),j.addEventListener("click",d=>{let p=d.target.closest("[data-action]"),v=p?.dataset.action;if(v==="sidebar-view"){let x=le(o);if(!x)return;let M=I(x),L=z.querySelector("#data-filter-form");L&&_==="query"&&(M.values=xt(L,x,M)),_=p.dataset.view==="schema"?"schema":"query",mt(x);return}if(v==="select-schema-table"){let x=le(o);if(!x)return;ne(x,p.dataset.tableId||"");return}if(v==="reset"){let x=le(o);if(!x)return;w=null,A=null;let M=I(x);l[be(i,x.id)]=kt(x,M.pageSize),z.innerHTML=`${Es(x)}${Yt(x,l[be(i,x.id)])}<div class="sidebar-note">${Ps(x)}</div>`,Se(x),O("\u5DF2\u91CD\u8A2D\u9019\u500B\u8CC7\u6599\u5EAB\u7684\u67E5\u8A62\u689D\u4EF6\u3002","info",2400);return}d.target.closest("#catalog-retry")&&It()}),E.addEventListener("input",d=>{let p=d.target.closest("[data-schema-search]");if(!p)return;let v=ce();if(!v)return;let x=p.dataset.schemaSearch||"",M=p.value,L=`${v.mode}:${v.db.id}:${v.tableId}:${x}`,q=pe.get(L);if(q&&window.clearTimeout(q),!M.trim()){pe.delete(L),ie(),re(v,x,"");return}let J=window.setTimeout(()=>{pe.delete(L),Be(v,x,M,p)},250);pe.set(L,J)}),E.addEventListener("keydown",d=>{let p=d.target.closest("[data-schema-search]");if(!p)return;let v=ce();if(v){if(d.key==="Escape"){ie();return}if(d.key==="ArrowDown"||d.key==="ArrowUp"){if(!P||P.hidden)return;d.preventDefault();let x=d.key==="ArrowDown"?1:-1;Le(C<0?x>0?0:h.length-1:C+x);return}if(d.key==="Enter"){if(d.preventDefault(),P&&!P.hidden&&C>=0){_e(C);return}re(v,p.dataset.schemaSearch||"",p.value)}}}),P?.addEventListener("mousedown",d=>{d.preventDefault()}),P?.addEventListener("click",d=>{let p=d.target.closest("[data-schema-suggest-index]");p&&_e(Number(p.dataset.schemaSuggestIndex))});let gs=d=>{d.target.closest("[data-schema-search]")||P?.contains(d.target)||ie()};return document.addEventListener("click",gs),window.addEventListener("scroll",ie,!0),window.addEventListener("resize",ie),E.addEventListener("keydown",d=>{d.target.matches(".law-jump-input")&&d.key==="Enter"&&(d.preventDefault(),Ae(d.target.id))}),E.addEventListener("click",async d=>{let p=d.target.closest("[data-action]");if(!p)return;let v=p.dataset.action,x=le(o),M=x?I(x):null,L=M?.result;if(v==="back-to-results"){qe();return}if(v==="open-law"){Ie({lawKey:p.dataset.lawKey||"",sourceType:p.dataset.lawSource||"",lawName:p.dataset.lawName||""});return}if(v==="open-judgment"){N({jid:p.dataset.jid||""});return}if(v==="jump-article"){Ae(p.dataset.jumpInput||"law-article-jump");return}if(v==="sort-column"){let q=p.dataset.sortKey||"";if(!q||!x)return;if(_==="schema"&&g?.result){let me=g.sort,oe=q==="jdate"||q==="law_modified_date"||q==="article_count"||q==="citation_count"||q==="full_text_length"||q==="created_at"||q==="updated_at",Me=me?.key===q?me.direction==="asc"?"desc":"asc":oe?"desc":"asc";ne(x,g.tableId,{sort:{key:q,direction:Me},columnFilters:g.columnFilters||{}});return}if(!M)return;let J=M.sort,ue=J?.key===q?J.direction==="asc"?"desc":"asc":q==="jdate"?"desc":"asc";M.sort={key:q,direction:ue},Ge(1);return}if(v==="retry"){Ge(M?.page||1);return}if(L){if(v==="prev-page"){Ge(Math.max(1,Number(L.page)-1));return}if(v==="next-page"){let q=Math.max(1,Math.ceil(Number(L.total)/Number(L.page_size)));Ge(Math.min(q,Number(L.page)+1));return}if(v==="copy-query"){let q=await bt(L.query_text||"");O(q?"\u67E5\u8A62\u8A9E\u53E5\u5DF2\u8907\u88FD\u3002":"\u7121\u6CD5\u8907\u88FD\u67E5\u8A62\u8A9E\u53E5\u3002",q?"ok":"warn");return}if(v==="export-json"){let q=`${L.database}-${L.table||"query"}-page-${L.page}.json`;Ue(q,JSON.stringify(Tt(L),null,2),"application/json;charset=utf-8"),O(`\u5DF2\u532F\u51FA ${q}`,"ok");return}if(v==="export-csv"){let q=`${L.database}-${L.table||"query"}-page-${L.page}.csv`;Ue(q,Mt(L),"text/csv;charset=utf-8"),O(`\u5DF2\u532F\u51FA ${q}`,"ok")}}}),E.addEventListener("change",d=>{let p=d.target.closest("[data-action='select-law-version']");if(p&&w){Ie({lawKey:w.lawKey,sourceType:w.sourceType,lawName:w.lawName,versionId:p.value});return}if(!d.target.matches("[data-page-size]"))return;let v=le(o);if(!v)return;let x=I(v);x.pageSize=Number(d.target.value)||25,x.page=1,de("data.page_size",x.pageSize),Ge(1)}),X.addEventListener("click",()=>{It()}),await It(),t&&typeof t.setTitle=="function"&&t.setTitle("\u8CC7\u6599\u5EAB\u67E5\u8A62 \xB7 Judgment RAG Console"),()=>{s=!0;for(let d of pe.values())window.clearTimeout(d);pe.clear(),ie(),document.removeEventListener("click",gs),window.removeEventListener("scroll",ie,!0),window.removeEventListener("resize",ie)}}var Qs=[10,25,50,100],mn=[{value:"started_at:desc",label:"Timestamp \u65B0 \u2192 \u820A"},{value:"started_at:asc",label:"Timestamp \u820A \u2192 \u65B0"},{value:"duration_ms:desc",label:"\u8017\u6642\u591A \u2192 \u5C11"},{value:"duration_ms:asc",label:"\u8017\u6642\u5C11 \u2192 \u591A"}];function rs(){return{process:"",module:"",status:"",method:"",model:"",keyword:"",from_date:"",to_date:"",min_duration:"",sort:"started_at:desc"}}function vn(e,t=e){return`<option value="${n(e)}">${n(t)}</option>`}function dt(e,t,s,a,r=""){return`<div class="field">
+      </button></div>`,k.innerHTML=`<div class="report-empty">${ye({iconName:"server",title:"API \u76EE\u524D\u7121\u6CD5\u9023\u7DDA",text:"\u67E5\u8A62\u5831\u8868\u9700\u8981 FastAPI \u63D0\u4F9B catalog \u8207\u8CC7\u6599\u67E5\u8A62 API\u3002\u8ACB\u78BA\u8A8D judgment-web \u5DF2\u555F\u52D5\u3002"})}</div>`}finally{s||(Q.disabled=!1,V(Q,!1))}};z.addEventListener("change",d=>{let p=d.target;if(p.name==="category"){je(p.value);return}if(p.name==="database"){vt(p.value);return}let v=le(o);if(!v)return;let x=O(v),T=R.querySelector("#data-filter-form");!T||!p.name||(x.values=xt(T,v,x),x.page=1,p.name==="table"&&(_=null,E=null,x.sort=null,x.columnFilters={},x.result=null,R.innerHTML=Yt(v,x),Se(v)))}),z.addEventListener("input",d=>{let p=le(o);if(!p)return;let v=R.querySelector("#data-filter-form");if(!v||!d.target.name||d.target.name==="table")return;let x=O(p);x.values=xt(v,p,x)}),z.addEventListener("submit",d=>{d.target.id==="data-filter-form"&&(d.preventDefault(),Ge(1))}),z.addEventListener("click",d=>{let p=d.target.closest("[data-action]"),v=p?.dataset.action;if(v==="sidebar-view"){let x=le(o);if(!x)return;let T=O(x),L=R.querySelector("#data-filter-form");L&&w==="query"&&(T.values=xt(L,x,T)),w=p.dataset.view==="schema"?"schema":"query",mt(x);return}if(v==="select-schema-table"){let x=le(o);if(!x)return;ne(x,p.dataset.tableId||"");return}if(v==="reset"){let x=le(o);if(!x)return;_=null,E=null;let T=O(x);l[$e(i,x.id)]=kt(x,T.pageSize),R.innerHTML=`${js(x)}${Yt(x,l[$e(i,x.id)])}<div class="sidebar-note">${Ps(x)}</div>`,Se(x),D("\u5DF2\u91CD\u8A2D\u9019\u500B\u8CC7\u6599\u5EAB\u7684\u67E5\u8A62\u689D\u4EF6\u3002","info",2400);return}d.target.closest("#catalog-retry")&&Dt()}),k.addEventListener("input",d=>{let p=d.target.closest("[data-schema-search]");if(!p)return;let v=ce();if(!v)return;let x=p.dataset.schemaSearch||"",T=p.value,L=`${v.mode}:${v.db.id}:${v.tableId}:${x}`,j=pe.get(L);if(j&&window.clearTimeout(j),!T.trim()){pe.delete(L),ie(),re(v,x,"");return}let W=window.setTimeout(()=>{pe.delete(L),Be(v,x,T,p)},250);pe.set(L,W)}),k.addEventListener("keydown",d=>{let p=d.target.closest("[data-schema-search]");if(!p)return;let v=ce();if(v){if(d.key==="Escape"){ie();return}if(d.key==="ArrowDown"||d.key==="ArrowUp"){if(!q||q.hidden)return;d.preventDefault();let x=d.key==="ArrowDown"?1:-1;Le(C<0?x>0?0:h.length-1:C+x);return}if(d.key==="Enter"){if(d.preventDefault(),q&&!q.hidden&&C>=0){ke(C);return}re(v,p.dataset.schemaSearch||"",p.value)}}}),q?.addEventListener("mousedown",d=>{d.preventDefault()}),q?.addEventListener("click",d=>{let p=d.target.closest("[data-schema-suggest-index]");p&&ke(Number(p.dataset.schemaSuggestIndex))});let gs=d=>{d.target.closest("[data-schema-search]")||q?.contains(d.target)||ie()};return document.addEventListener("click",gs),window.addEventListener("scroll",ie,!0),window.addEventListener("resize",ie),k.addEventListener("keydown",d=>{d.target.matches(".law-jump-input")&&d.key==="Enter"&&(d.preventDefault(),Ae(d.target.id))}),k.addEventListener("click",async d=>{let p=d.target.closest("[data-action]");if(!p)return;let v=p.dataset.action,x=le(o),T=x?O(x):null,L=T?.result;if(v==="back-to-results"){qe();return}if(v==="open-law"){De({lawKey:p.dataset.lawKey||"",sourceType:p.dataset.lawSource||"",lawName:p.dataset.lawName||""});return}if(v==="open-judgment"){N({jid:p.dataset.jid||""});return}if(v==="jump-article"){Ae(p.dataset.jumpInput||"law-article-jump");return}if(v==="sort-column"){let j=p.dataset.sortKey||"";if(!j||!x)return;if(w==="schema"&&g?.result){let me=g.sort,oe=j==="jdate"||j==="law_modified_date"||j==="article_count"||j==="citation_count"||j==="full_text_length"||j==="created_at"||j==="updated_at",Me=me?.key===j?me.direction==="asc"?"desc":"asc":oe?"desc":"asc";ne(x,g.tableId,{sort:{key:j,direction:Me},columnFilters:g.columnFilters||{}});return}if(!T)return;let W=T.sort,ue=W?.key===j?W.direction==="asc"?"desc":"asc":j==="jdate"?"desc":"asc";T.sort={key:j,direction:ue},Ge(1);return}if(v==="retry"){Ge(T?.page||1);return}if(L){if(v==="prev-page"){Ge(Math.max(1,Number(L.page)-1));return}if(v==="next-page"){let j=Math.max(1,Math.ceil(Number(L.total)/Number(L.page_size)));Ge(Math.min(j,Number(L.page)+1));return}if(v==="copy-query"){let j=await bt(L.query_text||"");D(j?"\u67E5\u8A62\u8A9E\u53E5\u5DF2\u8907\u88FD\u3002":"\u7121\u6CD5\u8907\u88FD\u67E5\u8A62\u8A9E\u53E5\u3002",j?"ok":"warn");return}if(v==="export-json"){let j=`${L.database}-${L.table||"query"}-page-${L.page}.json`;Ue(j,JSON.stringify(Tt(L),null,2),"application/json;charset=utf-8"),D(`\u5DF2\u532F\u51FA ${j}`,"ok");return}if(v==="export-csv"){let j=`${L.database}-${L.table||"query"}-page-${L.page}.csv`;Ue(j,Mt(L),"text/csv;charset=utf-8"),D(`\u5DF2\u532F\u51FA ${j}`,"ok")}}}),k.addEventListener("change",d=>{let p=d.target.closest("[data-action='select-law-version']");if(p&&_){De({lawKey:_.lawKey,sourceType:_.sourceType,lawName:_.lawName,versionId:p.value});return}if(!d.target.matches("[data-page-size]"))return;let v=le(o);if(!v)return;let x=O(v);x.pageSize=Number(d.target.value)||25,x.page=1,de("data.page_size",x.pageSize),Ge(1)}),Q.addEventListener("click",()=>{Dt()}),await Dt(),t&&typeof t.setTitle=="function"&&t.setTitle("\u8CC7\u6599\u5EAB\u67E5\u8A62 \xB7 Judgment RAG Console"),()=>{s=!0;for(let d of pe.values())window.clearTimeout(d);pe.clear(),ie(),document.removeEventListener("click",gs),window.removeEventListener("scroll",ie,!0),window.removeEventListener("resize",ie)}}var Qs=[10,25,50,100],hn=[{value:"started_at:desc",label:"Timestamp \u65B0 \u2192 \u820A"},{value:"started_at:asc",label:"Timestamp \u820A \u2192 \u65B0"},{value:"duration_ms:desc",label:"\u8017\u6642\u591A \u2192 \u5C11"},{value:"duration_ms:asc",label:"\u8017\u6642\u5C11 \u2192 \u591A"}];function rs(){return{process:"",module:"",status:"",method:"",model:"",keyword:"",from_date:"",to_date:"",min_duration:"",sort:"started_at:desc"}}function bn(e,t=e){return`<option value="${n(e)}">${n(t)}</option>`}function dt(e,t,s,a,r=""){return`<div class="field">
     <label class="field-label" for="performance-${e}">
       <span>${n(t)}</span>
       <span class="field-tag">${n(e)}</span>
     </label>
     <select class="select" id="performance-${e}" name="${n(e)}">
-      ${vn("","\u5168\u90E8")}
+      ${bn("","\u5168\u90E8")}
       ${s.map(i=>`<option value="${n(i)}" ${String(i)===String(a)?"selected":""}>${n(i)}</option>`).join("")}
     </select>
     ${r?`<span class="field-help">${n(r)}</span>`:""}
-  </div>`}function gn(e,t){let s=mn.map(a=>`<option value="${a.value}" ${a.value===t.sort?"selected":""}>${a.label}</option>`).join("");return`
+  </div>`}function $n(e,t){let s=hn.map(a=>`<option value="${a.value}" ${a.value===t.sort?"selected":""}>${a.label}</option>`).join("");return`
     ${dt("process","\u7A0B\u5E8F",e.processes||[],t.process)}
     ${dt("module","\u6A21\u7D44",e.modules||[],t.module)}
     ${dt("model","\u6A21\u578B",e.models||[],t.model)}
@@ -727,27 +727,27 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <span class="field-tag">sort</span>
       </label>
       <select class="select" id="performance-sort" name="sort">${s}</select>
-    </div>`}function zs(){let e=document.getElementById("performance-filter-form");if(!e)return rs();let t=new FormData(e);return{process:String(t.get("process")||""),module:String(t.get("module")||""),status:String(t.get("status")||""),method:String(t.get("method")||""),model:String(t.get("model")||""),keyword:String(t.get("keyword")||"").trim(),from_date:String(t.get("from_date")||""),to_date:String(t.get("to_date")||""),min_duration:String(t.get("min_duration")||""),sort:String(t.get("sort")||"started_at:desc")}}function Js(e){if(e==null)return"null";if(typeof e=="object")try{let t=JSON.stringify(e);return t.length>160?`${t.slice(0,157)}\u2026`:t}catch{return String(e)}return String(e)}function fn(e){if(!e)return"";let t=new Date(e);if(Number.isNaN(t.getTime()))return"";let s=String(t.getHours()).padStart(2,"0"),a=String(t.getMinutes()).padStart(2,"0"),r=String(t.getSeconds()).padStart(2,"0"),i=String(t.getMilliseconds()).padStart(3,"0");return`${s}:${a}:${r}.${i}`}function hn(e){let t=String(e?.module||"");return t.includes("static")||t.includes("frontend")?"is-client":t.includes("judgment.rag")?"is-rag":t.includes("judgment.web.app")?"is-api":t.includes("judgment.web.query")?"is-data":t.includes("judgment.judgment_index")?"is-index":"is-other"}function bn(e){let t=new Map(e.map(a=>[a.seq,a.parent_seq])),s=new Map;for(let a of e){if(Number.isInteger(a.depth)){s.set(a.seq,a.depth);continue}let r=0,i=a.parent_seq,o=0;for(;i&&t.has(i)&&o<20;)r+=1,i=t.get(i),o+=1;s.set(a.seq,r)}return s}function $n(e){let t=Object.entries(e||{});if(!t.length)return'<span class="muted">\u7121\u53C3\u6578</span>';let s=t.slice(0,8),a=t.length-s.length;return`<div class="flow-param-list">${s.map(([r,i])=>`<span class="flow-param">
+    </div>`}function zs(){let e=document.getElementById("performance-filter-form");if(!e)return rs();let t=new FormData(e);return{process:String(t.get("process")||""),module:String(t.get("module")||""),status:String(t.get("status")||""),method:String(t.get("method")||""),model:String(t.get("model")||""),keyword:String(t.get("keyword")||"").trim(),from_date:String(t.get("from_date")||""),to_date:String(t.get("to_date")||""),min_duration:String(t.get("min_duration")||""),sort:String(t.get("sort")||"started_at:desc")}}function Js(e){if(e==null)return"null";if(typeof e=="object")try{let t=JSON.stringify(e);return t.length>160?`${t.slice(0,157)}\u2026`:t}catch{return String(e)}return String(e)}function yn(e){if(!e)return"";let t=new Date(e);if(Number.isNaN(t.getTime()))return"";let s=String(t.getHours()).padStart(2,"0"),a=String(t.getMinutes()).padStart(2,"0"),r=String(t.getSeconds()).padStart(2,"0"),i=String(t.getMilliseconds()).padStart(3,"0");return`${s}:${a}:${r}.${i}`}function wn(e){let t=String(e?.module||"");return t.includes("static")||t.includes("frontend")?"is-client":t.includes("judgment.rag")?"is-rag":t.includes("judgment.web.app")?"is-api":t.includes("judgment.web.query")?"is-data":t.includes("judgment.judgment_index")?"is-index":"is-other"}function _n(e){let t=new Map(e.map(a=>[a.seq,a.parent_seq])),s=new Map;for(let a of e){if(Number.isInteger(a.depth)){s.set(a.seq,a.depth);continue}let r=0,i=a.parent_seq,o=0;for(;i&&t.has(i)&&o<20;)r+=1,i=t.get(i),o+=1;s.set(a.seq,r)}return s}function kn(e){let t=Object.entries(e||{});if(!t.length)return'<span class="muted">\u7121\u53C3\u6578</span>';let s=t.slice(0,8),a=t.length-s.length;return`<div class="flow-param-list">${s.map(([r,i])=>`<span class="flow-param">
         <span class="flow-param-key">${n(r)}</span>
         <span class="flow-param-value">${n(Js(i))}</span>
-      </span>`).join("")}${a>0?`<span class="flow-param-more">+${a}</span>`:""}</div>`}function yn(e){let t=new Map,s=Math.max(0,Number(e[0]?.offset_ms)||0);return e.forEach((a,r)=>{let i=Math.max(0,Number(a.offset_ms)||0),o=Math.max(0,Number(a.duration_ms)||0),l=e[r+1],m=l?Math.max(i,Number(l.offset_ms)||i):null,f=m===null?i+o:m,_=Math.max(0,f-i),b=Math.max(0,f-s);t.set(a.seq,{offset:i,duration:o,lap:_,cumulative:b})}),t}function wn(e,t,s,a){let r=a.get(e.seq)||{},i=Math.max(0,Number(r.duration)||0),o=Math.max(0,Number(r.offset)||0),l=Math.max(0,Number(r.lap)||0),m=Math.max(0,Number(r.cumulative)||0),f=Math.max(t,o+i,1),_=Math.min(100,o/f*100),b=Math.min(100-_,Math.max(.6,l/f*100)),g=s.get(e.seq)||0,h=fn(e.started_at)||`+${o.toFixed(0)} ms`,y=e.started_at?`\u958B\u59CB\uFF1A${se(e.started_at)} \xB7 +${o.toFixed(1)} ms`:`\u958B\u59CB\uFF1A+${o.toFixed(1)} ms`;return`<div class="flow-segment ${e.status==="error"?"is-error":""}" style="--depth:${Math.min(g,8)}">
+      </span>`).join("")}${a>0?`<span class="flow-param-more">+${a}</span>`:""}</div>`}function xn(e){let t=new Map,s=Math.max(0,Number(e[0]?.offset_ms)||0);return e.forEach((a,r)=>{let i=Math.max(0,Number(a.offset_ms)||0),o=Math.max(0,Number(a.duration_ms)||0),l=e[r+1],m=l?Math.max(i,Number(l.offset_ms)||i):null,b=m===null?i+o:m,w=Math.max(0,b-i),f=Math.max(0,b-s);t.set(a.seq,{offset:i,duration:o,lap:w,cumulative:f})}),t}function Sn(e,t,s,a){let r=a.get(e.seq)||{},i=Math.max(0,Number(r.duration)||0),o=Math.max(0,Number(r.offset)||0),l=Math.max(0,Number(r.lap)||0),m=Math.max(0,Number(r.cumulative)||0),b=Math.max(t,o+i,1),w=Math.min(100,o/b*100),f=Math.min(100-w,Math.max(.6,l/b*100)),g=s.get(e.seq)||0,h=yn(e.started_at)||`+${o.toFixed(0)} ms`,y=e.started_at?`\u958B\u59CB\uFF1A${ee(e.started_at)} \xB7 +${o.toFixed(1)} ms`:`\u958B\u59CB\uFF1A+${o.toFixed(1)} ms`;return`<div class="flow-segment ${e.status==="error"?"is-error":""}" style="--depth:${Math.min(g,8)}">
     <div class="flow-segment-head">
       <span class="flow-seq">#${n(String(e.seq??"\u2014"))}</span>
       <span class="flow-segment-name">${n(e.name||"unnamed")}</span>
       <span class="flow-segment-start" title="${n(y)}">${n(h)}</span>
-      <span class="flow-segment-duration" title="\u8DDD\u4E0B\u4E00\u9EDE ${F(l)}\uFF1B\u7D2F\u8A08 ${F(m)}">${F(l)}</span>
-      <span class="flow-segment-span" title="\u5F9E\u7B2C\u4E00\u9EDE\u5230\u672C\u9EDE\u7D50\u675F\u7684\u7D2F\u8A08\u6642\u9593">\u7D2F\u8A08 ${F(m)}</span>
+      <span class="flow-segment-duration" title="\u8DDD\u4E0B\u4E00\u9EDE ${H(l)}\uFF1B\u7D2F\u8A08 ${H(m)}">${H(l)}</span>
+      <span class="flow-segment-span" title="\u5F9E\u7B2C\u4E00\u9EDE\u5230\u672C\u9EDE\u7D50\u675F\u7684\u7D2F\u8A08\u6642\u9593">\u7D2F\u8A08 ${H(m)}</span>
     </div>
     <div class="flow-segment-loc">
       <span class="flow-segment-loc-text">${n(e.module||"\u2014")}<span class="flow-segment-dot">\xB7</span>${n(e.function||"\u2014")}</span>
-      <span class="flow-segment-mobile-cum" title="\u5F9E\u7B2C\u4E00\u9EDE\u5230\u672C\u9EDE\u7D50\u675F\u7684\u7D2F\u8A08\u6642\u9593">\u7D2F\u8A08 ${F(m)}</span>
+      <span class="flow-segment-mobile-cum" title="\u5F9E\u7B2C\u4E00\u9EDE\u5230\u672C\u9EDE\u7D50\u675F\u7684\u7D2F\u8A08\u6642\u9593">\u7D2F\u8A08 ${H(m)}</span>
     </div>
-    <div class="flow-track" title="\u958B\u59CB +${o.toFixed(1)} ms \xB7 \u8DDD\u4E0B\u4E00\u9EDE ${F(l)} \xB7 \u7D2F\u8A08 ${F(m)}">
-      <span class="flow-bar ${hn(e)}" style="left:${_.toFixed(2)}%;width:${b.toFixed(2)}%"></span>
+    <div class="flow-track" title="\u958B\u59CB +${o.toFixed(1)} ms \xB7 \u8DDD\u4E0B\u4E00\u9EDE ${H(l)} \xB7 \u7D2F\u8A08 ${H(m)}">
+      <span class="flow-bar ${wn(e)}" style="left:${w.toFixed(2)}%;width:${f.toFixed(2)}%"></span>
     </div>
-    ${$n(e.params)}
+    ${kn(e.params)}
     ${e.error?`<div class="flow-segment-error">${n(e.error)}</div>`:""}
-  </div>`}function _n(e){let t=Array.isArray(e?.segments)?e.segments:[],s=Array.isArray(e?.models)?e.models:[],a=e?.client||{},r=Math.max(...t.map(l=>Number(l.avg_ms)||0),1),i=a.samples?F(a.avg_total_ms??0):"\u2014",o=a.samples?F(a.avg_render_ms??0):"\u2014";return`<div class="perf-flow-stats">
+  </div>`}function An(e){let t=Array.isArray(e?.segments)?e.segments:[],s=Array.isArray(e?.models)?e.models:[],a=e?.client||{},r=Math.max(...t.map(l=>Number(l.avg_ms)||0),1),i=a.samples?H(a.avg_total_ms??0):"\u2014",o=a.samples?H(a.avg_render_ms??0):"\u2014";return`<div class="perf-flow-stats">
     <div class="perf-stat-grid">
       <div class="perf-stat">
         <span class="perf-stat-value">${c(e?.avg_segments??0)}</span>
@@ -778,7 +778,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         </div>
         ${s.length?`<div class="perf-model-list">${s.map(l=>`<div class="perf-model-row">
                     <span class="chip">${n(l.label||"\u2014")}</span>
-                    <span class="perf-model-count">${c(l.value)} \u6B21${l.avg_ms?` \xB7 \u5E73\u5747 ${F(l.avg_ms)}`:""}</span>
+                    <span class="perf-model-count">${c(l.value)} \u6B21${l.avg_ms?` \xB7 \u5E73\u5747 ${H(l.avg_ms)}`:""}</span>
                   </div>`).join("")}</div>`:'<p class="muted" style="font-size:11px">\u5C1A\u7121\u6A21\u578B\u8CC7\u6599\uFF1B\u65B0\u7684 Flow \u6703\u5F9E params.model \u81EA\u52D5\u5F59\u6574\u3002</p>'}
       </div>
       <div class="perf-flow-stat-panel">
@@ -789,36 +789,36 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         ${t.length?`<div class="perf-seg-list">${t.slice(0,6).map(l=>`<div class="perf-seg-row">
                     <span class="perf-seg-name" title="${n(l.label)}">${n(l.label)}</span>
                     <span class="perf-seg-track"><span style="width:${Math.max(2,(Number(l.avg_ms)||0)/r*100).toFixed(1)}%"></span></span>
-                    <span class="perf-seg-ms">${F(l.avg_ms)}</span>
+                    <span class="perf-seg-ms">${H(l.avg_ms)}</span>
                   </div>`).join("")}</div>`:'<p class="muted" style="font-size:11px">\u5C1A\u7121\u5340\u6BB5\u8017\u6642\uFF1B\u9700\u6709\u542B flow \u7684\u65B0\u7D00\u9304\u3002</p>'}
       </div>
     </div>
-  </div>`}function we(e){let t=Math.max(0,Number(e)||0);if(!t)return"\u2014";if(t<1e3)return`${Math.round(t)} ms`;let s=Math.round(t/1e3),a=Math.floor(s/3600),r=Math.floor(s%3600/60),i=s%60;return a?`${a}h ${String(r).padStart(2,"0")}m ${String(i).padStart(2,"0")}s`:r?`${r}m ${String(i).padStart(2,"0")}s`:`${(t/1e3).toFixed(1)}s`}function Vs(e){let t=String(e?.task||"").trim();return t?t==="auto"?"\u81EA\u52D5\u63A5\u7E8C":`task ${t}`:"\u7D22\u5F15"}function kn(e){let t=(e||[]).slice(-12);if(!t.length)return'<p class="muted" style="font-size:11px">\u5C1A\u7121\u7D22\u5F15\u7D00\u9304\u3002</p>';let s=Math.max(...t.map(a=>Number(a.points_per_second)||0),.1);return`<div class="index-run-bars">${t.map(a=>{let r=Number(a.points_per_second)||0,i=Math.max(2,r/s*100);return`<div class="index-run-row">
+  </div>`}function _e(e){let t=Math.max(0,Number(e)||0);if(!t)return"\u2014";if(t<1e3)return`${Math.round(t)} ms`;let s=Math.round(t/1e3),a=Math.floor(s/3600),r=Math.floor(s%3600/60),i=s%60;return a?`${a}h ${String(r).padStart(2,"0")}m ${String(i).padStart(2,"0")}s`:r?`${r}m ${String(i).padStart(2,"0")}s`:`${(t/1e3).toFixed(1)}s`}function Vs(e){let t=String(e?.task||"").trim();return t?t==="auto"?"\u81EA\u52D5\u63A5\u7E8C":`task ${t}`:"\u7D22\u5F15"}function Ln(e){let t=(e||[]).slice(-12);if(!t.length)return'<p class="muted" style="font-size:11px">\u5C1A\u7121\u7D22\u5F15\u7D00\u9304\u3002</p>';let s=Math.max(...t.map(a=>Number(a.points_per_second)||0),.1);return`<div class="index-run-bars">${t.map(a=>{let r=Number(a.points_per_second)||0,i=Math.max(2,r/s*100);return`<div class="index-run-row">
         <div class="index-run-label">
           <strong>${n(Vs(a))}</strong>
-          <span>${n(se(a.started_at))}</span>
+          <span>${n(ee(a.started_at))}</span>
         </div>
-        <div class="index-run-track" title="${n(`${c(a.indexed_count)} \u7B46 \xB7 ${we(a.duration_ms)} \xB7 ${c(a.batch_count)} \u6279`)}">
+        <div class="index-run-track" title="${n(`${c(a.indexed_count)} \u7B46 \xB7 ${_e(a.duration_ms)} \xB7 ${c(a.batch_count)} \u6279`)}">
           <span style="width:${i.toFixed(1)}%"></span>
         </div>
         <div class="index-run-value">
           <strong>${r.toFixed(1)}</strong><span>\u7B46/\u79D2</span>
-          <em>${c(a.indexed_count)} \u7B46 \xB7 ${we(a.duration_ms)}</em>
+          <em>${c(a.indexed_count)} \u7B46 \xB7 ${_e(a.duration_ms)}</em>
         </div>
-      </div>`}).join("")}</div>`}function xn(e){let t=(Array.isArray(e.time_breakdown)?e.time_breakdown:[]).map(s=>({...s,ms:Number(s.ms)||0,percent:Number(s.percent)||0})).filter(s=>s.ms>0);return t.length?`<div class="index-breakdown-bar">${t.map(s=>`<span class="index-seg index-seg-${n(s.key)}" style="width:${Math.max(.5,s.percent).toFixed(2)}%" title="${n(`${s.label} ${we(s.ms)}\uFF08${s.percent.toFixed(1)}%\uFF09`)}"></span>`).join("")}</div>
+      </div>`}).join("")}</div>`}function Mn(e){let t=(Array.isArray(e.time_breakdown)?e.time_breakdown:[]).map(s=>({...s,ms:Number(s.ms)||0,percent:Number(s.percent)||0})).filter(s=>s.ms>0);return t.length?`<div class="index-breakdown-bar">${t.map(s=>`<span class="index-seg index-seg-${n(s.key)}" style="width:${Math.max(.5,s.percent).toFixed(2)}%" title="${n(`${s.label} ${_e(s.ms)}\uFF08${s.percent.toFixed(1)}%\uFF09`)}"></span>`).join("")}</div>
     <div class="index-breakdown-legend">${t.map(s=>`<span class="index-legend-item">
             <i class="index-seg index-seg-${n(s.key)}"></i>
             <span>${n(s.label)}</span>
-            <strong>${we(s.ms)}</strong>
+            <strong>${_e(s.ms)}</strong>
             <em>${s.percent.toFixed(1)}%</em>
-          </span>`).join("")}</div>`:'<div class="index-chart-empty">\u6B64\u7B46\u7D22\u5F15\u7D00\u9304\u5C1A\u672A\u5305\u542B\u968E\u6BB5\u8A08\u6642\uFF1B\u5F8C\u7E8C\u7D22\u5F15\u6703\u8A18\u9304 Ollama Embedding\u3001Qdrant Upsert \u8207 PostgreSQL \u7D22\u5F15\u7D00\u9304\u7684\u6642\u9593\u7D44\u6210\u3002</div>'}function Sn(e,t){let s=(Array.isArray(e)?e:[]).map(T=>({elapsed:Math.max(0,Number(T.elapsed_s)||0),indexed:Math.max(0,Number(T.indexed)||0)})).filter(T=>T.indexed>0);if(s.length<2)return"";let a=Math.max(...s.map(T=>T.elapsed),(Number(t)||0)/1e3,1),r=Math.max(...s.map(T=>T.indexed),1),i=760,o=150,l=12,m=12,f=i-l*2,_=o-m*2,b=s.map(T=>[l+T.elapsed/a*f,o-m-T.indexed/r*_]),g=b.map(([T,w],A)=>`${A===0?"M":"L"}${T.toFixed(1)},${w.toFixed(1)}`).join(" "),k=`${g} L${b[b.length-1][0].toFixed(1)},${o-m} L${b[0][0].toFixed(1)},${o-m} Z`,h=Math.max(1,Math.ceil(b.length/14)),y=b.map(([T,w],A)=>A%h===0||A===b.length-1?`<circle cx="${T.toFixed(1)}" cy="${w.toFixed(1)}" r="2.6" />`:"").join(""),C=[0,1,2,3].map(T=>{let w=m+_/3*T;return`<line x1="${l}" y1="${w.toFixed(1)}" x2="${i-l}" y2="${w.toFixed(1)}" class="index-chart-grid" />`}).join("");return`<div class="index-chart-card index-progress-card">
+          </span>`).join("")}</div>`:'<div class="index-chart-empty">\u6B64\u7B46\u7D22\u5F15\u7D00\u9304\u5C1A\u672A\u5305\u542B\u968E\u6BB5\u8A08\u6642\uFF1B\u5F8C\u7E8C\u7D22\u5F15\u6703\u8A18\u9304 Ollama Embedding\u3001Qdrant Upsert \u8207 PostgreSQL \u7D22\u5F15\u7D00\u9304\u7684\u6642\u9593\u7D44\u6210\u3002</div>'}function Tn(e,t){let s=(Array.isArray(e)?e:[]).map(M=>({elapsed:Math.max(0,Number(M.elapsed_s)||0),indexed:Math.max(0,Number(M.indexed)||0)})).filter(M=>M.indexed>0);if(s.length<2)return"";let a=Math.max(...s.map(M=>M.elapsed),(Number(t)||0)/1e3,1),r=Math.max(...s.map(M=>M.indexed),1),i=760,o=150,l=12,m=12,b=i-l*2,w=o-m*2,f=s.map(M=>[l+M.elapsed/a*b,o-m-M.indexed/r*w]),g=f.map(([M,_],E)=>`${E===0?"M":"L"}${M.toFixed(1)},${_.toFixed(1)}`).join(" "),S=`${g} L${f[f.length-1][0].toFixed(1)},${o-m} L${f[0][0].toFixed(1)},${o-m} Z`,h=Math.max(1,Math.ceil(f.length/14)),y=f.map(([M,_],E)=>E%h===0||E===f.length-1?`<circle cx="${M.toFixed(1)}" cy="${_.toFixed(1)}" r="2.6" />`:"").join(""),C=[0,1,2,3].map(M=>{let _=m+w/3*M;return`<line x1="${l}" y1="${_.toFixed(1)}" x2="${i-l}" y2="${_.toFixed(1)}" class="index-chart-grid" />`}).join("");return`<div class="index-chart-card index-progress-card">
     <div class="index-chart-head">
       <span>\u672C\u6B21\u7D22\u5F15\u9032\u5EA6</span>
-      <span>${c(r)} \u7B46 \xB7 ${we(a*1e3)}</span>
+      <span>${c(r)} \u7B46 \xB7 ${_e(a*1e3)}</span>
     </div>
     <svg class="index-progress-svg" viewBox="0 0 ${i} ${o}" role="img" aria-label="\u7D22\u5F15\u9032\u5EA6\u6298\u7DDA\u5716">
       ${C}
-      <path d="${k}" class="index-progress-area"></path>
+      <path d="${S}" class="index-progress-area"></path>
       <path d="${g}" class="index-progress-line"></path>
       ${y}
       <line x1="${l}" y1="${o-m}" x2="${i-l}" y2="${o-m}" class="index-chart-axis"></line>
@@ -826,10 +826,10 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </svg>
     <div class="index-progress-labels">
       <span>0</span>
-      <span>${we(a*500)}</span>
-      <span>${we(a*1e3)}</span>
+      <span>${_e(a*500)}</span>
+      <span>${_e(a*1e3)}</span>
     </div>
-  </div>`}function An(e){if(!e||!e.latest)return"";let t=e.latest,s=Array.isArray(e.runs)?e.runs:[],a=e.average||{},r=t.coverage||{},i=r.total_judgments>0?`${c(r.indexed_judgments)} / ${c(r.total_judgments)}\uFF08${(100*r.indexed_judgments/r.total_judgments).toFixed(1)}%\uFF09`:"\u2014",o=[{label:"\u7576\u6B21\u57F7\u884C\u7B46\u6578",value:c(t.indexed_count),note:`${c(t.batch_count)} \u6279 \xD7 ${c(t.batch_size)} \u7B46`},{label:"\u5E73\u5747\u6BCF\u79D2\u7B46\u6578",value:`${(Number(t.points_per_second)||0).toFixed(1)}`,note:"\u7B46/\u79D2"},{label:"\u7576\u6B21\u4F7F\u7528\u6642\u9593",value:we(t.duration_ms),note:`${c(t.scanned_count)} \u7B46\u5DF2\u6383\u63CF`},{label:"\u5E73\u5747\u6BCF\u6279\u6642\u9593",value:we(t.batch_avg_ms),note:t.batch_min_ms||t.batch_max_ms?`\u6700\u5FEB ${we(t.batch_min_ms)} \xB7 \u6700\u6162 ${we(t.batch_max_ms)}`:"\u4EE5\u7E3D\u8017\u6642 \xF7 \u6279\u6578\u8A08\u7B97"}];return`<section class="index-perf-panel">
+  </div>`}function qn(e){if(!e||!e.latest)return"";let t=e.latest,s=Array.isArray(e.runs)?e.runs:[],a=e.average||{},r=t.coverage||{},i=r.total_judgments>0?`${c(r.indexed_judgments)} / ${c(r.total_judgments)}\uFF08${(100*r.indexed_judgments/r.total_judgments).toFixed(1)}%\uFF09`:"\u2014",o=[{label:"\u7576\u6B21\u57F7\u884C\u7B46\u6578",value:c(t.indexed_count),note:`${c(t.batch_count)} \u6279 \xD7 ${c(t.batch_size)} \u7B46`},{label:"\u5E73\u5747\u6BCF\u79D2\u7B46\u6578",value:`${(Number(t.points_per_second)||0).toFixed(1)}`,note:"\u7B46/\u79D2"},{label:"\u7576\u6B21\u4F7F\u7528\u6642\u9593",value:_e(t.duration_ms),note:`${c(t.scanned_count)} \u7B46\u5DF2\u6383\u63CF`},{label:"\u5E73\u5747\u6BCF\u6279\u6642\u9593",value:_e(t.batch_avg_ms),note:t.batch_min_ms||t.batch_max_ms?`\u6700\u5FEB ${_e(t.batch_min_ms)} \xB7 \u6700\u6162 ${_e(t.batch_max_ms)}`:"\u4EE5\u7E3D\u8017\u6642 \xF7 \u6279\u6578\u8A08\u7B97"}];return`<section class="index-perf-panel">
     <div class="index-perf-head">
       <div>
         <div class="report-section-title">\u7D22\u5F15\u6548\u80FD</div>
@@ -845,12 +845,12 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           </div>`).join("")}
     </div>
     <div class="index-perf-meta">
-      <span><strong>\u6700\u8FD1\u4E00\u6B21</strong> ${n(se(t.started_at))}</span>
+      <span><strong>\u6700\u8FD1\u4E00\u6B21</strong> ${n(ee(t.started_at))}</span>
       <span><strong>batch</strong> ${c(t.batch_size)} \u7B46\uFF0F\u6279</span>
       <span><strong>embedding \u4E0A\u9650</strong> ${t.max_chars?`${c(t.max_chars)} \u5B57`:"\u2014"}</span>
       <span><strong>collection</strong> ${c(t.collection_points)} points</span>
       <span><strong>\u8986\u84CB\u7387</strong> ${n(i)}</span>
-      <span><strong>\u5E73\u5747\u6BCF\u6B21\u57F7\u884C</strong> ${we(a.duration_ms)} \xB7 ${(Number(a.points_per_second)||0).toFixed(1)} \u7B46/\u79D2</span>
+      <span><strong>\u5E73\u5747\u6BCF\u6B21\u57F7\u884C</strong> ${_e(a.duration_ms)} \xB7 ${(Number(a.points_per_second)||0).toFixed(1)} \u7B46/\u79D2</span>
     </div>
     <div class="index-charts">
       <div class="index-chart-card">
@@ -858,18 +858,18 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           <span>\u6700\u8FD1\u7D22\u5F15\u541E\u5410</span>
           <span>\u7B46/\u79D2</span>
         </div>
-        ${kn(s)}
+        ${Ln(s)}
       </div>
       <div class="index-chart-card">
         <div class="index-chart-head">
           <span>\u6700\u65B0\u4E00\u6B21\u6642\u9593\u7D44\u6210</span>
-          <span>${we(t.duration_ms)}</span>
+          <span>${_e(t.duration_ms)}</span>
         </div>
-        ${xn(t)}
+        ${Mn(t)}
       </div>
     </div>
-    ${Sn(t.progress,t.duration_ms)}
-  </section>`}function Ln(e){let t=Number(e.total)||0,s=Number(e.page_size)||25,a=Number(e.page)||1,r=Math.max(1,Math.ceil(t/s)),i=t?(a-1)*s+1:0,o=Math.min(a*s,t);return`<div class="pagination-bar">
+    ${Tn(t.progress,t.duration_ms)}
+  </section>`}function jn(e){let t=Number(e.total)||0,s=Number(e.page_size)||25,a=Number(e.page)||1,r=Math.max(1,Math.ceil(t/s)),i=t?(a-1)*s+1:0,o=Math.min(a*s,t);return`<div class="pagination-bar">
     <div class="pagination-info">
       \u7B2C <strong>${a}</strong> / ${r} \u9801 \xB7
       \u986F\u793A ${c(i)}\u2013${c(o)} / ${c(t)} \u7B46
@@ -884,40 +884,40 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       <span class="page-btn" aria-hidden="true">${a}</span>
       <button class="page-btn" type="button" data-action="next-page" ${a>=r?"disabled":""} aria-label="\u4E0B\u4E00\u9801">${$("chevronRight",13)}</button>
     </div>
-  </div>`}function Mn(e,t){let s=e.flow&&typeof e.flow=="object"?e.flow:null,a=Array.isArray(s?.segments)?[...s.segments].sort((h,y)=>Number(h.seq)-Number(y.seq)):[],r=s?.summary||{},i=Array.isArray(r.models)?r.models:[],o=s?.client||{},l=s?.metadata||{},m=l.question||"",f=l.answer||"",_=m||f?`<div class="perf-flow-qa">
+  </div>`}function En(e,t){let s=e.flow&&typeof e.flow=="object"?e.flow:null,a=Array.isArray(s?.segments)?[...s.segments].sort((h,y)=>Number(h.seq)-Number(y.seq)):[],r=s?.summary||{},i=Array.isArray(r.models)?r.models:[],o=s?.client||{},l=s?.metadata||{},m=l.question||"",b=l.answer||"",w=m||b?`<div class="perf-flow-qa">
           ${m?`<div class="perf-flow-qa-row"><strong>RAG \u554F\u984C</strong><span>${n(m)}</span></div>`:""}
-          ${f?`<div class="perf-flow-qa-row"><strong>RAG \u7B54\u6848</strong><span>${n(f)}</span></div>`:""}
-        </div>`:"",b=Math.max(Number(s?.total_ms)||0,Number(e.duration_ms)||0,...a.map(h=>(Number(h.offset_ms)||0)+(Number(h.duration_ms)||0)),1),g=bn(a),k=yn(a);return`<details class="perf-record" ${t===0?"open":""}>
+          ${b?`<div class="perf-flow-qa-row"><strong>RAG \u7B54\u6848</strong><span>${n(b)}</span></div>`:""}
+        </div>`:"",f=Math.max(Number(s?.total_ms)||0,Number(e.duration_ms)||0,...a.map(h=>(Number(h.offset_ms)||0)+(Number(h.duration_ms)||0)),1),g=_n(a),S=xn(a);return`<details class="perf-record" ${t===0?"open":""}>
     <summary class="perf-record-summary">
       <span class="perf-record-id">#${n(String(e.id))}</span>
       <span class="perf-record-main">
         <span class="perf-record-title">${n(e.process||"\u672A\u547D\u540D")}</span>
         <span class="perf-record-path mono">${n(e.method||"")} ${n(e.path||"")}</span>
       </span>
-      <span class="perf-record-time">${se(e.started_at)}</span>
-      <span class="perf-record-duration">${F(e.duration_ms)}</span>
-      ${V(e.status)}
+      <span class="perf-record-time">${ee(e.started_at)}</span>
+      <span class="perf-record-duration">${H(e.duration_ms)}</span>
+      ${K(e.status)}
       <span class="perf-record-chevron">${$("chevronRight",14)}</span>
     </summary>
     <div class="perf-record-body">
       <div class="perf-flow-meta">
         <span><strong>Request</strong> <span class="mono">${n(e.request_id||s?.request_id||"\u2014")}</span></span>
-        <span><strong>Server</strong> ${F(e.duration_ms)}</span>
-        ${o.total_ms?`<span><strong>Client \u5168\u6D41\u7A0B</strong> ${F(o.total_ms)}</span>`:""}
-        ${o.render_ms!==void 0?`<span><strong>Render</strong> ${F(o.render_ms)}</span>`:""}
+        <span><strong>Server</strong> ${H(e.duration_ms)}</span>
+        ${o.total_ms?`<span><strong>Client \u5168\u6D41\u7A0B</strong> ${H(o.total_ms)}</span>`:""}
+        ${o.render_ms!==void 0?`<span><strong>Render</strong> ${H(o.render_ms)}</span>`:""}
         <span><strong>Flow</strong> ${a.length} \u6BB5</span>
         ${a.length?"<span><strong>\u9EDE\u4F4D</strong> \u5340\u9593\uFF1D\u4E0B\u4E00\u9EDE\u958B\u59CB\uFF0D\u672C\u9EDE\u958B\u59CB\uFF1B\u7D2F\u8A08\uFF1D\u7B2C\u4E00\u9EDE\u5230\u672C\u9EDE\u7D50\u675F\uFF0C\u6700\u5F8C\u4E00\u9EDE\u70BA\u7E3D\u6642\u9593</span>":""}
       </div>
-      ${_}
+      ${w}
       ${i.length?`<div class="chips perf-record-models">${i.map(h=>`<span class="chip">${n(h)}</span>`).join("")}</div>`:""}
-      ${a.length?`<div class="flow-axis"><span>0 ms</span><span>${F(b)}</span></div>
-            <div class="flow-timeline">${a.map(h=>wn(h,b,g,k)).join("")}</div>`:`<div class="perf-no-flow">\u6B64\u7D00\u9304\u6C92\u6709 flow \u660E\u7D30\uFF08\u53EF\u80FD\u662F\u820A\u8CC7\u6599\u6216 CLI \u7D00\u9304\uFF09\u3002${e.params_text&&e.params_text!=="{}"?`<pre>${n(e.params_text)}</pre>`:""}</div>`}
+      ${a.length?`<div class="flow-axis"><span>0 ms</span><span>${H(f)}</span></div>
+            <div class="flow-timeline">${a.map(h=>Sn(h,f,g,S)).join("")}</div>`:`<div class="perf-no-flow">\u6B64\u7D00\u9304\u6C92\u6709 flow \u660E\u7D30\uFF08\u53EF\u80FD\u662F\u820A\u8CC7\u6599\u6216 CLI \u7D00\u9304\uFF09\u3002${e.params_text&&e.params_text!=="{}"?`<pre>${n(e.params_text)}</pre>`:""}</div>`}
       ${s?`<details class="flow-json">
               <summary>Flow JSON \xB7 ${a.length} \u6BB5</summary>
               <pre>${n(JSON.stringify(s,null,2))}</pre>
             </details>`:""}
     </div>
-  </details>`}var ut={embedding:"Embedding",retrieval:"Qdrant \u6AA2\u7D22",context:"PostgreSQL \u53D6\u6587",llm:"LLM \u751F\u6210",validation:"\u5F15\u7528\u9A57\u8B49"},Gs={embedding:"EMB",retrieval:"\u6AA2\u7D22",context:"\u53D6\u6587",llm:"LLM",validation:"\u9A57\u8B49",overhead:"\u5176\u4ED6"};function Ws(e){return{pending:"\u7B49\u5F85",running:"\u57F7\u884C\u4E2D",success:"\u5B8C\u6210",partial:"\u90E8\u5206\u6210\u529F",failed:"\u5931\u6557",skipped:"\u7565\u904E"}[e]||e||"\u672A\u77E5"}function Tn(e){let t=String(e.status||"pending"),s=Math.max(0,Math.min(100,Number(e.progress)||0)),a=t==="pending"?0:t==="running"?Math.max(s,12):100,r=t==="running"?"\u57F7\u884C\u4E2D\u2026":t==="pending"?"\u7B49\u5F85":e.duration_ms?F(e.duration_ms):Ws(t);return`<div class="test-flow-step is-${n(t)}">
+  </details>`}var ut={embedding:"Embedding",retrieval:"Qdrant \u6AA2\u7D22",context:"PostgreSQL \u53D6\u6587",llm:"LLM \u751F\u6210",validation:"\u5F15\u7528\u9A57\u8B49"},Gs={embedding:"EMB",retrieval:"\u6AA2\u7D22",context:"\u53D6\u6587",llm:"LLM",validation:"\u9A57\u8B49",overhead:"\u5176\u4ED6"};function Ws(e){return{pending:"\u7B49\u5F85",running:"\u57F7\u884C\u4E2D",success:"\u5B8C\u6210",partial:"\u90E8\u5206\u6210\u529F",failed:"\u5931\u6557",skipped:"\u7565\u904E"}[e]||e||"\u672A\u77E5"}function Pn(e){let t=String(e.status||"pending"),s=Math.max(0,Math.min(100,Number(e.progress)||0)),a=t==="pending"?0:t==="running"?Math.max(s,12):100,r=t==="running"?"\u57F7\u884C\u4E2D\u2026":t==="pending"?"\u7B49\u5F85":e.duration_ms?H(e.duration_ms):Ws(t);return`<div class="test-flow-step is-${n(t)}">
     <div class="test-flow-step-head">
       <span class="test-flow-model" title="${n(e.model||"")}">${n(e.model||"\u2014")}</span>
       <span class="test-flow-step-meta">${n(r)}</span>
@@ -928,28 +928,28 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </div>
     ${e.error_message?`<div class="test-flow-error">${n(e.error_message)}</div>`:""}
     ${e.details&&Object.keys(e.details).length?`<div class="test-flow-details">${n(Object.entries(e.details).slice(0,4).map(([i,o])=>`${i}=${Js(o)}`).join(" \xB7 "))}</div>`:""}
-  </div>`}function qn(e,t){if(!t.length)return"";let s=t.reduce((a,r)=>a+(Number(r.progress)||0),0)/t.length;return`<section class="test-flow-stage">
+  </div>`}function Cn(e,t){if(!t.length)return"";let s=t.reduce((a,r)=>a+(Number(r.progress)||0),0)/t.length;return`<section class="test-flow-stage">
     <div class="test-flow-stage-head">
       <span class="test-flow-stage-title">${n(ut[e]||e)}</span>
       <span class="test-flow-stage-meta">${t.length} \u500B\u7A0B\u5E8F \xB7 ${Math.round(s)}%</span>
     </div>
-    <div class="test-flow-stage-steps">${t.map(Tn).join("")}</div>
-  </section>`}function Ks(e,t){let s=Date.now(),a=new Map;for(let b of t){let g=Number(b.duration_ms)||0;if(b.status==="running"&&b.started_at){let k=Date.parse(b.started_at);Number.isFinite(k)&&(g=Math.max(g,s-k))}a.set(b.stage,(a.get(b.stage)||0)+g)}let r=Array.isArray(e.stage_order)?e.stage_order:Object.keys(ut),i=[],o=new Set;for(let b of r)t.some(g=>g.stage===b)&&(o.add(b),i.push({stage:b,label:ut[b]||b,short:Gs[b]||b,duration:a.get(b)||0}));for(let[b,g]of a)o.has(b)||i.push({stage:b,label:ut[b]||b,short:Gs[b]||b,duration:g});let l=i.reduce((b,g)=>b+g.duration,0),m=Number(e.total_ms)||0,f=Math.max(l,m),_=Math.max(0,f-l);return _>1&&i.push({stage:"overhead",label:"\u5176\u4ED6\uFF0F\u6392\u7A0B",short:"\u5176\u4ED6",duration:_}),{entries:i,total:f||l,stepTotal:l}}function En(e,t){let{entries:s,total:a}=Ks(e,t),r=s.filter(o=>o.duration>0).map(o=>{let l=a?o.duration/a*100:0;return`<span class="test-flow-time-seg stage-${n(o.stage)}" style="width:${l.toFixed(2)}%" title="${n(o.label)} \xB7 ${F(o.duration)}\uFF08${l.toFixed(1)}%\uFF09">${l>=8?n(o.short):""}</span>`}).join(""),i=s.map(o=>{let l=a?o.duration/a*100:0;return`<span class="test-flow-legend-item">
+    <div class="test-flow-stage-steps">${t.map(Pn).join("")}</div>
+  </section>`}function Ks(e,t){let s=Date.now(),a=new Map;for(let f of t){let g=Number(f.duration_ms)||0;if(f.status==="running"&&f.started_at){let S=Date.parse(f.started_at);Number.isFinite(S)&&(g=Math.max(g,s-S))}a.set(f.stage,(a.get(f.stage)||0)+g)}let r=Array.isArray(e.stage_order)?e.stage_order:Object.keys(ut),i=[],o=new Set;for(let f of r)t.some(g=>g.stage===f)&&(o.add(f),i.push({stage:f,label:ut[f]||f,short:Gs[f]||f,duration:a.get(f)||0}));for(let[f,g]of a)o.has(f)||i.push({stage:f,label:ut[f]||f,short:Gs[f]||f,duration:g});let l=i.reduce((f,g)=>f+g.duration,0),m=Number(e.total_ms)||0,b=Math.max(l,m),w=Math.max(0,b-l);return w>1&&i.push({stage:"overhead",label:"\u5176\u4ED6\uFF0F\u6392\u7A0B",short:"\u5176\u4ED6",duration:w}),{entries:i,total:b||l,stepTotal:l}}function Nn(e,t){let{entries:s,total:a}=Ks(e,t),r=s.filter(o=>o.duration>0).map(o=>{let l=a?o.duration/a*100:0;return`<span class="test-flow-time-seg stage-${n(o.stage)}" style="width:${l.toFixed(2)}%" title="${n(o.label)} \xB7 ${H(o.duration)}\uFF08${l.toFixed(1)}%\uFF09">${l>=8?n(o.short):""}</span>`}).join(""),i=s.map(o=>{let l=a?o.duration/a*100:0;return`<span class="test-flow-legend-item">
         <i class="test-flow-dot stage-${n(o.stage)}"></i>
         <span>${n(o.label)}</span>
-        <strong>${F(o.duration)}</strong>
+        <strong>${H(o.duration)}</strong>
         <em>${l.toFixed(1)}%</em>
       </span>`}).join("");return`<div class="test-flow-time">
     <div class="test-flow-total-head">
       <span>\u7E3D\u6D41\u7A0B\u6642\u9593\uFF08\u4F9D\u968E\u6BB5\uFF09</span>
-      <span>${F(a)}${e.status==="running"?" \xB7 \u4F30\u7B97\u4E2D":""}</span>
+      <span>${H(a)}${e.status==="running"?" \xB7 \u4F30\u7B97\u4E2D":""}</span>
     </div>
     <div class="test-flow-time-bar">
       ${r||'<span class="test-flow-time-empty">\u5C1A\u7121\u968E\u6BB5\u8017\u6642</span>'}
     </div>
     <div class="test-flow-legend">${i}</div>
     ${e.status==="running"?'<div class="test-flow-time-note">\u57F7\u884C\u4E2D\u7684\u968E\u6BB5\u4EE5\u958B\u59CB\u6642\u9593\u4F30\u7B97\uFF1B\u5B8C\u6210\u5F8C\u4EE5\u4F3A\u670D\u5668\u56DE\u5831\u7684 duration \u70BA\u6E96\u3002</div>':""}
-  </div>`}function at(e,t,s,a={}){let r=a.showHistory!==!1,i=[`<option value="" ${s?"":"selected"}>\u76EE\u524D\uFF0F\u6700\u65B0\u6E2C\u8A66</option>`,...(t||[]).map(w=>`<option value="${n(w.run_id)}" ${w.run_id===s?"selected":""}>${n(Ws(w.status))} \xB7 ${n((w.question||"\u672A\u547D\u540D").slice(0,28))} \xB7 ${n(se(w.started_at))}</option>`)].join(""),o=r?`<label class="test-flow-select-label">\u6B77\u53F2
+  </div>`}function at(e,t,s,a={}){let r=a.showHistory!==!1,i=[`<option value="" ${s?"":"selected"}>\u76EE\u524D\uFF0F\u6700\u65B0\u6E2C\u8A66</option>`,...(t||[]).map(_=>`<option value="${n(_.run_id)}" ${_.run_id===s?"selected":""}>${n(Ws(_.status))} \xB7 ${n((_.question||"\u672A\u547D\u540D").slice(0,28))} \xB7 ${n(ee(_.started_at))}</option>`)].join(""),o=r?`<label class="test-flow-select-label">\u6B77\u53F2
         <select class="select" id="test-run-select">${i}</select>
       </label>
       <button class="btn btn-secondary btn-sm" type="button" id="test-flow-refresh">
@@ -959,13 +959,13 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </a>`,l=`<div class="test-flow-head">
     <div class="test-flow-heading">
       <div class="eyebrow">PERFORMANCE TEST FLOW</div>
-      <div class="test-flow-title">\u6E2C\u8A66\u6D41\u7A0B ${e?V(e.status):""}</div>
+      <div class="test-flow-title">\u6E2C\u8A66\u6D41\u7A0B ${e?K(e.status):""}</div>
       <div class="test-flow-question">${e?n(e.question||"\u672A\u547D\u540D\u6E2C\u8A66"):"\u5C1A\u7121\u6E2C\u8A66\u6D41\u7A0B\u3002\u8ACB\u5230\u300C\u7CFB\u7D71\u6E2C\u8A66\u300D\u9801\u958B\u555F\u6E2C\u8A66\u6A21\u5F0F\uFF0C\u4E26\u5728 RAG \u9801\u63D0\u554F\u3002"}</div>
     </div>
     <div class="test-flow-actions">${o}</div>
   </div>`;if(!e)return`<div class="test-flow-panel card">${l}
-      ${$e({iconName:"activity",title:"\u7B49\u5F85\u6E2C\u8A66\u6D41\u7A0B",text:"\u5230\u300C\u7CFB\u7D71\u6E2C\u8A66\u300D\u9801\u958B\u555F\u6E2C\u8A66\u6A21\u5F0F\u5F8C\uFF0C\u4E0B\u4E00\u6B21 RAG \u63D0\u554F\u6703\u57F7\u884C\u6240\u6709\u53EF\u7528\u6A21\u578B\uFF0C\u4E26\u5728\u9019\u88E1\u5373\u6642\u986F\u793A\u6BCF\u500B\u968E\u6BB5\u7684\u9032\u5EA6\u3002"})}
-    </div>`;let m=Array.isArray(e.steps)?e.steps:[],f=new Map;for(let w of m)f.has(w.stage)||f.set(w.stage,[]),f.get(w.stage).push(w);let b=(Array.isArray(e.stage_order)?e.stage_order:Object.keys(ut)).map(w=>qn(w,f.get(w)||[])).join(""),g=e.models||{},k=Ks(e,m),h=e.status==="running"?`${F(k.total)}\uFF08\u4F30\u7B97\uFF09`:F(e.total_ms),y=m.find(w=>w.stage==="llm"&&w.model===e.summary?.primary_model)||m.find(w=>w.stage==="llm"&&w.details?.answer_preview),C=e.answer||y?.details?.answer_preview||"",T=`<div class="test-flow-answer">
+      ${ye({iconName:"activity",title:"\u7B49\u5F85\u6E2C\u8A66\u6D41\u7A0B",text:"\u5230\u300C\u7CFB\u7D71\u6E2C\u8A66\u300D\u9801\u958B\u555F\u6E2C\u8A66\u6A21\u5F0F\u5F8C\uFF0C\u4E0B\u4E00\u6B21 RAG \u63D0\u554F\u6703\u57F7\u884C\u6240\u6709\u53EF\u7528\u6A21\u578B\uFF0C\u4E26\u5728\u9019\u88E1\u5373\u6642\u986F\u793A\u6BCF\u500B\u968E\u6BB5\u7684\u9032\u5EA6\u3002"})}
+    </div>`;let m=Array.isArray(e.steps)?e.steps:[],b=new Map;for(let _ of m)b.has(_.stage)||b.set(_.stage,[]),b.get(_.stage).push(_);let f=(Array.isArray(e.stage_order)?e.stage_order:Object.keys(ut)).map(_=>Cn(_,b.get(_)||[])).join(""),g=e.models||{},S=Ks(e,m),h=e.status==="running"?`${H(S.total)}\uFF08\u4F30\u7B97\uFF09`:H(e.total_ms),y=m.find(_=>_.stage==="llm"&&_.model===e.summary?.primary_model)||m.find(_=>_.stage==="llm"&&_.details?.answer_preview),C=e.answer||y?.details?.answer_preview||"",M=`<div class="test-flow-answer">
     <div class="test-flow-answer-head">
       <span>RAG \u5F15\u64CE\u7B54\u6848</span>
       ${e.summary?.primary_model?`<span class="mono">${n(e.summary.primary_model)}</span>`:""}
@@ -975,14 +975,14 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     ${l}
     <div class="test-flow-meta">
       <span><strong>Run</strong> <span class="mono">${n(e.run_id)}</span></span>
-      <span><strong>\u958B\u59CB</strong> ${n(se(e.started_at))}</span>
+      <span><strong>\u958B\u59CB</strong> ${n(ee(e.started_at))}</span>
       <span><strong>\u7E3D\u8017\u6642</strong> ${h}</span>
       <span><strong>Embedding</strong> ${Array.isArray(g.embedding)?g.embedding.length:0} \u500B</span>
       <span><strong>LLM</strong> ${Array.isArray(g.llm)?g.llm.length:0} \u500B</span>
       <span><strong>\u968E\u6BB5</strong> ${n(e.stage_label||e.stage||"\u2014")}</span>
     </div>
-    ${T}
-    <div class="test-flow-stages">${b||'<p class="muted">\u6B64\u6E2C\u8A66\u6C92\u6709\u5340\u6BB5\u8CC7\u6599\u3002</p>'}</div>
+    ${M}
+    <div class="test-flow-stages">${f||'<p class="muted">\u6B64\u6E2C\u8A66\u6C92\u6709\u5340\u6BB5\u8CC7\u6599\u3002</p>'}</div>
     <div class="test-flow-total">
       <div class="test-flow-total-head">
         <span>\u7E3D\u6D41\u7A0B\u9032\u5EA6</span>
@@ -992,21 +992,21 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <span class="test-flow-bar is-total" style="width:${Math.max(0,Math.min(100,Number(e.progress)||0))}%"></span>
       </div>
     </div>
-    ${En(e,m)}
+    ${Nn(e,m)}
     <div class="test-flow-foot">
       <span>${e.status==="running"?"\u6E2C\u8A66\u57F7\u884C\u4E2D\uFF1B\u6B64\u5716\u8868\u6703\u81EA\u52D5\u66F4\u65B0\u3002":r?"\u6E2C\u8A66\u5DF2\u5B8C\u6210\uFF1B\u53EF\u5F9E\u4E0A\u65B9\u300C\u6B77\u53F2\u300D\u9078\u55AE\u9084\u539F\u5176\u4ED6 Flow\u3002":"\u6E2C\u8A66\u5DF2\u5B8C\u6210\uFF1B\u53EF\u81F3\u6548\u80FD\u5831\u8868\u67E5\u770B\u6B77\u53F2 Flow\u3002"}</span>
       ${e.summary?.primary_model?`<span class="mono">primary=${n(e.summary.primary_model)}</span>`:""}
     </div>
-  </div>`}function jn(e){let t=Array.isArray(e.rows)?e.rows:[],s=Array.isArray(e.summary)?e.summary:[],a=e.flow_stats||e.meta?.flow_stats||{},r=e.index_stats||null;return`<div class="report-card performance-flow-report" data-database="performance">
+  </div>`}function Rn(e){let t=Array.isArray(e.rows)?e.rows:[],s=Array.isArray(e.summary)?e.summary:[],a=e.flow_stats||e.meta?.flow_stats||{},r=e.index_stats||null;return`<div class="report-card performance-flow-report" data-database="performance">
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">PERFORMANCE FLOW REPORT</div>
         <div class="report-title">
-          \u6548\u80FD\u5831\u8868 ${V(e.status||"ok")}
+          \u6548\u80FD\u5831\u8868 ${K(e.status||"ok")}
           <span class="chip">performance_records</span>
         </div>
         <div class="report-sub">
-          ${c(e.total)} \u7B46\u7B26\u5408 \xB7 ${F(e.duration_ms)} \xB7
+          ${c(e.total)} \u7B46\u7B26\u5408 \xB7 ${H(e.duration_ms)} \xB7
           \u6BCF\u6B21\u57F7\u884C\u6309\u9215\u7684\u5B8C\u6574 Flow
         </div>
       </div>
@@ -1019,16 +1019,16 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
                 <div class="summary-label">${n(i.label)}</div>
                 <div class="summary-value">${n(i.value)}</div>
               </div>`).join("")}</div>`:""}
-    ${An(r)}
-    ${_n(a)}
+    ${qn(r)}
+    ${An(a)}
     <div class="report-section-head perf-flow-list-head">
       <span class="report-section-title">Flow \u7D00\u9304</span>
       <span class="muted" style="font-size:9.5px">\u9EDE\u64CA\u5217\u5C55\u958B\u6A21\u7D44\u3001\u51FD\u6578\u3001\u53C3\u6578\u8207\u5340\u6BB5\u8017\u6642</span>
     </div>
     <div class="perf-record-list">
-      ${t.length?t.map((i,o)=>Mn(i,o)).join(""):$e({iconName:"activity",title:"\u6C92\u6709\u7B26\u5408\u689D\u4EF6\u7684 Flow",text:"\u653E\u5BEC\u65E5\u671F\u3001\u6A21\u578B\u6216\u8017\u6642\u689D\u4EF6\u5F8C\u518D\u8A66\u4E00\u6B21\u3002"})}
+      ${t.length?t.map((i,o)=>En(i,o)).join(""):ye({iconName:"activity",title:"\u6C92\u6709\u7B26\u5408\u689D\u4EF6\u7684 Flow",text:"\u653E\u5BEC\u65E5\u671F\u3001\u6A21\u578B\u6216\u8017\u6642\u689D\u4EF6\u5F8C\u518D\u8A66\u4E00\u6B21\u3002"})}
     </div>
-    ${Ln(e)}
+    ${jn(e)}
     <details class="perf-query-details">
       <summary>\u67E5\u8A62\u8A9E\u53E5\u8207\u8B66\u544A</summary>
       <div class="query-box">
@@ -1039,7 +1039,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
       ${Array.isArray(e.warnings)&&e.warnings.length?`<div class="warnings">${e.warnings.map(i=>`<div class="warning-line">${n(i)}</div>`).join("")}</div>`:""}
     </details>
-  </div>`}async function Pn(e,t){let s=!1,a=rs(),r={processes:[],modules:[],statuses:[],methods:[],models:[]},i=1,o=25,l=null;e.innerHTML=`<section class="page data-page performance-page">
+  </div>`}async function In(e,t){let s=!1,a=rs(),r={processes:[],modules:[],statuses:[],methods:[],models:[]},i=1,o=25,l=null;e.innerHTML=`<section class="page data-page performance-page">
     <div class="page-header">
       <div class="data-page-heading">
         <div class="eyebrow">PERFORMANCE</div>
@@ -1081,12 +1081,12 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <div id="performance-report">${ct({label:"\u6548\u80FD\u5831\u8868"})}</div>
       </section>
     </div>
-  </section>`;let m=e.querySelector("#performance-filter-fields"),f=e.querySelector("#performance-filter-form"),_=e.querySelector("#performance-test-flow"),b=e.querySelector("#performance-report"),g=e.querySelector("#performance-meta"),k=e.querySelector("#performance-refresh"),h=null,y=[],C="",T=null,w="",A=()=>{m.innerHTML=gn(r,a)},j=()=>{let E=JSON.stringify({selected:C,tick:h?.status==="running"?Math.floor(Date.now()/1e3):0,runs:y.map(P=>`${P.run_id}:${P.status}`),run:h?{run_id:h.run_id,status:h.status,progress:h.progress,steps:(h.steps||[]).map(P=>`${P.stage}:${P.model}:${P.status}:${P.progress}`)}:null});E!==w&&(w=E,_.innerHTML=at(h,y,C))},R=async()=>{try{let E=await U.testRuns(30);if(s)return;y=Array.isArray(E.runs)?E.runs:[]}catch{if(s)return;y=[]}},G=async()=>{try{let E=C?await U.testRun(C):await U.testRunCurrent();if(s)return;h=E.run||null,!C&&h&&h.status!=="running"&&!y.some(P=>P.run_id===h.run_id)&&await R(),j()}catch{if(s)return;h=null,j()}},ee=async()=>{s||(C||await G(),s||(T=window.setTimeout(ee,1500)))};_.addEventListener("change",async E=>{E.target.id==="test-run-select"&&(C=String(E.target.value||""),await G())}),_.addEventListener("click",async E=>{E.target.closest("#test-flow-refresh")&&(C="",await R(),await G())});let z=async(E=i)=>{i=Math.max(1,Number(E)||1),a=zs(),b.innerHTML=ct({label:"\u6548\u80FD\u5831\u8868"});let P=e.querySelector("#performance-run");W(P,!0,"\u67E5\u8A62\u4E2D\u2026");try{let H=await U.performance(a,i,o);if(s)return;l=H,i=Number(H.page)||i,o=Number(H.page_size)||o,b.innerHTML=jn(H),g.textContent=`PERFORMANCE \xB7 ${c(H.total)} \u7B46`,g.className="badge badge-neutral badge-mono"}catch(H){if(s)return;b.innerHTML=Lt(H,{label:"\u6548\u80FD\u5831\u8868"}),O(H.message||"\u6548\u80FD\u5831\u8868\u67E5\u8A62\u5931\u6557\u3002","danger")}finally{s||W(P,!1)}},Y=async()=>{try{r=await U.performanceOptions()}catch{r={processes:[],modules:[],statuses:[],methods:[],models:[]}}A()};return f.addEventListener("submit",E=>{E.preventDefault(),z(1)}),e.querySelector('[data-action="reset"]').addEventListener("click",()=>{a=rs(),i=1,A(),z(1)}),k.addEventListener("click",async()=>{a=zs(),k.disabled=!0,W(k,!0,"\u6574\u7406\u4E2D\u2026"),await Y(),await R(),s||await G(),s||await z(1),s||(k.disabled=!1,W(k,!1))}),b.addEventListener("click",async E=>{let P=E.target.closest("[data-action]");if(!P||!l)return;let H=P.dataset.action;if(H==="retry"){z(i);return}if(H==="prev-page"){z(Math.max(1,Number(l.page)-1));return}if(H==="next-page"){let X=Math.max(1,Math.ceil(Number(l.total)/Number(l.page_size)));z(Math.min(X,Number(l.page)+1));return}if(H==="copy-query"){let X=await bt(l.query_text||"");O(X?"\u67E5\u8A62\u8A9E\u53E5\u5DF2\u8907\u88FD\u3002":"\u7121\u6CD5\u8907\u88FD\u67E5\u8A62\u8A9E\u53E5\u3002",X?"ok":"warn");return}if(H==="export-json"){let X=`performance-page-${l.page}.json`;Ue(X,JSON.stringify(Tt(l),null,2),"application/json;charset=utf-8"),O(`\u5DF2\u532F\u51FA ${X}`,"ok");return}if(H==="export-csv"){let X=`performance-page-${l.page}.csv`;Ue(X,Mt(l),"text/csv;charset=utf-8"),O(`\u5DF2\u532F\u51FA ${X}`,"ok")}}),b.addEventListener("change",E=>{E.target.matches("[data-page-size]")&&(o=Number(E.target.value)||25,Qs.includes(o)||(o=25),z(1))}),await Promise.allSettled([Y(),R()]),s||(await G(),await z(1),ee()),t&&typeof t.setTitle=="function"&&t.setTitle("\u6548\u80FD\u5831\u8868 \xB7 Judgment RAG Console"),()=>{s=!0,T&&window.clearTimeout(T)}}var Cn=["\u91D1\u878D\u6D88\u8CBB\u8005\u4FDD\u8B77\u6CD5\u5982\u4F55\u8655\u7406\u91D1\u878D\u6D88\u8CBB\u722D\u8B70\uFF1F","\u8B49\u5238\u4EA4\u6613\u6CD5\u5C0D\u5167\u7DDA\u4EA4\u6613\u6709\u4EC0\u9EBC\u898F\u7BC4\uFF1F","\u9280\u884C\u6CD5\u5C0D\u5438\u6536\u5B58\u6B3E\u8207\u6388\u4FE1\u6709\u54EA\u4E9B\u9650\u5236\uFF1F","\u4FDD\u96AA\u6CD5\u5C0D\u65BC\u696D\u52D9\u54E1\u4E0D\u7576\u62DB\u652C\u7684\u8CAC\u4EFB\u898F\u5B9A\uFF1F","\u9280\u884C\u6CD5\u6709\u591A\u5C11\u689D\u6587\uFF1F","\u8B49\u5238\u71DF\u696D\u54E1\u5E38\u89F8\u72AF\u4EC0\u9EBC\u6CD5\u898F\u6216\u547D\u4EE4\uFF1F","\u6709\u54EA\u4E9B\u6CD5\u898F\u662F\u548C\u58FD\u96AA\u53CA\u7522\u96AA\u76F8\u95DC\u7684\uFF1F"];function Nn(){return`<div class="answer-placeholder">
+  </section>`;let m=e.querySelector("#performance-filter-fields"),b=e.querySelector("#performance-filter-form"),w=e.querySelector("#performance-test-flow"),f=e.querySelector("#performance-report"),g=e.querySelector("#performance-meta"),S=e.querySelector("#performance-refresh"),h=null,y=[],C="",M=null,_="",E=()=>{m.innerHTML=$n(r,a)},z=()=>{let k=JSON.stringify({selected:C,tick:h?.status==="running"?Math.floor(Date.now()/1e3):0,runs:y.map(q=>`${q.run_id}:${q.status}`),run:h?{run_id:h.run_id,status:h.status,progress:h.progress,steps:(h.steps||[]).map(q=>`${q.stage}:${q.model}:${q.status}:${q.progress}`)}:null});k!==_&&(_=k,w.innerHTML=at(h,y,C))},G=async()=>{try{let k=await U.testRuns(30);if(s)return;y=Array.isArray(k.runs)?k.runs:[]}catch{if(s)return;y=[]}},X=async()=>{try{let k=C?await U.testRun(C):await U.testRunCurrent();if(s)return;h=k.run||null,!C&&h&&h.status!=="running"&&!y.some(q=>q.run_id===h.run_id)&&await G(),z()}catch{if(s)return;h=null,z()}},se=async()=>{s||(C||await X(),s||(M=window.setTimeout(se,1500)))};w.addEventListener("change",async k=>{k.target.id==="test-run-select"&&(C=String(k.target.value||""),await X())}),w.addEventListener("click",async k=>{k.target.closest("#test-flow-refresh")&&(C="",await G(),await X())});let R=async(k=i)=>{i=Math.max(1,Number(k)||1),a=zs(),f.innerHTML=ct({label:"\u6548\u80FD\u5831\u8868"});let q=e.querySelector("#performance-run");V(q,!0,"\u67E5\u8A62\u4E2D\u2026");try{let B=await U.performance(a,i,o);if(s)return;l=B,i=Number(B.page)||i,o=Number(B.page_size)||o,f.innerHTML=Rn(B),g.textContent=`PERFORMANCE \xB7 ${c(B.total)} \u7B46`,g.className="badge badge-neutral badge-mono"}catch(B){if(s)return;f.innerHTML=Lt(B,{label:"\u6548\u80FD\u5831\u8868"}),D(B.message||"\u6548\u80FD\u5831\u8868\u67E5\u8A62\u5931\u6557\u3002","danger")}finally{s||V(q,!1)}},P=async()=>{try{r=await U.performanceOptions()}catch{r={processes:[],modules:[],statuses:[],methods:[],models:[]}}E()};return b.addEventListener("submit",k=>{k.preventDefault(),R(1)}),e.querySelector('[data-action="reset"]').addEventListener("click",()=>{a=rs(),i=1,E(),R(1)}),S.addEventListener("click",async()=>{a=zs(),S.disabled=!0,V(S,!0,"\u6574\u7406\u4E2D\u2026"),await P(),await G(),s||await X(),s||await R(1),s||(S.disabled=!1,V(S,!1))}),f.addEventListener("click",async k=>{let q=k.target.closest("[data-action]");if(!q||!l)return;let B=q.dataset.action;if(B==="retry"){R(i);return}if(B==="prev-page"){R(Math.max(1,Number(l.page)-1));return}if(B==="next-page"){let Q=Math.max(1,Math.ceil(Number(l.total)/Number(l.page_size)));R(Math.min(Q,Number(l.page)+1));return}if(B==="copy-query"){let Q=await bt(l.query_text||"");D(Q?"\u67E5\u8A62\u8A9E\u53E5\u5DF2\u8907\u88FD\u3002":"\u7121\u6CD5\u8907\u88FD\u67E5\u8A62\u8A9E\u53E5\u3002",Q?"ok":"warn");return}if(B==="export-json"){let Q=`performance-page-${l.page}.json`;Ue(Q,JSON.stringify(Tt(l),null,2),"application/json;charset=utf-8"),D(`\u5DF2\u532F\u51FA ${Q}`,"ok");return}if(B==="export-csv"){let Q=`performance-page-${l.page}.csv`;Ue(Q,Mt(l),"text/csv;charset=utf-8"),D(`\u5DF2\u532F\u51FA ${Q}`,"ok")}}),f.addEventListener("change",k=>{k.target.matches("[data-page-size]")&&(o=Number(k.target.value)||25,Qs.includes(o)||(o=25),R(1))}),await Promise.allSettled([P(),G()]),s||(await X(),await R(1),se()),t&&typeof t.setTitle=="function"&&t.setTitle("\u6548\u80FD\u5831\u8868 \xB7 Judgment RAG Console"),()=>{s=!0,M&&window.clearTimeout(M)}}var Dn=["\u91D1\u878D\u6D88\u8CBB\u8005\u4FDD\u8B77\u6CD5\u5982\u4F55\u8655\u7406\u91D1\u878D\u6D88\u8CBB\u722D\u8B70\uFF1F","\u8B49\u5238\u4EA4\u6613\u6CD5\u5C0D\u5167\u7DDA\u4EA4\u6613\u6709\u4EC0\u9EBC\u898F\u7BC4\uFF1F","\u9280\u884C\u6CD5\u5C0D\u5438\u6536\u5B58\u6B3E\u8207\u6388\u4FE1\u6709\u54EA\u4E9B\u9650\u5236\uFF1F","\u4FDD\u96AA\u6CD5\u5C0D\u65BC\u696D\u52D9\u54E1\u4E0D\u7576\u62DB\u652C\u7684\u8CAC\u4EFB\u898F\u5B9A\uFF1F","\u9280\u884C\u6CD5\u6709\u591A\u5C11\u689D\u6587\uFF1F","\u8B49\u5238\u71DF\u696D\u54E1\u5E38\u89F8\u72AF\u4EC0\u9EBC\u6CD5\u898F\u6216\u547D\u4EE4\uFF1F","\u6709\u54EA\u4E9B\u6CD5\u898F\u662F\u548C\u58FD\u96AA\u53CA\u7522\u96AA\u76F8\u95DC\u7684\uFF1F"];function Bn(){return`<div class="answer-placeholder">
     <span class="empty-icon">${$("sparkles",26)}</span>
     <h2 class="empty-title">\u7B54\u6848\u53EA\u6703\u4F86\u81EA\u6AA2\u7D22\u5230\u7684\u5224\u6C7A\u53CA\u6CD5\u898F\u7247\u6BB5</h2>
     <p class="empty-text">\u9001\u51FA\u554F\u984C\u5F8C\uFF0C\u7CFB\u7D71\u6703\u5148\u4EE5 Qdrant \u6AA2\u7D22\u5224\u6C7A\uFF0C\u518D\u7531 LLM \u4F9D\u6AA2\u7D22\u7247\u6BB5\u751F\u6210\u56DE\u7B54\u4E26\u6A19\u793A\u5F15\u7528\u7DE8\u865F\u3002
       \u82E5\u5411\u91CF\u7D22\u5F15\u6216 LLM \u5C1A\u672A\u5C31\u7DD2\uFF0C\u6703\u660E\u78BA\u986F\u793A\u964D\u7D1A\u72C0\u614B\uFF0C\u4E0D\u6703\u6191\u7A7A\u751F\u6210\u7B54\u6848\u3002</p>
-  </div>`}var Rn={"http.request":"FastAPI \u63A5\u6536\u8ACB\u6C42","http.response":"\u56DE\u50B3\u7D50\u679C\u7D66\u524D\u7AEF","rag.answer_question":"RAG \u4E3B\u6D41\u7A0B","rag.coverage":"PostgreSQL \u7D22\u5F15\u8986\u84CB\u6AA2\u67E5","rag.law_retrieval":"\u6CD5\u898F\uFF0F\u547D\u4EE4\u6AA2\u7D22","rag.law_lookup":"\u6BD4\u5C0D\u554F\u984C\u4E2D\u7684\u6CD5\u898F\uFF0F\u547D\u4EE4\u540D\u7A31","rag.law_content":"\u8B80\u53D6\u6CD5\u898F\uFF0F\u547D\u4EE4\u689D\u6587","rag.qdrant_precheck":"Qdrant collection \u6AA2\u67E5","rag.search":"RAG \u6AA2\u7D22","rag.embed_query":"Ollama embedding \u67E5\u8A62\u5411\u91CF","rag.qdrant_search":"Qdrant \u5411\u91CF\u641C\u5C0B","rag.fetch_documents":"PostgreSQL \u8B80\u53D6\u5224\u6C7A","rag.postgres_fetch":"PostgreSQL \u5224\u6C7A\u67E5\u8A62","rag.build_citations":"\u6574\u7406\u5F15\u7528\u8207\u5224\u6C7A\u7247\u6BB5","rag.extract_excerpt":"\u64F7\u53D6\u76F8\u95DC\u7247\u6BB5","rag.llm":"LLM \u56DE\u7B54\u751F\u6210","rag.llm_request":"Ollama LLM \u751F\u6210","rag.validate_citations":"\u9A57\u8B49\u5F15\u7528\u7DE8\u865F","rag.test_mode":"\u6E2C\u8A66\u6A21\u5F0F\u591A\u6A21\u578B\u6D41\u7A0B","rag.preview_fallback":"\u6CD5\u898F\u9810\u89BD\u964D\u7D1A"};function Dn(e){let t=String(e?.name||""),s=e?.params||{},a=String(s.model||s.embedding_model||"").trim();return t==="rag.llm_request"?`Ollama run ${a||"LLM"}`:t==="rag.llm"?`LLM \u56DE\u7B54\u751F\u6210${a?` \xB7 ${a}`:""}`:t==="rag.embed_query"?`Ollama embedding \u67E5\u8A62\u5411\u91CF${a?` \xB7 ${a}`:""}`:Rn[t]||t||"backend step"}function Ys(e){return[e?.module,e?.function,e?.name].filter(Boolean).join(" \xB7 ")}function Xs(e){let t=Number(e);return Number.isFinite(t)?`${c(Math.max(0,Math.round(t)))} ms`:"\u2014"}function os(e,t){if(!e)return;e.classList.toggle("is-open",t);let s=e.querySelector("#rag-process-body"),a=e.querySelector(".rag-process-toggle");s&&(s.hidden=!t),a&&(a.setAttribute("aria-expanded",String(t)),a.title=t?"\u6536\u5408\u5F8C\u7AEF\u8655\u7406\u6D41\u7A0B":"\u5C55\u958B\u5F8C\u7AEF\u8655\u7406\u6D41\u7A0B")}function In(){return`<div class="rag-process is-open" id="rag-process">
+  </div>`}var On={"http.request":"FastAPI \u63A5\u6536\u8ACB\u6C42","http.response":"\u56DE\u50B3\u7D50\u679C\u7D66\u524D\u7AEF","rag.answer_question":"RAG \u4E3B\u6D41\u7A0B","rag.coverage":"PostgreSQL \u7D22\u5F15\u8986\u84CB\u6AA2\u67E5","rag.law_retrieval":"\u6CD5\u898F\uFF0F\u547D\u4EE4\u6AA2\u7D22","rag.law_lookup":"\u6BD4\u5C0D\u554F\u984C\u4E2D\u7684\u6CD5\u898F\uFF0F\u547D\u4EE4\u540D\u7A31","rag.law_content":"\u8B80\u53D6\u6CD5\u898F\uFF0F\u547D\u4EE4\u689D\u6587","rag.qdrant_precheck":"Qdrant collection \u6AA2\u67E5","rag.search":"RAG \u6AA2\u7D22","rag.embed_query":"Ollama embedding \u67E5\u8A62\u5411\u91CF","rag.qdrant_search":"Qdrant \u5411\u91CF\u641C\u5C0B","rag.fetch_documents":"PostgreSQL \u8B80\u53D6\u5224\u6C7A","rag.postgres_fetch":"PostgreSQL \u5224\u6C7A\u67E5\u8A62","rag.build_citations":"\u6574\u7406\u5F15\u7528\u8207\u5224\u6C7A\u7247\u6BB5","rag.extract_excerpt":"\u64F7\u53D6\u76F8\u95DC\u7247\u6BB5","rag.llm":"LLM \u56DE\u7B54\u751F\u6210","rag.llm_request":"Ollama LLM \u751F\u6210","rag.validate_citations":"\u9A57\u8B49\u5F15\u7528\u7DE8\u865F","rag.test_mode":"\u6E2C\u8A66\u6A21\u5F0F\u591A\u6A21\u578B\u6D41\u7A0B","rag.preview_fallback":"\u6CD5\u898F\u9810\u89BD\u964D\u7D1A"};function Fn(e){let t=String(e?.name||""),s=e?.params||{},a=String(s.model||s.embedding_model||"").trim();return t==="rag.llm_request"?`Ollama run ${a||"LLM"}`:t==="rag.llm"?`LLM \u56DE\u7B54\u751F\u6210${a?` \xB7 ${a}`:""}`:t==="rag.embed_query"?`Ollama embedding \u67E5\u8A62\u5411\u91CF${a?` \xB7 ${a}`:""}`:On[t]||t||"backend step"}function Ys(e){return[e?.module,e?.function,e?.name].filter(Boolean).join(" \xB7 ")}function Xs(e){let t=Number(e);return Number.isFinite(t)?`${c(Math.max(0,Math.round(t)))} ms`:"\u2014"}function os(e,t){if(!e)return;e.classList.toggle("is-open",t);let s=e.querySelector("#rag-process-body"),a=e.querySelector(".rag-process-toggle");s&&(s.hidden=!t),a&&(a.setAttribute("aria-expanded",String(t)),a.title=t?"\u6536\u5408\u5F8C\u7AEF\u8655\u7406\u6D41\u7A0B":"\u5C55\u958B\u5F8C\u7AEF\u8655\u7406\u6D41\u7A0B")}function Hn(){return`<div class="rag-process is-open" id="rag-process">
     <div class="rag-process-control">
       <button type="button" class="rag-process-toggle" id="rag-process-toggle"
         aria-expanded="true" aria-controls="rag-process-body" title="\u6536\u5408\u5F8C\u7AEF\u8655\u7406\u6D41\u7A0B">
@@ -1106,21 +1106,21 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
       <div class="rag-process-hint">\u986F\u793A\u6CD5\u898F\u7D50\u679C\u6642\u6703\u5148\u6536\u5408\uFF1B\u9EDE\u64CA\u6309\u9215\u53EF\u5C55\u958B\u5B8C\u6574\u6D41\u7A0B\u3002</div>
     </div>
-  </div>`}function Bn(e){let t=e.querySelector("#rag-process"),s=t?.querySelector("#rag-process-list"),a=t?.querySelector("#rag-process-summary"),r=performance.now(),i=new Map,o=(g,k,h)=>{let y=g.querySelector(k);y&&(y.textContent=h)},l=g=>{if(g.failed){o(g.element,".rag-process-meta","\u5931\u6557");return}if(g.hasChildren){o(g.element,".rag-process-meta","");return}o(g.element,".rag-process-meta",Xs(g.durationMs))},m=g=>{let k=g-1,h=[...i.values()].reverse();for(let y of h){if(k<0)break;y.depth<=k&&(y.hasChildren||(y.hasChildren=!0,y.element.dataset.hasChildren="true",y.finished&&l(y)),k=y.depth-1)}},f=g=>{if(!s)return null;let k=String(g?.seq??`step-${i.size+1}`),h=i.get(k);if(!h){let y=Math.max(0,Math.min(6,Number(g?.depth)||0));m(y);let C=document.createElement("div");C.className="rag-process-item is-running",C.dataset.processKey=k,C.style.setProperty("--depth",String(y)),C.innerHTML=`<span class="rag-process-dot"></span>
+  </div>`}function Un(e){let t=e.querySelector("#rag-process"),s=t?.querySelector("#rag-process-list"),a=t?.querySelector("#rag-process-summary"),r=performance.now(),i=new Map,o=(g,S,h)=>{let y=g.querySelector(S);y&&(y.textContent=h)},l=g=>{if(g.failed){o(g.element,".rag-process-meta","\u5931\u6557");return}if(g.hasChildren){o(g.element,".rag-process-meta","");return}o(g.element,".rag-process-meta",Xs(g.durationMs))},m=g=>{let S=g-1,h=[...i.values()].reverse();for(let y of h){if(S<0)break;y.depth<=S&&(y.hasChildren||(y.hasChildren=!0,y.element.dataset.hasChildren="true",y.finished&&l(y)),S=y.depth-1)}},b=g=>{if(!s)return null;let S=String(g?.seq??`step-${i.size+1}`),h=i.get(S);if(!h){let y=Math.max(0,Math.min(6,Number(g?.depth)||0));m(y);let C=document.createElement("div");C.className="rag-process-item is-running",C.dataset.processKey=S,C.style.setProperty("--depth",String(y)),C.innerHTML=`<span class="rag-process-dot"></span>
         <span class="rag-process-label"></span>
-        <span class="rag-process-meta">\u57F7\u884C\u4E2D\u2026</span>`,s.appendChild(C),h={element:C,depth:y,hasChildren:!1,finished:!1,failed:!1,durationMs:0},i.set(k,h)}return o(h.element,".rag-process-label",Dn(g)),h.element.title=Ys(g),h};return{step:g=>{let k=g?.segment;if(!k)return;let h=f(k);if(h){if(g.type==="segment_start"){h.element.classList.add("is-running"),o(h.element,".rag-process-meta","\u57F7\u884C\u4E2D\u2026");return}if(g.type==="segment_end"){let y=k.status==="error";h.element.classList.remove("is-running"),h.element.classList.toggle("is-error",y),h.finished=!0,h.failed=y,h.durationMs=Number(k.duration_ms)||0,l(h),h.element.title=[Ys(k),y&&k.error||""].filter(Boolean).join(" \xB7 ")}}},finish:(g=!0)=>{if(!t)return"";t.querySelectorAll(".rag-process-item.is-running").forEach(y=>{y.classList.remove("is-running");let C=y.dataset.hasChildren==="true";o(y,".rag-process-meta",C?"":g?"\u5B8C\u6210":"\u4E2D\u65B7")});let k=s?.children.length||i.size,h=Xs(Math.max(0,performance.now()-r));return a&&(a.textContent=g?`\u5B8C\u6210 \xB7 ${k} \u6B65 \xB7 ${h}`:`\u5931\u6557 \xB7 ${k} \u6B65`),t.classList.add("is-complete"),os(t,!1),t.outerHTML},collapse:()=>os(t,!1)}}function On(e,t=!1){let s=t?"\u6E2C\u8A66\u6A21\u5F0F\uFF1A\u6B63\u5728\u4F9D\u5E8F\u57F7\u884C\u6240\u6709\u53EF\u7528 embedding \u8207 LLM \u6A21\u578B\uFF0C\u53EF\u80FD\u9700\u8981\u6578\u5206\u9418\u2026":"\u6B63\u5728\u4EE5\u5411\u91CF\u76F8\u4F3C\u5EA6\u6AA2\u7D22\u5224\u6C7A\u7247\u6BB5\u4E26\u751F\u6210\u56DE\u7B54\uFF1B\u5FEB\u901F\u6A21\u5F0F\u901A\u5E38 2\u201310 \u79D2\u2026";return`<div class="answer-head">
+        <span class="rag-process-meta">\u57F7\u884C\u4E2D\u2026</span>`,s.appendChild(C),h={element:C,depth:y,hasChildren:!1,finished:!1,failed:!1,durationMs:0},i.set(S,h)}return o(h.element,".rag-process-label",Fn(g)),h.element.title=Ys(g),h};return{step:g=>{let S=g?.segment;if(!S)return;let h=b(S);if(h){if(g.type==="segment_start"){h.element.classList.add("is-running"),o(h.element,".rag-process-meta","\u57F7\u884C\u4E2D\u2026");return}if(g.type==="segment_end"){let y=S.status==="error";h.element.classList.remove("is-running"),h.element.classList.toggle("is-error",y),h.finished=!0,h.failed=y,h.durationMs=Number(S.duration_ms)||0,l(h),h.element.title=[Ys(S),y&&S.error||""].filter(Boolean).join(" \xB7 ")}}},finish:(g=!0)=>{if(!t)return"";t.querySelectorAll(".rag-process-item.is-running").forEach(y=>{y.classList.remove("is-running");let C=y.dataset.hasChildren==="true";o(y,".rag-process-meta",C?"":g?"\u5B8C\u6210":"\u4E2D\u65B7")});let S=s?.children.length||i.size,h=Xs(Math.max(0,performance.now()-r));return a&&(a.textContent=g?`\u5B8C\u6210 \xB7 ${S} \u6B65 \xB7 ${h}`:`\u5931\u6557 \xB7 ${S} \u6B65`),t.classList.add("is-complete"),os(t,!1),t.outerHTML},collapse:()=>os(t,!1)}}function zn(e,t=!1){let s=t?"\u6E2C\u8A66\u6A21\u5F0F\uFF1A\u6B63\u5728\u4F9D\u5E8F\u57F7\u884C\u6240\u6709\u53EF\u7528 embedding \u8207 LLM \u6A21\u578B\uFF0C\u53EF\u80FD\u9700\u8981\u6578\u5206\u9418\u2026":"\u6B63\u5728\u4EE5\u5411\u91CF\u76F8\u4F3C\u5EA6\u6AA2\u7D22\u5224\u6C7A\u7247\u6BB5\u4E26\u751F\u6210\u56DE\u7B54\uFF1B\u5FEB\u901F\u6A21\u5F0F\u901A\u5E38 2\u201310 \u79D2\u2026";return`<div class="answer-head">
       <div class="answer-head-left">${$("sparkles",16)}
         <span class="answer-head-title">\u6AA2\u7D22\u4E2D</span>
       </div>
       <div class="answer-head-meta"><span class="spinner"></span></div>
-      ${t?"":In()}
+      ${t?"":Hn()}
     </div>
     <div class="answer-body">
       <p class="answer-text">${s}\u300C${n(e)}\u300D</p>
       <div class="skeleton skeleton-line" style="margin-top:22px;width:92%"></div>
       <div class="skeleton skeleton-line" style="width:76%"></div>
       <div class="skeleton skeleton-line" style="width:84%"></div>
-    </div>`}function Fn(e,t){let s=e.score===null||e.score===void 0?"":`\u76F8\u4F3C\u5EA6 ${Number(e.score).toFixed(4)}`,a=[e.court,e.jdate,s].filter(Boolean).map(l=>`<span>${n(l)}</span>`).join(""),r=(Array.isArray(e.matched_laws)?e.matched_laws:[]).slice(0,5).map(l=>`<span class="chip">${n(l)}</span>`).join(""),i=e.jid?` data-action="open-parquet-judgment"
+    </div>`}function Gn(e,t){let s=e.score===null||e.score===void 0?"":`\u76F8\u4F3C\u5EA6 ${Number(e.score).toFixed(4)}`,a=[e.court,e.jdate,s].filter(Boolean).map(l=>`<span>${n(l)}</span>`).join(""),r=(Array.isArray(e.matched_laws)?e.matched_laws:[]).slice(0,5).map(l=>`<span class="chip">${n(l)}</span>`).join(""),i=e.jid?` data-action="open-parquet-judgment"
         data-jid="${n(e.jid)}"
         role="button"
         tabindex="0"
@@ -1135,7 +1135,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       ${e.snippet?`<p class="citation-snippet">${n(e.snippet)}</p>`:""}
     </div>
     <div class="citation-links">${o}</div>
-  </article>`}function Hn(e,t){let s=[e.law_level,e.law_category,e.article_count?`${c(e.article_count)} \u689D`:""].filter(Boolean).map(r=>`<span>${n(r)}</span>`).join(""),a=e.law_url?`<a class="citation-link" href="${n(e.law_url)}" target="_blank" rel="noopener noreferrer">\u4F86\u6E90${$("external",11)}</a>`:"";return`<article class="citation">
+  </article>`}function Qn(e,t){let s=[e.law_level,e.law_category,e.article_count?`${c(e.article_count)} \u689D`:""].filter(Boolean).map(r=>`<span>${n(r)}</span>`).join(""),a=e.law_url?`<a class="citation-link" href="${n(e.law_url)}" target="_blank" rel="noopener noreferrer">\u4F86\u6E90${$("external",11)}</a>`:"";return`<article class="citation">
     <span class="citation-index">${String(e.index??t+1).padStart(2,"0")}</span>
     <div class="citation-body">
       <h4 class="citation-name">${n(e.law_name||"\u672A\u547D\u540D\u6CD5\u898F")}</h4>
@@ -1143,20 +1143,20 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       ${e.snippet?`<p class="citation-snippet">${n(e.snippet)}</p>`:""}
     </div>
     ${a}
-  </article>`}function Un(e,t){let s=e.source_label||(e.source_type==="order"?"\u547D\u4EE4":"\u6CD5\u898F"),a=e.law_level&&e.law_level!==s?e.law_level:"",r=[`<span class="badge ${e.source_type==="order"?"badge-warn":"badge-info"}">${n(s)}</span>`,a,e.law_category,e.article_count?`${c(e.article_count)} \u689D`:"",e.law_modified_date?`\u7570\u52D5 ${Pe(e.law_modified_date)}`:""].filter(Boolean).map(k=>`<span>${k}</span>`).join(""),i=e.first_promulgation?`<div class="citation-meta"><span>\u6700\u65E9\u5236\u5B9A\uFF1A${n(e.first_promulgation.roc_date)}\uFF08\u897F\u5143 ${n(e.first_promulgation.gregorian_date)}\uFF09</span></div>`:"",o=e.stats,l=o?`<div class="law-source-stats">
+  </article>`}function Jn(e,t){let s=e.source_label||(e.source_type==="order"?"\u547D\u4EE4":"\u6CD5\u898F"),a=e.law_level&&e.law_level!==s?e.law_level:"",r=[`<span class="badge ${e.source_type==="order"?"badge-warn":"badge-info"}">${n(s)}</span>`,a,e.law_category,e.article_count?`${c(e.article_count)} \u689D`:"",e.law_modified_date?`\u7570\u52D5 ${Pe(e.law_modified_date)}`:""].filter(Boolean).map(S=>`<span>${S}</span>`).join(""),i=e.first_promulgation?`<div class="citation-meta"><span>\u6700\u65E9\u5236\u5B9A\uFF1A${n(e.first_promulgation.roc_date)}\uFF08\u897F\u5143 ${n(e.first_promulgation.gregorian_date)}\uFF09</span></div>`:"",o=e.stats,l=o?`<div class="law-source-stats">
         <span>\u63D0\u53CA\u300C${n(o.entity||"")}\u300D\u7684\u5224\u6C7A ${c(o.judgment_count||0)} \u7B46</span>
         <span>\u672C\u6CD5\u898F\u88AB\u5F15\u7528 ${c(o.law_count||0)} \u6B21</span>
-      </div>`:"",m=e.law_key||"",f=e.source_type||"",_=(Array.isArray(e.articles)?e.articles:[]).slice(0,2).map(k=>{let h=String(k.article_no||"");return`<div class="law-source-article"${m&&h?` data-action="open-law-source"
+      </div>`:"",m=e.law_key||"",b=e.source_type||"",w=(Array.isArray(e.articles)?e.articles:[]).slice(0,2).map(S=>{let h=String(S.article_no||"");return`<div class="law-source-article"${m&&h?` data-action="open-law-source"
         data-law-key="${n(m)}"
-        data-source-type="${n(f)}"
+        data-source-type="${n(b)}"
         data-article-no="${n(h)}"
         role="button"
         tabindex="0"
         title="\u9EDE\u9078\u67E5\u770B ${n(h)} \u7684\u5B8C\u6574\u5167\u5BB9"
         aria-label="\u958B\u555F ${n(e.law_name||"\u6CD5\u898F")} ${n(h)} \u7684\u5B8C\u6574\u689D\u6587"`:""}>
-        <span class="law-source-article-no">${n(k.article_no||"\u689D\u6587")}</span>
-        <p class="law-source-article-text">${n(k.article_content||"")}</p>
-      </div>`}).join(""),b=e.law_url?`<a class="citation-link" href="${n(e.law_url)}" target="_blank" rel="noopener noreferrer">\u6CD5\u898F\u4F86\u6E90${$("external",11)}</a>`:"",g=e.law_key?` data-action="open-law-source"
+        <span class="law-source-article-no">${n(S.article_no||"\u689D\u6587")}</span>
+        <p class="law-source-article-text">${n(S.article_content||"")}</p>
+      </div>`}).join(""),f=e.law_url?`<a class="citation-link" href="${n(e.law_url)}" target="_blank" rel="noopener noreferrer">\u6CD5\u898F\u4F86\u6E90${$("external",11)}</a>`:"",g=e.law_key?` data-action="open-law-source"
         data-law-key="${n(e.law_key)}"
         data-source-type="${n(e.source_type||"")}"
         role="button"
@@ -1169,32 +1169,32 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       <div class="citation-meta">${r}</div>
       ${i}
       ${l}
-      ${_}
+      ${w}
     </div>
-    <div class="citation-links">${b}</div>
-  </article>`}function Zs(e){let t=Array.isArray(e.citations)?e.citations:[],s=Array.isArray(e.judgments)?e.judgments:[],a=Array.isArray(e.law_sources)?e.law_sources:[],r=Array.isArray(e.matched_terms)?e.matched_terms:[],i=e.status||"preview",o=!!e.partial,l=!!e.streaming,m=!!e.show_sources||!o,f=s.length?`<div class="answer-divider"></div>
+    <div class="citation-links">${f}</div>
+  </article>`}function Zs(e){let t=Array.isArray(e.citations)?e.citations:[],s=Array.isArray(e.judgments)?e.judgments:[],a=Array.isArray(e.law_sources)?e.law_sources:[],r=Array.isArray(e.matched_terms)?e.matched_terms:[],i=e.status||"preview",o=!!e.partial,l=!!e.streaming,m=!!e.show_sources||!o,b=s.length?`<div class="answer-divider"></div>
       <div class="answer-section-label">
         <span>\u5F15\u7528\u5224\u6C7A \xB7 ${s.length} \u7B46</span>
         <span>vector retrieval \xB7 [\u7DE8\u865F] \u5C0D\u61C9\u56DE\u7B54\u5F15\u7528</span>
       </div>
-      <div class="citation-list">${s.map((I,de)=>Fn(I,de)).join("")}</div>`:"",_=a.length?`<div class="answer-divider"></div>
+      <div class="citation-list">${s.map((O,de)=>Gn(O,de)).join("")}</div>`:"",w=a.length?`<div class="answer-divider"></div>
       <div class="answer-section-label">
         <span>\u5F15\u7528\u6CD5\u898F\uFF0F\u547D\u4EE4 \xB7 ${a.length} \u7B46</span>
         <span>PostgreSQL metadata \xB7 Parquet \u689D\u6587</span>
       </div>
-      <div class="citation-list">${a.map((I,de)=>Un(I,de)).join("")}</div>`:"",b=!s.length&&t.length?`<div class="answer-divider"></div>
+      <div class="citation-list">${a.map((O,de)=>Jn(O,de)).join("")}</div>`:"",f=!s.length&&t.length?`<div class="answer-divider"></div>
       <div class="answer-section-label">
         <span>\u5F15\u7528\u6CD5\u898F \xB7 ${t.length} \u7B46</span>
         <span>metadata match</span>
       </div>
-      <div class="citation-list">${t.map((I,de)=>Hn(I,de)).join("")}</div>`:"",g=m?f+_+b:"";!g&&!o&&(g=`<div class="answer-divider"></div>
-      ${$e({iconName:"file",title:"\u6C92\u6709\u53EF\u5F15\u7528\u7684\u4F86\u6E90",text:i==="retrieval_only"?"\u76EE\u524D\u5DF2\u5EFA\u7ACB\u7684\u5411\u91CF\u7D22\u5F15\u4E2D\u6C92\u6709\u8DB3\u5920\u76F8\u4F3C\u7684\u5224\u6C7A\uFF0C\u4E5F\u6C92\u6709\u53EF\u5C0D\u61C9\u7684\u6CD5\u898F\u6216\u547D\u4EE4\u3002\u7CFB\u7D71\u4E0D\u6703\u5728\u6C92\u6709\u4F86\u6E90\u6642\u751F\u6210\u7B54\u6848\u3002":"\u5411\u91CF\u7D22\u5F15\u6216 LLM \u5C1A\u672A\u5C31\u7DD2\uFF0C\u4E14\u554F\u984C\u4E2D\u6C92\u6709\u53EF\u76F4\u63A5\u5C0D\u61C9\u7684\u73FE\u884C\u6CD5\u898F\u540D\u7A31\u3002"})}`);let k=r.length?`<div class="answer-section-label" style="margin-top:18px">
+      <div class="citation-list">${t.map((O,de)=>Qn(O,de)).join("")}</div>`:"",g=m?b+w+f:"";!g&&!o&&(g=`<div class="answer-divider"></div>
+      ${ye({iconName:"file",title:"\u6C92\u6709\u53EF\u5F15\u7528\u7684\u4F86\u6E90",text:i==="retrieval_only"?"\u76EE\u524D\u5DF2\u5EFA\u7ACB\u7684\u5411\u91CF\u7D22\u5F15\u4E2D\u6C92\u6709\u8DB3\u5920\u76F8\u4F3C\u7684\u5224\u6C7A\uFF0C\u4E5F\u6C92\u6709\u53EF\u5C0D\u61C9\u7684\u6CD5\u898F\u6216\u547D\u4EE4\u3002\u7CFB\u7D71\u4E0D\u6703\u5728\u6C92\u6709\u4F86\u6E90\u6642\u751F\u6210\u7B54\u6848\u3002":"\u5411\u91CF\u7D22\u5F15\u6216 LLM \u5C1A\u672A\u5C31\u7DD2\uFF0C\u4E14\u554F\u984C\u4E2D\u6C92\u6709\u53EF\u76F4\u63A5\u5C0D\u61C9\u7684\u73FE\u884C\u6CD5\u898F\u540D\u7A31\u3002"})}`);let S=r.length?`<div class="answer-section-label" style="margin-top:18px">
         <span>\u547D\u4E2D\u8A5E\u5F59</span>
       </div>
-      <div class="chips">${r.map(I=>`<span class="chip">${n(I)}</span>`).join("")}</div>`:"",h=e.test_run,y=String(e.llm_model||h?.primary_model||"").trim(),C=String(e.embedding_model||"").trim(),T=[y?`LLM\uFF1A${y}`:"",C?`Embedding\uFF1A${C}`:""].filter(Boolean).join(" \xB7 "),w=e.answer_source==="structured",A=String(e.law_answer||"").trim(),j=e.law_framework||null,R=Array.isArray(j?.rows)?j.rows:[],G=Array.isArray(j?.sources)?j.sources:[],ee=R.length>0,z=!!A&&!w&&!ee,Y=l||e.answer_source==="llm"?"LLM \u7D9C\u5408\u56DE\u7B54":"\u6AA2\u7D22\u7D50\u679C\u6458\u8981",E=ee?`<div class="answer-block law-framework-block">
+      <div class="chips">${r.map(O=>`<span class="chip">${n(O)}</span>`).join("")}</div>`:"",h=e.test_run,y=String(e.llm_model||h?.primary_model||"").trim(),C=String(e.embedding_model||"").trim(),M=[y?`LLM\uFF1A${y}`:"",C?`Embedding\uFF1A${C}`:""].filter(Boolean).join(" \xB7 "),_=e.answer_source==="structured",E=String(e.law_answer||"").trim(),z=e.law_framework||null,G=Array.isArray(z?.rows)?z.rows:[],X=Array.isArray(z?.sources)?z.sources:[],se=G.length>0,R=!!E&&!_&&!se,P=l||e.answer_source==="llm"?"LLM \u7D9C\u5408\u56DE\u7B54":"\u6AA2\u7D22\u7D50\u679C\u6458\u8981",k=se?`<div class="answer-block law-framework-block">
         <div class="answer-block-head">
-          <span>${n(j.title||"\u76F8\u95DC\u6CD5\u898F\u7684\u8CAC\u4EFB\u67B6\u69CB")}</span>
-          <span>${R.length} \u689D</span>
+          <span>${n(z.title||"\u76F8\u95DC\u6CD5\u898F\u7684\u8CAC\u4EFB\u67B6\u69CB")}</span>
+          <span>${G.length} \u689D</span>
         </div>
         <div class="table-wrap law-framework-table-wrap">
           <table class="data-table is-compact law-framework-table">
@@ -1202,22 +1202,22 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
               <tr><th scope="col">\u6CD5\u898F</th><th scope="col">\u689D\u6587</th><th scope="col">\u898F\u7BC4\u91CD\u9EDE</th></tr>
             </thead>
             <tbody>
-              ${R.map(I=>`<tr>
-                    <td>${n(I.law_name||"\u2014")}</td>
-                    <td class="cell-number">${n(I.article_no||"\u2014")}</td>
-                    <td>${n(I.focus||"\u2014")}</td>
+              ${G.map(O=>`<tr>
+                    <td>${n(O.law_name||"\u2014")}</td>
+                    <td class="cell-number">${n(O.article_no||"\u2014")}</td>
+                    <td>${n(O.focus||"\u2014")}</td>
                   </tr>`).join("")}
             </tbody>
           </table>
         </div>
-        ${G.length?`<div class="law-framework-sources">
+        ${X.length?`<div class="law-framework-sources">
                 <span>\u6CD5\u898F\u4F86\u6E90</span>
-                ${G.map(I=>`<span class="chip">${n(I.law_name||I)}${I&&I.index!==null&&I.index!==void 0?` [${n(I.index)}]`:""}</span>`).join("")}
+                ${X.map(O=>`<span class="chip">${n(O.law_name||O)}${O&&O.index!==null&&O.index!==void 0?` [${n(O.index)}]`:""}</span>`).join("")}
               </div>`:""}
-      </div>`:"",P=e.answer_source==="llm"&&y?`<span class="answer-model" title="${n(T)}">${$("brain",11)}${n(y)}</span>`:w?`<span class="answer-model" title="\u7531 PostgreSQL metadata\u3001Parquet \u689D\u6587\u8207\u5224\u6C7A\u5F15\u7528\u7D71\u8A08\u76F4\u63A5\u6574\u7406">${$("database",11)}\u6CD5\u898F\u8CC7\u6599\u5EAB</span>`:"",H=l?`${y||"LLM"} \xB7 \u751F\u6210\u4E2D`:P?y||"structured":"retrieval",X=h?`<div class="test-run-summary">
+      </div>`:"",q=e.answer_source==="llm"&&y?`<span class="answer-model" title="${n(M)}">${$("brain",11)}${n(y)}</span>`:_?`<span class="answer-model" title="\u7531 PostgreSQL metadata\u3001Parquet \u689D\u6587\u8207\u5224\u6C7A\u5F15\u7528\u7D71\u8A08\u76F4\u63A5\u6574\u7406">${$("database",11)}\u6CD5\u898F\u8CC7\u6599\u5EAB</span>`:"",B=l?`${y||"LLM"} \xB7 \u751F\u6210\u4E2D`:q?y||"structured":"retrieval",Q=h?`<div class="test-run-summary">
         <div class="test-run-summary-head">
           <span class="badge badge-warn">\u6E2C\u8A66\u6A21\u5F0F</span>
-          ${V(h.status)}
+          ${K(h.status)}
           <span class="mono">${n(h.run_id||"")}</span>
         </div>
         <div class="test-run-summary-body">
@@ -1227,57 +1227,57 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           <span>${Number(h.total_ms||0)} ms</span>
           <a href="#/performance">\u67E5\u770B\u6E2C\u8A66 Flow</a>
         </div>
-      </div>`:"",Te=String(e.answer||"").trim()||(l?"\u6B63\u5728\u751F\u6210\u56DE\u7B54\u2026":o?"\u6B63\u5728\u6AA2\u7D22\u5224\u6C7A\u4E26\u751F\u6210 LLM \u56DE\u7B54\u2026":"\u76EE\u524D\u6C92\u6709\u53EF\u986F\u793A\u7684\u56DE\u7B54\u3002"),le=l?" data-partial-answer":"",be=l?" is-streaming":"";return`${E}
-      ${z?`<div class="answer-block law-answer-block">
+      </div>`:"",Te=String(e.answer||"").trim()||(l?"\u6B63\u5728\u751F\u6210\u56DE\u7B54\u2026":o?"\u6B63\u5728\u6AA2\u7D22\u5224\u6C7A\u4E26\u751F\u6210 LLM \u56DE\u7B54\u2026":"\u76EE\u524D\u6C92\u6709\u53EF\u986F\u793A\u7684\u56DE\u7B54\u3002"),le=l?" data-partial-answer":"",$e=l?" is-streaming":"";return`${k}
+      ${R?`<div class="answer-block law-answer-block">
               <div class="answer-block-head">
                 <span>\u6CD5\u898F\uFF0F\u547D\u4EE4\u6AA2\u7D22\u7D50\u679C</span>
                 <span>${o&&!m?"\u6CD5\u898F\u8CC7\u6599\u5EAB":`${a.length} \u7B46\u4F86\u6E90`}</span>
               </div>
-              <p class="answer-text">${n(A)}</p>
+              <p class="answer-text">${n(E)}</p>
             </div>`:""}
       <div class="answer-block">
-        ${z||ee?`<div class="answer-block-head">
-                <span>${n(Y)}</span>
-                <span>${n(H)}</span>
+        ${R||se?`<div class="answer-block-head">
+                <span>${n(P)}</span>
+                <span>${n(B)}</span>
               </div>`:""}
-        <p class="answer-text${be}"${le}>${n(Te)}</p>
+        <p class="answer-text${$e}"${le}>${n(Te)}</p>
       </div>
       ${e.notice?`<div class="answer-notice">${n(e.notice)}</div>`:""}
-      ${X}
-      ${k}
-      ${g}`}function zn(e,t,s=""){let a=t.status||"preview",r=a==="operational"?"\u5B8C\u6210":a==="retrieval_only"?"\u50C5\u6AA2\u7D22\u7D50\u679C":a==="preview"?"\u6CD5\u898F\u9810\u89BD":a==="unavailable"||a==="not_configured"?"\u8CC7\u6599\u4E0D\u53EF\u7528":a==="degraded"?"\u964D\u7D1A":"\u5B8C\u6210",i=t.test_run,o=String(t.llm_model||i?.primary_model||"").trim(),l=String(t.embedding_model||"").trim(),m=[o?`LLM\uFF1A${o}`:"",l?`Embedding\uFF1A${l}`:""].filter(Boolean).join(" \xB7 "),f=t.answer_source==="structured",_=t.answer_source==="llm"&&o?`<span class="answer-model" title="${n(m)}">${$("brain",11)}${n(o)}</span>`:f?`<span class="answer-model" title="\u7531 PostgreSQL metadata\u3001Parquet \u689D\u6587\u8207\u5224\u6C7A\u5F15\u7528\u7D71\u8A08\u76F4\u63A5\u6574\u7406">${$("database",11)}\u6CD5\u898F\u8CC7\u6599\u5EAB</span>`:"";return`<div class="answer-head">
+      ${Q}
+      ${S}
+      ${g}`}function Vn(e,t,s=""){let a=t.status||"preview",r=a==="operational"?"\u5B8C\u6210":a==="retrieval_only"?"\u50C5\u6AA2\u7D22\u7D50\u679C":a==="preview"?"\u6CD5\u898F\u9810\u89BD":a==="unavailable"||a==="not_configured"?"\u8CC7\u6599\u4E0D\u53EF\u7528":a==="degraded"?"\u964D\u7D1A":"\u5B8C\u6210",i=t.test_run,o=String(t.llm_model||i?.primary_model||"").trim(),l=String(t.embedding_model||"").trim(),m=[o?`LLM\uFF1A${o}`:"",l?`Embedding\uFF1A${l}`:""].filter(Boolean).join(" \xB7 "),b=t.answer_source==="structured",w=t.answer_source==="llm"&&o?`<span class="answer-model" title="${n(m)}">${$("brain",11)}${n(o)}</span>`:b?`<span class="answer-model" title="\u7531 PostgreSQL metadata\u3001Parquet \u689D\u6587\u8207\u5224\u6C7A\u5F15\u7528\u7D71\u8A08\u76F4\u63A5\u6574\u7406">${$("database",11)}\u6CD5\u898F\u8CC7\u6599\u5EAB</span>`:"";return`<div class="answer-head">
       <div class="answer-head-left">${$("sparkles",16)}
         <span class="answer-head-title">\u6AA2\u7D22\u7D50\u679C</span>
       </div>
       <div class="answer-head-meta">
-        ${V(a,r)}
+        ${K(a,r)}
         <span>${Number(t.duration_ms||0)} ms</span>
-        ${_}
+        ${w}
       </div>
       ${s}
     </div>
-    <div class="answer-body">${Zs(t)}</div>`}function Gn(e,t=""){return`<div class="answer-head">
+    <div class="answer-body">${Zs(t)}</div>`}function Wn(e,t=""){return`<div class="answer-head">
       <div class="answer-head-left">${$("alert",16)}
         <span class="answer-head-title">\u7121\u6CD5\u5B8C\u6210\u6AA2\u7D22</span>
       </div>
       ${t}
     </div>
     <div class="answer-body">
-      ${K({tone:"danger",title:"\u8ACB\u6C42\u5931\u6557",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
-    </div>`}function Qn(e){return e.length?e.map((t,s)=>{let a=Array.isArray(t.payload?.citations)?t.payload.citations.length:0,r=Array.isArray(t.payload?.judgments)?t.payload.judgments.length:0,i=Array.isArray(t.payload?.law_sources)?t.payload.law_sources.length:0,o=a+r+i;return`<button class="history-item" type="button" data-history-index="${s}">
+      ${Y({tone:"danger",title:"\u8ACB\u6C42\u5931\u6557",text:n(e.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
+    </div>`}function Kn(e){return e.length?e.map((t,s)=>{let a=Array.isArray(t.payload?.citations)?t.payload.citations.length:0,r=Array.isArray(t.payload?.judgments)?t.payload.judgments.length:0,i=Array.isArray(t.payload?.law_sources)?t.payload.law_sources.length:0,o=a+r+i;return`<button class="history-item" type="button" data-history-index="${s}">
         <span class="history-question">${n(t.title||"\u672A\u547D\u540D\u63D0\u554F")}</span>
         <span class="history-meta">
           <span>${n(tt(t.created_at))}</span>
           <span>\xB7</span>
           <span>${o?`${o} \u7B46\u4F86\u6E90`:"\u7121\u5F15\u7528"}</span>
         </span>
-      </button>`}).join(""):'<div class="history-empty">\u5C1A\u7121\u63D0\u554F\u7D00\u9304\u3002\u9001\u51FA\u7B2C\u4E00\u500B\u554F\u984C\u5F8C\u6703\u4FDD\u5B58\u5728\u6B64\u700F\u89BD\u5668\u3002</div>'}async function Jn(e){let t=!1,s=[],a="",r=!1,i={embedding:[],llm:[]};e.innerHTML=`<section class="page rag-page">
+      </button>`}).join(""):'<div class="history-empty">\u5C1A\u7121\u63D0\u554F\u7D00\u9304\u3002\u9001\u51FA\u7B2C\u4E00\u500B\u554F\u984C\u5F8C\u6703\u4FDD\u5B58\u5728\u6B64\u700F\u89BD\u5668\u3002</div>'}async function Yn(e){let t=!1,s=[],a="",r=!1,i={embedding:[],llm:[]};e.innerHTML=`<section class="page rag-page">
     <header class="rag-hero">
       <span class="eyebrow">JUDGMENT \xB7 LEGAL RAG</span>
       <h1 class="rag-title">\u8B93\u6BCF\u4E00\u500B\u7B54\u6848\uFF0C\u90FD\u80FD\u56DE\u5230\u6CD5\u898F\u8207\u5224\u6C7A</h1>
       <p class="rag-lead">\u4EE5\u91D1\u878D\u6CD5\u898F\u7684\u73FE\u884C\u689D\u6587\u8207\u5224\u6C7A\u7247\u6BB5\u70BA\u6AA2\u7D22\u57FA\u790E\u3002
         \u5148\u5F9E Qdrant \u6AA2\u7D22\u76F8\u4F3C\u5224\u6C7A\uFF0C\u518D\u7531 LLM \u4F9D\u6AA2\u7D22\u7247\u6BB5\u751F\u6210\u56DE\u7B54\uFF1B\u82E5\u7D22\u5F15\u6216\u6A21\u578B\u5C1A\u672A\u5C31\u7DD2\uFF0C\u6703\u964D\u7D1A\u70BA\u53EA\u986F\u793A\u53EF\u9A57\u8B49\u7684\u6AA2\u7D22\u7D50\u679C\u3002</p>
-      <div id="rag-mode-notice">${K({tone:"info",title:"RAG \u670D\u52D9\u72C0\u614B\u6AA2\u67E5\u4E2D",text:"\u6B63\u5728\u78BA\u8A8D Qdrant\u3001Embedding \u8207 LLM \u72C0\u614B\uFF1B\u6240\u6709\u56DE\u7B54\u90FD\u6703\u6A19\u793A\u53EF\u56DE\u6EAF\u7684\u4F86\u6E90\u3002"})}</div>
+      <div id="rag-mode-notice">${Y({tone:"info",title:"RAG \u670D\u52D9\u72C0\u614B\u6AA2\u67E5\u4E2D",text:"\u6B63\u5728\u78BA\u8A8D Qdrant\u3001Embedding \u8207 LLM \u72C0\u614B\uFF1B\u6240\u6709\u56DE\u7B54\u90FD\u6703\u6A19\u793A\u53EF\u56DE\u6EAF\u7684\u4F86\u6E90\u3002"})}</div>
       <div id="rag-test-mode"></div>
       <form class="ask-card" id="rag-form" autocomplete="off">
         <label class="sr-only" for="rag-question">\u8F38\u5165\u6CD5\u5F8B\u554F\u984C</label>
@@ -1296,13 +1296,13 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         </div>
       </form>
       <div class="example-chips" id="example-chips" aria-label="\u7BC4\u4F8B\u554F\u984C">
-        ${Cn.map(u=>`<button class="example-chip" type="button" data-question="${n(u)}">${n(u)}</button>`).join("")}
+        ${Dn.map(u=>`<button class="example-chip" type="button" data-question="${n(u)}">${n(u)}</button>`).join("")}
       </div>
     </header>
 
     <div class="rag-grid">
       <section class="card answer-card" id="answer-card" aria-live="polite">
-        ${Nn()}
+        ${Bn()}
       </section>
 
       <aside class="rag-side">
@@ -1338,9 +1338,9 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     <div id="rag-test-flow" class="rag-test-flow"></div>
     <dialog id="rag-judgment-dialog" class="judgment-dialog"></dialog>
     <dialog id="rag-law-dialog" class="judgment-dialog law-dialog"></dialog>
-  </section>`;let o=e.querySelector("#rag-form"),l=e.querySelector("#rag-question"),m=e.querySelector("#rag-submit"),f=e.querySelector("#answer-card"),_=e.querySelector("#rag-stats"),b=e.querySelector("#rag-stats-mode"),g=e.querySelector("#rag-history"),k=e.querySelector("#rag-storage-note"),h=e.querySelector("#rag-clear-history"),y=e.querySelector("#rag-test-mode"),C=e.querySelector("#rag-test-flow"),T=e.querySelector("#rag-judgment-dialog"),w=e.querySelector("#rag-law-dialog"),A=()=>{document.documentElement.classList.toggle("dialog-open",!!e.querySelector("dialog[open]"))};T?.addEventListener("close",A),w?.addEventListener("close",A);let j=null,R=null,G=()=>{l.style.height="auto",l.style.height=`${Math.min(l.scrollHeight,220)}px`},ee=async()=>{try{if(s=await _t({limit:6}),t)return;g.innerHTML=Qn(s),k.textContent=yt()==="indexeddb"?"\u63D0\u554F\u7D00\u9304\u5132\u5B58\u5728\u700F\u89BD\u5668 IndexedDB\uFF0C\u4E0D\u6703\u4E0A\u50B3\u5230\u4F3A\u670D\u5668\u3002":"\u700F\u89BD\u5668\u5132\u5B58\u4E0D\u53EF\u7528\uFF0C\u63D0\u554F\u7D00\u9304\u53EA\u4FDD\u7559\u5728\u672C\u6B21\u5DE5\u4F5C\u968E\u6BB5\u3002"}catch{if(t)return;g.innerHTML='<div class="history-empty">\u7121\u6CD5\u8B80\u53D6\u672C\u6A5F\u7D00\u9304\u3002</div>'}},z=async()=>{try{let u=await U.status();if(t)return;let S=u.data||{},D=new Map((u.services||[]).map(Be=>[Be.id,Be])),ne=D.get("qdrant"),ce=D.get("embedding"),re=D.get("rag"),pe=D.get("llm"),ie=Number(S.judgment_indexed_count||0),Q=Number(S.judgment_count||0),ge=Q?(ie/Q*100).toFixed(1):"0.0",Le=S.judgment_vector_points===null||S.judgment_vector_points===void 0?"\u2014":c(S.judgment_vector_points);_.innerHTML=`<div class="mini-stats">
+  </section>`;let o=e.querySelector("#rag-form"),l=e.querySelector("#rag-question"),m=e.querySelector("#rag-submit"),b=e.querySelector("#answer-card"),w=e.querySelector("#rag-stats"),f=e.querySelector("#rag-stats-mode"),g=e.querySelector("#rag-history"),S=e.querySelector("#rag-storage-note"),h=e.querySelector("#rag-clear-history"),y=e.querySelector("#rag-test-mode"),C=e.querySelector("#rag-test-flow"),M=e.querySelector("#rag-judgment-dialog"),_=e.querySelector("#rag-law-dialog"),E=()=>{document.documentElement.classList.toggle("dialog-open",!!e.querySelector("dialog[open]"))};M?.addEventListener("close",E),_?.addEventListener("close",E);let z=null,G=null,X=()=>{l.style.height="auto",l.style.height=`${Math.min(l.scrollHeight,220)}px`},se=async()=>{try{if(s=await _t({limit:6}),t)return;g.innerHTML=Kn(s),S.textContent=yt()==="indexeddb"?"\u63D0\u554F\u7D00\u9304\u5132\u5B58\u5728\u700F\u89BD\u5668 IndexedDB\uFF0C\u4E0D\u6703\u4E0A\u50B3\u5230\u4F3A\u670D\u5668\u3002":"\u700F\u89BD\u5668\u5132\u5B58\u4E0D\u53EF\u7528\uFF0C\u63D0\u554F\u7D00\u9304\u53EA\u4FDD\u7559\u5728\u672C\u6B21\u5DE5\u4F5C\u968E\u6BB5\u3002"}catch{if(t)return;g.innerHTML='<div class="history-empty">\u7121\u6CD5\u8B80\u53D6\u672C\u6A5F\u7D00\u9304\u3002</div>'}},R=async()=>{try{let u=await U.status();if(t)return;let A=u.data||{},I=new Map((u.services||[]).map(Be=>[Be.id,Be])),ne=I.get("qdrant"),ce=I.get("embedding"),re=I.get("rag"),pe=I.get("llm"),ie=Number(A.judgment_indexed_count||0),J=Number(A.judgment_count||0),ge=J?(ie/J*100).toFixed(1):"0.0",Le=A.judgment_vector_points===null||A.judgment_vector_points===void 0?"\u2014":c(A.judgment_vector_points);w.innerHTML=`<div class="mini-stats">
           <div class="mini-stat">
-            <div class="mini-stat-value">${c(Q)}</div>
+            <div class="mini-stat-value">${c(J)}</div>
             <div class="mini-stat-label">\u5224\u6C7A</div>
           </div>
           <div class="mini-stat">
@@ -1355,25 +1355,25 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <div class="side-status-list">
           <div class="side-status-row">
             <span>${$("cube",13)}Qdrant \u5411\u91CF\u7D22\u5F15</span>
-            ${V(ne?.status,ne?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
+            ${K(ne?.status,ne?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
           </div>
           <div class="side-status-row">
-            <span>${$("layers",13)}Embedding\uFF08${n(S.judgment_vector_model||"\u2014")}\uFF09</span>
-            ${V(ce?.status,ce?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
+            <span>${$("layers",13)}Embedding\uFF08${n(A.judgment_vector_model||"\u2014")}\uFF09</span>
+            ${K(ce?.status,ce?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
           </div>
           <div class="side-status-row">
             <span>${$("brain",13)}RAG \u56DE\u7B54\u7BA1\u7DDA</span>
-            ${V(re?.status,re?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
+            ${K(re?.status,re?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
           </div>
           <div class="side-status-row">
             <span>${$("sparkles",13)}LLM \u6A21\u578B</span>
-            ${V(pe?.status,pe?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
+            ${K(pe?.status,pe?.status==="not_configured"?"\u672A\u8A2D\u5B9A":void 0)}
           </div>
         </div>
         <div class="side-card-foot" style="padding:0;border:0;margin-top:10px">
-          Collection\uFF1A${n(S.judgment_vector_collection||"\u2014")} \xB7
-          ${Le} points \xB7 \u5269\u9918 ${c(S.judgment_index_remaining)} \u7B46\u5F85\u7D22\u5F15
-        </div>`;let _e=e.querySelector("#rag-mode-notice");_e&&(re?.status==="operational"?_e.innerHTML=K({tone:"ok",title:"\u6AA2\u7D22\u8207\u56DE\u7B54\u5C31\u7DD2",text:`Qdrant\u3001Embedding \u8207 LLM \u5747\u53EF\u4F7F\u7528\uFF1B\u76EE\u524D\u7D22\u5F15\u6DB5\u84CB ${c(ie)} / ${c(Q)} \u7B46\u5224\u6C7A\u3002\u56DE\u7B54\u4E0D\u662F\u6CD5\u5F8B\u610F\u898B\u3002`}):re?.status==="degraded"?_e.innerHTML=K({tone:"warn",title:"\u90E8\u5206 AI \u5143\u4EF6\u672A\u5C31\u7DD2",text:n(re.detail||"RAG \u6703\u964D\u7D1A\u70BA\u53EA\u986F\u793A\u6AA2\u7D22\u7D50\u679C\u3002")}):_e.innerHTML=K({tone:"info",title:"\u5411\u91CF\u7D22\u5F15\u5C1A\u672A\u5C31\u7DD2 \xB7 \u4E0D\u662F\u6CD5\u5F8B\u610F\u898B",text:n(re?.detail||"\u8A2D\u5B9A QDRANT_URL\u3001EMBEDDING_URL \u8207 LLM_URL \u4E26\u57F7\u884C judgment-index-vectors \u5F8C\u5373\u53EF\u555F\u7528\u5224\u6C7A\u6AA2\u7D22\u3002")})),b.className=`badge ${re?.status==="operational"?"badge-ok":re?.status==="not_configured"?"badge-neutral":"badge-warn"} badge-mono`,b.textContent=re?.status==="operational"?"RAG \u5C31\u7DD2":re?.status==="not_configured"?"\u672A\u8A2D\u5B9A":"\u964D\u7D1A"}catch{if(t)return;_.innerHTML='<p class="muted" style="font-size:11px">\u76EE\u524D\u7121\u6CD5\u53D6\u5F97\u670D\u52D9\u72C0\u614B\u3002</p>',b.className="badge badge-danger badge-mono",b.textContent="\u96E2\u7DDA"}},Y=()=>{if(!y)return;if(!r){y.innerHTML="";return}let u=Array.isArray(i.embedding)?i.embedding.length:0,S=Array.isArray(i.llm)?i.llm.length:0;y.innerHTML=K({tone:"warn",title:"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F",text:`\u6BCF\u6B21\u63D0\u554F\u6703\u4F9D\u5E8F\u57F7\u884C ${u} \u500B embedding \u8207 ${S} \u500B LLM \u6A21\u578B\uFF0C\u4E14\u4E0D\u8A2D\u903E\u6642\u3002\u6E2C\u8A66 Flow \u6703\u5728\u9801\u9762\u4E0B\u65B9\u5373\u6642\u986F\u793A\uFF0C\u4E5F\u53EF\u5230 <a href="#/tests">\u7CFB\u7D71\u6E2C\u8A66</a> \u6216 <a href="#/performance">\u6548\u80FD\u5831\u8868</a> \u67E5\u770B\u6B77\u53F2\u3002`})},E=async()=>{try{let u=await U.testMode();if(t)return;r=!!u.enabled,i=u.models||{embedding:[],llm:[]},Y()}catch{if(t)return;r=!1,Y()}},P=u=>{r=!!u.detail?.enabled,i=u.detail?.models||{embedding:[],llm:[]},Y()};window.addEventListener("judgment:test-mode",P);let H=u=>{C&&(R=u||null,C.innerHTML=u?at(u,[],"",{showHistory:!1}):"")},X=()=>{j&&(window.clearTimeout(j),j=null)},he=()=>{X();let u=async()=>{if(!t){try{let S=await U.testRunCurrent();if(t)return;let D=S.run;D&&D.status==="running"&&H(D)}catch{}t||(j=window.setTimeout(u,1500))}};u()},Te=async u=>{if(!u){H(null);return}try{let S=await U.testRun(u);if(t)return;H(S.run||null)}catch{t||O("\u6E2C\u8A66\u5DF2\u5B8C\u6210\uFF0C\u4F46\u7121\u6CD5\u8F09\u5165\u6E2C\u8A66 Flow\u3002","warn")}},le=async()=>{if(r)try{let u=await U.testRunCurrent();if(t)return;u.run?.status==="running"&&(H(u.run),he())}catch{}},be=0,I=(u,S)=>`<div class="judgment-dialog-head">
+          Collection\uFF1A${n(A.judgment_vector_collection||"\u2014")} \xB7
+          ${Le} points \xB7 \u5269\u9918 ${c(A.judgment_index_remaining)} \u7B46\u5F85\u7D22\u5F15
+        </div>`;let ke=e.querySelector("#rag-mode-notice");ke&&(re?.status==="operational"?ke.innerHTML=Y({tone:"ok",title:"\u6AA2\u7D22\u8207\u56DE\u7B54\u5C31\u7DD2",text:`Qdrant\u3001Embedding \u8207 LLM \u5747\u53EF\u4F7F\u7528\uFF1B\u76EE\u524D\u7D22\u5F15\u6DB5\u84CB ${c(ie)} / ${c(J)} \u7B46\u5224\u6C7A\u3002\u56DE\u7B54\u4E0D\u662F\u6CD5\u5F8B\u610F\u898B\u3002`}):re?.status==="degraded"?ke.innerHTML=Y({tone:"warn",title:"\u90E8\u5206 AI \u5143\u4EF6\u672A\u5C31\u7DD2",text:n(re.detail||"RAG \u6703\u964D\u7D1A\u70BA\u53EA\u986F\u793A\u6AA2\u7D22\u7D50\u679C\u3002")}):ke.innerHTML=Y({tone:"info",title:"\u5411\u91CF\u7D22\u5F15\u5C1A\u672A\u5C31\u7DD2 \xB7 \u4E0D\u662F\u6CD5\u5F8B\u610F\u898B",text:n(re?.detail||"\u8A2D\u5B9A QDRANT_URL\u3001EMBEDDING_URL \u8207 LLM_URL \u4E26\u57F7\u884C judgment-index-vectors \u5F8C\u5373\u53EF\u555F\u7528\u5224\u6C7A\u6AA2\u7D22\u3002")})),f.className=`badge ${re?.status==="operational"?"badge-ok":re?.status==="not_configured"?"badge-neutral":"badge-warn"} badge-mono`,f.textContent=re?.status==="operational"?"RAG \u5C31\u7DD2":re?.status==="not_configured"?"\u672A\u8A2D\u5B9A":"\u964D\u7D1A"}catch{if(t)return;w.innerHTML='<p class="muted" style="font-size:11px">\u76EE\u524D\u7121\u6CD5\u53D6\u5F97\u670D\u52D9\u72C0\u614B\u3002</p>',f.className="badge badge-danger badge-mono",f.textContent="\u96E2\u7DDA"}},P=()=>{if(!y)return;if(!r){y.innerHTML="";return}let u=Array.isArray(i.embedding)?i.embedding.length:0,A=Array.isArray(i.llm)?i.llm.length:0;y.innerHTML=Y({tone:"warn",title:"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F",text:`\u6BCF\u6B21\u63D0\u554F\u6703\u4F9D\u5E8F\u57F7\u884C ${u} \u500B embedding \u8207 ${A} \u500B LLM \u6A21\u578B\uFF0C\u4E14\u4E0D\u8A2D\u903E\u6642\u3002\u6E2C\u8A66 Flow \u6703\u5728\u9801\u9762\u4E0B\u65B9\u5373\u6642\u986F\u793A\uFF0C\u4E5F\u53EF\u5230 <a href="#/tests">\u7CFB\u7D71\u6E2C\u8A66</a> \u6216 <a href="#/performance">\u6548\u80FD\u5831\u8868</a> \u67E5\u770B\u6B77\u53F2\u3002`})},k=async()=>{try{let u=await U.testMode();if(t)return;r=!!u.enabled,i=u.models||{embedding:[],llm:[]},P()}catch{if(t)return;r=!1,P()}},q=u=>{r=!!u.detail?.enabled,i=u.detail?.models||{embedding:[],llm:[]},P()};window.addEventListener("judgment:test-mode",q);let B=u=>{C&&(G=u||null,C.innerHTML=u?at(u,[],"",{showHistory:!1}):"")},Q=()=>{z&&(window.clearTimeout(z),z=null)},be=()=>{Q();let u=async()=>{if(!t){try{let A=await U.testRunCurrent();if(t)return;let I=A.run;I&&I.status==="running"&&B(I)}catch{}t||(z=window.setTimeout(u,1500))}};u()},Te=async u=>{if(!u){B(null);return}try{let A=await U.testRun(u);if(t)return;B(A.run||null)}catch{t||D("\u6E2C\u8A66\u5DF2\u5B8C\u6210\uFF0C\u4F46\u7121\u6CD5\u8F09\u5165\u6E2C\u8A66 Flow\u3002","warn")}},le=async()=>{if(r)try{let u=await U.testRunCurrent();if(t)return;u.run?.status==="running"&&(B(u.run),be())}catch{}},$e=0,O=(u,A)=>`<div class="judgment-dialog-head">
     <div>
       <div class="eyebrow">DB ORIGINAL JUDGMENT</div>
       <h2>${n(u)}</h2>
@@ -1381,30 +1381,30 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     <button class="judgment-dialog-close" type="button"
       data-action="close-parquet-judgment" aria-label="\u95DC\u9589">${$("x",14)}</button>
   </div>
-  <div class="judgment-dialog-body">${S}</div>`,de=u=>{let S=(Array.isArray(u.matched_laws)?u.matched_laws:[]).map(re=>`<span class="chip">${n(re)}</span>`).join(""),D=[u.court,u.jdate,u.title?`\u6848\u7531\uFF1A${u.title}`:"",u.full_text_length?`${c(u.full_text_length)} \u5B57`:"",u.citation_count?`\u5F15\u7528 ${c(u.citation_count)} \u7B46`:""].filter(Boolean).map(re=>`<span>${n(re)}</span>`).join(""),ne=u.parquet_generated_at?`DB \u5132\u5B58\u539F\u6587\uFF08\u539F\u59CB Parquet\uFF09\xB7 ${n(String(u.parquet_generated_at).replace("T"," ").slice(0,19))}`:"DB \u5132\u5B58\u539F\u6587",ce=u.pdf_url?`<a class="btn btn-secondary btn-sm" href="${n(u.pdf_url)}" target="_blank" rel="noopener noreferrer">${$("external",13)}<span>\u53F8\u6CD5\u9662\u539F\u5224\u6C7A PDF</span></a>`:"";return I(u.jid||"\u5224\u6C7A\u5168\u6587",`<div class="judgment-dialog-meta">
+  <div class="judgment-dialog-body">${A}</div>`,de=u=>{let A=(Array.isArray(u.matched_laws)?u.matched_laws:[]).map(re=>`<span class="chip">${n(re)}</span>`).join(""),I=[u.court,u.jdate,u.title?`\u6848\u7531\uFF1A${u.title}`:"",u.full_text_length?`${c(u.full_text_length)} \u5B57`:"",u.citation_count?`\u5F15\u7528 ${c(u.citation_count)} \u7B46`:""].filter(Boolean).map(re=>`<span>${n(re)}</span>`).join(""),ne=u.parquet_generated_at?`DB \u5132\u5B58\u539F\u6587\uFF08\u539F\u59CB Parquet\uFF09\xB7 ${n(String(u.parquet_generated_at).replace("T"," ").slice(0,19))}`:"DB \u5132\u5B58\u539F\u6587",ce=u.pdf_url?`<a class="btn btn-secondary btn-sm" href="${n(u.pdf_url)}" target="_blank" rel="noopener noreferrer">${$("external",13)}<span>\u53F8\u6CD5\u9662\u539F\u5224\u6C7A PDF</span></a>`:"";return O(u.jid||"\u5224\u6C7A\u5168\u6587",`<div class="judgment-dialog-meta">
         <span class="badge badge-info">${n(u.source==="parquet"?"DB \u5132\u5B58\u539F\u6587":"PostgreSQL")}</span>
-        ${D}
+        ${I}
       </div>
-      ${S?`<div class="chips" style="margin:8px 0 10px">${S}</div>`:""}
+      ${A?`<div class="chips" style="margin:8px 0 10px">${A}</div>`:""}
       <div class="judgment-dialog-source">${ne}</div>
       <pre class="judgment-dialog-text">${n(u.full_text||"\u6B64\u5224\u6C7A\u6C92\u6709\u5168\u6587\u3002")}</pre>
       <div class="judgment-dialog-actions">
         ${ce}
         <button class="btn btn-secondary btn-sm" type="button"
           data-action="close-parquet-judgment">\u8FD4\u56DE\u56DE\u7B54</button>
-      </div>`)},De=async u=>{if(!T||!u)return;let S=++be;T.open||T.showModal(),A(),T.innerHTML=I("\u8B80\u53D6\u5224\u6C7A\u4E2D\u2026",`<div class="judgment-dialog-loading">
+      </div>`)},Ie=async u=>{if(!M||!u)return;let A=++$e;M.open||M.showModal(),E(),M.innerHTML=O("\u8B80\u53D6\u5224\u6C7A\u4E2D\u2026",`<div class="judgment-dialog-loading">
         <span class="spinner"></span>
         <span>\u6B63\u5728\u5F9E DB \u5132\u5B58\u539F\u6587\u8B80\u53D6 ${n(u)}\u2026</span>
-      </div>`);try{let D=await U.judgmentDetail(u,"parquet");if(t||S!==be)return;T.innerHTML=de(D)}catch(D){if(t||S!==be)return;T.innerHTML=I("\u7121\u6CD5\u8B80\u53D6 DB \u539F\u6587\u5224\u6C7A",`<div class="notice notice-danger">
+      </div>`);try{let I=await U.judgmentDetail(u,"parquet");if(t||A!==$e)return;M.innerHTML=de(I)}catch(I){if(t||A!==$e)return;M.innerHTML=O("\u7121\u6CD5\u8B80\u53D6 DB \u539F\u6587\u5224\u6C7A",`<div class="notice notice-danger">
           <div class="notice-body"><strong>\u8B80\u53D6\u5931\u6557</strong>
-          <p>${n(D.message||"\u627E\u4E0D\u5230\u5224\u6C7A\u5168\u6587\u3002")}</p>
+          <p>${n(I.message||"\u627E\u4E0D\u5230\u5224\u6C7A\u5168\u6587\u3002")}</p>
           <p class="muted">\u8ACB\u78BA\u8A8D\u5DF2\u57F7\u884C <span class="mono">uv run judgment-import-judgments --raw-only</span>\uFF0C\u4E14\u539F\u59CB Parquet \u5B58\u5728\u3002</p>
           </div>
         </div>
         <div class="judgment-dialog-actions">
           <button class="btn btn-secondary btn-sm" type="button"
             data-action="close-parquet-judgment">\u95DC\u9589</button>
-        </div>`)}},Se=0,qe=(u,S)=>`<div class="judgment-dialog-head">
+        </div>`)}},Se=0,qe=(u,A)=>`<div class="judgment-dialog-head">
     <div>
       <div class="eyebrow">LOCAL PARQUET LAW</div>
       <h2>${n(u)}</h2>
@@ -1412,31 +1412,31 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     <button class="judgment-dialog-close" type="button"
       data-action="close-law-source" aria-label="\u95DC\u9589">${$("x",14)}</button>
   </div>
-  <div class="judgment-dialog-body">${S}</div>`,Ae=(u,S="")=>{let D=String(u.selected_article_no||S||"").trim(),ne=!!D,re=(Array.isArray(u.articles)?u.articles:[]).map(Ee=>{let it=String(Ee.article_content||"").trim();return it?Ee.article_type==="C"?`<div class="law-chapter">${n(it)}</div>`:`<article class="law-article">
+  <div class="judgment-dialog-body">${A}</div>`,Ae=(u,A="")=>{let I=String(u.selected_article_no||A||"").trim(),ne=!!I,re=(Array.isArray(u.articles)?u.articles:[]).map(je=>{let it=String(je.article_content||"").trim();return it?je.article_type==="C"?`<div class="law-chapter">${n(it)}</div>`:`<article class="law-article">
           <div class="law-article-head">
-            <span class="law-article-no">${n(Ee.article_no||"\u689D\u6587")}</span>
+            <span class="law-article-no">${n(je.article_no||"\u689D\u6587")}</span>
           </div>
           <div class="law-article-text">${n(it)}</div>
-        </article>`:""}).join(""),pe=(Array.isArray(u.warnings)?u.warnings:[]).map(Ee=>n(Ee)).join("<br />"),ie=u.source_type==="order"?"\u547D\u4EE4":"\u6CD5\u898F",Q=u.meta?.articles_source,ge=Q==="parquet"?"Parquet \u689D\u6587":Q==="postgresql"?"PostgreSQL \u689D\u6587":"\u689D\u6587\u672A\u63D0\u4F9B",Le=u.meta?.snapshot||"",_e=[u.law_level,u.law_category,u.article_count?`${c(u.article_count)} \u689D`:"",u.law_modified_date?`\u7570\u52D5 ${Pe(u.law_modified_date)}`:""].filter(Boolean).map(Ee=>`<span>${n(Ee)}</span>`).join(""),Be=u.law_url?`<a class="btn btn-secondary btn-sm" href="${n(u.law_url)}" target="_blank" rel="noopener noreferrer">${$("external",13)}<span>\u4F86\u6E90\u7DB2\u7AD9</span></a>`:"",ke=!ne&&u.law_histories?`<details class="law-dialog-history">
+        </article>`:""}).join(""),pe=(Array.isArray(u.warnings)?u.warnings:[]).map(je=>n(je)).join("<br />"),ie=u.source_type==="order"?"\u547D\u4EE4":"\u6CD5\u898F",J=u.meta?.articles_source,ge=J==="parquet"?"Parquet \u689D\u6587":J==="postgresql"?"PostgreSQL \u689D\u6587":"\u689D\u6587\u672A\u63D0\u4F9B",Le=u.meta?.snapshot||"",ke=[u.law_level,u.law_category,u.article_count?`${c(u.article_count)} \u689D`:"",u.law_modified_date?`\u7570\u52D5 ${Pe(u.law_modified_date)}`:""].filter(Boolean).map(je=>`<span>${n(je)}</span>`).join(""),Be=u.law_url?`<a class="btn btn-secondary btn-sm" href="${n(u.law_url)}" target="_blank" rel="noopener noreferrer">${$("external",13)}<span>\u4F86\u6E90\u7DB2\u7AD9</span></a>`:"",xe=!ne&&u.law_histories?`<details class="law-dialog-history">
           <summary>\u6CD5\u898F\u6CBF\u9769</summary>
           <div>${n(u.law_histories)}</div>
-        </details>`:"",mt=ne?`<span class="badge badge-mono">${n(D)}</span>`:"",vt=ne?`${u.law_name||u.law_key||"\u6CD5\u898F\uFF0F\u547D\u4EE4"} \xB7 ${D}`:u.law_name||u.law_key||"\u6CD5\u898F\uFF0F\u547D\u4EE4";return qe(vt,`<div class="judgment-dialog-meta">
+        </details>`:"",mt=ne?`<span class="badge badge-mono">${n(I)}</span>`:"",vt=ne?`${u.law_name||u.law_key||"\u6CD5\u898F\uFF0F\u547D\u4EE4"} \xB7 ${I}`:u.law_name||u.law_key||"\u6CD5\u898F\uFF0F\u547D\u4EE4";return qe(vt,`<div class="judgment-dialog-meta">
         <span class="badge ${u.source_type==="order"?"badge-warn":"badge-info"}">${n(ie)}</span>
         ${mt}
-        ${_e}
+        ${ke}
       </div>
       <div class="judgment-dialog-source">${n([ge,Le].filter(Boolean).join(" \xB7 "))}</div>
       ${pe?`<div class="law-dialog-warning">${pe}</div>`:""}
-      ${ke}
+      ${xe}
       <div class="law-dialog-articles">${re||`<div class="report-empty-inline">${ne?"\u9019\u689D\u689D\u6587\u76EE\u524D\u6C92\u6709\u53EF\u986F\u793A\u7684\u5167\u5BB9\u3002":"\u9019\u500B\u6CD5\u898F\uFF0F\u547D\u4EE4\u76EE\u524D\u6C92\u6709\u53EF\u986F\u793A\u7684\u689D\u6587\u3002"}</div>`}</div>
       <div class="judgment-dialog-actions">
         ${Be}
         <button class="btn btn-secondary btn-sm" type="button"
           data-action="close-law-source">\u8FD4\u56DE\u56DE\u7B54</button>
-      </div>`)},Ie=async(u,S="",D="")=>{if(!w||!u)return;let ne=++Se;w.open||w.showModal(),A(),w.innerHTML=qe(D?"\u8B80\u53D6\u6CD5\u898F\u689D\u6587\u4E2D\u2026":"\u8B80\u53D6\u6CD5\u898F\uFF0F\u547D\u4EE4\u4E2D\u2026",`<div class="judgment-dialog-loading">
+      </div>`)},De=async(u,A="",I="")=>{if(!_||!u)return;let ne=++Se;_.open||_.showModal(),E(),_.innerHTML=qe(I?"\u8B80\u53D6\u6CD5\u898F\u689D\u6587\u4E2D\u2026":"\u8B80\u53D6\u6CD5\u898F\uFF0F\u547D\u4EE4\u4E2D\u2026",`<div class="judgment-dialog-loading">
         <span class="spinner"></span>
-        <span>\u6B63\u5728\u5F9E\u672C\u5730 Parquet \u8B80\u53D6 ${n([u,D].filter(Boolean).join(" \xB7 "))} \u7684\u539F\u59CB\u689D\u6587\u2026</span>
-      </div>`);try{let ce=await U.lawDetail(u,S,"",D);if(t||ne!==Se)return;w.innerHTML=Ae(ce,D)}catch(ce){if(t||ne!==Se)return;w.innerHTML=qe("\u7121\u6CD5\u8B80\u53D6\u6CD5\u898F\uFF0F\u547D\u4EE4\u539F\u6587",`<div class="notice notice-danger">
+        <span>\u6B63\u5728\u5F9E\u672C\u5730 Parquet \u8B80\u53D6 ${n([u,I].filter(Boolean).join(" \xB7 "))} \u7684\u539F\u59CB\u689D\u6587\u2026</span>
+      </div>`);try{let ce=await U.lawDetail(u,A,"",I);if(t||ne!==Se)return;_.innerHTML=Ae(ce,I)}catch(ce){if(t||ne!==Se)return;_.innerHTML=qe("\u7121\u6CD5\u8B80\u53D6\u6CD5\u898F\uFF0F\u547D\u4EE4\u539F\u6587",`<div class="notice notice-danger">
           <div class="notice-body"><strong>\u8B80\u53D6\u5931\u6557</strong>
           <p>${n(ce.message||"\u627E\u4E0D\u5230\u689D\u6587\u5167\u5BB9\u3002")}</p>
           <p class="muted">\u8ACB\u78BA\u8A8D\u672C\u5730\u539F\u59CB\u6CD5\u898F Parquet \u5B58\u5728\uFF0C\u4E14 PostgreSQL metadata \u8207\u5176\u4E00\u81F4\u3002</p>
@@ -1445,56 +1445,56 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <div class="judgment-dialog-actions">
           <button class="btn btn-secondary btn-sm" type="button"
             data-action="close-law-source">\u95DC\u9589</button>
-        </div>`)}};w?.addEventListener("click",u=>{if(u.target.closest('[data-action="close-law-source"]')){w.close();return}let S=w.getBoundingClientRect();(u.clientX<S.left||u.clientX>S.right||u.clientY<S.top||u.clientY>S.bottom)&&w.close()}),T?.addEventListener("click",u=>{if(u.target.closest('[data-action="close-parquet-judgment"]')){T.close();return}let S=T.getBoundingClientRect();(u.clientX<S.left||u.clientX>S.right||u.clientY<S.top||u.clientY>S.bottom)&&T.close()}),f.addEventListener("click",u=>{let S=u.target.closest(".rag-process-toggle");if(S){let ne=S.closest(".rag-process"),ce=S.getAttribute("aria-expanded")==="true";os(ne,!ce);return}let D=u.target.closest('[data-action="open-parquet-judgment"], [data-action="open-law-source"]');if(D){if(D.dataset.action==="open-law-source"){Ie(D.dataset.lawKey||"",D.dataset.sourceType||"",D.dataset.articleNo||"");return}De(D.dataset.jid||"")}}),f.addEventListener("keydown",u=>{if(u.key!=="Enter"&&u.key!==" ")return;let S=u.target.closest('[data-action="open-parquet-judgment"], [data-action="open-law-source"]');if(!(!S||S.closest("a, button"))){if(u.preventDefault(),S.dataset.action==="open-law-source"){Ie(S.dataset.lawKey||"",S.dataset.sourceType||"",S.dataset.articleNo||"");return}De(S.dataset.jid||"")}});let N=async u=>{let S=u.trim();if(!S){O("\u8ACB\u5148\u8F38\u5165\u554F\u984C\u3002","warn"),l.focus();return}a=S,l.value=S,G(),f.innerHTML=On(S,r);let D=r?null:Bn(f);r?(H(null),he()):(X(),H(null)),W(m,!0,"\u6AA2\u7D22\u4E2D\u2026");let ne=null,ce="",re=Q=>{if(t||!Q?.partial)return;let ge=f.querySelector(".answer-body");if(!ge)return;ne=Q,ce=String(Q.answer||""),ge.innerHTML=Zs(Q),D?.collapse?.();let Le=f.querySelector(".answer-head-title");Le&&(Le.textContent=Q.streaming?"LLM \u56DE\u7B54\u751F\u6210\u4E2D":"\u6CD5\u898F\u7D50\u679C\u5DF2\u986F\u793A")},pe=Q=>{if(t||!Q||!ne?.streaming)return;ce+=Q;let ge=f.querySelector("[data-partial-answer]");ge&&(ge.textContent=ce)},ie=()=>{if(t||!ne?.streaming)return;ce="";let Q=f.querySelector("[data-partial-answer]");Q&&(Q.textContent="\u6B63\u5728\u91CD\u65B0\u751F\u6210\u56DE\u7B54\u2026")};try{let Q=r?await U.rag(S,{testMode:r}):await U.ragStream(S,{onStep:ke=>D?.step(ke),onPartial:re,onToken:pe,onTokenReset:ie});if(t)return;X();let ge=D?.finish(!0)||"";f.innerHTML=zn(S,Q,ge),Q.test_run?.run_id?await Te(Q.test_run.run_id):H(null);let Le=Array.isArray(Q.citations)?Q.citations:[],_e=Array.isArray(Q.judgments)?Q.judgments:[],Be=Le.length+_e.length;await wt({kind:"rag",title:S,detail:`${Q.status||"preview"} \xB7 ${Be} \u7B46\u4F86\u6E90`,payload:{question:S,status:Q.status,citations:Le.map(ke=>ke.law_name),judgments:_e.map(ke=>ke.jid)}}),await ee()}catch(Q){if(X(),t)return;let ge=D?.finish(!1)||"";f.innerHTML=Gn(Q,ge),O(Q.message||"\u6AA2\u7D22\u5931\u6557\u3002","danger")}finally{X(),t||W(m,!1)}};return o.addEventListener("submit",u=>{u.preventDefault(),N(l.value)}),l.addEventListener("input",G),l.addEventListener("keydown",u=>{u.key==="Enter"&&!u.shiftKey&&!u.isComposing&&(u.preventDefault(),o.requestSubmit())}),e.querySelector("#example-chips").addEventListener("click",u=>{let S=u.target.closest("[data-question]");S&&(l.value=S.dataset.question,G(),o.requestSubmit())}),g.addEventListener("click",u=>{let S=u.target.closest("[data-history-index]");if(!S)return;let D=s[Number(S.dataset.historyIndex)];D&&(l.value=D.title,G(),N(D.title))}),h.addEventListener("click",async()=>{if(!s.length){O("\u76EE\u524D\u6C92\u6709\u53EF\u6E05\u9664\u7684\u63D0\u554F\u7D00\u9304\u3002","info");return}window.confirm("\u78BA\u5B9A\u6E05\u9664\u9019\u500B\u700F\u89BD\u5668\u7684\u6240\u6709\u63D0\u554F\u7D00\u9304\uFF1F")&&(await Ls(),await ee(),O("\u5DF2\u6E05\u9664\u672C\u6A5F\u63D0\u554F\u7D00\u9304\u3002","ok"))}),G(),await Promise.allSettled([z(),ee(),E()]),await le(),()=>{t=!0,X(),document.documentElement.classList.remove("dialog-open"),window.removeEventListener("judgment:test-mode",P),a&&f.setAttribute("data-last-question",a)}}var cs={};Qe(cs,{render:()=>br});var Vn=2e3,Wn={running:{label:"\u57F7\u884C\u4E2D",tone:"info"},success:{label:"\u5B8C\u6210",tone:"ok"},failed:{label:"\u5931\u6557",tone:"danger"},interrupted:{label:"\u5DF2\u4E2D\u6B62",tone:"warn"},stale:{label:"\u72C0\u614B\u5931\u6548",tone:"warn"},skipped:{label:"\u7565\u904E",tone:"idle"},pending:{label:"\u7B49\u5F85",tone:"idle"},idle:{label:"\u5F85\u547D",tone:"idle"},no_change:{label:"\u7121\u8B8A\u66F4",tone:"info"},operational:{label:"\u6B63\u5E38",tone:"ok"},degraded:{label:"\u964D\u7D1A",tone:"warn"},unavailable:{label:"\u7121\u6CD5\u53D6\u5F97",tone:"danger"},missing:{label:"\u5C1A\u7121\u7D00\u9304",tone:"idle"},error:{label:"\u8B80\u53D6\u5931\u6557",tone:"danger"},ok:{label:"\u6B63\u5E38",tone:"ok"}},ea={ok:"badge-ok",warn:"badge-warn",danger:"badge-danger",info:"badge-info",idle:"badge-neutral"},ta={ok:"is-ok",warn:"is-warn",danger:"is-danger",info:"is-idle",idle:"is-idle"},na={judgment:"\u5224\u6C7A",law:"\u6CD5\u898F",order:"\u547D\u4EE4",system:"\u7CFB\u7D71"},qt={judgment:"#a78bfa",law:"#22d3ee",order:"#f472b6",system:"#94a3b8"},Kn={extract:"file",raw_parquet:"cube",filter:"filter",postgres:"database",qdrant:"brain",download:"download",parse:"sliders"},Yn={raw_parquet:"\u539F\u59CB Parquet",postgres:"PostgreSQL"};function pt(e){return Wn[e]||{label:e?String(e):"\u672A\u77E5",tone:"idle"}}function xe(e,t){let s=pt(e);return`<span class="badge ${ea[s.tone]||ea.idle}"><span class="status-dot ${ta[s.tone]||ta.idle}"></span>${n(t||s.label)}</span>`}function Ze(e){if(e==null||e==="")return"\u2014";let t=Number(e);if(!Number.isFinite(t))return"\u2014";let s=Math.max(0,Math.min(100,t));return`${Number.isInteger(s)?s:s.toFixed(1)}%`}function sa(e){return e==null?"\u7121\u6CD5\u53D6\u5F97":c(e)}function nt(e){return e&&e.color?String(e.color):"var(--accent)"}function Et(e,t=""){let s=e.percent===null||e.percent===void 0?null:Math.max(0,Math.min(100,Number(e.percent)||0)),a=e.status==="running"&&s===null,r=a?' aria-valuetext="\u9032\u5EA6\u672A\u77E5"':` aria-valuenow="${s??0}"`;return`<div class="processing-bar${a?" is-indeterminate":""}${t?` ${t}`:""}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${r}>
+        </div>`)}};_?.addEventListener("click",u=>{if(u.target.closest('[data-action="close-law-source"]')){_.close();return}let A=_.getBoundingClientRect();(u.clientX<A.left||u.clientX>A.right||u.clientY<A.top||u.clientY>A.bottom)&&_.close()}),M?.addEventListener("click",u=>{if(u.target.closest('[data-action="close-parquet-judgment"]')){M.close();return}let A=M.getBoundingClientRect();(u.clientX<A.left||u.clientX>A.right||u.clientY<A.top||u.clientY>A.bottom)&&M.close()}),b.addEventListener("click",u=>{let A=u.target.closest(".rag-process-toggle");if(A){let ne=A.closest(".rag-process"),ce=A.getAttribute("aria-expanded")==="true";os(ne,!ce);return}let I=u.target.closest('[data-action="open-parquet-judgment"], [data-action="open-law-source"]');if(I){if(I.dataset.action==="open-law-source"){De(I.dataset.lawKey||"",I.dataset.sourceType||"",I.dataset.articleNo||"");return}Ie(I.dataset.jid||"")}}),b.addEventListener("keydown",u=>{if(u.key!=="Enter"&&u.key!==" ")return;let A=u.target.closest('[data-action="open-parquet-judgment"], [data-action="open-law-source"]');if(!(!A||A.closest("a, button"))){if(u.preventDefault(),A.dataset.action==="open-law-source"){De(A.dataset.lawKey||"",A.dataset.sourceType||"",A.dataset.articleNo||"");return}Ie(A.dataset.jid||"")}});let N=async u=>{let A=u.trim();if(!A){D("\u8ACB\u5148\u8F38\u5165\u554F\u984C\u3002","warn"),l.focus();return}a=A,l.value=A,X(),b.innerHTML=zn(A,r);let I=r?null:Un(b);r?(B(null),be()):(Q(),B(null)),V(m,!0,"\u6AA2\u7D22\u4E2D\u2026");let ne=null,ce="",re=J=>{if(t||!J?.partial)return;let ge=b.querySelector(".answer-body");if(!ge)return;ne=J,ce=String(J.answer||""),ge.innerHTML=Zs(J),I?.collapse?.();let Le=b.querySelector(".answer-head-title");Le&&(Le.textContent=J.streaming?"LLM \u56DE\u7B54\u751F\u6210\u4E2D":"\u6CD5\u898F\u7D50\u679C\u5DF2\u986F\u793A")},pe=J=>{if(t||!J||!ne?.streaming)return;ce+=J;let ge=b.querySelector("[data-partial-answer]");ge&&(ge.textContent=ce)},ie=()=>{if(t||!ne?.streaming)return;ce="";let J=b.querySelector("[data-partial-answer]");J&&(J.textContent="\u6B63\u5728\u91CD\u65B0\u751F\u6210\u56DE\u7B54\u2026")};try{let J=r?await U.rag(A,{testMode:r}):await U.ragStream(A,{onStep:xe=>I?.step(xe),onPartial:re,onToken:pe,onTokenReset:ie});if(t)return;Q();let ge=I?.finish(!0)||"";b.innerHTML=Vn(A,J,ge),J.test_run?.run_id?await Te(J.test_run.run_id):B(null);let Le=Array.isArray(J.citations)?J.citations:[],ke=Array.isArray(J.judgments)?J.judgments:[],Be=Le.length+ke.length;await wt({kind:"rag",title:A,detail:`${J.status||"preview"} \xB7 ${Be} \u7B46\u4F86\u6E90`,payload:{question:A,status:J.status,citations:Le.map(xe=>xe.law_name),judgments:ke.map(xe=>xe.jid)}}),await se()}catch(J){if(Q(),t)return;let ge=I?.finish(!1)||"";b.innerHTML=Wn(J,ge),D(J.message||"\u6AA2\u7D22\u5931\u6557\u3002","danger")}finally{Q(),t||V(m,!1)}};return o.addEventListener("submit",u=>{u.preventDefault(),N(l.value)}),l.addEventListener("input",X),l.addEventListener("keydown",u=>{u.key==="Enter"&&!u.shiftKey&&!u.isComposing&&(u.preventDefault(),o.requestSubmit())}),e.querySelector("#example-chips").addEventListener("click",u=>{let A=u.target.closest("[data-question]");A&&(l.value=A.dataset.question,X(),o.requestSubmit())}),g.addEventListener("click",u=>{let A=u.target.closest("[data-history-index]");if(!A)return;let I=s[Number(A.dataset.historyIndex)];I&&(l.value=I.title,X(),N(I.title))}),h.addEventListener("click",async()=>{if(!s.length){D("\u76EE\u524D\u6C92\u6709\u53EF\u6E05\u9664\u7684\u63D0\u554F\u7D00\u9304\u3002","info");return}window.confirm("\u78BA\u5B9A\u6E05\u9664\u9019\u500B\u700F\u89BD\u5668\u7684\u6240\u6709\u63D0\u554F\u7D00\u9304\uFF1F")&&(await Ls(),await se(),D("\u5DF2\u6E05\u9664\u672C\u6A5F\u63D0\u554F\u7D00\u9304\u3002","ok"))}),X(),await Promise.allSettled([R(),se(),k()]),await le(),()=>{t=!0,Q(),document.documentElement.classList.remove("dialog-open"),window.removeEventListener("judgment:test-mode",q),a&&b.setAttribute("data-last-question",a)}}var cs={};Qe(cs,{render:()=>xr});var Xn=2e3,Zn={running:{label:"\u57F7\u884C\u4E2D",tone:"info"},success:{label:"\u5B8C\u6210",tone:"ok"},failed:{label:"\u5931\u6557",tone:"danger"},interrupted:{label:"\u5DF2\u4E2D\u6B62",tone:"warn"},stale:{label:"\u72C0\u614B\u5931\u6548",tone:"warn"},skipped:{label:"\u7565\u904E",tone:"idle"},pending:{label:"\u7B49\u5F85",tone:"idle"},idle:{label:"\u5F85\u547D",tone:"idle"},no_change:{label:"\u7121\u8B8A\u66F4",tone:"info"},operational:{label:"\u6B63\u5E38",tone:"ok"},degraded:{label:"\u964D\u7D1A",tone:"warn"},unavailable:{label:"\u7121\u6CD5\u53D6\u5F97",tone:"danger"},missing:{label:"\u5C1A\u7121\u7D00\u9304",tone:"idle"},error:{label:"\u8B80\u53D6\u5931\u6557",tone:"danger"},ok:{label:"\u6B63\u5E38",tone:"ok"}},ea={ok:"badge-ok",warn:"badge-warn",danger:"badge-danger",info:"badge-info",idle:"badge-neutral"},ta={ok:"is-ok",warn:"is-warn",danger:"is-danger",info:"is-idle",idle:"is-idle"},oa={judgment:"\u5224\u6C7A",law:"\u6CD5\u898F",order:"\u547D\u4EE4",system:"\u7CFB\u7D71"},qt={judgment:"#a78bfa",law:"#22d3ee",order:"#f472b6",system:"#94a3b8"},er={extract:"file",raw_parquet:"cube",filter:"filter",postgres:"database",qdrant:"brain",download:"download",parse:"sliders"},tr={raw_parquet:"\u539F\u59CB Parquet",postgres:"PostgreSQL"};function pt(e){return Zn[e]||{label:e?String(e):"\u672A\u77E5",tone:"idle"}}function he(e,t){let s=pt(e);return`<span class="badge ${ea[s.tone]||ea.idle}"><span class="status-dot ${ta[s.tone]||ta.idle}"></span>${n(t||s.label)}</span>`}function Ze(e){if(e==null||e==="")return"\u2014";let t=Number(e);if(!Number.isFinite(t))return"\u2014";let s=Math.max(0,Math.min(100,t));return`${Number.isInteger(s)?s:s.toFixed(1)}%`}function sa(e){return e==null?"\u7121\u6CD5\u53D6\u5F97":c(e)}function nt(e){return e&&e.color?String(e.color):"var(--accent)"}function jt(e,t=""){let s=e.percent===null||e.percent===void 0?null:Math.max(0,Math.min(100,Number(e.percent)||0)),a=e.status==="running"&&s===null,r=a?' aria-valuetext="\u9032\u5EA6\u672A\u77E5"':` aria-valuenow="${s??0}"`;return`<div class="processing-bar${a?" is-indeterminate":""}${t?` ${t}`:""}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${r}>
     <span class="processing-bar-fill" style="width:${s??0}%;background:${n(nt(e))}"></span>
-  </div>`}function Xn(e){let t=e.unit==="bytes"?"":e.unit||"\u7B46",s=e.current,a=e.total;return s==null?e.status==="running"?"\u9032\u884C\u4E2D":"\u2014":e.unit==="bytes"?a?`${B(s)} / ${B(a)}`:B(s):a?`${c(s)} / ${c(a)} ${t}`:`${c(s)} ${t}`}function Zn(e){let t=[`<span>${n(Xn(e))}</span>`];return e.percent===null||e.percent===void 0?e.status==="running"&&t.push('<span class="mono">\u9032\u5EA6\u672A\u77E5</span>'):t.push(`<span class="mono">${Ze(e.percent)}</span>`),e.duration_ms&&t.push(`<span class="mono">${F(e.duration_ms)}</span>`),t.join("")}function er(e){let s=(Array.isArray(e.stats)?e.stats:[]).map(r=>`<span class="processing-stage-stat"><span>${n(r.label)}</span><strong>${n(r.value)}</strong></span>`),a=e.coverage;return a&&a.indexed!==null&&a.indexed!==void 0&&a.total!==null&&a.total!==void 0&&s.push(`<span class="processing-stage-stat"><span>\u7D22\u5F15\u8986\u84CB</span><strong>${c(a.indexed)} / ${c(a.total)}</strong></span>`),s.length?`<div class="processing-stage-stats">${s.join("")}</div>`:""}function tr(e,{compact:t=!1,step:s=null}={}){let a=pt(e.status),r=e.status==="running";return`<div class="processing-stage${t?" is-compact":""} is-${a.tone}${r?" is-live":""}" style="--stage-color:${n(nt(e))}"${r?' aria-current="step"':""}>
+  </div>`}function sr(e){let t=e.unit==="bytes"?"":e.unit||"\u7B46",s=e.current,a=e.total;return s==null?e.status==="running"?"\u9032\u884C\u4E2D":"\u2014":e.unit==="bytes"?a?`${F(s)} / ${F(a)}`:F(s):a?`${c(s)} / ${c(a)} ${t}`:`${c(s)} ${t}`}function ar(e){let t=[`<span>${n(sr(e))}</span>`];return e.percent===null||e.percent===void 0?e.status==="running"&&t.push('<span class="mono">\u9032\u5EA6\u672A\u77E5</span>'):t.push(`<span class="mono">${Ze(e.percent)}</span>`),e.duration_ms&&t.push(`<span class="mono">${H(e.duration_ms)}</span>`),t.join("")}function nr(e){let s=(Array.isArray(e.stats)?e.stats:[]).map(r=>`<span class="processing-stage-stat"><span>${n(r.label)}</span><strong>${n(r.value)}</strong></span>`),a=e.coverage;return a&&a.indexed!==null&&a.indexed!==void 0&&a.total!==null&&a.total!==void 0&&s.push(`<span class="processing-stage-stat"><span>\u7D22\u5F15\u8986\u84CB</span><strong>${c(a.indexed)} / ${c(a.total)}</strong></span>`),s.length?`<div class="processing-stage-stats">${s.join("")}</div>`:""}function rr(e,{compact:t=!1,step:s=null}={}){let a=pt(e.status),r=e.status==="running";return`<div class="processing-stage${t?" is-compact":""} is-${a.tone}${r?" is-live":""}" style="--stage-color:${n(nt(e))}"${r?' aria-current="step"':""}>
     <div class="processing-stage-head">
       ${s===null?"":`<span class="processing-stage-step">${String(s).padStart(2,"0")}</span>`}
       <span class="processing-stage-swatch" style="background:${n(nt(e))}"></span>
       <span class="processing-stage-label">${n(e.label||e.key)}</span>
-      ${xe(e.status)}
+      ${he(e.status)}
     </div>
-    ${Et(e)}
-    <div class="processing-stage-meta">${Zn(e)}</div>
+    ${jt(e)}
+    <div class="processing-stage-meta">${ar(e)}</div>
     ${e.message?`<div class="processing-stage-message" title="${n(e.message)}">${n(e.message)}</div>`:""}
-    ${t?"":er(e)}
-  </div>`}function ra(e){let t=pt(e);return`<span class="flow-status is-${t.tone}"><span class="flow-status-dot"></span>${n(t.label)}</span>`}function aa(e,t){return t==null||t===""?"\u2014":e.unit==="bytes"?B(t):c(t)}function sr(e){let t=[{label:"\u76EE\u524D",value:aa(e,e.current)},{label:"\u7E3D\u91CF",value:aa(e,e.total)},{label:"\u767E\u5206\u6BD4",value:e.percent===null||e.percent===void 0?e.status==="running"?"\u8A08\u7B97\u4E2D":"\u2014":Ze(e.percent)},{label:"\u8017\u6642",value:e.duration_ms?F(e.duration_ms):"\u2014"}],s=Array.isArray(e.stats)?e.stats:[];for(let r of s){if(t.length>=6)break;r&&r.label&&r.value&&t.push({label:String(r.label),value:String(r.value)})}let a=e.coverage;return a&&a.indexed!==null&&a.indexed!==void 0&&a.total!==null&&a.total!==void 0&&!t.some(r=>r.label==="\u7D22\u5F15\u8986\u84CB")&&t.push({label:"\u7D22\u5F15\u8986\u84CB",value:`${c(a.indexed)} / ${c(a.total)}`}),t}function ar(e,t){let s=pt(e.status),a=e.status==="running",r=sr(e);return`<article class="flow-node is-${s.tone}${a?" is-live":""}" style="--stage-color:${n(nt(e))}"${a?' aria-current="step"':""}>
+    ${t?"":nr(e)}
+  </div>`}function la(e){let t=pt(e);return`<span class="flow-status is-${t.tone}"><span class="flow-status-dot"></span>${n(t.label)}</span>`}function aa(e,t){return t==null||t===""?"\u2014":e.unit==="bytes"?F(t):c(t)}function ir(e){let t=[{label:"\u76EE\u524D",value:aa(e,e.current)},{label:"\u7E3D\u91CF",value:aa(e,e.total)},{label:"\u767E\u5206\u6BD4",value:e.percent===null||e.percent===void 0?e.status==="running"?"\u8A08\u7B97\u4E2D":"\u2014":Ze(e.percent)},{label:"\u8017\u6642",value:e.duration_ms?H(e.duration_ms):"\u2014"}],s=Array.isArray(e.stats)?e.stats:[];for(let r of s){if(t.length>=6)break;r&&r.label&&r.value&&t.push({label:String(r.label),value:String(r.value)})}let a=e.coverage;return a&&a.indexed!==null&&a.indexed!==void 0&&a.total!==null&&a.total!==void 0&&!t.some(r=>r.label==="\u7D22\u5F15\u8986\u84CB")&&t.push({label:"\u7D22\u5F15\u8986\u84CB",value:`${c(a.indexed)} / ${c(a.total)}`}),t}function or(e,t){let s=pt(e.status),a=e.status==="running",r=ir(e);return`<article class="flow-node is-${s.tone}${a?" is-live":""}" style="--stage-color:${n(nt(e))}"${a?' aria-current="step"':""}>
     <div class="flow-node-head">
-      <span class="flow-node-icon">${$(Kn[e.key]||"cube",14)}</span>
+      <span class="flow-node-icon">${$(er[e.key]||"cube",14)}</span>
       <div class="flow-node-heading">
         <span class="flow-node-kicker">STEP ${String(t+1).padStart(2,"0")}</span>
-        <strong>${n(Yn[e.key]||e.label||e.key)}</strong>
+        <strong>${n(tr[e.key]||e.label||e.key)}</strong>
       </div>
-      ${ra(e.status)}
+      ${la(e.status)}
     </div>
     <div class="flow-node-body">
-      ${Et(e,"flow-progress")}
+      ${jt(e,"flow-progress")}
       <div class="flow-node-props">${r.map(i=>`<div class="flow-prop"><span>${n(i.label)}</span><strong>${n(i.value)}</strong></div>`).join("")}</div>
       ${e.message?`<div class="flow-node-note" title="${n(e.message)}">${n(e.message)}</div>`:""}
     </div>
-  </article>`}function nr(e,t,s,a){let r=nt(e),i=a||"#8b5cf6",o=e.status==="running",l=`${s}-${t}`,m=`flow-gradient-${l}`,f=`flow-marker-${l}`,_=t%2===0?"M2 60 C8 42 16 78 22 60":"M2 60 C8 78 16 42 22 60";return`<div class="flow-link${o?" is-live":""}" style="color:${n(r)}" aria-hidden="true">
+  </article>`}function lr(e,t,s,a){let r=nt(e),i=a||"#8b5cf6",o=e.status==="running",l=`${s}-${t}`,m=`flow-gradient-${l}`,b=`flow-marker-${l}`,w=t%2===0?"M2 60 C8 42 16 78 22 60":"M2 60 C8 78 16 42 22 60";return`<div class="flow-link${o?" is-live":""}" style="color:${n(r)}" aria-hidden="true">
     <svg viewBox="0 0 28 120" width="28" height="120" fill="none">
       <defs>
         <linearGradient id="${m}" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" stop-color="${n(i)}"/>
           <stop offset="1" stop-color="${n(r)}"/>
         </linearGradient>
-        <marker id="${f}" viewBox="0 0 8 8" refX="6.2" refY="4" markerWidth="4.6" markerHeight="4.6" orient="auto">
+        <marker id="${b}" viewBox="0 0 8 8" refX="6.2" refY="4" markerWidth="4.6" markerHeight="4.6" orient="auto">
           <path d="M0 0 8 4 0 8Z" fill="${n(r)}"/>
         </marker>
       </defs>
-      <path class="flow-link-line" d="${_}" stroke="url(#${m})" stroke-width="1.7" stroke-linecap="round" marker-end="url(#${f})"/>
+      <path class="flow-link-line" d="${w}" stroke="url(#${m})" stroke-width="1.7" stroke-linecap="round" marker-end="url(#${b})"/>
       <circle class="flow-link-port" cx="2" cy="60" r="3.6" stroke="${n(i)}" stroke-width="1.5"/>
       <circle class="flow-link-port" cx="26" cy="60" r="3.6" stroke="${n(r)}" stroke-width="1.5"/>
     </svg>
-  </div>`}function ia(e){if(!e)return"";let t=[];return e.started_at&&t.push(`\u958B\u59CB ${se(e.started_at)}`),e.duration_ms&&t.push(`\u8017\u6642 ${F(e.duration_ms)}`),e.pid&&t.push(`PID ${e.pid}`),t.join(" \xB7 ")}function rr(e,{active:t,focus:s,status:a,runLine:r,runningStage:i}){let o=e.label||na[e.key]||e.key;return`<div class="flow-source${t?" is-live":""}" style="--branch-accent:${qt[e.key]||qt.system}">
+  </div>`}function ca(e){if(!e)return"";let t=[];return e.started_at&&t.push(`\u958B\u59CB ${ee(e.started_at)}`),e.duration_ms&&t.push(`\u8017\u6642 ${H(e.duration_ms)}`),e.pid&&t.push(`PID ${e.pid}`),t.join(" \xB7 ")}function cr(e,{active:t,focus:s,status:a,runLine:r,runningStage:i}){let o=e.label||oa[e.key]||e.key;return`<div class="flow-source${t?" is-live":""}" style="--branch-accent:${qt[e.key]||qt.system}">
     <div class="flow-source-head">
       <span class="flow-source-icon">${$(e.icon||"database",15)}</span>
       <div class="flow-node-heading">
         <span class="flow-node-kicker">SOURCE</span>
         <strong>${n(o)}</strong>
       </div>
-      ${ra(a)}
+      ${la(a)}
     </div>
     <div class="flow-source-body">
       <p class="flow-source-desc">${n(e.description||"")}</p>
@@ -1502,57 +1502,57 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       ${i?`<div class="flow-source-current"><span class="flow-current-dot"></span>\u76EE\u524D\u968E\u6BB5\uFF1A<strong>${n(i.label||i.key)}</strong></div>`:""}
       ${s&&s.message?`<div class="flow-source-note" title="${n(s.message)}">${n(s.message)}</div>`:""}
     </div>
-  </div>`}function ir(e){let t=e.active_run,s=t||e.focus_run||e.last_run,a=t?"running":s?s.status:"idle",r=s?n(ia(s)||tt(s.started_at||s.finished_at)):"\u5C1A\u7121\u57F7\u884C\u7D00\u9304",i=Array.isArray(e.stages)?e.stages:[],o=i.find(b=>b.status==="running"),l=qt[e.key]||qt.system,m=String(e.key||"branch").replace(/[^a-zA-Z0-9_-]/g,""),f=rr(e,{active:t,focus:s,status:a,runLine:r,runningStage:o}),_=i.length?i.map((b,g)=>{let k=g?nt(i[g-1]):l;return`${nr(b,g,m,k)}${ar(b,g)}`}).join(""):'<div class="flow-empty">\u6C92\u6709\u53EF\u986F\u793A\u7684\u968E\u6BB5\u3002</div>';return`<article class="flow-lane" style="--branch-accent:${l}"><div class="flow-row">${f}${_}</div></article>`}function or(e){return`<div class="flow-canvas-open">
-    <div class="processing-branches">${(Array.isArray(e.branches)?e.branches:[]).map(ir).join("")}</div>
+  </div>`}function dr(e){let t=e.active_run,s=t||e.focus_run||e.last_run,a=t?"running":s?s.status:"idle",r=s?n(ca(s)||tt(s.started_at||s.finished_at)):"\u5C1A\u7121\u57F7\u884C\u7D00\u9304",i=Array.isArray(e.stages)?e.stages:[],o=i.find(f=>f.status==="running"),l=qt[e.key]||qt.system,m=String(e.key||"branch").replace(/[^a-zA-Z0-9_-]/g,""),b=cr(e,{active:t,focus:s,status:a,runLine:r,runningStage:o}),w=i.length?i.map((f,g)=>{let S=g?nt(i[g-1]):l;return`${lr(f,g,m,S)}${or(f,g)}`}).join(""):'<div class="flow-empty">\u6C92\u6709\u53EF\u986F\u793A\u7684\u968E\u6BB5\u3002</div>';return`<article class="flow-lane" style="--branch-accent:${l}"><div class="flow-row">${b}${w}</div></article>`}function ur(e){return`<div class="flow-canvas-open">
+    <div class="processing-branches">${(Array.isArray(e.branches)?e.branches:[]).map(dr).join("")}</div>
   </div>`}function Xe(e,t,s="",a=""){return`<div class="processing-summary-card">
     <span class="processing-summary-label">${n(e)}</span>
     <span class="processing-summary-value">${t}</span>
     ${s?`<span class="processing-summary-hint">${s}</span>`:""}
     ${a}
-  </div>`}function lr(e){let t=e.database||{},s=e.index||{},a=e.local_archives||{},r=e.raw_backups||{},i=r.totals||{},o=e.state||{},l=e.capabilities||{},m=e.mode==="running"?"\u57F7\u884C\u4E2D":"\u5F85\u547D",f=t.status==="operational",_=s.status==="operational",b=a.available!==!1,g=r.available!==!1,k=_?`${c(s.indexed)} / ${c(s.total)}`:xe(s.status||"unavailable"),h=_?`${Ze(s.percent)} \xB7 \u5C1A\u9918 ${c(s.remaining)} \u7B46`:n(s.error||"\u7121\u6CD5\u67E5\u8A62 Qdrant \u7D22\u5F15\u8986\u84CB\u7387\u3002"),y=b?`${c(a.unprocessed)} / ${c(a.total)}`:xe("unavailable"),C=b?`\u672A\u8655\u7406 / \u5168\u90E8 \xB7 ${B(a.unprocessed_bytes)} \u5F85\u8655\u7406`:n(a.error||"\u627E\u4E0D\u5230\u5224\u6C7A\u8CC7\u6599\u76EE\u9304\u3002");return`<div class="processing-summary">
-    ${Xe("\u8655\u7406\u72C0\u614B",xe(e.status||"unknown"),`${n(m)} \xB7 \u66F4\u65B0\u65BC <span data-processing-updated-at>\u2014</span>`)}
+  </div>`}function pr(e){let t=e.database||{},s=e.index||{},a=e.local_archives||{},r=e.raw_backups||{},i=r.totals||{},o=e.state||{},l=e.capabilities||{},m=e.mode==="running"?"\u57F7\u884C\u4E2D":"\u5F85\u547D",b=t.status==="operational",w=s.status==="operational",f=a.available!==!1,g=r.available!==!1,S=w?`${c(s.indexed)} / ${c(s.total)}`:he(s.status||"unavailable"),h=w?`${Ze(s.percent)} \xB7 \u5C1A\u9918 ${c(s.remaining)} \u7B46`:n(s.error||"\u7121\u6CD5\u67E5\u8A62 Qdrant \u7D22\u5F15\u8986\u84CB\u7387\u3002"),y=f?`${c(a.unprocessed)} / ${c(a.total)}`:he("unavailable"),C=f?`\u672A\u8655\u7406 / \u5168\u90E8 \xB7 ${F(a.unprocessed_bytes)} \u5F85\u8655\u7406`:n(a.error||"\u627E\u4E0D\u5230\u5224\u6C7A\u8CC7\u6599\u76EE\u9304\u3002");return`<div class="processing-summary">
+    ${Xe("\u8655\u7406\u72C0\u614B",he(e.status||"unknown"),`${n(m)} \xB7 \u66F4\u65B0\u65BC <span data-processing-updated-at>\u2014</span>`)}
     ${Xe("\u672A\u8655\u7406\u58D3\u7E2E\u6A94",n(y),C)}
-    ${Xe("\u539F\u59CB Parquet \u5099\u4EFD",g?`${c(r.count)} \u6A94`:xe("unavailable"),g?`\u5171 ${c(i.row_count)} \u7B46 \xB7 ${B(i.compressed_bytes)}`:n(r.error||"\u7121\u6CD5\u6383\u63CF\u539F\u59CB Parquet \u5099\u4EFD\u3002"))}
-    ${Xe("PostgreSQL \u5224\u6C7A",f?c(t.judgment_count):xe("unavailable"),f?`\u6CD5\u898F ${sa(t.law_count)} \xB7 \u547D\u4EE4 ${sa(t.order_count)}`:n(t.error||"\u7121\u6CD5\u67E5\u8A62 PostgreSQL\u3002"))}
-    ${Xe("Qdrant \u7D22\u5F15",k,h)}
-    ${Xe("\u72C0\u614B\u6A94",xe(o.status||"missing"),o.updated_at?`\u66F4\u65B0\u65BC ${n(se(o.updated_at))}`:n(o.detail||"\u5C1A\u7121\u8655\u7406\u72C0\u614B\u7D00\u9304\u3002"))}
+    ${Xe("\u539F\u59CB Parquet \u5099\u4EFD",g?`${c(r.count)} \u6A94`:he("unavailable"),g?`\u5171 ${c(i.row_count)} \u7B46 \xB7 ${F(i.compressed_bytes)}`:n(r.error||"\u7121\u6CD5\u6383\u63CF\u539F\u59CB Parquet \u5099\u4EFD\u3002"))}
+    ${Xe("PostgreSQL \u5224\u6C7A",b?c(t.judgment_count):he("unavailable"),b?`\u6CD5\u898F ${sa(t.law_count)} \xB7 \u547D\u4EE4 ${sa(t.order_count)}`:n(t.error||"\u7121\u6CD5\u67E5\u8A62 PostgreSQL\u3002"))}
+    ${Xe("Qdrant \u7D22\u5F15",S,h)}
+    ${Xe("\u72C0\u614B\u6A94",he(o.status||"missing"),o.updated_at?`\u66F4\u65B0\u65BC ${n(ee(o.updated_at))}`:n(o.detail||"\u5C1A\u7121\u8655\u7406\u72C0\u614B\u7D00\u9304\u3002"))}
     ${Xe("\u5F85\u8655\u7406\u5DE5\u4F5C",l.can_start_update===!1?"\u66AB\u505C\u555F\u52D5":"\u53EF\u958B\u59CB\u66F4\u65B0",l.start_blocked_reason?n(l.start_blocked_reason):`\u672A\u8655\u7406 ${c(l.unprocessed_archives)} \u500B \xB7 \u7D22\u5F15\u5F85\u88DC ${c(l.index_backlog)} \u7B46${l.external_processes?` \xB7 \u5916\u90E8\u7A0B\u5E8F ${c(l.external_processes)} \u500B`:""}`)}
-  </div>`}function cr(e){if(e.available===!1)return K({tone:"warn",title:"\u627E\u4E0D\u5230\u5224\u6C7A\u8CC7\u6599\u76EE\u9304",text:n(e.error||"\u7121\u6CD5\u6383\u63CF .rar \u6A94\u6848\u3002")});let t=Number(e.total)||0,s=Number(e.processed)||0,a=Number(e.unprocessed)||0,r=t?100*s/t:null;return`<div class="processing-archive-summary">
+  </div>`}function mr(e){if(e.available===!1)return Y({tone:"warn",title:"\u627E\u4E0D\u5230\u5224\u6C7A\u8CC7\u6599\u76EE\u9304",text:n(e.error||"\u7121\u6CD5\u6383\u63CF .rar \u6A94\u6848\u3002")});let t=Number(e.total)||0,s=Number(e.processed)||0,a=Number(e.unprocessed)||0,r=t?100*s/t:null;return`<div class="processing-archive-summary">
     <div class="processing-archive-summary-head">
       <span class="mono">${n(e.data_dir||"")}</span>
-      <span>${c(s)} / ${c(t)} \u5DF2\u8655\u7406 \xB7 ${c(a)} \u5F85\u8655\u7406 \xB7 ${B(e.unprocessed_bytes)} \u5F85\u8655\u7406</span>
+      <span>${c(s)} / ${c(t)} \u5DF2\u8655\u7406 \xB7 ${c(a)} \u5F85\u8655\u7406 \xB7 ${F(e.unprocessed_bytes)} \u5F85\u8655\u7406</span>
     </div>
-    ${Et({percent:r,status:a?"pending":"success",color:"var(--success)"},"processing-bar-lg")}
+    ${jt({percent:r,status:a?"pending":"success",color:"var(--success)"},"processing-bar-lg")}
     <div class="processing-archive-summary-meta">
       <span>\u58D3\u7E2E\u6A94\u532F\u5165\u8986\u84CB ${Ze(r)}</span>
-      <span>\u5168\u90E8 ${B(e.total_bytes)}</span>
+      <span>\u5168\u90E8 ${F(e.total_bytes)}</span>
     </div>
-  </div>`}function dr(e){let t=e.stages||{},a=["extract","filter","postgres"].map(r=>t[r]).filter(Boolean).map(r=>tr(r,{compact:!0}));return a.length?`<div class="processing-archive-stages">${a.join("")}</div>`:""}function ur(e){let t=e.status||"pending",s=t==="running",a=e.percent===null||e.percent===void 0?null:Math.max(0,Math.min(100,Number(e.percent)||0)),r=s&&a===null,i=[];return e.message&&i.push(e.message),e.error&&i.push(e.error),(e.scanned||e.matched||e.stored)&&i.push(`\u6383\u63CF ${c(e.scanned)} \xB7 \u547D\u4E2D ${c(e.matched)} \xB7 \u5BEB\u5165 ${c(e.stored)}`),`<div class="processing-archive is-${pt(t).tone}">
+  </div>`}function vr(e){let t=e.stages||{},a=["extract","filter","postgres"].map(r=>t[r]).filter(Boolean).map(r=>rr(r,{compact:!0}));return a.length?`<div class="processing-archive-stages">${a.join("")}</div>`:""}function gr(e){let t=e.status||"pending",s=t==="running",a=e.percent===null||e.percent===void 0?null:Math.max(0,Math.min(100,Number(e.percent)||0)),r=s&&a===null,i=[];return e.message&&i.push(e.message),e.error&&i.push(e.error),(e.scanned||e.matched||e.stored)&&i.push(`\u6383\u63CF ${c(e.scanned)} \xB7 \u547D\u4E2D ${c(e.matched)} \xB7 \u5BEB\u5165 ${c(e.stored)}`),`<div class="processing-archive is-${pt(t).tone}">
     <div class="processing-archive-head">
       <span class="processing-archive-name mono">${n(e.name)}</span>
       <div class="processing-archive-bar-wrap">
-        ${Et({percent:a,status:t,color:s?"var(--accent)":"var(--success)"})}
+        ${jt({percent:a,status:t,color:s?"var(--accent)":"var(--success)"})}
       </div>
       <span class="processing-archive-percent mono">${r?"\u9032\u884C\u4E2D":Ze(a)}</span>
-      ${xe(t)}
-      <span class="processing-archive-size faint">${B(e.size_bytes)}</span>
+      ${he(t)}
+      <span class="processing-archive-size faint">${F(e.size_bytes)}</span>
     </div>
-    ${dr(e)}
+    ${vr(e)}
     ${i.length?`<div class="processing-archive-note">${i.map(o=>`<span>${n(o)}</span>`).join("")}</div>`:""}
-  </div>`}function pr(e){let t=e.archives||{},s=e.local_archives||{},a=Array.isArray(t.items)?t.items:[],r=t.run,i=`<div class="report-section-head">
+  </div>`}function fr(e){let t=e.archives||{},s=e.local_archives||{},a=Array.isArray(t.items)?t.items:[],r=t.run,i=`<div class="report-section-head">
     <div>
       <div class="report-kicker">ARCHIVE PIPELINE</div>
       <h2 class="report-section-title">\u5224\u6C7A\u58D3\u7E2E\u6A94</h2>
       <p class="processing-section-sub">\u6BCF\u500B\u58D3\u7E2E\u6A94\u540D\u7A31\u5F8C\u65B9\u5373\u6642\u986F\u793A\u8655\u7406\u9032\u5EA6\uFF1B\u672A\u53D6\u5F97\u53EF\u8A08\u7B97\u7684\u7E3D\u91CF\u6642\u6A19\u793A\u300C\u9032\u5EA6\u672A\u77E5\u300D\uFF0C\u4E0D\u4EE5\u63A8\u6E2C\u6578\u503C\u4EE3\u66FF\u3002</p>
     </div>
-  </div>`,o=t.source==="run"?`${xe(r?r.status:"idle")} <span>\u76EE\u524D\u986F\u793A ${r?n(r.title||"\u5224\u6C7A\u532F\u5165"):"\u6700\u8FD1\u4E00\u6B21\u532F\u5165"} \u7684\u9010\u6A94\u9032\u5EA6${r&&r.started_at?` \xB7 ${n(ia(r))}`:""}</span>`:t.external?`${xe("running")} <span>${n(t.note||"\u5916\u90E8\u532F\u5165\u7A0B\u5E8F\u672A\u5BEB\u5165\u9010\u6A94\u72C0\u614B\uFF1B\u4EE5\u4E0B\u70BA PostgreSQL \u8986\u84CB\u7387\u3002")}</span>`:'<span class="faint">\u76EE\u524D\u6C92\u6709\u53EF\u8B80\u53D6\u7684\u532F\u5165 run \u72C0\u614B\uFF1B\u4EE5\u4E0B\u4EE5 PostgreSQL \u7684 source_archive \u5224\u5B9A\u662F\u5426\u5DF2\u8655\u7406\u3002</span>';return`<section class="report-card processing-card">
+  </div>`,o=t.source==="run"?`${he(r?r.status:"idle")} <span>\u76EE\u524D\u986F\u793A ${r?n(r.title||"\u5224\u6C7A\u532F\u5165"):"\u6700\u8FD1\u4E00\u6B21\u532F\u5165"} \u7684\u9010\u6A94\u9032\u5EA6${r&&r.started_at?` \xB7 ${n(ca(r))}`:""}</span>`:t.external?`${he("running")} <span>${n(t.note||"\u5916\u90E8\u532F\u5165\u7A0B\u5E8F\u672A\u5BEB\u5165\u9010\u6A94\u72C0\u614B\uFF1B\u4EE5\u4E0B\u70BA PostgreSQL \u8986\u84CB\u7387\u3002")}</span>`:'<span class="faint">\u76EE\u524D\u6C92\u6709\u53EF\u8B80\u53D6\u7684\u532F\u5165 run \u72C0\u614B\uFF1B\u4EE5\u4E0B\u4EE5 PostgreSQL \u7684 source_archive \u5224\u5B9A\u662F\u5426\u5DF2\u8655\u7406\u3002</span>';return`<section class="report-card processing-card">
     <div class="report-head">${i}</div>
     <div class="report-section">
-      ${cr(s)}
+      ${mr(s)}
       <div class="processing-archive-run">${o}</div>
-      ${a.length?`<div class="processing-archive-list">${a.map(ur).join("")}</div>`:`<div class="processing-empty">\u627E\u4E0D\u5230 .rar \u58D3\u7E2E\u6A94\uFF1B\u8ACB\u78BA\u8A8D ${n(s.data_dir||"\u5224\u6C7A\u8CC7\u6599\u76EE\u9304")}\u3002</div>`}
+      ${a.length?`<div class="processing-archive-list">${a.map(gr).join("")}</div>`:`<div class="processing-empty">\u627E\u4E0D\u5230 .rar \u58D3\u7E2E\u6A94\uFF1B\u8ACB\u78BA\u8A8D ${n(s.data_dir||"\u5224\u6C7A\u8CC7\u6599\u76EE\u9304")}\u3002</div>`}
     </div>
-  </section>`}function mr(e){let t=e.timeline||{},s=Array.isArray(t.stages)?t.stages:[],a=`<div class="report-section-head">
+  </section>`}function hr(e){let t=e.timeline||{},s=Array.isArray(t.stages)?t.stages:[],a=`<div class="report-section-head">
     <div>
       <div class="report-kicker">ELAPSED COMPOSITION</div>
       <h2 class="report-section-title">\u6574\u9AD4\u8655\u7406\u6642\u9593</h2>
@@ -1563,23 +1563,23 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       <div class="report-section">
         <div class="processing-empty">${n(t.label||"\u5C1A\u7121\u53EF\u8A08\u7B97\u7684\u968E\u6BB5\u8017\u6642\uFF1B\u57F7\u884C\u8CC7\u6599\u66F4\u65B0\u6216\u7D22\u5F15\u5F8C\u6703\u986F\u793A\u3002")}</div>
       </div>
-    </section>`;let r=s.map(o=>`<span class="processing-stack-segment" style="width:${Math.max(0,Number(o.percent)||0)}%;background:${n(o.color||"var(--accent)")}" title="${n(`${o.label} ${F(o.duration_ms)} (${Ze(o.percent)})`)}"></span>`).join(""),i=s.map(o=>`<div class="processing-legend-item">
+    </section>`;let r=s.map(o=>`<span class="processing-stack-segment" style="width:${Math.max(0,Number(o.percent)||0)}%;background:${n(o.color||"var(--accent)")}" title="${n(`${o.label} ${H(o.duration_ms)} (${Ze(o.percent)})`)}"></span>`).join(""),i=s.map(o=>`<div class="processing-legend-item">
         <span class="processing-legend-swatch" style="background:${n(o.color||"var(--accent)")}"></span>
         <span class="processing-legend-label">${n(o.label)}</span>
-        <span class="mono">${F(o.duration_ms)}</span>
+        <span class="mono">${H(o.duration_ms)}</span>
         <span class="processing-legend-percent mono">${Ze(o.percent)}</span>
-        ${xe(o.status)}
+        ${he(o.status)}
       </div>`).join("");return`<section class="report-card processing-card">
     <div class="report-head">${a}</div>
     <div class="report-section">
       <div class="processing-timeline-label">
         <span>${n(t.label||"\u968E\u6BB5\u8017\u6642")}</span>
-        <span class="mono">\u7E3D\u8A08 ${F(t.total_ms)}</span>
+        <span class="mono">\u7E3D\u8A08 ${H(t.total_ms)}</span>
       </div>
       <div class="processing-stack" role="img" aria-label="\u968E\u6BB5\u8017\u6642\u6BD4\u4F8B">${r}</div>
       <div class="processing-legend">${i}</div>
     </div>
-  </section>`}function vr(e){let t=Array.isArray(e.recent_runs)?e.recent_runs:[],s=new Map((e.branches||[]).map(i=>[i.key,i.label])),a=`<div class="report-section-head">
+  </section>`}function br(e){let t=Array.isArray(e.recent_runs)?e.recent_runs:[],s=new Map((e.branches||[]).map(i=>[i.key,i.label])),a=`<div class="report-section-head">
     <div>
       <div class="report-kicker">RECENT RUNS</div>
       <h2 class="report-section-title">\u6700\u8FD1\u8655\u7406\u7D00\u9304</h2>
@@ -1588,21 +1588,21 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
   </div>`;if(!t.length)return`<section class="report-card processing-card">
       <div class="report-head">${a}</div>
       <div class="report-section"><div class="processing-empty">\u5C1A\u7121\u8655\u7406\u7D00\u9304\u3002</div></div>
-    </section>`;let r=t.map(i=>{let o=s.get(i.branch)||na[i.branch]||i.branch||"\u2014";return`<div class="processing-run">
+    </section>`;let r=t.map(i=>{let o=s.get(i.branch)||oa[i.branch]||i.branch||"\u2014";return`<div class="processing-run">
         <div class="processing-run-head">
           <span class="badge badge-neutral">${n(o)}</span>
           <strong>${n(i.title||"\u8655\u7406")}</strong>
-          ${xe(i.status)}
+          ${he(i.status)}
           <span class="grow"></span>
-          <span class="mono faint">${n(se(i.finished_at||i.started_at))}</span>
-          <span class="mono">${i.duration_ms?F(i.duration_ms):"\u2014"}</span>
+          <span class="mono faint">${n(ee(i.finished_at||i.started_at))}</span>
+          <span class="mono">${i.duration_ms?H(i.duration_ms):"\u2014"}</span>
         </div>
         ${i.message?`<div class="processing-run-message">${n(i.message)}</div>`:""}
       </div>`}).join("");return`<section class="report-card processing-card">
     <div class="report-head">${a}</div>
     <div class="report-section"><div class="processing-run-list">${r}</div></div>
-  </section>`}function gr(e){let t=Array.isArray(e.notices)?e.notices:[];return t.length?`<div class="processing-notices">${t.map(s=>K({tone:s.tone||"info",title:s.title,text:n(s.message||"")})).join("")}</div>`:""}function fr(e){return`${gr(e)}
-    ${lr(e)}
+  </section>`}function $r(e){let t=Array.isArray(e.notices)?e.notices:[];return t.length?`<div class="processing-notices">${t.map(s=>Y({tone:s.tone||"info",title:s.title,text:n(s.message||"")})).join("")}</div>`:""}function na(e){return`${$r(e)}
+    ${pr(e)}
     <section class="processing-flow-section">
       <div class="processing-section-head">
         <div>
@@ -1611,21 +1611,84 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           <p class="processing-section-sub">\u5224\u6C7A\u3001\u6CD5\u898F\u3001\u547D\u4EE4\u4E09\u689D\u6D41\u7A0B\u5373\u6642\u53CD\u6620\u76EE\u524D\u57F7\u884C\u968E\u6BB5\uFF1B\u66F2\u7DDA\u7531\u4F86\u6E90\u7BC0\u9EDE\u9023\u5230\u5404\u968E\u6BB5\uFF0C\u767C\u5149\u7BC0\u9EDE\u8207\u6D41\u52D5\u66F2\u7DDA\u8868\u793A\u76EE\u524D\u57F7\u884C\u4F4D\u7F6E\u3002</p>
         </div>
       </div>
-      ${or(e)}
+      ${ur(e)}
     </section>
-    ${pr(e)}
-    ${mr(e)}
-    ${vr(e)}`}function hr(e,t){return`<div class="report-card processing-card">
+    ${fr(e)}
+    ${hr(e)}
+    ${br(e)}`}function yr(e,t){return`<div class="report-card processing-card">
     <div class="report-section">
-      ${K({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u8CC7\u6599\u8655\u7406\u72C0\u614B",text:n(e||"\u672A\u77E5\u932F\u8AA4")})}
-      ${t?`<p class="processing-section-sub">\u4E0A\u6B21\u6210\u529F\u66F4\u65B0\uFF1A${n(se(t.generated_at))}\u3002\u756B\u9762\u4E0A\u6C92\u6709\u986F\u793A\u66FF\u4EE3\u6216\u63A8\u6E2C\u7684\u9032\u5EA6\u3002</p>`:""}
+      ${Y({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u8CC7\u6599\u8655\u7406\u72C0\u614B",text:n(e||"\u672A\u77E5\u932F\u8AA4")})}
+      ${t?`<p class="processing-section-sub">\u4E0A\u6B21\u6210\u529F\u66F4\u65B0\uFF1A${n(ee(t.generated_at))}\u3002\u756B\u9762\u4E0A\u6C92\u6709\u986F\u793A\u66FF\u4EE3\u6216\u63A8\u6E2C\u7684\u9032\u5EA6\u3002</p>`:""}
       <div class="processing-error-actions">
         <button class="btn btn-secondary btn-sm" type="button" data-processing-action="refresh">
           ${$("refresh",14)}<span>\u91CD\u65B0\u6574\u7406</span>
         </button>
       </div>
     </div>
-  </div>`}async function br(e){e.innerHTML=`<section class="page processing-page">
+  </div>`}var da={overview:"activity",full_update:"download",law_download:"layers",order_download:"file",judgment_import:"database",judgment_parquet:"cube",index_versions:"brain",normalize_courts:"filter",backfill_law_articles:"history"};function wr(e){let t=Array.isArray(e.workflows)?e.workflows:[];return[{id:"overview",label:"\u8655\u7406\u7E3D\u89BD",description:"\u76EE\u524D\u6D41\u7A0B\u3001\u58D3\u7E2E\u6A94\u8207\u6700\u8FD1\u57F7\u884C\u7D00\u9304",status:e.status||"idle",activeRun:null,lastRun:null},...t.map(s=>{let a=s.active_run||null,r=a||s.last_run||null;return{...s,activeRun:a,lastRun:r,status:r?.status||"idle"}})]}function ra(e,t){return`<div class="status-sidebar-head">
+      <div class="eyebrow">DATA WORKFLOWS</div>
+      <div class="status-sidebar-title">\u8CC7\u6599\u6D41\u7A0B</div>
+    </div>
+    <nav class="status-tab-list" aria-label="\u8CC7\u6599\u8655\u7406\u5DE5\u4F5C\u6D41\u7A0B">
+      ${wr(e).map(a=>{let r=a.id===t,i=da[a.id]||"terminal";return`<button class="status-tab${r?" is-active":""}" type="button"
+            data-processing-workflow="${n(a.id)}"
+            ${r?'aria-current="page"':""}>
+            <span class="status-tab-icon">${$(i,15)}</span>
+            <span class="status-tab-copy">
+              <strong>${n(a.label)}</strong>
+              <small>${n(a.description||"")}</small>
+            </span>
+            ${he(a.status)}
+          </button>`}).join("")}
+    </nav>
+    <div class="status-sidebar-foot">
+      <span>\u57F7\u884C\u6A21\u5F0F</span>
+      <span class="mono">${n(e.mode==="running"?"\u57F7\u884C\u4E2D":"\u5F85\u547D")}</span>
+    </div>`}function _r(e){if(!e)return'<div class="processing-workflow-empty">\u5C1A\u672A\u57F7\u884C\u3002\u6309\u4E0B\u53F3\u5074\u6309\u9215\u958B\u59CB\u3002</div>';let t=e.meta||{};return`<div class="processing-workflow-run">
+    <div class="processing-workflow-run-head">
+      ${he(e.status)}
+      <span class="mono">${n(e.id||"\u2014")}</span>
+    </div>
+    <div class="processing-workflow-run-grid">
+      <span>\u958B\u59CB</span><strong>${n(ee(e.started_at))}</strong>
+      <span>\u8017\u6642</span><strong>${H(e.duration_ms)}</strong>
+      <span>\u8A0A\u606F</span><strong>${n(e.message||"\u2014")}</strong>
+      ${t.log_path?`<span>\u65E5\u8A8C</span><strong class="mono">${n(t.log_path)}</strong>`:""}
+    </div>
+  </div>`}function kr(e){let t=e.active_run||null,s=t||e.last_run||null,a=!!t,r=!!e.can_run&&!a,i=e.id==="full_update",o=Array.isArray(e.command)?e.command.join(" "):"";return`<div class="processing-workflow-panel">
+    ${Y({tone:"info",title:e.label,text:e.description||""})}
+    <section class="report-card processing-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${$(da[e.id]||"terminal",14)}\u57F7\u884C\u8CC7\u8A0A</span>
+        <span class="badge badge-neutral badge-mono">${n(e.branch||"")}</span>
+      </div>
+      <div class="processing-workflow-command-grid">
+        <span>\u7A0B\u5F0F</span><code>${n(e.program||"\u2014")}</code>
+        <span>Shell\uFF0F\u5165\u53E3</span><code>${n(e.script||"\u2014")}</code>
+        <span>\u5BE6\u969B\u547D\u4EE4</span><code class="processing-workflow-command">${n(o||"\u2014")}</code>
+      </div>
+      <div class="processing-workflow-actions">
+        <button class="btn btn-primary btn-sm" type="button"
+          data-processing-action="run-workflow"
+          data-workflow-id="${n(e.id)}"
+          ${r?"":"disabled"}>
+          ${$("play",14)}<span>${a?"\u57F7\u884C\u4E2D":i?"\u57F7\u884C\u8CC7\u6599\u66F4\u65B0":"\u57F7\u884C\u6B64\u6D41\u7A0B"}</span>
+        </button>
+        ${t?`<button class="btn btn-secondary btn-sm processing-stop" type="button"
+                data-processing-action="stop">${$("x",14)}<span>\u505C\u6B62</span></button>`:""}
+      </div>
+      <div class="side-card-foot">
+        ${i?"\u6703\u4F9D\u5E8F\u57F7\u884C\u6CD5\u898F\uFF0F\u547D\u4EE4\u4E0B\u8F09\u3001\u5224\u6C7A\u532F\u5165\u8207\u53EF\u9078\u7684 Qdrant \u7D22\u5F15\u3002":"\u57F7\u884C\u7D50\u679C\u6703\u5BEB\u5165\u5171\u7528\u8655\u7406\u72C0\u614B\u6A94\uFF0C\u53EF\u5F9E\u8655\u7406\u7E3D\u89BD\u67E5\u770B\u3002"}
+      </div>
+    </section>
+    <section class="report-card processing-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${$("history",14)}\u6700\u8FD1\u57F7\u884C</span>
+        ${he(s?.status||"idle")}
+      </div>
+      ${_r(s)}
+    </section>
+  </div>`}function ia(e,t){if(t==="overview")return na(e);let a=(Array.isArray(e.workflows)?e.workflows:[]).find(r=>r.id===t);return a?kr(a):na(e)}async function xr(e){e.innerHTML=`<section class="page processing-page">
     <div class="page-header">
       <div>
         <div class="page-kicker">DATA PIPELINE</div>
@@ -1648,16 +1711,27 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         </button>
       </div>
     </div>
-    <div id="processing-root">
-      <div class="processing-loading" role="status">
-        <span class="spinner" aria-hidden="true"></span>
-        <span>\u6B63\u5728\u8B80\u53D6\u8655\u7406\u72C0\u614B\u2026</span>
-      </div>
+    <div class="status-layout processing-layout">
+      <aside class="status-sidebar processing-sidebar" aria-label="\u8CC7\u6599\u8655\u7406\u5DE5\u4F5C\u6D41\u7A0B">
+        <div id="processing-workflows">
+          <div class="status-sidebar-head">
+            <div class="eyebrow">DATA WORKFLOWS</div>
+            <div class="skeleton skeleton-line" style="width:90px;height:18px"></div>
+          </div>
+          ${Array.from({length:7}).map(()=>'<div class="skeleton skeleton-line" style="width:100%;height:48px;margin-top:8px"></div>').join("")}
+        </div>
+      </aside>
+      <section class="status-panel" id="processing-root">
+        <div class="processing-loading" role="status">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>\u6B63\u5728\u8B80\u53D6\u8655\u7406\u72C0\u614B\u2026</span>
+        </div>
+      </section>
     </div>
-  </section>`;let t=e.querySelector(".processing-page"),s=e.querySelector("#processing-root"),a=e.querySelector("#processing-update"),r=e.querySelector("#processing-stop"),i=e.querySelector("#processing-refresh"),o=e.querySelector("#processing-index-toggle"),l=!1,m=!1,f=!1,_=null,b="",g=null,k=A=>{let j=A.capabilities||{},R=!!(o&&o.checked),G=R?j.can_start_update_with_index!==!1:j.can_start_update!==!1,ee=R&&j.index_blocked_reason||j.start_blocked_reason;if(!f){a.disabled=!G,a.title=ee||"\u6AA2\u67E5\u7DDA\u4E0A\u6CD5\u898F\uFF0F\u547D\u4EE4\uFF0C\u4E26\u8655\u7406\u672A\u532F\u5165\u7684\u5224\u6C7A\u58D3\u7E2E\u6A94\u3002";let z=a.querySelector("[data-update-label]");z&&(z.textContent=G?"\u8CC7\u6599\u66F4\u65B0":j.active_update_id?"\u66F4\u65B0\u57F7\u884C\u4E2D":"\u8655\u7406\u7A0B\u5E8F\u57F7\u884C\u4E2D"),r.hidden=!j.can_stop_update,o&&(o.disabled=j.can_start_update===!1)}},h=async({silent:A=!1}={})=>{if(!(l||m)){m=!0,A||W(i,!0,"\u66F4\u65B0\u4E2D\u2026");try{let j=await U.processing();if(l)return;_=j;let R=fr(j);R!==b&&(s.innerHTML=R,b=R);let G=s.querySelector("[data-processing-updated-at]");if(G){let ee=se(j.generated_at);G.textContent!==ee&&(G.textContent=ee)}k(j)}catch(j){if(l)return;let R=hr(j.message,_);R!==b&&(s.innerHTML=R,b=R),A||O(j.message||"\u7121\u6CD5\u53D6\u5F97\u8CC7\u6599\u8655\u7406\u72C0\u614B\u3002","danger",6e3)}finally{m=!1,A||W(i,!1)}}},y=async A=>{if(!f){f=!0,W(A,!0,"\u555F\u52D5\u4E2D\u2026");try{let j=!!(o&&o.checked),R=await U.startProcessingUpdate(j);O(`\u5DF2\u555F\u52D5\u8CC7\u6599\u66F4\u65B0${j?"\uFF0C\u5B8C\u6210\u5F8C\u63A5\u7E8C Qdrant \u7D22\u5F15":""}\u3002`,"ok",6e3),R&&R.run_id&&console.info("processing update started",R),await h({silent:!0})}catch(j){O(j.message||"\u7121\u6CD5\u555F\u52D5\u8CC7\u6599\u66F4\u65B0\u3002","danger",7e3)}finally{f=!1,W(A,!1),_&&k(_)}}},C=async A=>{if(!f){f=!0,W(A,!0,"\u505C\u6B62\u4E2D\u2026");try{let j=await U.stopProcessingUpdate();O(j.message||"\u5DF2\u9001\u51FA\u505C\u6B62\u8A0A\u865F\u3002","info",6e3),await h({silent:!0})}catch(j){O(j.message||"\u7121\u6CD5\u505C\u6B62\u8CC7\u6599\u66F4\u65B0\u3002","danger",7e3)}finally{f=!1,W(A,!1),_&&k(_)}}},T=A=>{let j=A.target.closest("[data-processing-action]");if(!j||j.disabled)return;let R=j.dataset.processingAction;R==="refresh"?h({silent:!1}):R==="update"?y(j):R==="stop"&&C(j)},w=A=>{A.target===o&&_&&k(_)};return t.addEventListener("click",T),o&&o.addEventListener("change",w),await h({silent:!1}),g=window.setInterval(()=>{document.hidden||h({silent:!0})},Vn),()=>{l=!0,g!==null&&window.clearInterval(g),t.removeEventListener("click",T),o&&o.removeEventListener("change",w)}}var ds={};Qe(ds,{render:()=>Sr});function Pt(e){if(e==null||e==="")return"\u2014";let t=Number(e);return Number.isFinite(t)?`${t.toFixed(t>=10?1:2)}%`:"\u2014"}function oa(e){return e==null?"\u2014":c(e)}function $r(e){return e.count?e.severity==="danger"?V("failed","\u9700\u8655\u7406"):e.severity==="warn"?V("warning","\u6CE8\u610F"):V("preview","\u63D0\u793A"):V("success","\u901A\u904E")}function yr(e){return e.count?e.severity==="danger"?"is-danger":e.severity==="warn"?"is-warn":"is-info":"is-ok"}function wr(e){let t=Number(e.count)||0,s=Math.max(0,Math.min(100,Number(e.percent)||0));return`<div class="quality-check ${yr(e)}">
+  </section>`;let t=e.querySelector(".processing-page"),s=e.querySelector("#processing-root"),a=e.querySelector("#processing-workflows"),r=e.querySelector("#processing-update"),i=e.querySelector("#processing-stop"),o=e.querySelector("#processing-refresh"),l=e.querySelector("#processing-index-toggle"),m=!1,b=!1,w=!1,f=null,g="",S="",h="overview",y=null,C=R=>{let P=R.capabilities||{},k=!!(l&&l.checked),q=k?P.can_start_update_with_index!==!1:P.can_start_update!==!1,B=k&&P.index_blocked_reason||P.start_blocked_reason;if(!w){r.disabled=!q,r.title=B||"\u6AA2\u67E5\u7DDA\u4E0A\u6CD5\u898F\uFF0F\u547D\u4EE4\uFF0C\u4E26\u8655\u7406\u672A\u532F\u5165\u7684\u5224\u6C7A\u58D3\u7E2E\u6A94\u3002";let Q=r.querySelector("[data-update-label]");Q&&(Q.textContent=q?"\u8CC7\u6599\u66F4\u65B0":P.active_update_id?"\u66F4\u65B0\u57F7\u884C\u4E2D":"\u8655\u7406\u7A0B\u5E8F\u57F7\u884C\u4E2D"),i.hidden=!P.can_stop_update,l&&(l.disabled=P.can_start_update===!1)}},M=async({silent:R=!1}={})=>{if(!(m||b)){b=!0,R||V(o,!0,"\u66F4\u65B0\u4E2D\u2026");try{let P=await U.processing();if(m)return;f=P;let k=ra(P,h);k!==S&&(a.innerHTML=k,S=k);let q=ia(P,h);q!==g&&(s.innerHTML=q,g=q);let B=s.querySelector("[data-processing-updated-at]");if(B){let Q=ee(P.generated_at);B.textContent!==Q&&(B.textContent=Q)}C(P)}catch(P){if(m)return;let k=yr(P.message,f);k!==g&&(s.innerHTML=k,g=k),R||D(P.message||"\u7121\u6CD5\u53D6\u5F97\u8CC7\u6599\u8655\u7406\u72C0\u614B\u3002","danger",6e3)}finally{b=!1,R||V(o,!1)}}},_=async R=>{if(!w){w=!0,V(R,!0,"\u555F\u52D5\u4E2D\u2026");try{let P=!!(l&&l.checked),k=await U.startProcessingUpdate(P);D(`\u5DF2\u555F\u52D5\u8CC7\u6599\u66F4\u65B0${P?"\uFF0C\u5B8C\u6210\u5F8C\u63A5\u7E8C Qdrant \u7D22\u5F15":""}\u3002`,"ok",6e3),k&&k.run_id&&console.info("processing update started",k),await M({silent:!0})}catch(P){D(P.message||"\u7121\u6CD5\u555F\u52D5\u8CC7\u6599\u66F4\u65B0\u3002","danger",7e3)}finally{w=!1,V(R,!1),f&&C(f)}}},E=async(R,P)=>{if(!w){w=!0,V(R,!0,"\u555F\u52D5\u4E2D\u2026");try{let k=await U.startProcessingWorkflow(P);D("\u5DF2\u555F\u52D5\u5DE5\u4F5C\u6D41\u7A0B\u3002","ok",6e3),k&&k.run_id&&console.info("processing workflow started",k),await M({silent:!0})}catch(k){D(k.message||"\u7121\u6CD5\u555F\u52D5\u5DE5\u4F5C\u6D41\u7A0B\u3002","danger",7e3)}finally{w=!1,V(R,!1),f&&C(f)}}},z=async R=>{if(!w){w=!0,V(R,!0,"\u505C\u6B62\u4E2D\u2026");try{let P=await U.stopProcessingUpdate();D(P.message||"\u5DF2\u9001\u51FA\u505C\u6B62\u8A0A\u865F\u3002","info",6e3),await M({silent:!0})}catch(P){D(P.message||"\u7121\u6CD5\u505C\u6B62\u8CC7\u6599\u66F4\u65B0\u3002","danger",7e3)}finally{w=!1,V(R,!1),f&&C(f)}}},G=R=>{let P=R.target.closest("[data-processing-action]");if(!P||P.disabled)return;let k=P.dataset.processingAction;if(k==="refresh")M({silent:!1});else if(k==="update")_(P);else if(k==="run-workflow"){let q=P.dataset.workflowId||"";q==="full_update"?_(P):E(P,q)}else k==="stop"&&z(P)},X=R=>{R.target===l&&f&&C(f)},se=R=>{let P=R.target.closest("[data-processing-workflow]");if(P&&(h=P.dataset.processingWorkflow||"overview",f)){let k=ra(f,h);a.innerHTML=k,S=k;let q=ia(f,h);s.innerHTML=q,g=q}};return t.addEventListener("click",G),a.addEventListener("click",se),l&&l.addEventListener("change",X),await M({silent:!1}),y=window.setInterval(()=>{document.hidden||M({silent:!0})},Xn),()=>{m=!0,y!==null&&window.clearInterval(y),t.removeEventListener("click",G),a.removeEventListener("click",se),l&&l.removeEventListener("change",X)}}var ds={};Qe(ds,{render:()=>jr});function Pt(e){if(e==null||e==="")return"\u2014";let t=Number(e);return Number.isFinite(t)?`${t.toFixed(t>=10?1:2)}%`:"\u2014"}function ua(e){return e==null?"\u2014":c(e)}function Sr(e){return e.count?e.severity==="danger"?K("failed","\u9700\u8655\u7406"):e.severity==="warn"?K("warning","\u6CE8\u610F"):K("preview","\u63D0\u793A"):K("success","\u901A\u904E")}function Ar(e){return e.count?e.severity==="danger"?"is-danger":e.severity==="warn"?"is-warn":"is-info":"is-ok"}function Lr(e){let t=Number(e.count)||0,s=Math.max(0,Math.min(100,Number(e.percent)||0));return`<div class="quality-check ${Ar(e)}">
     <div class="quality-check-head">
       <span class="quality-check-label">${n(e.label)}</span>
-      ${$r(e)}
+      ${Sr(e)}
     </div>
     <div class="quality-check-value">
       <strong>${c(t)}</strong>
@@ -1668,7 +1742,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     <div class="quality-check-track" aria-hidden="true">
       <span style="width:${s}%"></span>
     </div>
-  </div>`}function jt(e,t,s){let a=Array.isArray(s)?s:[];if(!a.length)return`<div class="index-chart-card">
+  </div>`}function Et(e,t,s){let a=Array.isArray(s)?s:[];if(!a.length)return`<div class="index-chart-card">
       <div class="index-chart-head"><span>${n(e)}</span><span>${n(t)}</span></div>
       <div class="index-chart-empty">DuckDB \u6383\u63CF\u5F8C\u6C92\u6709\u53EF\u5448\u73FE\u7684\u8CC7\u6599\u3002</div>
     </div>`;let r=Math.max(...a.map(i=>Number(i.value)||0),1);return`<div class="index-chart-card">
@@ -1680,7 +1754,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
             <span class="dist-value">${c(o)}</span>
           </div>`}).join("")}
     </div>
-  </div>`}function _r(e){let t=e.coverage||{},s=e.totals||{},a=e.source||{},r=t.postgres_diff,i=r==null?"\u2014":r===0?"\u8207\u539F\u59CB\u7CBE\u78BA\u547D\u4E2D\u4E00\u81F4":`\u8207\u539F\u59CB\u7CBE\u78BA\u547D\u4E2D\u76F8\u5DEE ${c(Math.abs(r))} \u7B46`,o=t.vector_indexed===null||t.vector_indexed===void 0?t.detail||"\u7121\u6CD5\u53D6\u5F97\u7D22\u5F15\u7D71\u8A08":`${c(t.vector_indexed)} / ${c(t.vector_total)} \xB7 ${t.model||"\u2014"}`;return`<div class="metric-grid quality-coverage-grid">
+  </div>`}function Mr(e){let t=e.coverage||{},s=e.totals||{},a=e.source||{},r=t.postgres_diff,i=r==null?"\u2014":r===0?"\u8207\u539F\u59CB\u7CBE\u78BA\u547D\u4E2D\u4E00\u81F4":`\u8207\u539F\u59CB\u7CBE\u78BA\u547D\u4E2D\u76F8\u5DEE ${c(Math.abs(r))} \u7B46`,o=t.vector_indexed===null||t.vector_indexed===void 0?t.detail||"\u7121\u6CD5\u53D6\u5F97\u7D22\u5F15\u7D71\u8A08":`${c(t.vector_indexed)} / ${c(t.vector_total)} \xB7 ${t.model||"\u2014"}`;return`<div class="metric-grid quality-coverage-grid">
     <div class="metric-card">
       <div class="metric-label">${$("filter",13)}<span>\u539F\u59CB\u7CBE\u78BA\u547D\u4E2D</span></div>
       <div class="metric-value">${c(s.matched_rows)}</div>
@@ -1688,7 +1762,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </div>
     <div class="metric-card">
       <div class="metric-label">${$("database",13)}<span>PostgreSQL \u6536\u9304</span></div>
-      <div class="metric-value">${oa(t.postgres_judgments)}</div>
+      <div class="metric-value">${ua(t.postgres_judgments)}</div>
       <div class="metric-foot">${n(i)}</div>
     </div>
     <div class="metric-card">
@@ -1698,10 +1772,10 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </div>
     <div class="metric-card">
       <div class="metric-label">${$("layers",13)}<span>DuckDB \u5019\u9078</span></div>
-      <div class="metric-value">${oa(a.candidate_total)}</div>
+      <div class="metric-value">${ua(a.candidate_total)}</div>
       <div class="metric-foot">${c(a.candidate_archive_count)} / ${c(a.archive_count)} \u500B manifest \u6709 candidate_count</div>
     </div>
-  </div>`}function kr(e){return e.length?`<div class="table-wrap">
+  </div>`}function Tr(e){return e.length?`<div class="table-wrap">
     <table class="data-table is-compact quality-archive-table">
       <thead>
         <tr>
@@ -1733,18 +1807,18 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
             </tr>`}).join("")}
       </tbody>
     </table>
-  </div>`:$e({iconName:"table",title:"\u6C92\u6709\u539F\u59CB Parquet \u6A94\u6848",text:"\u5B8C\u6210\u5224\u6C7A RAR \u532F\u5165\u5F8C\uFF0C\u9019\u88E1\u6703\u986F\u793A\u6BCF\u500B\u58D3\u7E2E\u6A94\u7684 DuckDB \u7D71\u8A08\u3002"})}function xr(e){let t=e.totals||{},s=e.source||{},a=Array.isArray(e.checks)?e.checks:[],r=e.summary||{},i=e.distributions||{},o=Array.isArray(e.warnings)?e.warnings:[],l=B(s.compressed_bytes||0);return`<div class="report-card quality-report" data-database="quality">
+  </div>`:ye({iconName:"table",title:"\u6C92\u6709\u539F\u59CB Parquet \u6A94\u6848",text:"\u5B8C\u6210\u5224\u6C7A RAR \u532F\u5165\u5F8C\uFF0C\u9019\u88E1\u6703\u986F\u793A\u6BCF\u500B\u58D3\u7E2E\u6A94\u7684 DuckDB \u7D71\u8A08\u3002"})}function qr(e){let t=e.totals||{},s=e.source||{},a=Array.isArray(e.checks)?e.checks:[],r=e.summary||{},i=e.distributions||{},o=Array.isArray(e.warnings)?e.warnings:[],l=F(s.compressed_bytes||0);return`<div class="report-card quality-report" data-database="quality">
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">DUCKDB DATA QUALITY</div>
         <div class="report-title">
-          \u539F\u59CB Parquet \u8CC7\u6599\u54C1\u8CEA ${V(e.status||"operational")}
+          \u539F\u59CB Parquet \u8CC7\u6599\u54C1\u8CEA ${K(e.status||"operational")}
           <span class="chip">raw.parquet</span>
         </div>
         <div class="report-sub">
           ${c(t.rows)} \u7B46 \xB7 ${c(s.raw_files)} \u500B\u6A94\u6848 \xB7
-          ${l} \xB7 \u6383\u63CF ${F(e.scan_ms||0)} \xB7
-          ${n(se(e.generated_at))}
+          ${l} \xB7 \u6383\u63CF ${H(e.scan_ms||0)} \xB7
+          ${n(ee(e.generated_at))}
         </div>
       </div>
       <div class="report-actions">
@@ -1753,7 +1827,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         </button>
       </div>
     </div>
-    ${o.length?`<div class="report-alert">${K({tone:"warn",title:"\u76EE\u524D\u9650\u5236\u8207\u5DEE\u7570",text:o.map(m=>n(m)).join("<br>")})}</div>`:""}
+    ${o.length?`<div class="report-alert">${Y({tone:"warn",title:"\u76EE\u524D\u9650\u5236\u8207\u5DEE\u7570",text:o.map(m=>n(m)).join("<br>")})}</div>`:""}
     <div class="summary-strip quality-summary-strip">
       <div class="summary-item">
         <div class="summary-label">\u539F\u59CB\u7B46\u6578</div>
@@ -1782,21 +1856,21 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           ${c(r.info_count)} \u9805\u63D0\u793A
         </span>
       </div>
-      <div class="quality-checks">${a.map(wr).join("")}</div>
+      <div class="quality-checks">${a.map(Lr).join("")}</div>
     </div>
     <div class="report-section quality-section">
       <div class="report-section-head">
         <span class="report-section-title">\u6536\u9304\u8986\u84CB</span>
         <span class="muted" style="font-size:9.5px">PostgreSQL \u8207\u5411\u91CF\u7D22\u5F15\u70BA\u5373\u6642\u67E5\u8A62\uFF0C\u4E0D\u662F\u5F9E Parquet \u63A8\u4F30</span>
       </div>
-      ${_r(e)}
+      ${Mr(e)}
     </div>
     <div class="report-section quality-section">
       <div class="report-section-head">
         <span class="report-section-title">\u6A94\u6848\u660E\u7D30</span>
         <span class="muted" style="font-size:9.5px">${c(s.archive_count)} \u500B\u539F\u59CB Parquet</span>
       </div>
-      ${kr(Array.isArray(e.archives)?e.archives:[])}
+      ${Tr(Array.isArray(e.archives)?e.archives:[])}
     </div>
     <div class="report-section quality-section">
       <div class="report-section-head">
@@ -1804,13 +1878,13 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <span class="muted" style="font-size:9.5px">DuckDB group by / unnest</span>
       </div>
       <div class="quality-dist-grid">
-        ${jt("\u6CD5\u9662","\u5224\u6C7A\u7B46\u6578",i.courts)}
-        ${jt("\u88C1\u5224\u5E74\u4EFD","\u5224\u6C7A\u7B46\u6578",i.years)}
-        ${jt("\u71B1\u9580\u6CD5\u898F","\u63D0\u53CA\u5224\u6C7A\u6578",i.laws)}
-        ${jt("\u71B1\u9580\u6848\u7531","\u5224\u6C7A\u7B46\u6578",i.titles)}
+        ${Et("\u6CD5\u9662","\u5224\u6C7A\u7B46\u6578",i.courts)}
+        ${Et("\u88C1\u5224\u5E74\u4EFD","\u5224\u6C7A\u7B46\u6578",i.years)}
+        ${Et("\u71B1\u9580\u6CD5\u898F","\u63D0\u53CA\u5224\u6C7A\u6578",i.laws)}
+        ${Et("\u71B1\u9580\u6848\u7531","\u5224\u6C7A\u7B46\u6578",i.titles)}
       </div>
     </div>
-  </div>`}async function Sr(e){e.innerHTML=`<section class="page data-page quality-page">
+  </div>`}async function jr(e){e.innerHTML=`<section class="page data-page quality-page">
     <div class="page-header">
       <div class="data-page-heading">
         <div class="eyebrow">DATA QUALITY</div>
@@ -1843,7 +1917,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <div class="skeleton skeleton-line" style="width:68%;margin-bottom:0"></div>
       </div>
     </div></div>
-  </section>`;let t=e.querySelector("#quality-content"),s=e.querySelector("#quality-refresh"),a=e.querySelector("#quality-meta"),r=null,i=()=>{r&&(t.innerHTML=xr(r),a.textContent=`DUCKDB \xB7 ${c(r.totals?.rows)} \u7B46 \xB7 ${F(r.scan_ms||0)}`)},o=async()=>{W(s,!0,"\u6383\u63CF\u4E2D\u2026");try{r=await U.quality(),i()}catch(l){t.innerHTML=`<div class="report-card">
+  </section>`;let t=e.querySelector("#quality-content"),s=e.querySelector("#quality-refresh"),a=e.querySelector("#quality-meta"),r=null,i=()=>{r&&(t.innerHTML=qr(r),a.textContent=`DUCKDB \xB7 ${c(r.totals?.rows)} \u7B46 \xB7 ${H(r.scan_ms||0)}`)},o=async()=>{V(s,!0,"\u6383\u63CF\u4E2D\u2026");try{r=await U.quality(),i()}catch(l){t.innerHTML=`<div class="report-card">
         <div class="report-head">
           <div class="report-title-group">
             <div class="report-kicker">DUCKDB DATA QUALITY</div>
@@ -1852,9 +1926,9 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           </div>
         </div>
         <div class="report-section">
-          ${K({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u8CC7\u6599\u54C1\u8CEA\u7D71\u8A08",text:n(l.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
+          ${Y({tone:"danger",title:"\u7121\u6CD5\u53D6\u5F97\u8CC7\u6599\u54C1\u8CEA\u7D71\u8A08",text:n(l.message||"\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002")})}
         </div>
-      </div>`,a.textContent="DUCKDB \xB7 \u8B80\u53D6\u5931\u6557",O("\u8CC7\u6599\u54C1\u8CEA\u6383\u63CF\u5931\u6557\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002","danger")}finally{W(s,!1)}};s.addEventListener("click",o),t.addEventListener("click",l=>{!l.target.closest("[data-action='export-quality']")||!r||Ue(`judgment-quality-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(r,null,2),"application/json;charset=utf-8")}),await o()}var us={};Qe(us,{render:()=>Wr});var la={frontend:"browser",backend:"server",database:"database",storage:"layers",vector:"cube",ai:"brain",default:"cpu"};var da={query:"\u7DB2\u5740 ?api= \u53C3\u6578",storage:"\u700F\u89BD\u5668\u5132\u5B58\u503C",config:"config.js \u9810\u8A2D\u503C","file-default":"file:// \u9810\u8A2D\u503C","same-origin":"\u540C\u6E90"},ua=[{id:"overview",label:"\u670D\u52D9\u7E3D\u89BD",hint:"\u5065\u5EB7\u72C0\u614B\u8207\u8CC7\u6599\u91CF",icon:"activity"},{id:"resources",label:"\u7CFB\u7D71\u8CC7\u6599\u4F7F\u7528",hint:"CPU\u3001RAM\u3001Docker\u3001\u786C\u789F",icon:"cpu"},{id:"architecture",label:"\u524D\u5F8C\u7AEF\u67B6\u69CB",hint:"Client \u2192 Data \u2192 AI",icon:"layers"},{id:"data",label:"\u8CC7\u6599\u7248\u672C",hint:"Parquet \u8207 PostgreSQL",icon:"database"},{id:"api",label:"API \u7AEF\u9EDE",hint:"REST \u8207 OpenAPI",icon:"terminal"},{id:"runs",label:"\u6700\u8FD1\u4E0B\u8F09",hint:"\u6CD5\u898F\uFF0F\u547D\u4EE4\u57F7\u884C\u7D00\u9304",icon:"history"}];function Ar(e){return e==="operational"?{label:"\u6838\u5FC3\u670D\u52D9\u6B63\u5E38",tone:"ok",headline:"\u6838\u5FC3\u8CC7\u6599\u7BA1\u7DDA\u904B\u4F5C\u4E2D",copy:"FastAPI\u3001PostgreSQL \u8207 Parquet \u5747\u53EF\u5B58\u53D6\u3002Qdrant\u3001Embedding \u8207 LLM \u6703\u5373\u6642\u6AA2\u67E5\uFF1B\u672A\u8A2D\u5B9A\u6216\u964D\u7D1A\u6642\u4E0D\u5F71\u97FF\u8CC7\u6599\u700F\u89BD\u8207\u67E5\u8A62\u5831\u8868\u3002"}:e==="degraded"?{label:"\u90E8\u5206\u670D\u52D9\u964D\u7D1A",tone:"warn",headline:"\u90E8\u5206\u670D\u52D9\u9700\u8981\u8A2D\u5B9A\u6216\u4FEE\u5FA9",copy:"\u6838\u5FC3\u8CC7\u6599\u670D\u52D9\u76EE\u524D\u672A\u5B8C\u5168\u53EF\u7528\u3002\u8ACB\u67E5\u770B\u4E0B\u65B9\u670D\u52D9\u5361\u7247\u3001\u8CC7\u6599\u7248\u672C\u8207\u6700\u8FD1\u7684\u57F7\u884C\u7D00\u9304\uFF0C\u78BA\u8A8D PostgreSQL\u3001Parquet \u6216\u5916\u90E8\u670D\u52D9\u72C0\u614B\u3002"}:{label:Ce(e).label,tone:Ce(e).tone,headline:"\u76EE\u524D\u7121\u6CD5\u78BA\u8A8D\u7CFB\u7D71\u72C0\u614B",copy:"\u72C0\u614B API \u56DE\u50B3\u4E86\u975E\u9810\u671F\u7D50\u679C\u3002\u8ACB\u91CD\u65B0\u6574\u7406\uFF0C\u6216\u76F4\u63A5\u6AA2\u67E5 FastAPI \u670D\u52D9\u65E5\u8A8C\u3002"}}function Lr(e){let t=Ce(e.status),s=la[e.kind]||la.default,a=e.latency_ms===null||e.latency_ms===void 0?"":`<span class="service-latency">${c(e.latency_ms)} ms</span>`;return`<article class="service-card">
+      </div>`,a.textContent="DUCKDB \xB7 \u8B80\u53D6\u5931\u6557",D("\u8CC7\u6599\u54C1\u8CEA\u6383\u63CF\u5931\u6557\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002","danger")}finally{V(s,!1)}};s.addEventListener("click",o),t.addEventListener("click",l=>{!l.target.closest("[data-action='export-quality']")||!r||Ue(`judgment-quality-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(r,null,2),"application/json;charset=utf-8")}),await o()}var us={};Qe(us,{render:()=>ti});var pa={frontend:"browser",backend:"server",database:"database",storage:"layers",vector:"cube",ai:"brain",default:"cpu"};var va={query:"\u7DB2\u5740 ?api= \u53C3\u6578",storage:"\u700F\u89BD\u5668\u5132\u5B58\u503C",config:"config.js \u9810\u8A2D\u503C","file-default":"file:// \u9810\u8A2D\u503C","same-origin":"\u540C\u6E90"},ga=[{id:"overview",label:"\u670D\u52D9\u7E3D\u89BD",hint:"\u5065\u5EB7\u72C0\u614B\u8207\u8CC7\u6599\u91CF",icon:"activity"},{id:"resources",label:"\u7CFB\u7D71\u8CC7\u6599\u4F7F\u7528",hint:"CPU\u3001RAM\u3001Docker\u3001\u786C\u789F",icon:"cpu"},{id:"architecture",label:"\u524D\u5F8C\u7AEF\u67B6\u69CB",hint:"Client \u2192 Data \u2192 AI",icon:"layers"},{id:"data",label:"\u8CC7\u6599\u7248\u672C",hint:"Parquet \u8207 PostgreSQL",icon:"database"},{id:"api",label:"API \u7AEF\u9EDE",hint:"REST \u8207 OpenAPI",icon:"terminal"},{id:"runs",label:"\u6700\u8FD1\u4E0B\u8F09",hint:"\u6CD5\u898F\uFF0F\u547D\u4EE4\u57F7\u884C\u7D00\u9304",icon:"history"}];function Er(e){return e==="operational"?{label:"\u6838\u5FC3\u670D\u52D9\u6B63\u5E38",tone:"ok",headline:"\u6838\u5FC3\u8CC7\u6599\u7BA1\u7DDA\u904B\u4F5C\u4E2D",copy:"FastAPI\u3001PostgreSQL \u8207 Parquet \u5747\u53EF\u5B58\u53D6\u3002Qdrant\u3001Embedding \u8207 LLM \u6703\u5373\u6642\u6AA2\u67E5\uFF1B\u672A\u8A2D\u5B9A\u6216\u964D\u7D1A\u6642\u4E0D\u5F71\u97FF\u8CC7\u6599\u700F\u89BD\u8207\u67E5\u8A62\u5831\u8868\u3002"}:e==="degraded"?{label:"\u90E8\u5206\u670D\u52D9\u964D\u7D1A",tone:"warn",headline:"\u90E8\u5206\u670D\u52D9\u9700\u8981\u8A2D\u5B9A\u6216\u4FEE\u5FA9",copy:"\u6838\u5FC3\u8CC7\u6599\u670D\u52D9\u76EE\u524D\u672A\u5B8C\u5168\u53EF\u7528\u3002\u8ACB\u67E5\u770B\u4E0B\u65B9\u670D\u52D9\u5361\u7247\u3001\u8CC7\u6599\u7248\u672C\u8207\u6700\u8FD1\u7684\u57F7\u884C\u7D00\u9304\uFF0C\u78BA\u8A8D PostgreSQL\u3001Parquet \u6216\u5916\u90E8\u670D\u52D9\u72C0\u614B\u3002"}:{label:Ce(e).label,tone:Ce(e).tone,headline:"\u76EE\u524D\u7121\u6CD5\u78BA\u8A8D\u7CFB\u7D71\u72C0\u614B",copy:"\u72C0\u614B API \u56DE\u50B3\u4E86\u975E\u9810\u671F\u7D50\u679C\u3002\u8ACB\u91CD\u65B0\u6574\u7406\uFF0C\u6216\u76F4\u63A5\u6AA2\u67E5 FastAPI \u670D\u52D9\u65E5\u8A8C\u3002"}}function Pr(e){let t=Ce(e.status),s=pa[e.kind]||pa.default,a=e.latency_ms===null||e.latency_ms===void 0?"":`<span class="service-latency">${c(e.latency_ms)} ms</span>`;return`<article class="service-card">
     <div class="service-top">
       <span class="service-icon">${$(s,14)}</span>
       <span class="service-name" title="${n(e.name)}">${n(e.name)}</span>
@@ -1866,7 +1940,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       ${a}
     </div>
     <p class="service-detail" title="${n(e.detail||"")}">${n(e.detail||"")}</p>
-  </article>`}function Mr(e,t){return`<div class="arch-node ${e?"":"is-muted"}" ${e?"":'title="\u5C1A\u672A\u8A2D\u5B9A\u6216\u5C1A\u672A\u63A5\u5165"'}>${n(t)}</div>`}function Tr(e,t){if(e==="IndexedDB")return Ss();let a={PostgreSQL:"postgres",Parquet:"parquet",Qdrant:"qdrant",Embedding:"embedding",Retriever:"rag","RAG Engine":"rag",LLM:"llm"}[e];return a?t.find(i=>i.id===a)?.status==="operational":!0}function qr(e,t){let s=e?.layers||[];if(!s.length)return'<div class="report-empty-inline">\u72C0\u614B API \u672A\u63D0\u4F9B\u67B6\u69CB\u8CC7\u6599\u3002</div>';let a=s.map(i=>{let o=(i.nodes||[]).map(l=>Mr(Tr(l,t),l)).join("");return`<div class="arch-layer">
+  </article>`}function Cr(e,t){return`<div class="arch-node ${e?"":"is-muted"}" ${e?"":'title="\u5C1A\u672A\u8A2D\u5B9A\u6216\u5C1A\u672A\u63A5\u5165"'}>${n(t)}</div>`}function Nr(e,t){if(e==="IndexedDB")return Ss();let a={PostgreSQL:"postgres",Parquet:"parquet",Qdrant:"qdrant",Embedding:"embedding",Retriever:"rag","RAG Engine":"rag",LLM:"llm"}[e];return a?t.find(i=>i.id===a)?.status==="operational":!0}function Rr(e,t){let s=e?.layers||[];if(!s.length)return'<div class="report-empty-inline">\u72C0\u614B API \u672A\u63D0\u4F9B\u67B6\u69CB\u8CC7\u6599\u3002</div>';let a=s.map(i=>{let o=(i.nodes||[]).map(l=>Cr(Nr(l,t),l)).join("");return`<div class="arch-layer">
       <div class="arch-layer-label">${n(i.label||i.id)}</div>
       <div class="arch-nodes">${o}</div>
     </div>`}),r=[];return a.forEach((i,o)=>{o&&r.push(`<div class="arch-arrow" aria-hidden="true">${$("arrowRight",15)}</div>`),r.push(i)}),`<div class="arch-flow">${r.join("")}</div>
@@ -1874,7 +1948,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       <span><i class="legend-key is-live"></i>\u5DF2\u63A5\u5165\u4E14\u72C0\u614B\u6B63\u5E38</span>
       <span><i class="legend-key is-off"></i>\u5C1A\u672A\u8A2D\u5B9A\u6216\u5C1A\u672A\u63A5\u5165</span>
       <span>${$("info",12)} \u7BC0\u9EDE\u72C0\u614B\u4F86\u81EA\u4E3B\u670D\u52D9\u5065\u5EB7\u6AA2\u67E5</span>
-    </div>`}function Er(e){return!Array.isArray(e)||!e.length?'<div class="report-empty-inline">\u6C92\u6709\u7AEF\u9EDE\u8CC7\u8A0A\u3002</div>':`<div class="endpoint-list">
+    </div>`}function Ir(e){return!Array.isArray(e)||!e.length?'<div class="report-empty-inline">\u6C92\u6709\u7AEF\u9EDE\u8CC7\u8A0A\u3002</div>':`<div class="endpoint-list">
     ${e.map(t=>`<div class="endpoint-row">
           <span class="endpoint-method">${n(t.method)}</span>
           <span class="endpoint-path" title="${n(t.path)}">${n(t.path)}</span>
@@ -1883,21 +1957,21 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
   </div>`}function te(e,t){return`<div class="detail-row">
     <span class="detail-label">${n(e)}</span>
     <span class="detail-value">${t}</span>
-  </div>`}function jr(e){return e?`<div class="detail-list">
+  </div>`}function Dr(e){return e?`<div class="detail-list">
     ${te("\u7248\u672C ID",`<strong>#${c(e.id)}</strong>`)}
-    ${te("\u8CC7\u6599\u985E\u578B",V("operational",e.source_type==="law"?"\u6CD5\u898F":"\u547D\u4EE4"))}
+    ${te("\u8CC7\u6599\u985E\u578B",K("operational",e.source_type==="law"?"\u6CD5\u898F":"\u547D\u4EE4"))}
     ${te("\u4F86\u6E90\u66F4\u65B0\u65E5",`<strong>${n(e.update_date||"\u2014")}</strong>`)}
     ${te("\u6CD5\u898F / \u689D\u6587",`<strong>${c(e.law_count)} / ${c(e.article_count)}</strong>`)}
-    ${te("\u4E0B\u8F09\u6642\u9593",`<span class="mono">${se(e.downloaded_at)}</span>`)}
+    ${te("\u4E0B\u8F09\u6642\u9593",`<span class="mono">${ee(e.downloaded_at)}</span>`)}
     ${te("Parquet",`<code title="${n(e.parquet_path||"")}">${n(e.parquet_path||"\u2014")}</code>`)}
-  </div>`:'<div class="report-empty-inline">\u5C1A\u672A\u532F\u5165\u4EFB\u4F55\u8CC7\u6599\u7248\u672C\u3002</div>'}function Pr(e){if(!Array.isArray(e)||!e.length)return $e({iconName:"history",title:"\u5C1A\u7121\u4E0B\u8F09\u57F7\u884C\u7D00\u9304",text:"\u57F7\u884C judgment-law-download \u5F8C\uFF0C\u6210\u529F\u3001\u7121\u8B8A\u66F4\u8207\u5931\u6557\u7684\u7D50\u679C\u6703\u51FA\u73FE\u5728\u9019\u88E1\u3002"});let t=[{key:"id",label:"Run",type:"number"},{key:"source_type",label:"\u985E\u578B",type:"source"},{key:"status",label:"\u72C0\u614B",type:"status"},{key:"started_at",label:"\u958B\u59CB\u6642\u9593",type:"datetime"},{key:"duration_ms",label:"\u8017\u6642",type:"duration"},{key:"law_count",label:"\u6CD5\u898F",type:"number"},{key:"article_count",label:"\u689D\u6587",type:"number"},{key:"error_message",label:"\u932F\u8AA4",type:"longtext"}];return`<div class="table-wrap" style="border-top:0;max-height:340px">
+  </div>`:'<div class="report-empty-inline">\u5C1A\u672A\u532F\u5165\u4EFB\u4F55\u8CC7\u6599\u7248\u672C\u3002</div>'}function Br(e){if(!Array.isArray(e)||!e.length)return ye({iconName:"history",title:"\u5C1A\u7121\u4E0B\u8F09\u57F7\u884C\u7D00\u9304",text:"\u57F7\u884C judgment-law-download \u5F8C\uFF0C\u6210\u529F\u3001\u7121\u8B8A\u66F4\u8207\u5931\u6557\u7684\u7D50\u679C\u6703\u51FA\u73FE\u5728\u9019\u88E1\u3002"});let t=[{key:"id",label:"Run",type:"number"},{key:"source_type",label:"\u985E\u578B",type:"source"},{key:"status",label:"\u72C0\u614B",type:"status"},{key:"started_at",label:"\u958B\u59CB\u6642\u9593",type:"datetime"},{key:"duration_ms",label:"\u8017\u6642",type:"duration"},{key:"law_count",label:"\u6CD5\u898F",type:"number"},{key:"article_count",label:"\u689D\u6587",type:"number"},{key:"error_message",label:"\u932F\u8AA4",type:"longtext"}];return`<div class="table-wrap" style="border-top:0;max-height:340px">
     <table class="data-table runs-table">
       <thead><tr>${t.map(s=>`<th scope="col">${n(s.label)}</th>`).join("")}</tr></thead>
       <tbody>
         ${e.map(s=>`<tr>${t.map(a=>`<td>${ht(s[a.key],a.type)}</td>`).join("")}</tr>`).join("")}
       </tbody>
     </table>
-  </div>`}function Cr(e){let t=e.data||{},s=Array.isArray(e.services)?e.services:[],a=Ar(e.status),r=s.find(f=>f.id==="qdrant"),i=s.find(f=>f.id==="rag"),o=s.find(f=>f.id==="llm"),l=He(),m=da[l]||l;return`<section class="status-hero">
+  </div>`}function Or(e){let t=e.data||{},s=Array.isArray(e.services)?e.services:[],a=Er(e.status),r=s.find(b=>b.id==="qdrant"),i=s.find(b=>b.id==="rag"),o=s.find(b=>b.id==="llm"),l=He(),m=va[l]||l;return`<section class="status-hero">
       <div class="status-hero-main">
         <div class="overall-row">
           <span class="overall-badge ${a.tone==="warn"?"is-warn":a.tone==="danger"?"is-danger":""}">
@@ -1910,7 +1984,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         <h2 class="status-headline">${n(a.headline)}</h2>
         <p class="status-copy">${n(a.copy)}</p>
         <div class="status-meta">
-          <span>${$("clock",11)} \u6AA2\u67E5\u6642\u9593 ${se(e.checked_at)} \xB7 ${n(tt(e.checked_at))}</span>
+          <span>${$("clock",11)} \u6AA2\u67E5\u6642\u9593 ${ee(e.checked_at)} \xB7 ${n(tt(e.checked_at))}</span>
           <span>${$("server",11)} ${s.length} \u500B\u670D\u52D9\u5143\u4EF6</span>
           <span>${$("database",11)} ${c(t.total_current)} \u7B46\u73FE\u884C\u8CC7\u6599</span>
           <span>${$("layers",11)} ${c(t.parquet_files)} \u500B\u539F\u59CB Parquet</span>
@@ -1919,7 +1993,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
     </section>
 
-    <div class="service-grid">${s.map(Lr).join("")}</div>
+    <div class="service-grid">${s.map(Pr).join("")}</div>
 
     <div class="status-summary">
       <div class="metric-card">
@@ -1949,9 +2023,9 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
     </div>
 
-    ${r?.status==="not_configured"||i?.status==="not_configured"||o?.status==="not_configured"?`<div class="data-section">${K({tone:"info",title:"\u90E8\u5206 AI \u5143\u4EF6\u5C1A\u672A\u8A2D\u5B9A",text:`Qdrant\uFF1A${n(r?.detail||"\u672A\u8A2D\u5B9A")}\uFF1BRAG\uFF1A${n(i?.detail||"\u672A\u8A2D\u5B9A")}\uFF1BLLM\uFF1A${n(o?.detail||"\u672A\u8A2D\u5B9A")}\u3002\u9019\u4E9B\u72C0\u614B\u4E0D\u6703\u88AB\u507D\u88DD\u6210\u53EF\u7528\u3002`})}</div>`:""}
+    ${r?.status==="not_configured"||i?.status==="not_configured"||o?.status==="not_configured"?`<div class="data-section">${Y({tone:"info",title:"\u90E8\u5206 AI \u5143\u4EF6\u5C1A\u672A\u8A2D\u5B9A",text:`Qdrant\uFF1A${n(r?.detail||"\u672A\u8A2D\u5B9A")}\uFF1BRAG\uFF1A${n(i?.detail||"\u672A\u8A2D\u5B9A")}\uFF1BLLM\uFF1A${n(o?.detail||"\u672A\u8A2D\u5B9A")}\u3002\u9019\u4E9B\u72C0\u614B\u4E0D\u6703\u88AB\u507D\u88DD\u6210\u53EF\u7528\u3002`})}</div>`:""}
 
-  }`}function Nr(e){let t=Array.isArray(e.services)?e.services:[],s=e.architecture||{};return`<div class="data-section card architecture-card">
+  }`}function Fr(e){let t=Array.isArray(e.services)?e.services:[],s=e.architecture||{};return`<div class="data-section card architecture-card">
     <div class="section-head">
       <div>
         <div class="section-title">\u524D\u5F8C\u7AEF\u67B6\u69CB</div>
@@ -1959,20 +2033,20 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
       <span class="badge badge-neutral badge-mono">${c((s.flow||[]).length)} layers</span>
     </div>
-    ${qr(s,t)}
-  </div>`}function Rr(e){let t=He(),s=da[t]||t,a=je("/api/docs"),r=je("/api/openapi.json");return`<div class="status-columns is-single">
+    ${Rr(s,t)}
+  </div>`}function Hr(e){let t=He(),s=va[t]||t,a=Ee("/api/docs"),r=Ee("/api/openapi.json");return`<div class="status-columns is-single">
     <section class="card">
       <div class="side-card-head">
         <span class="side-card-title">${$("terminal",14)}API \u7AEF\u9EDE</span>
         <a href="${n(a)}" target="_blank" rel="noopener noreferrer" class="chip"
           >OpenAPI ${$("external",11)}</a>
       </div>
-      ${Er(e.endpoints)}
+      ${Ir(e.endpoints)}
       <div class="side-card-foot">
         \u76EE\u524D API Base\uFF1A<code>${n(Je())}</code>\uFF08${n(s)}\uFF09\u3002\u4E92\u52D5\u5F0F API \u6587\u4EF6\u4F4D\u65BC <a href="${n(a)}" target="_blank" rel="noopener noreferrer"><code>${n(a)}</code></a>\uFF0COpenAPI schema \u4F4D\u65BC <a href="${n(r)}" target="_blank" rel="noopener noreferrer"><code>${n(r)}</code></a>\u3002
       </div>
     </section>
-  </div>`}function Dr(e){let t=e.data||{};return`<div class="status-summary">
+  </div>`}function Ur(e){let t=e.data||{};return`<div class="status-summary">
       <div class="metric-card">
         <div class="metric-label">\u73FE\u884C\u6CD5\u898F</div>
         <div class="metric-value">${c(t.law_count)}</div>
@@ -2003,11 +2077,11 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       <section class="card">
         <div class="side-card-head">
           <span class="side-card-title">${$("layers",14)}\u6700\u65B0\u8CC7\u6599\u7248\u672C</span>
-          ${V("operational","Parquet")}
+          ${K("operational","Parquet")}
         </div>
-        ${jr(t.last_version)}
+        ${Dr(t.last_version)}
         <div class="side-card-foot">
-          \u539F\u59CB Parquet \u5408\u8A08 ${B(t.parquet_bytes)}\uFF1BPostgreSQL \u4FDD\u5B58 metadata \u8207\u7248\u672C\u72C0\u614B\u3002
+          \u539F\u59CB Parquet \u5408\u8A08 ${F(t.parquet_bytes)}\uFF1BPostgreSQL \u4FDD\u5B58 metadata \u8207\u7248\u672C\u72C0\u614B\u3002
         </div>
       </section>
       <section class="card">
@@ -2019,39 +2093,39 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           ${te("\u73FE\u884C\u6CD5\u898F",`<strong>${c(t.law_count)}</strong>`)}
           ${te("\u73FE\u884C\u547D\u4EE4",`<strong>${c(t.order_count)}</strong>`)}
           ${te("\u689D\u6587\u7E3D\u6578",`<strong>${c(t.article_count)}</strong>`)}
-          ${te("\u539F\u59CB Parquet",`<strong>${B(t.parquet_bytes)}</strong>`)}
+          ${te("\u539F\u59CB Parquet",`<strong>${F(t.parquet_bytes)}</strong>`)}
           ${te("\u5224\u6C7A\u6587\u4EF6",`<strong>${c(t.judgment_count)}</strong>`)}
           ${te("\u5411\u91CF\u7D22\u5F15",`<strong>${c(t.judgment_indexed_count)}</strong> / ${c(t.judgment_count)}\uFF08${c(t.judgment_vector_points)} points\uFF09`)}
           ${te("\u7D22\u5F15\u7248\u672C",`<strong>#${c(t.judgment_vector_version_id)}</strong> \xB7 ${n(t.judgment_vector_version_status||"legacy")}`)}
           ${te("Alias",`<code>${n(t.judgment_vector_alias||"\u2014")}</code> \u2192 <code>${n(t.judgment_vector_collection||"\u2014")}</code>`)}
           ${te("\u7D22\u5F15\u6A21\u578B",`<code>${n(t.judgment_vector_model||"\u2014")}</code>`)}
-          ${te("\u6700\u8FD1\u7D22\u5F15",`<span class="mono">${se(t.judgment_indexed_at)}</span>`)}
+          ${te("\u6700\u8FD1\u7D22\u5F15",`<span class="mono">${ee(t.judgment_indexed_at)}</span>`)}
         </div>
       </section>
-    </div>`}function Ir(e){let t=e.data||{};return`<section class="card data-section">
+    </div>`}function zr(e){let t=e.data||{};return`<section class="card data-section">
     <div class="side-card-head">
       <span class="side-card-title">${$("history",14)}\u6700\u8FD1\u4E0B\u8F09\u57F7\u884C</span>
       <span class="badge badge-neutral badge-mono">${c(t.run_count)} TOTAL</span>
     </div>
-    ${Pr(e.recent_runs)}
-  </section>`}function Br(e){let t=Number(e);return Number.isFinite(t)?t>=90?"is-danger":t>=70?"is-warn":"":""}function pa(e,t=""){let s=Math.max(0,Math.min(100,Number(e)||0));return`<div class="resource-bar ${t}"><span style="width:${s}%"></span></div>`}function et(e,t,s,a,r){let i=Br(r);return`<article class="resource-card">
+    ${Br(e.recent_runs)}
+  </section>`}function Gr(e){let t=Number(e);return Number.isFinite(t)?t>=90?"is-danger":t>=70?"is-warn":"":""}function fa(e,t=""){let s=Math.max(0,Math.min(100,Number(e)||0));return`<div class="resource-bar ${t}"><span style="width:${s}%"></span></div>`}function et(e,t,s,a,r){let i=Gr(r);return`<article class="resource-card">
     <div class="resource-card-head">
       <span class="resource-card-label">${$(t,14)}${n(e)}</span>
       <strong>${n(s)}</strong>
     </div>
-    ${pa(r,i)}
+    ${fa(r,i)}
     <div class="resource-card-detail">${a}</div>
-  </article>`}function Or(e){let t=e.docker||{};if(!t.available)return`<section class="card data-section">
+  </article>`}function Qr(e){let t=e.docker||{};if(!t.available)return`<section class="card data-section">
       <div class="side-card-head">
         <span class="side-card-title">${$("layers",14)}Docker</span>
-        ${V("not_configured","\u672A\u9023\u7DDA")}
+        ${K("not_configured","\u672A\u9023\u7DDA")}
       </div>
       <div class="report-empty-inline">${n(t.detail||"Docker daemon \u672A\u9023\u7DDA\u3002")}</div>
     </section>`;let s=[...t.containers||[]].sort((i,o)=>{let l=i.service?0:1,m=o.service?0:1;return l-m||String(i.name).localeCompare(String(o.name))}),a=s.map(i=>`<tr>
         <td><strong>${n(i.name||"\u2014")}</strong>${i.service?`<span class="badge badge-neutral badge-mono">${n(i.service)}</span>`:""}</td>
-        <td>${V(i.state==="running"?"operational":"degraded",i.state||"\u2014")}</td>
+        <td>${K(i.state==="running"?"operational":"degraded",i.state||"\u2014")}</td>
         <td class="cell-number">${i.cpu_percent===null||i.cpu_percent===void 0?"\u2014":`${c(i.cpu_percent)}%`}</td>
-        <td class="cell-number">${B(i.memory_used)}${i.memory_limit?` / ${B(i.memory_limit)}`:""}</td>
+        <td class="cell-number">${F(i.memory_used)}${i.memory_limit?` / ${F(i.memory_limit)}`:""}</td>
         <td class="mono">${n(i.net_io||"\u2014")}</td>
         <td class="mono">${n(i.block_io||"\u2014")}</td>
         <td class="cell-number">${c(i.pids)}</td>
@@ -2075,17 +2149,17 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
             </table>
           </div>`:'<div class="report-empty-inline">\u76EE\u524D\u6C92\u6709\u57F7\u884C\u4E2D\u7684\u5BB9\u5668\u3002</div>'}
     <div class="side-card-foot">${n(t.detail||"Docker \u8CC7\u6E90\u7D71\u8A08")}</div>
-  </section>`}function Fr(e){return`<div class="resource-section-head">
+  </section>`}function Jr(e){return`<div class="resource-section-head">
       <div>
         <div class="section-title">\u5404\u8CC7\u6599\u5EAB\u4F7F\u7528\u8CC7\u6E90</div>
         <div class="section-sub">\u5BB9\u5668 CPU\uFF0FRAM \u8207\u8CC7\u6599\u5EAB\u5167\u90E8\u5BB9\u91CF</div>
       </div>
     </div>
     <div class="resource-db-grid">${(Array.isArray(e.databases)?e.databases:[]).map(s=>{let a=s.id==="postgres",r=Array.isArray(s.tables)?s.tables:[],i=s.status==="operational"?"operational":s.status==="not_configured"?"not_configured":"degraded",o=a?`${te("\u8CC7\u6599\u5EAB",`<code>${n(s.database||"\u2014")}</code>`)}
-           ${te("\u8CC7\u6599\u5EAB\u5927\u5C0F",`<strong>${B(s.storage_bytes)}</strong>`)}
-           ${te("Docker volume",`<strong>${B(s.volume_bytes)}</strong>${s.volume_name?` <code>${n(s.volume_name)}</code>`:""}`)}
+           ${te("\u8CC7\u6599\u5EAB\u5927\u5C0F",`<strong>${F(s.storage_bytes)}</strong>`)}
+           ${te("Docker volume",`<strong>${F(s.volume_bytes)}</strong>${s.volume_name?` <code>${n(s.volume_name)}</code>`:""}`)}
            ${te("\u9023\u7DDA\u6578",`<strong>${c(s.connections)}</strong>`)}`:`${te("Collection",`<code>${n(s.collection||"\u2014")}</code>`)}
-           ${te("Docker volume",`<strong>${B(s.volume_bytes)}</strong>${s.volume_name?` <code>${n(s.volume_name)}</code>`:""}`)}
+           ${te("Docker volume",`<strong>${F(s.volume_bytes)}</strong>${s.volume_name?` <code>${n(s.volume_name)}</code>`:""}`)}
            ${te("\u5411\u91CF\u9EDE\u6578",`<strong>${c(s.points_count)}</strong>`)}
            ${te("Collections",`<strong>${c(s.collections)}</strong>`)}
            ${te("Segments",`<strong>${c(s.segments_count)}</strong>`)}`;return`<article class="resource-db-card">
@@ -2094,11 +2168,11 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
             <div class="resource-db-title">${n(s.name||"\u2014")}</div>
             <div class="resource-db-kind">${n(s.kind||"")}</div>
           </div>
-          ${V(i)}
+          ${K(i)}
         </div>
         <div class="resource-db-metrics">
           <div><span>CPU</span><strong>${s.cpu_percent===null||s.cpu_percent===void 0?"\u2014":`${c(s.cpu_percent)}%`}</strong></div>
-          <div><span>RAM</span><strong>${B(s.memory_used)}</strong><small>${s.memory_limit?` / ${B(s.memory_limit)}`:""}</small></div>
+          <div><span>RAM</span><strong>${F(s.memory_used)}</strong><small>${s.memory_limit?` / ${F(s.memory_limit)}`:""}</small></div>
           <div><span>\u5BB9\u5668</span><strong class="mono">${n(s.container||"\u2014")}</strong><small>${n(s.container_status||"\u2014")}</small></div>
         </div>
         <div class="detail-list">${o}</div>
@@ -2107,7 +2181,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
                   <thead><tr><th scope="col">\u8CC7\u6599\u8868</th><th scope="col">\u5927\u5C0F</th></tr></thead>
                   <tbody>${r.map(l=>`<tr>
                         <td class="mono">${n(l.name||"\u2014")}</td>
-                        <td class="cell-number">${B(l.bytes)}</td>
+                        <td class="cell-number">${F(l.bytes)}</td>
                       </tr>`).join("")}</tbody>
                 </table>
               </div>`:""}
@@ -2115,46 +2189,46 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </article>`}).join("")}</div>`}function rt(e,t,s,a){let r=Number(t)||0,i=a?r/a*100:0;return`<div class="storage-row">
     <div class="storage-row-head">
       <span>${n(e)}</span>
-      <strong>${B(r)}</strong>
+      <strong>${F(r)}</strong>
     </div>
-    ${pa(i)}
+    ${fa(i)}
     <div class="storage-row-detail">${s}</div>
-  </div>`}function Hr(e){let t=e.storage||{},s=t.application||{},a=t.parquet||{},r=t.docker||{},i=t.volumes||{},o=i.postgres||{},l=i.qdrant||{},m=Number(t.judgment_total_bytes||0);return`<section class="card data-section storage-section">
+  </div>`}function Vr(e){let t=e.storage||{},s=t.application||{},a=t.parquet||{},r=t.docker||{},i=t.volumes||{},o=i.postgres||{},l=i.qdrant||{},m=Number(t.judgment_total_bytes||0);return`<section class="card data-section storage-section">
     <div class="side-card-head">
       <span class="side-card-title">${$("database",14)}\u786C\u789F\u4F7F\u7528\u7D44\u6210</span>
-      <span class="badge badge-neutral badge-mono">${B(m)}</span>
+      <span class="badge badge-neutral badge-mono">${F(m)}</span>
     </div>
     <div class="storage-list">
       ${rt("\u524D\u7AEF",s.frontend_bytes,`<span class="mono">${n(s.frontend_path||"\u2014")}</span>`,m)}
       ${rt("\u5F8C\u7AEF",s.backend_bytes,`<span class="mono">${n(s.backend_path||"\u2014")}</span>`,m)}
-      ${rt("Docker \u6620\u50CF\uFF0F\u5BB9\u5668\uFF0F\u5FEB\u53D6",r.layers_bytes,`Images ${B(r.images_bytes)} \xB7 Containers ${B(r.containers_bytes)} \xB7 Build cache ${B(r.build_cache_bytes)}`,m)}
+      ${rt("Docker \u6620\u50CF\uFF0F\u5BB9\u5668\uFF0F\u5FEB\u53D6",r.layers_bytes,`Images ${F(r.images_bytes)} \xB7 Containers ${F(r.containers_bytes)} \xB7 Build cache ${F(r.build_cache_bytes)}`,m)}
       ${rt("PostgreSQL volume",o.size_bytes,`<span class="mono">${n(o.name||"\u2014")}</span>`,m)}
       ${rt("Qdrant volume",l.size_bytes,`<span class="mono">${n(l.name||"\u2014")}</span>`,m)}
-      ${rt("Parquet",a.total_bytes,`\u6CD5\u898F ${B(a.law_bytes)} \xB7 \u5224\u6C7A ${B(a.judgment_bytes)}`,m)}
+      ${rt("Parquet",a.total_bytes,`\u6CD5\u898F ${F(a.law_bytes)} \xB7 \u5224\u6C7A ${F(a.judgment_bytes)}`,m)}
     </div>
     <div class="storage-total">
       <span>Judgment \u5143\u4EF6\u5408\u8A08</span>
-      <strong>${B(m)}</strong>
+      <strong>${F(m)}</strong>
     </div>
     <div class="side-card-foot">
       \u524D\u7AEF\uFF0B\u5F8C\u7AEF\u7A0B\u5F0F\u3001Docker \u6620\u50CF\uFF0F\u5BB9\u5668\uFF0F\u5EFA\u7F6E\u5FEB\u53D6\u3001PostgreSQL\uFF0FQdrant volume \u8207\u539F\u59CB Parquet\uFF1B\u4E0D\u542B .venv \u8207\u5176\u4ED6\u975E Judgment Docker volume\u3002
     </div>
-  </section>`}function Ur(e){let t=e.host||{},s=t.cpu||{},a=t.memory||{},r=t.swap||{},i=e.storage||{},o=i.filesystem||{},l=Number(i.judgment_total_bytes||0),m=Array.isArray(e.disk)?e.disk:[],f=m[0]||{},_=Number(o.total_bytes||f.total||0),b=_?l/_*100:0,g=[s.load_1,s.load_5,s.load_15].map(y=>y??"\u2014").join(" / "),k=t.uptime_seconds===null||t.uptime_seconds===void 0?"\u2014":F(Number(t.uptime_seconds)*1e3),h=[f.label?et("HDD \u5DF2\u4F7F\u7528","database",`${c(f.percent)}%`,`${B(f.used)} / ${B(f.total)} \xB7 \u5269\u9918 ${B(f.free)}<br><span class="mono">${n(f.path||"")}</span>`,f.percent):"",l?et("Judgment \u5143\u4EF6\u5408\u8A08","layers",B(l),`\u7D04\u5360 HDD ${c(b)}% \xB7 \u524D\u7AEF\uFF0F\u5F8C\u7AEF\uFF0FDocker\uFF0FDB volume\uFF0FParquet`,b):"",...m.slice(1).map(y=>et(`\u786C\u789F \xB7 ${y.label}`,"layers",`${c(y.percent)}%`,`${B(y.used)} / ${B(y.total)} \xB7 \u5269\u9918 ${B(y.free)}<br><span class="mono">${n(y.path||"")}</span>`,y.percent))].filter(Boolean).join("");return`<div class="resource-section-head">
+  </section>`}function Wr(e){let t=e.host||{},s=t.cpu||{},a=t.memory||{},r=t.swap||{},i=e.storage||{},o=i.filesystem||{},l=Number(i.judgment_total_bytes||0),m=Array.isArray(e.disk)?e.disk:[],b=m[0]||{},w=Number(o.total_bytes||b.total||0),f=w?l/w*100:0,g=[s.load_1,s.load_5,s.load_15].map(y=>y??"\u2014").join(" / "),S=t.uptime_seconds===null||t.uptime_seconds===void 0?"\u2014":H(Number(t.uptime_seconds)*1e3),h=[b.label?et("HDD \u5DF2\u4F7F\u7528","database",`${c(b.percent)}%`,`${F(b.used)} / ${F(b.total)} \xB7 \u5269\u9918 ${F(b.free)}<br><span class="mono">${n(b.path||"")}</span>`,b.percent):"",l?et("Judgment \u5143\u4EF6\u5408\u8A08","layers",F(l),`\u7D04\u5360 HDD ${c(f)}% \xB7 \u524D\u7AEF\uFF0F\u5F8C\u7AEF\uFF0FDocker\uFF0FDB volume\uFF0FParquet`,f):"",...m.slice(1).map(y=>et(`\u786C\u789F \xB7 ${y.label}`,"layers",`${c(y.percent)}%`,`${F(y.used)} / ${F(y.total)} \xB7 \u5269\u9918 ${F(y.free)}<br><span class="mono">${n(y.path||"")}</span>`,y.percent))].filter(Boolean).join("");return`<div class="resource-section-head">
       <div>
         <div class="eyebrow">SYSTEM RESOURCE USAGE</div>
-        <div class="section-sub">\u66F4\u65B0\u6642\u9593 ${se(e.checked_at)} \xB7 ${e.status==="operational"?"\u8CC7\u6E90\u8B80\u53D6\u6B63\u5E38":"\u90E8\u5206\u8CC7\u6E90\u964D\u7D1A"}</div>
+        <div class="section-sub">\u66F4\u65B0\u6642\u9593 ${ee(e.checked_at)} \xB7 ${e.status==="operational"?"\u8CC7\u6E90\u8B80\u53D6\u6B63\u5E38":"\u90E8\u5206\u8CC7\u6E90\u964D\u7D1A"}</div>
       </div>
     </div>
     <div class="resource-grid">
       ${et("CPU \u4F7F\u7528\u7387","cpu",`${c(s.percent)}%`,`${c(s.logical_cores)} \u908F\u8F2F\u6838\u5FC3 \xB7 ${c(s.physical_cores)} \u5BE6\u9AD4\u6838\u5FC3<br>Load ${n(g)}`,s.percent)}
-      ${et("\u8A18\u61B6\u9AD4","server",`${c(a.percent)}%`,`${B(a.used)} / ${B(a.total)} \xB7 \u53EF\u7528 ${B(a.available)}`,a.percent)}
-      ${et("Swap","layers",`${c(r.percent)}%`,`${B(r.used)} / ${B(r.total)}`,r.percent)}
-      ${et("\u7A0B\u5E8F\u8207\u958B\u6A5F","activity",`${c(t.processes)} \u500B\u7A0B\u5E8F`,`\u958B\u6A5F ${n(k)}<br>${n(t.platform||"")}`,null)}
+      ${et("\u8A18\u61B6\u9AD4","server",`${c(a.percent)}%`,`${F(a.used)} / ${F(a.total)} \xB7 \u53EF\u7528 ${F(a.available)}`,a.percent)}
+      ${et("Swap","layers",`${c(r.percent)}%`,`${F(r.used)} / ${F(r.total)}`,r.percent)}
+      ${et("\u7A0B\u5E8F\u8207\u958B\u6A5F","activity",`${c(t.processes)} \u500B\u7A0B\u5E8F`,`\u958B\u6A5F ${n(S)}<br>${n(t.platform||"")}`,null)}
     </div>
     <div class="resource-grid resource-disk-grid">${h||'<div class="report-empty-inline">\u627E\u4E0D\u5230\u53EF\u8B80\u53D6\u7684\u78C1\u789F\u3002</div>'}</div>
-    ${Hr(e)}
-    ${Or(e)}
-    ${Fr(e)}`}function ca(){return`<div class="resource-section-head">
+    ${Vr(e)}
+    ${Qr(e)}
+    ${Jr(e)}`}function ma(){return`<div class="resource-section-head">
       <div>
         <div class="skeleton skeleton-line" style="width:160px;height:18px"></div>
         <div class="skeleton skeleton-line" style="width:260px;margin-top:8px"></div>
@@ -2164,7 +2238,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       ${Array.from({length:4}).map(()=>'<div class="skeleton" style="height:120px;border-radius:var(--radius-md)"></div>').join("")}
     </div>
     <div class="skeleton" style="height:180px;margin-top:16px;border-radius:var(--radius-md)"></div>
-    <div class="skeleton" style="height:220px;margin-top:16px;border-radius:var(--radius-md)"></div>`}function zr(e){return`<div class="report-card">
+    <div class="skeleton" style="height:220px;margin-top:16px;border-radius:var(--radius-md)"></div>`}function Kr(e){return`<div class="report-card">
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">SYSTEM RESOURCE USAGE</div>
@@ -2173,19 +2247,19 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
     </div>
     <div class="report-section">
-      ${K({tone:"danger",title:"\u8CC7\u6E90 API \u8ACB\u6C42\u5931\u6557",text:n(e.message||"\u8ACB\u78BA\u8A8D judgment-web \u662F\u5426\u555F\u52D5\u3002")})}
+      ${Y({tone:"danger",title:"\u8CC7\u6E90 API \u8ACB\u6C42\u5931\u6557",text:n(e.message||"\u8ACB\u78BA\u8A8D judgment-web \u662F\u5426\u555F\u52D5\u3002")})}
       <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
         <button class="btn btn-secondary btn-sm" type="button" id="status-resources-retry">
           ${$("refresh",14)}<span>\u91CD\u8A66</span>
         </button>
       </div>
     </div>
-  </div>`}function Gr(e,t,s){let a=e?.data||{},r=e?Ce(e.status):null,i=s?Ce(s.status):null,o={overview:r?`<span class="badge ${r.tone==="ok"?"badge-ok":r.tone==="warn"?"badge-warn":"badge-danger"} badge-mono">${n(r.label)}</span>`:"",resources:i?`<span class="badge ${i.tone==="ok"?"badge-ok":i.tone==="warn"?"badge-warn":"badge-danger"} badge-mono">${n(i.label)}</span>`:'<span class="badge badge-neutral badge-mono">\u672A\u8B80\u53D6</span>',data:`<span class="badge badge-neutral badge-mono">${c(a.version_count)}</span>`,runs:`<span class="badge badge-neutral badge-mono">${c(a.run_count)}</span>`};return`<div class="status-sidebar-head">
+  </div>`}function Yr(e,t,s){let a=e?.data||{},r=e?Ce(e.status):null,i=s?Ce(s.status):null,o={overview:r?`<span class="badge ${r.tone==="ok"?"badge-ok":r.tone==="warn"?"badge-warn":"badge-danger"} badge-mono">${n(r.label)}</span>`:"",resources:i?`<span class="badge ${i.tone==="ok"?"badge-ok":i.tone==="warn"?"badge-warn":"badge-danger"} badge-mono">${n(i.label)}</span>`:'<span class="badge badge-neutral badge-mono">\u672A\u8B80\u53D6</span>',data:`<span class="badge badge-neutral badge-mono">${c(a.version_count)}</span>`,runs:`<span class="badge badge-neutral badge-mono">${c(a.run_count)}</span>`};return`<div class="status-sidebar-head">
       <div class="eyebrow">STATUS SECTIONS</div>
       <div class="status-sidebar-title">\u7CFB\u7D71\u5206\u985E</div>
     </div>
     <nav class="status-tab-list" aria-label="\u7CFB\u7D71\u72C0\u614B\u5206\u985E">
-      ${ua.map(l=>{let m=l.id===t;return`<button class="status-tab${m?" is-active":""}" type="button"
+      ${ga.map(l=>{let m=l.id===t;return`<button class="status-tab${m?" is-active":""}" type="button"
           data-status-tab="${l.id}" ${m?'aria-current="page"':""}>
           <span class="status-tab-icon">${$(l.icon,15)}</span>
           <span class="status-tab-copy">
@@ -2197,8 +2271,8 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </nav>
     <div class="status-sidebar-foot">
       <span>\u6AA2\u67E5\u6642\u9593</span>
-      <span class="mono">${n(e?se(e.checked_at):"\u2014")}</span>
-    </div>`}function Qr(e,t,s,a,r){return e==="resources"?s?Ur(s):a?ca():r?zr(r):ca():e==="architecture"?Nr(t):e==="api"?Rr(t):e==="data"?Dr(t):e==="runs"?Ir(t):Cr(t)}function Jr(){return`<div class="status-hero">
+      <span class="mono">${n(e?ee(e.checked_at):"\u2014")}</span>
+    </div>`}function Xr(e,t,s,a,r){return e==="resources"?s?Wr(s):a?ma():r?Kr(r):ma():e==="architecture"?Fr(t):e==="api"?Hr(t):e==="data"?Ur(t):e==="runs"?zr(t):Or(t)}function Zr(){return`<div class="status-hero">
       <div style="width:100%">
         <div class="skeleton skeleton-line" style="width:180px;height:26px"></div>
         <div class="skeleton skeleton-line" style="width:min(520px,88%);height:30px;margin-top:14px"></div>
@@ -2210,7 +2284,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </div>
     <div class="status-summary">
       ${Array.from({length:5}).map(()=>'<div class="skeleton" style="height:88px;border-radius:var(--radius-md)"></div>').join("")}
-    </div>`}function Vr(e){return`<div class="report-card">
+    </div>`}function ei(e){return`<div class="report-card">
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">STATUS CHECK</div>
@@ -2219,14 +2293,14 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       </div>
     </div>
     <div class="report-section">
-      ${K({tone:"danger",title:"\u72C0\u614B API \u8ACB\u6C42\u5931\u6557",text:n(e.message||"\u8ACB\u78BA\u8A8D judgment-web \u662F\u5426\u555F\u52D5\u3002")})}
+      ${Y({tone:"danger",title:"\u72C0\u614B API \u8ACB\u6C42\u5931\u6557",text:n(e.message||"\u8ACB\u78BA\u8A8D judgment-web \u662F\u5426\u555F\u52D5\u3002")})}
       <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
         <button class="btn btn-secondary btn-sm" type="button" id="status-retry">
           ${$("refresh",14)}<span>\u91CD\u8A66</span>
         </button>
       </div>
     </div>
-  </div>`}async function Wr(e,t){let s=!1,a=null,r=null,i="overview",o=null,l=!1,m=null;e.innerHTML=`<section class="page status-page">
+  </div>`}async function ti(e,t){let s=!1,a=null,r=null,i="overview",o=null,l=!1,m=null;e.innerHTML=`<section class="page status-page">
     <div class="page-header">
       <div>
         <div class="eyebrow">OBSERVABILITY</div>
@@ -2254,12 +2328,12 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
           ${Array.from({length:6}).map(()=>'<div class="skeleton skeleton-line" style="width:100%;height:52px;margin-top:8px"></div>').join("")}
         </div>
       </aside>
-      <section class="status-panel" id="status-content">${Jr()}</section>
+      <section class="status-panel" id="status-content">${Zr()}</section>
     </div>
-  </section>`;let f=e.querySelector("#status-nav"),_=e.querySelector("#status-content"),b=e.querySelector("#refresh-status"),g=e.querySelector("#auto-refresh"),k=()=>{r&&(f.innerHTML=Gr(r,i,o),_.innerHTML=Qr(i,r,o,l,m))},h=async({quiet:T=!1}={})=>{if(!l){l=!0,m=null,i==="resources"&&k();try{let w=await U.systemUsage();if(s)return;o=w}catch(w){if(s)return;m=w,T||O(w.message||"\u7121\u6CD5\u53D6\u5F97\u7CFB\u7D71\u8CC7\u6E90\u3002","danger")}finally{s||(l=!1,i==="resources"&&k())}}},y=async({quiet:T=!1}={})=>{T||(b.disabled=!0,W(b,!0,"\u6AA2\u67E5\u4E2D\u2026"));try{let w=await U.status();if(s)return;r=w,k(),T||O("\u670D\u52D9\u72C0\u614B\u5DF2\u66F4\u65B0\u3002","ok",2200)}catch(w){if(s)return;_.innerHTML=Vr(w),T||O(w.message||"\u7121\u6CD5\u53D6\u5F97\u670D\u52D9\u72C0\u614B\u3002","danger")}finally{s||(b.disabled=!1,W(b,!1))}},C=async({quiet:T=!1}={})=>{await y({quiet:T}),i==="resources"&&await h({quiet:T})};return f.addEventListener("click",T=>{let w=T.target.closest("[data-status-tab]");if(!w)return;let A=w.dataset.statusTab;ua.some(j=>j.id===A)&&(i=A,k(),i==="resources"&&!o&&!l&&h())}),_.addEventListener("click",T=>{T.target.closest("#status-retry")&&y(),T.target.closest("#status-resources-retry")&&h()}),b.addEventListener("click",()=>C()),g.addEventListener("change",()=>{a&&(window.clearInterval(a),a=null),g.checked&&(a=window.setInterval(()=>C({quiet:!0}),3e4),O("\u5DF2\u555F\u7528\u6BCF 30 \u79D2\u81EA\u52D5\u66F4\u65B0\u3002","info",2200))}),await y({quiet:!0}),t&&typeof t.setTitle=="function"&&t.setTitle("\u7CFB\u7D71\u72C0\u614B \xB7 Judgment RAG Console"),()=>{s=!0,a&&window.clearInterval(a)}}var ps={};Qe(ps,{render:()=>Yr});var ma={query:"\u7DB2\u5740 ?api= \u53C3\u6578",storage:"\u700F\u89BD\u5668\u5132\u5B58\u503C",config:"config.js \u9810\u8A2D\u503C","file-default":"file:// \u9810\u8A2D\u503C","same-origin":"\u540C\u6E90\uFF08\u76EE\u524D\u7DB2\u57DF\uFF09"};function va(e,t){let s=Array.isArray(t)?t:[];return`<div class="tests-model-group">
+  </section>`;let b=e.querySelector("#status-nav"),w=e.querySelector("#status-content"),f=e.querySelector("#refresh-status"),g=e.querySelector("#auto-refresh"),S=()=>{r&&(b.innerHTML=Yr(r,i,o),w.innerHTML=Xr(i,r,o,l,m))},h=async({quiet:M=!1}={})=>{if(!l){l=!0,m=null,i==="resources"&&S();try{let _=await U.systemUsage();if(s)return;o=_}catch(_){if(s)return;m=_,M||D(_.message||"\u7121\u6CD5\u53D6\u5F97\u7CFB\u7D71\u8CC7\u6E90\u3002","danger")}finally{s||(l=!1,i==="resources"&&S())}}},y=async({quiet:M=!1}={})=>{M||(f.disabled=!0,V(f,!0,"\u6AA2\u67E5\u4E2D\u2026"));try{let _=await U.status();if(s)return;r=_,S(),M||D("\u670D\u52D9\u72C0\u614B\u5DF2\u66F4\u65B0\u3002","ok",2200)}catch(_){if(s)return;w.innerHTML=ei(_),M||D(_.message||"\u7121\u6CD5\u53D6\u5F97\u670D\u52D9\u72C0\u614B\u3002","danger")}finally{s||(f.disabled=!1,V(f,!1))}},C=async({quiet:M=!1}={})=>{await y({quiet:M}),i==="resources"&&await h({quiet:M})};return b.addEventListener("click",M=>{let _=M.target.closest("[data-status-tab]");if(!_)return;let E=_.dataset.statusTab;ga.some(z=>z.id===E)&&(i=E,S(),i==="resources"&&!o&&!l&&h())}),w.addEventListener("click",M=>{M.target.closest("#status-retry")&&y(),M.target.closest("#status-resources-retry")&&h()}),f.addEventListener("click",()=>C()),g.addEventListener("change",()=>{a&&(window.clearInterval(a),a=null),g.checked&&(a=window.setInterval(()=>C({quiet:!0}),3e4),D("\u5DF2\u555F\u7528\u6BCF 30 \u79D2\u81EA\u52D5\u66F4\u65B0\u3002","info",2200))}),await y({quiet:!0}),t&&typeof t.setTitle=="function"&&t.setTitle("\u7CFB\u7D71\u72C0\u614B \xB7 Judgment RAG Console"),()=>{s=!0,a&&window.clearInterval(a)}}var ps={};Qe(ps,{render:()=>ai});var ha={query:"\u7DB2\u5740 ?api= \u53C3\u6578",storage:"\u700F\u89BD\u5668\u5132\u5B58\u503C",config:"config.js \u9810\u8A2D\u503C","file-default":"file:// \u9810\u8A2D\u503C","same-origin":"\u540C\u6E90\uFF08\u76EE\u524D\u7DB2\u57DF\uFF09"};function ba(e,t){let s=Array.isArray(t)?t:[];return`<div class="tests-model-group">
     <span class="tests-model-label">${n(e)}</span>
     <div class="tests-model-chips">${s.length?s.map(a=>`<span class="chip chip-mono">${n(a)}</span>`).join(""):'<span class="tests-model-empty">\u672A\u5075\u6E2C\u5230\u6A21\u578B</span>'}</div>
-  </div>`}function Kr(e,t,s){return JSON.stringify({selected:s,runs:(t||[]).map(a=>`${a.run_id}:${a.status}`),run:e?{run_id:e.run_id,status:e.status,progress:e.progress,steps:(e.steps||[]).map(a=>`${a.stage}:${a.model}:${a.status}:${a.progress}`)}:null})}async function Yr(e,t){let s=!1,a=!1,r={embedding:[],llm:[]},i=!1,o=null,l=[],m="",f=null,_="";e.innerHTML=`<section class="page tests-page">
+  </div>`}function si(e,t,s){return JSON.stringify({selected:s,runs:(t||[]).map(a=>`${a.run_id}:${a.status}`),run:e?{run_id:e.run_id,status:e.status,progress:e.progress,steps:(e.steps||[]).map(a=>`${a.stage}:${a.model}:${a.status}:${a.progress}`)}:null})}async function ai(e,t){let s=!1,a=!1,r={embedding:[],llm:[]},i=!1,o=null,l=[],m="",b=null,w="";e.innerHTML=`<section class="page tests-page">
     <div class="page-header">
       <div>
         <div class="eyebrow">SYSTEM TEST</div>
@@ -2339,7 +2413,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
     </div>
 
     <div id="tests-flow"></div>
-  </section>`;let b=e.querySelector("#tests-mode-badge"),g=e.querySelector("#tests-mode-toggle"),k=e.querySelector("#tests-mode-summary"),h=e.querySelector("#tests-mode-models"),y=e.querySelector("#tests-mode-status"),C=e.querySelector("#tests-api-form"),T=e.querySelector("#tests-api-input"),w=e.querySelector("#tests-api-preview"),A=e.querySelector("#tests-api-status"),j=e.querySelector("#tests-api-note"),R=e.querySelector("#tests-api-test"),G=e.querySelector("#tests-api-reset"),ee=e.querySelector("#tests-api-save"),z=e.querySelector("#tests-refresh"),Y=e.querySelector("#tests-flow"),E=(N,u,S="")=>{N&&(N.textContent=u,N.className=`tests-status${S?` is-${S}`:""}`)},P=(N,u="")=>{A&&(A.textContent=N,A.className=`api-dialog-status${u?` is-${u}`:""}`)},H=()=>He()==="query",X=()=>{let N=Oe(T.value);return N||(window.location.protocol==="file:"?Ot:"")},he=()=>{let N=X(),u=Fe(),S=ma[He()]||He()||"\u540C\u6E90";w.innerHTML=`\u76EE\u524D\u751F\u6548\uFF1A<strong>${n(Je(u))}</strong>${u?`\uFF08${n(S)}\uFF09`:""}<br />\u6B64\u4F4D\u5740\u7684\u5065\u5EB7\u6AA2\u67E5\uFF1A${n(je("/api/health",N))}`},Te=()=>{let N=He(),u=`\u76EE\u524D\u4F86\u6E90\uFF1A${ma[N]||N||"\u540C\u6E90"}\u3002\u512A\u5148\u9806\u5E8F\u70BA ?api= \u2192 \u700F\u89BD\u5668\u5132\u5B58\u503C \u2192 config.js \u2192 \u540C\u6E90\u3002`,S="";N==="query"?(S="is-warn",u="\u6B64\u9801\u7531\u7DB2\u5740\u7684 ?api= \u53C3\u6578\u6307\u5B9A\u5F8C\u7AEF\u4F4D\u5740\uFF0C\u5177\u6709\u6700\u9AD8\u512A\u5148\u9806\u5E8F\u3002\u5132\u5B58\u6216\u6062\u5FA9\u9810\u8A2D\u5728\u6B64\u9801\u4E0D\u6703\u751F\u6548\uFF1B\u8ACB\u5148\u79FB\u9664\u7DB2\u5740\u4E2D\u7684 api \u53C3\u6578\u3002"):gt()?(S="is-warn",u="\u6B64\u9801\u4E0D\u662F\u5F9E localhost \u958B\u555F\uFF0C\u4E14\u5C1A\u672A\u8A2D\u5B9A\u5F8C\u7AEF API\u3002\u8ACB\u586B\u5165 cloudflared \u7684 https:// \u4F4D\u5740\uFF0C\u6216\u90E8\u7F72\u6642\u5728 config.js \u6307\u5B9A apiBase\uFF1BHTTP \u4F4D\u5740\u6703\u88AB HTTPS \u9801\u9762\u963B\u64CB\u3002"):(N==="file-default"||window.location.protocol==="file:")&&(u="\u4EE5 file:// \u76F4\u63A5\u958B\u555F\u6642\uFF0C\u9810\u8A2D\u9023\u5230 http://127.0.0.1:9200\u3002\u82E5\u5F8C\u7AEF\u4F7F\u7528\u5176\u4ED6\u9023\u63A5\u57E0\uFF0C\u8ACB\u5728\u6B64\u4FEE\u6539\u4E26\u5132\u5B58\u3002"),j.textContent=u,j.className=`api-dialog-note${S?` ${S}`:""}`;let D=N==="query";ee.disabled=D,G.disabled=D,T.readOnly=D},le=()=>{if(!Ft(T.value))return P("API \u4F4D\u5740\u683C\u5F0F\u4E0D\u6B63\u78BA\uFF0C\u8ACB\u8F38\u5165 http:// \u6216 https:// \u958B\u982D\u7684\u7DB2\u5740\u3002","error"),T.focus(),null;let N=X();return window.location.protocol==="https:"&&/^http:\/\//i.test(N)&&!/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(N)?(P("HTTPS \u9801\u9762\u7121\u6CD5\u9023\u7DDA\u5230 HTTP API\uFF08mixed content\uFF09\u3002\u8ACB\u6539\u7528 cloudflared \u63D0\u4F9B\u7684 https:// \u4F4D\u5740\u3002","error"),T.focus(),null):N},be=()=>{T.value=Fe(),he(),Te(),P("\u53EF\u5148\u6E2C\u8A66\u9023\u7DDA\uFF0C\u5132\u5B58\u5F8C\u9801\u9762\u6703\u91CD\u65B0\u8F09\u5165\u3002")},I=()=>{let N=Array.isArray(r.embedding)?r.embedding.length:0,u=Array.isArray(r.llm)?r.llm.length:0;if(b&&(b.textContent=i?"\u5207\u63DB\u4E2D\u2026":a?"\u6E2C\u8A66\u6A21\u5F0F ON":"\u6E2C\u8A66\u6A21\u5F0F OFF",b.className=`badge badge-mono ${i?"badge-info":a?"badge-warn":"badge-neutral"}`),g){g.disabled=i,g.classList.toggle("is-on",a),g.classList.toggle("is-off",!a&&!i),g.classList.toggle("is-busy",i),g.setAttribute("aria-checked",a?"true":"false"),g.setAttribute("aria-busy",i?"true":"false"),g.setAttribute("aria-label",i?"\u6B63\u5728\u5207\u63DB\u6E2C\u8A66\u6A21\u5F0F":a?"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F\uFF0C\u9EDE\u64CA\u95DC\u9589":"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u95DC\u9589\uFF0C\u9EDE\u64CA\u958B\u555F"),g.title=i?"\u6B63\u5728\u5207\u63DB\u6E2C\u8A66\u6A21\u5F0F\u2026":a?"\u6E2C\u8A66\u6A21\u5F0F ON \xB7 \u9EDE\u64CA\u95DC\u9589":"\u6E2C\u8A66\u6A21\u5F0F OFF \xB7 \u9EDE\u64CA\u958B\u555F";let S=g.querySelector(".header-power-label");S&&(S.textContent=i?"\u2026":a?"ON":"OFF")}k&&(k.textContent=a?`\u6BCF\u6B21\u63D0\u554F\u6703\u4F9D\u5E8F\u57F7\u884C ${N} \u500B embedding \u8207 ${u} \u500B LLM \u6A21\u578B\u3002`:"\u76EE\u524D\u4F7F\u7528\u5FEB\u901F\u6A21\u5F0F\uFF1A\u55AE\u4E00 embedding \u8207 LLM\u3002"),h&&(h.innerHTML=va("Embedding",r.embedding)+va("LLM",r.llm))},de=async()=>{try{let N=await U.testMode();if(s)return;a=!!N.enabled,r=N.models||{embedding:[],llm:[]},E(y,"")}catch(N){if(s)return;a=!1,r={embedding:[],llm:[]},E(y,N.message||"\u7121\u6CD5\u8B80\u53D6\u6E2C\u8A66\u6A21\u5F0F\uFF0C\u8ACB\u78BA\u8A8D\u5F8C\u7AEF API\u3002","error")}s||I()},De=async()=>{if(i)return;let N=!a;i=!0,I(),E(y,N?"\u6B63\u5728\u958B\u555F\u6E2C\u8A66\u6A21\u5F0F\u2026":"\u6B63\u5728\u95DC\u9589\u6E2C\u8A66\u6A21\u5F0F\u2026");try{let u=await U.setTestMode(N);if(s)return;a=!!u.enabled,r=u.models||{embedding:[],llm:[]},window.dispatchEvent(new CustomEvent("judgment:test-mode",{detail:{enabled:a,models:r}}));let S=r.embedding?.length||0,D=r.llm?.length||0;E(y,a?`\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F\uFF1A\u4E0B\u6B21 RAG \u63D0\u554F\u6703\u57F7\u884C ${S} \u500B embedding \u8207 ${D} \u500B LLM \u6A21\u578B\u3002`:"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u95DC\u9589\u3002","ok"),O(a?`\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F\uFF1A${S} \u500B embedding\u3001${D} \u500B LLM\u3002`:"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u95DC\u9589\u3002",a?"ok":"info",6e3),await Ae()}catch(u){s||(E(y,u.message||"\u6E2C\u8A66\u6A21\u5F0F\u5207\u63DB\u5931\u6557\u3002","error"),O(u.message||"\u6E2C\u8A66\u6A21\u5F0F\u5207\u63DB\u5931\u6557\u3002","danger",6e3))}finally{i=!1,s||I()}},Se=()=>{if(!Y)return;let N=Kr(o,l,m);N!==_&&(_=N,Y.innerHTML=at(o,l,m))},qe=async()=>{try{let N=await U.testRuns(30);if(s)return;l=Array.isArray(N.runs)?N.runs:[]}catch{if(s)return;l=[]}},Ae=async()=>{try{let N=m?await U.testRun(m):await U.testRunCurrent();if(s)return;o=N.run||null,!m&&o&&o.status!=="running"&&!l.some(u=>u.run_id===o.run_id)&&await qe()}catch{if(s)return;o=null}s||Se()};T?.addEventListener("input",()=>{he(),P("\u5C1A\u672A\u6E2C\u8A66\u6B64\u4F4D\u5740\u3002")}),R?.addEventListener("click",async()=>{let N=le();if(N!==null){W(R,!0,"\u6E2C\u8A66\u4E2D\u2026"),P(`\u6B63\u5728\u9023\u7DDA\u5230 ${Je(N)||"\u540C\u6E90"}\u2026`);try{let u=await $s(N);if(s)return;P(`\u9023\u7DDA\u6210\u529F \xB7 v${u.version} \xB7 ${u.duration_ms} ms \xB7 GET ${je("/api/health",N)}`,"ok")}catch(u){s||P(u.message||"\u9023\u7DDA\u6E2C\u8A66\u5931\u6557\u3002","error")}finally{s||W(R,!1)}}}),C?.addEventListener("submit",N=>{if(N.preventDefault(),H())return;let u=le();u!==null&&(Gt(u),O(`\u5F8C\u7AEF API \u5DF2\u8A2D\u70BA ${Je(u)}\uFF0C\u91CD\u65B0\u8F09\u5165\u4E2D\u2026`,"ok",1600),window.setTimeout(()=>window.location.reload(),120))}),G?.addEventListener("click",()=>{H()||(Gt(""),O("\u5DF2\u6E05\u9664\u700F\u89BD\u5668\u5132\u5B58\u7684 API \u4F4D\u5740\uFF0C\u91CD\u65B0\u8F09\u5165\u4E2D\u2026","info",1600),window.setTimeout(()=>window.location.reload(),120))}),g?.addEventListener("click",De),Y?.addEventListener("change",async N=>{N.target.id==="test-run-select"&&(m=String(N.target.value||""),await Ae())}),Y?.addEventListener("click",async N=>{N.target.closest("#test-flow-refresh")&&(m="",await qe(),await Ae())}),z?.addEventListener("click",async()=>{W(z,!0,"\u66F4\u65B0\u4E2D\u2026"),be(),await Promise.allSettled([de(),qe()]),s||await Ae(),s||(W(z,!1),O("\u7CFB\u7D71\u6E2C\u8A66\u72C0\u614B\u5DF2\u66F4\u65B0\u3002","ok",2200))});let Ie=N=>{a=!!N.detail?.enabled,r=N.detail?.models||{embedding:[],llm:[]},I()};return window.addEventListener("judgment:test-mode",Ie),be(),I(),await Promise.allSettled([de(),qe()]),await Ae(),f=window.setInterval(async()=>{s||document.hidden||m||await Ae()},2500),typeof t?.setTitle=="function"&&t.setTitle("\u7CFB\u7D71\u6E2C\u8A66 \xB7 Judgment RAG Console"),()=>{s=!0,f&&window.clearInterval(f),window.removeEventListener("judgment:test-mode",Ie)}}var ga="rag",Dt={rag:{page:ls,title:"RAG \u63D0\u554F \xB7 Judgment RAG Console"},data:{page:ns,title:"\u8CC7\u6599\u5EAB\u67E5\u8A62 \xB7 Judgment RAG Console"},quality:{page:ds,title:"\u8CC7\u6599\u54C1\u8CEA \xB7 Judgment RAG Console"},performance:{page:is,title:"\u6548\u80FD\u5831\u8868 \xB7 Judgment RAG Console"},processing:{page:cs,title:"\u8CC7\u6599\u8655\u7406 \xB7 Judgment RAG Console"},status:{page:us,title:"\u7CFB\u7D71\u72C0\u614B \xB7 Judgment RAG Console"},tests:{page:ps,title:"\u7CFB\u7D71\u6E2C\u8A66 \xB7 Judgment RAG Console"}},Ct=document.getElementById("app-main"),Nt=null,Rt=0;function Xr(){return`<div class="page-loading" aria-live="polite">
+  </section>`;let f=e.querySelector("#tests-mode-badge"),g=e.querySelector("#tests-mode-toggle"),S=e.querySelector("#tests-mode-summary"),h=e.querySelector("#tests-mode-models"),y=e.querySelector("#tests-mode-status"),C=e.querySelector("#tests-api-form"),M=e.querySelector("#tests-api-input"),_=e.querySelector("#tests-api-preview"),E=e.querySelector("#tests-api-status"),z=e.querySelector("#tests-api-note"),G=e.querySelector("#tests-api-test"),X=e.querySelector("#tests-api-reset"),se=e.querySelector("#tests-api-save"),R=e.querySelector("#tests-refresh"),P=e.querySelector("#tests-flow"),k=(N,u,A="")=>{N&&(N.textContent=u,N.className=`tests-status${A?` is-${A}`:""}`)},q=(N,u="")=>{E&&(E.textContent=N,E.className=`api-dialog-status${u?` is-${u}`:""}`)},B=()=>He()==="query",Q=()=>{let N=Oe(M.value);return N||(window.location.protocol==="file:"?Ot:"")},be=()=>{let N=Q(),u=Fe(),A=ha[He()]||He()||"\u540C\u6E90";_.innerHTML=`\u76EE\u524D\u751F\u6548\uFF1A<strong>${n(Je(u))}</strong>${u?`\uFF08${n(A)}\uFF09`:""}<br />\u6B64\u4F4D\u5740\u7684\u5065\u5EB7\u6AA2\u67E5\uFF1A${n(Ee("/api/health",N))}`},Te=()=>{let N=He(),u=`\u76EE\u524D\u4F86\u6E90\uFF1A${ha[N]||N||"\u540C\u6E90"}\u3002\u512A\u5148\u9806\u5E8F\u70BA ?api= \u2192 \u700F\u89BD\u5668\u5132\u5B58\u503C \u2192 config.js \u2192 \u540C\u6E90\u3002`,A="";N==="query"?(A="is-warn",u="\u6B64\u9801\u7531\u7DB2\u5740\u7684 ?api= \u53C3\u6578\u6307\u5B9A\u5F8C\u7AEF\u4F4D\u5740\uFF0C\u5177\u6709\u6700\u9AD8\u512A\u5148\u9806\u5E8F\u3002\u5132\u5B58\u6216\u6062\u5FA9\u9810\u8A2D\u5728\u6B64\u9801\u4E0D\u6703\u751F\u6548\uFF1B\u8ACB\u5148\u79FB\u9664\u7DB2\u5740\u4E2D\u7684 api \u53C3\u6578\u3002"):gt()?(A="is-warn",u="\u6B64\u9801\u4E0D\u662F\u5F9E localhost \u958B\u555F\uFF0C\u4E14\u5C1A\u672A\u8A2D\u5B9A\u5F8C\u7AEF API\u3002\u8ACB\u586B\u5165 cloudflared \u7684 https:// \u4F4D\u5740\uFF0C\u6216\u90E8\u7F72\u6642\u5728 config.js \u6307\u5B9A apiBase\uFF1BHTTP \u4F4D\u5740\u6703\u88AB HTTPS \u9801\u9762\u963B\u64CB\u3002"):(N==="file-default"||window.location.protocol==="file:")&&(u="\u4EE5 file:// \u76F4\u63A5\u958B\u555F\u6642\uFF0C\u9810\u8A2D\u9023\u5230 http://127.0.0.1:9200\u3002\u82E5\u5F8C\u7AEF\u4F7F\u7528\u5176\u4ED6\u9023\u63A5\u57E0\uFF0C\u8ACB\u5728\u6B64\u4FEE\u6539\u4E26\u5132\u5B58\u3002"),z.textContent=u,z.className=`api-dialog-note${A?` ${A}`:""}`;let I=N==="query";se.disabled=I,X.disabled=I,M.readOnly=I},le=()=>{if(!Ft(M.value))return q("API \u4F4D\u5740\u683C\u5F0F\u4E0D\u6B63\u78BA\uFF0C\u8ACB\u8F38\u5165 http:// \u6216 https:// \u958B\u982D\u7684\u7DB2\u5740\u3002","error"),M.focus(),null;let N=Q();return window.location.protocol==="https:"&&/^http:\/\//i.test(N)&&!/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(N)?(q("HTTPS \u9801\u9762\u7121\u6CD5\u9023\u7DDA\u5230 HTTP API\uFF08mixed content\uFF09\u3002\u8ACB\u6539\u7528 cloudflared \u63D0\u4F9B\u7684 https:// \u4F4D\u5740\u3002","error"),M.focus(),null):N},$e=()=>{M.value=Fe(),be(),Te(),q("\u53EF\u5148\u6E2C\u8A66\u9023\u7DDA\uFF0C\u5132\u5B58\u5F8C\u9801\u9762\u6703\u91CD\u65B0\u8F09\u5165\u3002")},O=()=>{let N=Array.isArray(r.embedding)?r.embedding.length:0,u=Array.isArray(r.llm)?r.llm.length:0;if(f&&(f.textContent=i?"\u5207\u63DB\u4E2D\u2026":a?"\u6E2C\u8A66\u6A21\u5F0F ON":"\u6E2C\u8A66\u6A21\u5F0F OFF",f.className=`badge badge-mono ${i?"badge-info":a?"badge-warn":"badge-neutral"}`),g){g.disabled=i,g.classList.toggle("is-on",a),g.classList.toggle("is-off",!a&&!i),g.classList.toggle("is-busy",i),g.setAttribute("aria-checked",a?"true":"false"),g.setAttribute("aria-busy",i?"true":"false"),g.setAttribute("aria-label",i?"\u6B63\u5728\u5207\u63DB\u6E2C\u8A66\u6A21\u5F0F":a?"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F\uFF0C\u9EDE\u64CA\u95DC\u9589":"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u95DC\u9589\uFF0C\u9EDE\u64CA\u958B\u555F"),g.title=i?"\u6B63\u5728\u5207\u63DB\u6E2C\u8A66\u6A21\u5F0F\u2026":a?"\u6E2C\u8A66\u6A21\u5F0F ON \xB7 \u9EDE\u64CA\u95DC\u9589":"\u6E2C\u8A66\u6A21\u5F0F OFF \xB7 \u9EDE\u64CA\u958B\u555F";let A=g.querySelector(".header-power-label");A&&(A.textContent=i?"\u2026":a?"ON":"OFF")}S&&(S.textContent=a?`\u6BCF\u6B21\u63D0\u554F\u6703\u4F9D\u5E8F\u57F7\u884C ${N} \u500B embedding \u8207 ${u} \u500B LLM \u6A21\u578B\u3002`:"\u76EE\u524D\u4F7F\u7528\u5FEB\u901F\u6A21\u5F0F\uFF1A\u55AE\u4E00 embedding \u8207 LLM\u3002"),h&&(h.innerHTML=ba("Embedding",r.embedding)+ba("LLM",r.llm))},de=async()=>{try{let N=await U.testMode();if(s)return;a=!!N.enabled,r=N.models||{embedding:[],llm:[]},k(y,"")}catch(N){if(s)return;a=!1,r={embedding:[],llm:[]},k(y,N.message||"\u7121\u6CD5\u8B80\u53D6\u6E2C\u8A66\u6A21\u5F0F\uFF0C\u8ACB\u78BA\u8A8D\u5F8C\u7AEF API\u3002","error")}s||O()},Ie=async()=>{if(i)return;let N=!a;i=!0,O(),k(y,N?"\u6B63\u5728\u958B\u555F\u6E2C\u8A66\u6A21\u5F0F\u2026":"\u6B63\u5728\u95DC\u9589\u6E2C\u8A66\u6A21\u5F0F\u2026");try{let u=await U.setTestMode(N);if(s)return;a=!!u.enabled,r=u.models||{embedding:[],llm:[]},window.dispatchEvent(new CustomEvent("judgment:test-mode",{detail:{enabled:a,models:r}}));let A=r.embedding?.length||0,I=r.llm?.length||0;k(y,a?`\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F\uFF1A\u4E0B\u6B21 RAG \u63D0\u554F\u6703\u57F7\u884C ${A} \u500B embedding \u8207 ${I} \u500B LLM \u6A21\u578B\u3002`:"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u95DC\u9589\u3002","ok"),D(a?`\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u958B\u555F\uFF1A${A} \u500B embedding\u3001${I} \u500B LLM\u3002`:"\u6E2C\u8A66\u6A21\u5F0F\u5DF2\u95DC\u9589\u3002",a?"ok":"info",6e3),await Ae()}catch(u){s||(k(y,u.message||"\u6E2C\u8A66\u6A21\u5F0F\u5207\u63DB\u5931\u6557\u3002","error"),D(u.message||"\u6E2C\u8A66\u6A21\u5F0F\u5207\u63DB\u5931\u6557\u3002","danger",6e3))}finally{i=!1,s||O()}},Se=()=>{if(!P)return;let N=si(o,l,m);N!==w&&(w=N,P.innerHTML=at(o,l,m))},qe=async()=>{try{let N=await U.testRuns(30);if(s)return;l=Array.isArray(N.runs)?N.runs:[]}catch{if(s)return;l=[]}},Ae=async()=>{try{let N=m?await U.testRun(m):await U.testRunCurrent();if(s)return;o=N.run||null,!m&&o&&o.status!=="running"&&!l.some(u=>u.run_id===o.run_id)&&await qe()}catch{if(s)return;o=null}s||Se()};M?.addEventListener("input",()=>{be(),q("\u5C1A\u672A\u6E2C\u8A66\u6B64\u4F4D\u5740\u3002")}),G?.addEventListener("click",async()=>{let N=le();if(N!==null){V(G,!0,"\u6E2C\u8A66\u4E2D\u2026"),q(`\u6B63\u5728\u9023\u7DDA\u5230 ${Je(N)||"\u540C\u6E90"}\u2026`);try{let u=await $s(N);if(s)return;q(`\u9023\u7DDA\u6210\u529F \xB7 v${u.version} \xB7 ${u.duration_ms} ms \xB7 GET ${Ee("/api/health",N)}`,"ok")}catch(u){s||q(u.message||"\u9023\u7DDA\u6E2C\u8A66\u5931\u6557\u3002","error")}finally{s||V(G,!1)}}}),C?.addEventListener("submit",N=>{if(N.preventDefault(),B())return;let u=le();u!==null&&(Gt(u),D(`\u5F8C\u7AEF API \u5DF2\u8A2D\u70BA ${Je(u)}\uFF0C\u91CD\u65B0\u8F09\u5165\u4E2D\u2026`,"ok",1600),window.setTimeout(()=>window.location.reload(),120))}),X?.addEventListener("click",()=>{B()||(Gt(""),D("\u5DF2\u6E05\u9664\u700F\u89BD\u5668\u5132\u5B58\u7684 API \u4F4D\u5740\uFF0C\u91CD\u65B0\u8F09\u5165\u4E2D\u2026","info",1600),window.setTimeout(()=>window.location.reload(),120))}),g?.addEventListener("click",Ie),P?.addEventListener("change",async N=>{N.target.id==="test-run-select"&&(m=String(N.target.value||""),await Ae())}),P?.addEventListener("click",async N=>{N.target.closest("#test-flow-refresh")&&(m="",await qe(),await Ae())}),R?.addEventListener("click",async()=>{V(R,!0,"\u66F4\u65B0\u4E2D\u2026"),$e(),await Promise.allSettled([de(),qe()]),s||await Ae(),s||(V(R,!1),D("\u7CFB\u7D71\u6E2C\u8A66\u72C0\u614B\u5DF2\u66F4\u65B0\u3002","ok",2200))});let De=N=>{a=!!N.detail?.enabled,r=N.detail?.models||{embedding:[],llm:[]},O()};return window.addEventListener("judgment:test-mode",De),$e(),O(),await Promise.allSettled([de(),qe()]),await Ae(),b=window.setInterval(async()=>{s||document.hidden||m||await Ae()},2500),typeof t?.setTitle=="function"&&t.setTitle("\u7CFB\u7D71\u6E2C\u8A66 \xB7 Judgment RAG Console"),()=>{s=!0,b&&window.clearInterval(b),window.removeEventListener("judgment:test-mode",De)}}var $a="rag",It={rag:{page:ls,title:"RAG \u63D0\u554F \xB7 Judgment RAG Console"},data:{page:ns,title:"\u8CC7\u6599\u5EAB\u67E5\u8A62 \xB7 Judgment RAG Console"},quality:{page:ds,title:"\u8CC7\u6599\u54C1\u8CEA \xB7 Judgment RAG Console"},performance:{page:is,title:"\u6548\u80FD\u5831\u8868 \xB7 Judgment RAG Console"},processing:{page:cs,title:"\u8CC7\u6599\u8655\u7406 \xB7 Judgment RAG Console"},status:{page:us,title:"\u7CFB\u7D71\u72C0\u614B \xB7 Judgment RAG Console"},tests:{page:ps,title:"\u7CFB\u7D71\u6E2C\u8A66 \xB7 Judgment RAG Console"}},Ct=document.getElementById("app-main"),Nt=null,Rt=0;function ni(){return`<div class="page-loading" aria-live="polite">
     <div class="skeleton skeleton-title"></div>
     <div class="skeleton skeleton-subtitle"></div>
     <div class="skeleton-grid">
@@ -2347,7 +2421,7 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
       <div class="skeleton skeleton-card"></div>
       <div class="skeleton skeleton-card"></div>
     </div>
-  </div>`}function vs(){let t=window.location.hash.replace(/^#\/?/,"").trim().split("/")[0]||ga;return Object.prototype.hasOwnProperty.call(Dt,t)?t:ga}function Zr(e){document.querySelectorAll("[data-route]").forEach(t=>{let s=t.dataset.route===e;t.classList.toggle("is-active",s),s?t.setAttribute("aria-current","page"):t.removeAttribute("aria-current")})}function ei(e){return`<section class="page">
+  </div>`}function vs(){let t=window.location.hash.replace(/^#\/?/,"").trim().split("/")[0]||$a;return Object.prototype.hasOwnProperty.call(It,t)?t:$a}function ri(e){document.querySelectorAll("[data-route]").forEach(t=>{let s=t.dataset.route===e;t.classList.toggle("is-active",s),s?t.setAttribute("aria-current","page"):t.removeAttribute("aria-current")})}function ii(e){return`<section class="page">
     <div class="report-card">
       <div class="report-head">
         <div class="report-title-group">
@@ -2371,4 +2445,4 @@ LIMIT ${l} OFFSET ${k}`,warnings:m,meta:{store:r,filters:a,client_side:!0}}}asyn
         </div>
       </div>
     </div>
-  </section>`}async function ms(){let e=vs(),t=++Rt;if(Zr(e),window.location.hash!==`#/${e}`&&window.history.replaceState(null,"",`#/${e}`),typeof Nt=="function"){try{Nt()}catch{}Nt=null}document.title=Dt[e].title,Ct.innerHTML=Xr(),Ct.focus({preventScroll:!0}),window.scrollTo({top:0,behavior:"auto"});let s={route:e,navigate(a){Dt[a]&&(window.location.hash=`#/${a}`)},setTitle(a){t===Rt&&a&&(document.title=a)}};try{let a=await Dt[e].page.render(Ct,s);if(t!==Rt){typeof a=="function"&&a();return}Nt=typeof a=="function"?a:null}catch(a){if(t!==Rt)return;console.error("Failed to render route",e,a),Ct.innerHTML=ei(a);let r=document.getElementById("route-retry");r&&r.addEventListener("click",()=>ms()),O("\u9801\u9762\u8F09\u5165\u5931\u6557\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002","danger")}}function ti(){document.addEventListener("keydown",e=>{if(e.key!=="/"||e.metaKey||e.ctrlKey||e.altKey)return;let t=document.activeElement;if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)||vs()!=="rag")return;let a=document.getElementById("rag-question");a&&(e.preventDefault(),a.focus())})}function fa(){xs(),ti(),window.addEventListener("hashchange",ms),ms(),gt()&&window.setTimeout(()=>{vs()!=="tests"&&(window.location.hash="#/tests")},700)}document.readyState==="loading"?document.addEventListener("DOMContentLoaded",fa):fa();})();
+  </section>`}async function ms(){let e=vs(),t=++Rt;if(ri(e),window.location.hash!==`#/${e}`&&window.history.replaceState(null,"",`#/${e}`),typeof Nt=="function"){try{Nt()}catch{}Nt=null}document.title=It[e].title,Ct.innerHTML=ni(),Ct.focus({preventScroll:!0}),window.scrollTo({top:0,behavior:"auto"});let s={route:e,navigate(a){It[a]&&(window.location.hash=`#/${a}`)},setTitle(a){t===Rt&&a&&(document.title=a)}};try{let a=await It[e].page.render(Ct,s);if(t!==Rt){typeof a=="function"&&a();return}Nt=typeof a=="function"?a:null}catch(a){if(t!==Rt)return;console.error("Failed to render route",e,a),Ct.innerHTML=ii(a);let r=document.getElementById("route-retry");r&&r.addEventListener("click",()=>ms()),D("\u9801\u9762\u8F09\u5165\u5931\u6557\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002","danger")}}function oi(){document.addEventListener("keydown",e=>{if(e.key!=="/"||e.metaKey||e.ctrlKey||e.altKey)return;let t=document.activeElement;if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)||vs()!=="rag")return;let a=document.getElementById("rag-question");a&&(e.preventDefault(),a.focus())})}function ya(){xs(),oi(),window.addEventListener("hashchange",ms),ms(),gt()&&window.setTimeout(()=>{vs()!=="tests"&&(window.location.hash="#/tests")},700)}document.readyState==="loading"?document.addEventListener("DOMContentLoaded",ya):ya();})();

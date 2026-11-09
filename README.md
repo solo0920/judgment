@@ -429,7 +429,7 @@ uv run judgment-normalize-courts --all
 | `#/data` | 資料庫查詢 | 先切換「法規命令／判決」，再選擇資料庫；側欄提供「查詢／Schema」切換，Schema 模式列出該資料庫的資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
 | `#/quality` | 資料品質 | DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。無法取得的數值顯示「—」。 |
 | `#/performance` | 效能報表 | 上方測試流程圖表顯示目前／歷史模型測試進度；中段「索引效能」面板顯示當次執行筆數、平均每秒筆數、耗時、平均每批時間與吞吐／時間組成／進度圖表；下方記錄每次執行按鈕的完整 Flow、模組、函式、參數、模型與區段耗時；可展開時間軸、篩選、分頁與匯出。 |
-| `#/processing` | 資料處理 | 判決、法規、命令三條即時流程圖；判決壓縮檔逐檔進度；RAR 解壓縮、原始 Parquet 備份、金融法規篩選、PostgreSQL metadata、Qdrant 各階段子進度與顏色；依實際階段耗時組成的整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
+| `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 8 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。另含判決、法規、命令三條即時流程圖、判決壓縮檔逐檔進度、各階段子進度與顏色、整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
 | `#/status` | 系統狀態 | 左側分類切換服務總覽、系統資料使用、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。 |
 
 ### HTTP API
@@ -455,7 +455,8 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/processing` | 資料處理快照：三條流程、各階段進度、逐檔壓縮檔狀態、階段耗時堆疊、外部程序偵測、更新能力與注意事項。 |
 | `GET` | `/api/processing/plan` | 更新前檢查結果：未處理壓縮檔、索引待補筆數與建議步驟；不會啟動任何程序。 |
 | `POST` | `/api/processing/update` | 啟動可中斷續跑的資料更新；body 為 `{"index": false}`。已在執行中或外部匯入／更新程序佔用時回傳 409。 |
-| `POST` | `/api/processing/stop` | 對由 Web 啟動的資料更新送出 SIGINT；外部程序不會被強制停止。 |
+| `POST` | `/api/processing/workflows/{workflow_id}/run` | 啟動白名單中的單一工作流程（法規下載、命令下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、法規條文版本回填）；同一時間僅允許一個處理程序，衝突或外部程序佔用時回傳 409。 |
+| `POST` | `/api/processing/stop` | 對由 Web 啟動的資料更新或工作流程送出 SIGINT；外部程序不會被強制停止。 |
 | `POST` | `/api/rag/query` | 以 Qdrant 檢索判決並由 LLM 產生有引用編號的回答；問題上限 500 字，服務未就緒時降級。 |
 | `POST` | `/api/rag/query/stream` | 與 `/api/rag/query` 相同，但以 SSE 逐段回傳 `step`、`partial`、`token`、`token_reset`、`result`、`error`；RAG 頁用來即時顯示後端處理流程、先顯示法規結果，再逐 token 顯示 LLM 回答。 |
 | `GET` | `/api/docs` | Swagger UI 互動式 API 文件。 |
@@ -484,6 +485,8 @@ uv run judgment-normalize-courts --all
 - **逐檔進度**：從狀態檔的 `archives` 讀取每個壓縮檔的解壓縮、原始備份、篩選與 PostgreSQL 進度，直接顯示在檔名後方。沒有狀態檔時，改用 PostgreSQL 的 `source_archive` 顯示哪些壓縮檔已處理。
 - **整體時間**：以各階段實際耗時比例組成堆疊長條，而非用筆數推估。
 - **外部程序**：後端以 `ps` 偵測直接在 terminal 啟動的 `judgment-index-vectors`、`judgment-import-judgments`、`judgment-law-download` 與 `judgment.processing_update`。這些程序若沒有寫入狀態檔，只會標示「外部程序」與可驗證的整體覆蓋率；不會替它們產生假的逐階段百分比。外部匯入／更新執行中時，資料更新按鈕會停用；外部索引執行中時，仍可更新但不可勾選接續索引。
+- **工作流程 sidebar**：左側列出「處理總覽」與 8 個白名單流程（完整資料更新、法規下載、命令下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、法規條文版本回填）。右側面板顯示該流程使用的 Python 程式、Shell／入口腳本與實際命令，並提供「執行此流程」按鈕；結果寫入共用狀態檔，面板顯示最近一次 run 的狀態、開始時間、耗時、訊息與日誌路徑。
+- **執行與停止**：單一流程由 `judgment.workflow_runner` 在背景啟動，可執行命令只來自 `src/judgment/workflows.py` 白名單；完整資料更新仍走 `ProcessingManager.start_update`，可勾選接續索引。所有長流程共用「停止」與可續跑機制；已有 Web 或 terminal 程序執行時，按鈕停用或回傳 409，不會同時啟動第二個處理程序。
 
 「資料更新」按鈕會依序：
 
@@ -995,14 +998,14 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：133 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：136 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
 - 判決匯入：24 個月份共掃描 2,485,151 筆（既有 8 個月 + 新增 16 個月），命中 99 項金融法規清單並寫入 738,743 筆判決、1,578,718 筆引用；`judgment_documents` 約 4.4 GB。新增 16 個月份掃描 1,655,684 筆、寫入 494,413 筆，耗時 858.6 秒。
 - 原始判決 Parquet：24 個壓縮檔共 2,485,151 筆，約 6.2 GB；以 `jid` filter 單筆讀取後解析 `raw_json`，點擊 RAG 引用卡內容可開啟完整判決 dialog，並保留 PDF 連結。
 - 判決法院正規化：738,743 筆全部有 `court_normalized`，對應 37 個標準法院，0 筆未解析、原始 `court` 保留。
-- 判決向量索引：已完成全量 738,743 筆（1,024 維、`bge-m3`）；Qdrant `judgment_documents` 與 PostgreSQL `judgment_vector_index` coverage 738,743 / 738,743＝100%。正式查詢使用 `judgments_current` alias，後續版本以 Blue-Green collection 建置。
+- 判決向量索引：已完成全量 738,743 筆（1,024 維、`bge-m3`）；Qdrant `judgments_v002`（`judgments_current` alias）與 PostgreSQL `judgment_vector_index` coverage 738,743 / 738,743＝100%。正式查詢使用 `judgments_current` alias，後續版本以 Blue-Green collection 建置。
 - 全量索引已完成：一般 RAG 的語意候選涵蓋全部 738,743 筆；PostgreSQL 關鍵字／條件查詢、法規與引用統計、Parquet 全文快照仍可獨立使用。
 - 全量索引資源估算：Qdrant 由目前 229 MB 增至約 5–5.5 GB（向量約 2.8 GB、payload 約 1.2 GB、索引與 WAL 另計），索引期間峰值可能短暫達 7–8 GB；Qdrant 記憶體約 3–4 GB。以 HNSW 對數成長推算，單次搜尋由實測中位 6.9 ms 增至約 10–20 ms，RAG 總時間（2–6.5 秒，主要為 LLM）影響小於 1%。索引期間會與 Ollama embedding 競爭資源，建議離峰執行。每月新增約 3 萬筆判決的增量索引約需 1.1 小時。
 - 法規／命令範例問題：以「證券營業員常觸犯什麼法規或命令?」提問，系統在 30 筆全文提及「證券營業員」的判決中統計引用次數，回傳洗錢防制法、民法、保險法、證券交易法等法規卡；「有哪些法規是和壽險及產險相關的?」會依名稱與類別關鍵字整理保險法、簡易人壽保險法、人壽保險各類保險定名準則、財產保險業財務報告編製準則等 8 筆法規／命令。
@@ -1022,6 +1025,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 效能 Flow 實測：快速 profile 的 RAG 請求產生約 20 段 Flow，包含 `http.request`、`rag.answer_question`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm`、`rag.validate_citations` 與 `client.render`；`summary.models` 為 `bge-m3`、`gemma3:4b`。伺服器端 LLM 區段約 1–4 秒，前端 client 全流程與伺服器總耗時接近。時間軸以每個點位的 `started_at` 顯示開始時間，主要數字為「本點到下一點」區間；「累計」採流水線累加，例如 `http.request` 顯示 1 ms 並累計 1 ms，`rag.coverage` 顯示 30 ms 並累計 32 ms，`rag.llm_request` 顯示 2.9 s，最後 `client.render` 才累計到整體 3.9–4.0 秒。
 - 以 Playwright 驗證效能 Flow 頁：模型篩選、21 段巢狀時間軸、每點實際開始時間、點到點區間、流水線累計、module／function／params、時間軸比例條、模型統計、最慢區段、Flow JSON 展開、390px 無水平溢出與 0 console error。
 - 以 Playwright 驗證十種主題切換與持久化、四個頁面、法規／判決類別切換、判決命中法規查詢、匯入紀錄查詢、查詢報表、法規明細、判決原文與返回流程、服務狀態與 390px 行動版；無 console error、無失敗請求、無水平溢出。
+- 以 Playwright 驗證資料處理頁工作流程 sidebar：9 個項目（總覽＋8 個流程）、選取「法規下載」顯示程式 `judgment-law-download --source law`、Shell／入口 `src/judgment/law_download/cli.py`、實際命令與執行按鈕；桌面 1300px 與行動版 390px 均無水平溢出、0 console error。
 - 以 Playwright 驗證判決法院正規化：下拉選單只有 37 個標準法院＋全部、無重複或髒值，以標準名稱篩選／排序／開啟原文皆一致，返回查詢結果後條件與資料列保留。
 - 以 Playwright 驗證 `file://frontend/index.html`、系統測試頁的 API 連線測試／儲存流程，以及靜態主機（含 `?api=` 覆寫）的跨來源 API 呼叫。
 - 以 Playwright 驗證系統測試頁：header「系統測試」入口、API 表單、測試模式 ON/OFF 切換、模型清單、測試 Flow、RAG 頁測試模式提示，以及 `/api/test-mode` 狀態一致；後端電源改由 `./up.sh`／`./down.sh` 管理。

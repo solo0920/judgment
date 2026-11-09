@@ -421,6 +421,20 @@ def create_app(
                 detail=f"無法啟動資料更新：{exc.__class__.__name__}: {exc}",
             ) from exc
 
+    @app.post("/api/processing/workflows/{workflow_id}/run")
+    def processing_workflow_run(workflow_id: str) -> Dict[str, Any]:
+        try:
+            return app.state.processing_manager.start_workflow(workflow_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"無法啟動工作流程：{exc.__class__.__name__}: {exc}",
+            ) from exc
+
     @app.post("/api/processing/stop")
     def processing_stop() -> Dict[str, Any]:
         try:

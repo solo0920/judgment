@@ -4668,6 +4668,7 @@ button.chip:hover {
   align-items: flex-start;
   gap: 9px;
   width: 100%;
+  min-width: 0;
   padding: 9px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -4715,12 +4716,16 @@ button.chip:hover {
 }
 
 .status-tab-copy strong {
+  min-width: 0;
   font-size: 11px;
   font-weight: 650;
   line-height: 1.35;
 }
 
 .status-tab-copy small {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--faint);
   font-size: 9px;
@@ -5064,7 +5069,7 @@ button.chip:hover {
   .resource-grid,
   .resource-disk-grid,
   .storage-list {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -8407,5 +8412,100 @@ button.chip:hover {
 
   .tests-api-form .api-dialog-actions .grow {
     display: none;
+  }
+}
+
+/* ------------------------------------------------------- data workflows */
+.processing-layout {
+  align-items: start;
+}
+
+.processing-sidebar {
+  top: 86px;
+}
+
+.processing-workflow-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.processing-workflow-command-grid {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 9px 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+}
+
+.processing-workflow-command-grid > span {
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+.processing-workflow-command-grid > code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.processing-workflow-command {
+  white-space: pre-wrap;
+}
+
+.processing-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 16px 0;
+}
+
+.processing-workflow-run {
+  padding: 16px;
+}
+
+.processing-workflow-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.processing-workflow-run-grid {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 6px 12px;
+  margin-top: 12px;
+  font-size: 10.5px;
+}
+
+.processing-workflow-run-grid > span {
+  color: var(--faint);
+}
+
+.processing-workflow-run-grid > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.processing-workflow-empty {
+  padding: 16px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .processing-sidebar {
+    top: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .processing-workflow-command-grid {
+    grid-template-columns: 1fr;
   }
 }

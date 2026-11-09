@@ -834,6 +834,151 @@ function errorMarkup(message, snapshot) {
   </div>`;
 }
 
+const WORKFLOW_ICONS = {
+  overview: "activity",
+  full_update: "download",
+  law_download: "layers",
+  order_download: "file",
+  judgment_import: "database",
+  judgment_parquet: "cube",
+  index_versions: "brain",
+  normalize_courts: "filter",
+  backfill_law_articles: "history",
+};
+
+function workflowItems(snapshot) {
+  const workflows = Array.isArray(snapshot.workflows) ? snapshot.workflows : [];
+  return [
+    {
+      id: "overview",
+      label: "處理總覽",
+      description: "目前流程、壓縮檔與最近執行紀錄",
+      status: snapshot.status || "idle",
+      activeRun: null,
+      lastRun: null,
+    },
+    ...workflows.map((workflow) => {
+      const activeRun = workflow.active_run || null;
+      const lastRun = activeRun || workflow.last_run || null;
+      return {
+        ...workflow,
+        activeRun,
+        lastRun,
+        status: lastRun?.status || "idle",
+      };
+    }),
+  ];
+}
+
+function workflowNavMarkup(snapshot, activeWorkflowId) {
+  const items = workflowItems(snapshot);
+  return `<div class="status-sidebar-head">
+      <div class="eyebrow">DATA WORKFLOWS</div>
+      <div class="status-sidebar-title">資料流程</div>
+    </div>
+    <nav class="status-tab-list" aria-label="資料處理工作流程">
+      ${items
+        .map((item) => {
+          const active = item.id === activeWorkflowId;
+          const iconName = WORKFLOW_ICONS[item.id] || "terminal";
+          return `<button class="status-tab${active ? " is-active" : ""}" type="button"
+            data-processing-workflow="${escapeHtml(item.id)}"
+            ${active ? 'aria-current="page"' : ""}>
+            <span class="status-tab-icon">${icon(iconName, 15)}</span>
+            <span class="status-tab-copy">
+              <strong>${escapeHtml(item.label)}</strong>
+              <small>${escapeHtml(item.description || "")}</small>
+            </span>
+            ${statusBadge(item.status)}
+          </button>`;
+        })
+        .join("")}
+    </nav>
+    <div class="status-sidebar-foot">
+      <span>執行模式</span>
+      <span class="mono">${escapeHtml(snapshot.mode === "running" ? "執行中" : "待命")}</span>
+    </div>`;
+}
+
+function runMetaMarkup(run) {
+  if (!run) {
+    return `<div class="processing-workflow-empty">尚未執行。按下右側按鈕開始。</div>`;
+  }
+  const meta = run.meta || {};
+  return `<div class="processing-workflow-run">
+    <div class="processing-workflow-run-head">
+      ${statusBadge(run.status)}
+      <span class="mono">${escapeHtml(run.id || "—")}</span>
+    </div>
+    <div class="processing-workflow-run-grid">
+      <span>開始</span><strong>${escapeHtml(formatDateTime(run.started_at))}</strong>
+      <span>耗時</span><strong>${formatDuration(run.duration_ms)}</strong>
+      <span>訊息</span><strong>${escapeHtml(run.message || "—")}</strong>
+      ${meta.log_path ? `<span>日誌</span><strong class="mono">${escapeHtml(meta.log_path)}</strong>` : ""}
+    </div>
+  </div>`;
+}
+
+function workflowPanelMarkup(workflow) {
+  const activeRun = workflow.active_run || null;
+  const lastRun = activeRun || workflow.last_run || null;
+  const busy = Boolean(activeRun);
+  const canRun = Boolean(workflow.can_run) && !busy;
+  const isFullUpdate = workflow.id === "full_update";
+  const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
+  return `<div class="processing-workflow-panel">
+    ${notice({
+      tone: "info",
+      title: workflow.label,
+      text: workflow.description || "",
+    })}
+    <section class="report-card processing-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon(WORKFLOW_ICONS[workflow.id] || "terminal", 14)}執行資訊</span>
+        <span class="badge badge-neutral badge-mono">${escapeHtml(workflow.branch || "")}</span>
+      </div>
+      <div class="processing-workflow-command-grid">
+        <span>程式</span><code>${escapeHtml(workflow.program || "—")}</code>
+        <span>Shell／入口</span><code>${escapeHtml(workflow.script || "—")}</code>
+        <span>實際命令</span><code class="processing-workflow-command">${escapeHtml(command || "—")}</code>
+      </div>
+      <div class="processing-workflow-actions">
+        <button class="btn btn-primary btn-sm" type="button"
+          data-processing-action="run-workflow"
+          data-workflow-id="${escapeHtml(workflow.id)}"
+          ${canRun ? "" : "disabled"}>
+          ${icon("play", 14)}<span>${busy ? "執行中" : isFullUpdate ? "執行資料更新" : "執行此流程"}</span>
+        </button>
+        ${
+          activeRun
+            ? `<button class="btn btn-secondary btn-sm processing-stop" type="button"
+                data-processing-action="stop">${icon("x", 14)}<span>停止</span></button>`
+            : ""
+        }
+      </div>
+      <div class="side-card-foot">
+        ${isFullUpdate ? "會依序執行法規／命令下載、判決匯入與可選的 Qdrant 索引。" : "執行結果會寫入共用處理狀態檔，可從處理總覽查看。"}
+      </div>
+    </section>
+    <section class="report-card processing-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("history", 14)}最近執行</span>
+        ${statusBadge(lastRun?.status || "idle")}
+      </div>
+      ${runMetaMarkup(lastRun)}
+    </section>
+  </div>`;
+}
+
+function panelMarkup(snapshot, activeWorkflowId) {
+  if (activeWorkflowId === "overview") {
+    return contentMarkup(snapshot);
+  }
+  const workflows = Array.isArray(snapshot.workflows) ? snapshot.workflows : [];
+  const workflow = workflows.find((item) => item.id === activeWorkflowId);
+  return workflow ? workflowPanelMarkup(workflow) : contentMarkup(snapshot);
+}
+
 export async function render(root) {
   root.innerHTML = `<section class="page processing-page">
     <div class="page-header">
@@ -858,16 +1003,33 @@ export async function render(root) {
         </button>
       </div>
     </div>
-    <div id="processing-root">
-      <div class="processing-loading" role="status">
-        <span class="spinner" aria-hidden="true"></span>
-        <span>正在讀取處理狀態…</span>
-      </div>
+    <div class="status-layout processing-layout">
+      <aside class="status-sidebar processing-sidebar" aria-label="資料處理工作流程">
+        <div id="processing-workflows">
+          <div class="status-sidebar-head">
+            <div class="eyebrow">DATA WORKFLOWS</div>
+            <div class="skeleton skeleton-line" style="width:90px;height:18px"></div>
+          </div>
+          ${Array.from({ length: 7 })
+            .map(
+              () =>
+                `<div class="skeleton skeleton-line" style="width:100%;height:48px;margin-top:8px"></div>`,
+            )
+            .join("")}
+        </div>
+      </aside>
+      <section class="status-panel" id="processing-root">
+        <div class="processing-loading" role="status">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>正在讀取處理狀態…</span>
+        </div>
+      </section>
     </div>
   </section>`;
 
   const page = root.querySelector(".processing-page");
   const content = root.querySelector("#processing-root");
+  const workflowNav = root.querySelector("#processing-workflows");
   const updateButton = root.querySelector("#processing-update");
   const stopButton = root.querySelector("#processing-stop");
   const refreshButton = root.querySelector("#processing-refresh");
@@ -878,6 +1040,8 @@ export async function render(root) {
   let actionBusy = false;
   let lastSnapshot = null;
   let lastMarkup = "";
+  let lastNavMarkup = "";
+  let activeWorkflowId = "overview";
   let timer = null;
 
   const syncControls = (snapshot) => {
@@ -913,7 +1077,12 @@ export async function render(root) {
       const snapshot = await api.processing();
       if (disposed) return;
       lastSnapshot = snapshot;
-      const markup = contentMarkup(snapshot);
+      const navMarkup = workflowNavMarkup(snapshot, activeWorkflowId);
+      if (navMarkup !== lastNavMarkup) {
+        workflowNav.innerHTML = navMarkup;
+        lastNavMarkup = navMarkup;
+      }
+      const markup = panelMarkup(snapshot, activeWorkflowId);
       if (markup !== lastMarkup) {
         content.innerHTML = markup;
         lastMarkup = markup;
@@ -962,6 +1131,26 @@ export async function render(root) {
     }
   };
 
+  const startWorkflow = async (button, workflowId) => {
+    if (actionBusy) return;
+    actionBusy = true;
+    setBusy(button, true, "啟動中…");
+    try {
+      const result = await api.startProcessingWorkflow(workflowId);
+      toast("已啟動工作流程。", "ok", 6000);
+      if (result && result.run_id) {
+        console.info("processing workflow started", result);
+      }
+      await refresh({ silent: true });
+    } catch (error) {
+      toast(error.message || "無法啟動工作流程。", "danger", 7000);
+    } finally {
+      actionBusy = false;
+      setBusy(button, false);
+      if (lastSnapshot) syncControls(lastSnapshot);
+    }
+  };
+
   const stopUpdate = async (button) => {
     if (actionBusy) return;
     actionBusy = true;
@@ -985,7 +1174,11 @@ export async function render(root) {
     const action = button.dataset.processingAction;
     if (action === "refresh") refresh({ silent: false });
     else if (action === "update") startUpdate(button);
-    else if (action === "stop") stopUpdate(button);
+    else if (action === "run-workflow") {
+      const workflowId = button.dataset.workflowId || "";
+      if (workflowId === "full_update") startUpdate(button);
+      else startWorkflow(button, workflowId);
+    } else if (action === "stop") stopUpdate(button);
   };
 
   const onChange = (event) => {
@@ -994,7 +1187,22 @@ export async function render(root) {
     }
   };
 
+  const onWorkflowClick = (event) => {
+    const button = event.target.closest("[data-processing-workflow]");
+    if (!button) return;
+    activeWorkflowId = button.dataset.processingWorkflow || "overview";
+    if (lastSnapshot) {
+      const navMarkup = workflowNavMarkup(lastSnapshot, activeWorkflowId);
+      workflowNav.innerHTML = navMarkup;
+      lastNavMarkup = navMarkup;
+      const markup = panelMarkup(lastSnapshot, activeWorkflowId);
+      content.innerHTML = markup;
+      lastMarkup = markup;
+    }
+  };
+
   page.addEventListener("click", onClick);
+  workflowNav.addEventListener("click", onWorkflowClick);
   if (indexToggle) indexToggle.addEventListener("change", onChange);
 
   await refresh({ silent: false });
@@ -1007,6 +1215,7 @@ export async function render(root) {
     disposed = true;
     if (timer !== null) window.clearInterval(timer);
     page.removeEventListener("click", onClick);
+    workflowNav.removeEventListener("click", onWorkflowClick);
     if (indexToggle) indexToggle.removeEventListener("change", onChange);
   };
 }

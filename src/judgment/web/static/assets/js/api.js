@@ -510,6 +510,13 @@ export const api = {
     });
   },
 
+  startProcessingWorkflow(workflowId) {
+    return request(
+      `/api/processing/workflows/${encodeURIComponent(workflowId)}/run`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
   startProcessingUpdate(index = false) {
     return request("/api/processing/update", {
       method: "POST",

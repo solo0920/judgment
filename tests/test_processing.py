@@ -659,6 +659,47 @@ def test_snapshot_marks_external_import_stages_unavailable(
     )
 
 
+def test_snapshot_excludes_tracked_workflow_child_process(
+    tmp_path: Path, monkeypatch, session_factory
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    settings = _settings(tmp_path)
+    _add_judgment(session_factory, source_archive="202601.rar")
+    store = ProcessingStateStore()
+    run_id = store.start_run(
+        branch="judgment",
+        kind="normalize_courts",
+        title="法院名稱正規化",
+        stages=["postgres"],
+        pid=os.getpid(),
+        meta={"workflow": "normalize_courts", "child_pid": 9001},
+    )
+    child = _process(
+        pid=9001,
+        kind="import",
+        branch="judgment",
+        title="判決 RAR 匯入",
+    )
+    monkeypatch.setattr(
+        processing_module, "_detect_external_processes", lambda: [child]
+    )
+
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+
+    assert snapshot["external_processes"] == []
+    workflow = next(
+        item for item in snapshot["workflows"] if item["id"] == "normalize_courts"
+    )
+    assert workflow["active_run"]["id"] == run_id
+    assert workflow["can_run"] is False
+    assert snapshot["capabilities"]["can_start_workflow"] is False
+
+
 def test_snapshot_blocks_only_index_start_when_external_index_runs(
     tmp_path: Path, monkeypatch, session_factory
 ) -> None:
@@ -737,3 +778,39 @@ def test_manager_refuses_start_when_external_work_is_running(
     with pytest.raises(RuntimeError, match="Qdrant 索引程序"):
         manager.start_update(index=True)
     assert not state_path.exists()
+
+
+def test_processing_snapshot_lists_workflows(processing_client: TestClient) -> None:
+    payload = processing_client.get("/api/processing").json()
+    workflows = {item["id"]: item for item in payload["workflows"]}
+    assert "full_update" in workflows
+    assert "law_download" in workflows
+    assert "judgment_import" in workflows
+    assert "index_versions" in workflows
+    assert workflows["index_versions"]["script"] == "scripts/index_full_task.sh"
+    assert workflows["law_download"]["program"].startswith("judgment-law-download")
+
+
+def test_processing_workflow_endpoint_starts_selected_workflow(
+    processing_client: TestClient, monkeypatch
+) -> None:
+    manager = processing_client.app.state.processing_manager
+    started = []
+
+    def fake_start(workflow_id: str):
+        started.append(workflow_id)
+        return {
+            "status": "started",
+            "workflow": workflow_id,
+            "run_id": "test-run",
+            "pid": 123,
+        }
+
+    monkeypatch.setattr(manager, "start_workflow", fake_start)
+    response = processing_client.post(
+        "/api/processing/workflows/law_download/run"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["workflow"] == "law_download"
+    assert started == ["law_download"]

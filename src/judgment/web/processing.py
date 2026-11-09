@@ -33,6 +33,7 @@ from ..processing_state import (
     stage_seconds,
     state_file_status,
 )
+from ..workflows import workflow_catalog, workflow_definition
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +386,11 @@ def _attach_external_runs(
         and run.get("status") == STATE_RUNNING
         and run.get("pid")
     }
+    tracked_pids.update(
+        int((run.get("meta") or {}).get("child_pid") or 0)
+        for run in runs
+        if isinstance(run, dict) and run.get("status") == STATE_RUNNING
+    )
     external = [
         process
         for process in detected
@@ -572,12 +578,22 @@ def _index_metrics_with_factory(
             "model": settings.embedding_model,
         }
     try:
+        from ..index_versions import active_version
         from ..judgment_index import index_coverage
 
+        active = active_version(
+            session_factory, alias_name=settings.judgment_vector_alias
+        )
+        collection = (
+            active["physical_collection"]
+            if active
+            else settings.judgment_vector_collection
+        )
         coverage = index_coverage(
             session_factory,
-            collection=settings.judgment_vector_collection,
+            collection=collection,
             model=settings.embedding_model,
+            version_id=active["version_id"] if active else None,
         )
         indexed = int(coverage.get("indexed_judgments") or 0)
         total = int(coverage.get("total_judgments") or 0)
@@ -590,6 +606,8 @@ def _index_metrics_with_factory(
             "remaining": remaining,
             "percent": _percent(indexed, total),
             "collection": coverage.get("collection"),
+            "alias": settings.judgment_vector_alias,
+            "version_id": active["version_id"] if active else None,
             "model": coverage.get("model"),
             "latest_indexed_at": coverage.get("latest_indexed_at"),
         }
@@ -1231,8 +1249,23 @@ def build_processing_snapshot(
             }
         )
 
+    workflow_entries = []
+    workflow_runnable = not active_runs and not external_processes
+    for definition in workflow_catalog():
+        workflow_active = _active_run(runs, kind=definition["kind"])
+        workflow_latest = _latest_run(runs, kind=definition["kind"])
+        workflow_entries.append(
+            {
+                **definition,
+                "active_run": _public_run(workflow_active),
+                "last_run": _public_run(workflow_latest),
+                "can_run": bool(workflow_runnable),
+            }
+        )
+
     capabilities = {
         "can_start_update": can_start_update,
+        "can_start_workflow": bool(workflow_runnable),
         "can_start_update_with_index": bool(
             can_start_update and external_index is None
         ),
@@ -1286,6 +1319,7 @@ def build_processing_snapshot(
         "local_archives": local,
         "external_processes": external_processes,
         "branches": branches,
+        "workflows": workflow_entries,
         "active_runs": [_public_run(run) for run in active_runs],
         "recent_runs": [_public_run(run) for run in runs[:10]],
         "archives": archives,
@@ -1378,6 +1412,115 @@ class ProcessingManager:
             ):
                 return run
         return None
+
+    def _active_any(self) -> Optional[Dict[str, Any]]:
+        try:
+            state = self.store.read()
+        except ProcessingStateError:
+            return None
+        for run in state.get("runs") or []:
+            if (
+                isinstance(run, dict)
+                and run.get("status") == STATE_RUNNING
+                and pid_alive(run.get("pid"))
+            ):
+                return run
+        return None
+
+    def start_workflow(self, workflow_id: str) -> Dict[str, Any]:
+        definition = workflow_definition(workflow_id)
+        if definition is None:
+            raise LookupError(f"未知工作流程：{workflow_id}")
+        if definition.mode == "update":
+            return self.start_update(index=False)
+        with self._lock:
+            active = self._active_any()
+            if active is not None:
+                raise RuntimeError(
+                    f"已有處理程序執行中（run {active.get('id')}，PID {active.get('pid')}）。"
+                )
+            external = _detect_external_processes()
+            if external:
+                process = external[0]
+                raise RuntimeError(
+                    f"外部{process.get('title') or '處理程序'}正在執行中"
+                    f"（PID {process.get('pid')}），請等待結束後再啟動。"
+                )
+            run_id = self.store.start_run(
+                branch=definition.branch,
+                kind=definition.kind,
+                title=definition.label,
+                stages=[definition.stage],
+                pid=os.getpid(),
+                meta={
+                    "workflow": definition.id,
+                    "program": definition.program,
+                    "script": definition.script,
+                    "pid_pending": True,
+                },
+                message=f"準備執行 {definition.label}。",
+            )
+            log_dir = self.root / ".run"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            log_path = log_dir / f"workflow_{definition.id}_{stamp}.log"
+            env = os.environ.copy()
+            env["JUDGMENT_PROCESSING_STATE"] = str(self.state_path)
+            env["JUDGMENT_PROCESSING_PARENT"] = run_id
+            command = [
+                sys.executable,
+                "-m",
+                "judgment.workflow_runner",
+                "--workflow",
+                definition.id,
+                "--run-id",
+                run_id,
+            ]
+            log_handle = log_path.open("ab")
+            try:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(self.root),
+                    env=env,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except Exception as exc:
+                log_handle.close()
+                self.store.finish_run(
+                    run_id,
+                    status="failed",
+                    message=f"無法啟動 {definition.label}：{exc.__class__.__name__}: {exc}",
+                )
+                raise RuntimeError(
+                    f"無法啟動 {definition.label}：{exc.__class__.__name__}: {exc}"
+                ) from exc
+            finally:
+                try:
+                    log_handle.close()
+                except OSError:
+                    pass
+            self.store.update_run(
+                run_id,
+                pid=process.pid,
+                meta={
+                    "workflow": definition.id,
+                    "program": definition.program,
+                    "script": definition.script,
+                    "log_path": str(log_path),
+                    "pid_pending": False,
+                },
+                message=f"已啟動 {definition.label}。",
+            )
+            return {
+                "status": "started",
+                "workflow": definition.id,
+                "run_id": run_id,
+                "pid": process.pid,
+                "log_path": str(log_path),
+                "state_path": str(self.state_path),
+            }
 
     def start_update(self, *, index: bool = False) -> Dict[str, Any]:
         with self._lock:
@@ -1482,7 +1625,7 @@ class ProcessingManager:
             }
 
     def stop_update(self) -> Dict[str, Any]:
-        active = self._active_update()
+        active = self._active_any()
         if active is None:
             return {
                 "status": "not_running",
