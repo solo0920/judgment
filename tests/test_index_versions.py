@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
-from judgment.index_versions import recipe_version, rollback_version
+from judgment.index_versions import activate_version, recipe_version, rollback_version
 from judgment.judgment_index import build_index_version, vector_point_id
 from judgment.models import (
     Base,
@@ -284,6 +284,15 @@ def test_build_version_reuses_unchanged_and_embeds_new(tmp_path: Path) -> None:
     )
     assert rolled["version_id"] == 1
     assert store.aliases[settings.judgment_vector_alias] == "judgments_v001"
+
+    reactivated = activate_version(
+        session_factory,
+        store=store,
+        version_id=2,
+        alias_name=settings.judgment_vector_alias,
+    )
+    assert reactivated["version_id"] == 2
+    assert store.aliases[settings.judgment_vector_alias] == "judgments_v002"
 
 
 def test_build_version_does_not_switch_on_validation_failure(

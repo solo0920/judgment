@@ -470,7 +470,7 @@ def activate_version(
         target = session.get(JudgmentIndexVersion, int(version_id))
         if target is None:
             raise LookupError(f"找不到索引版本：{version_id}")
-        if target.status not in {"ready", "active"}:
+        if target.status not in {"ready", "active", "retired"}:
             raise ValueError(
                 f"索引版本 #{version_id} 狀態為 {target.status}，不可啟用"
             )
