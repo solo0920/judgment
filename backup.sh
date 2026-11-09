@@ -188,6 +188,7 @@ JUDGMENT_DATA_DIR="${JUDGMENT_DATA_DIR:-./data/judgments}"
 LAW_DATA_DIR="${LAW_DATA_DIR:-./data/laws}"
 QDRANT_URL="${QDRANT_URL:-http://127.0.0.1:6333}"
 JUDGMENT_VECTOR_COLLECTION="${JUDGMENT_VECTOR_COLLECTION:-judgment_documents}"
+JUDGMENT_VECTOR_ALIAS="${JUDGMENT_VECTOR_ALIAS:-judgments_current}"
 JUDGMENT_PG_SERVICE="${JUDGMENT_PG_SERVICE:-postgres}"
 JUDGMENT_PG_USER="${JUDGMENT_PG_USER:-judgment}"
 JUDGMENT_PG_DB="${JUDGMENT_PG_DB:-judgment}"
@@ -244,6 +245,22 @@ fi
 if [[ "$SKIP_QDRANT" != "1" ]]; then
   if ! curl -fsS --max-time 3 "$QDRANT_URL/collections" >/dev/null 2>&1; then
     die "Qdrant 無法連線：$QDRANT_URL"
+  fi
+  ALIAS_TARGET="$(curl -fsS "$QDRANT_URL/aliases" 2>/dev/null | python3 -c '
+import json,sys
+alias=sys.argv[1]
+try:
+    data=json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+for item in (data.get("result") or {}).get("aliases") or []:
+    if item.get("alias_name")==alias:
+        print(item.get("collection_name") or "")
+        break
+' "$JUDGMENT_VECTOR_ALIAS" || true)"
+  if [[ -n "$ALIAS_TARGET" ]]; then
+    JUDGMENT_VECTOR_COLLECTION="$ALIAS_TARGET"
+    printf 'Alias %s -> %s\n' "$JUDGMENT_VECTOR_ALIAS" "$JUDGMENT_VECTOR_COLLECTION"
   fi
   curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION" >/dev/null 2>&1 \
     || die "找不到 Qdrant collection：$JUDGMENT_VECTOR_COLLECTION（尚未建立索引時可用 --skip-qdrant）"
@@ -370,7 +387,7 @@ export TARGET_DIR PROJECT_ROOT JUDGMENT_DATA_ABS LAW_DATA_ABS
 export JUDGMENT_BYTES LAW_BYTES TOTAL_BYTES
 export JUDGMENT_PG_SERVICE JUDGMENT_PG_USER JUDGMENT_PG_DB
 export PG_DUMP_REL PG_DUMP_SHA
-export QDRANT_URL JUDGMENT_VECTOR_COLLECTION
+export QDRANT_URL JUDGMENT_VECTOR_COLLECTION JUDGMENT_VECTOR_ALIAS
 export QDRANT_SNAPSHOT_REL QDRANT_SNAPSHOT_SHA QDRANT_POINTS QDRANT_COLLECTION_SNAPSHOT
 export GIT_COMMIT GIT_BRANCH
 export SKIP_DATA SKIP_POSTGRES SKIP_QDRANT
@@ -413,6 +430,7 @@ manifest = {
     "qdrant": {
         "url": os.environ["QDRANT_URL"],
         "collection": os.environ["JUDGMENT_VECTOR_COLLECTION"],
+        "alias_name": os.environ.get("JUDGMENT_VECTOR_ALIAS", "judgments_current"),
         "snapshot": os.environ.get("QDRANT_SNAPSHOT_REL", ""),
         "snapshot_name": os.environ.get("QDRANT_COLLECTION_SNAPSHOT", ""),
         "sha256": os.environ.get("QDRANT_SNAPSHOT_SHA", ""),
@@ -457,7 +475,7 @@ cat > "$TARGET_DIR/USAGE.md" <<'EOF'
 
 - `pyproject.toml`、`docker-compose.yml`、`restore.sh`
 - `JUDGMENT_DATA_DIR`、`LAW_DATA_DIR` 是否存在
-- Docker daemon、PostgreSQL、Qdrant collection
+- Docker daemon、PostgreSQL、Qdrant alias／collection
 - 目標目錄可寫入、為空、磁碟空間足夠
 - 是否有索引／匯入／下載程序仍在執行
 
@@ -508,7 +526,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 ## 重要
 
-- `judgment_vector_index` 必須與 Qdrant collection 一起還原。
+- `judgment_vector_index` 必須與 Qdrant collection／alias 一起還原。
 - 若跳過 Qdrant，重新索引前請先清空 `judgment_vector_index`。
 - `config/.env` 可能含資料庫密碼，請加密保存備份。
 - 還原後若要接續索引，執行 `./scripts/index_full_task.sh`。

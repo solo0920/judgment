@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .. import __version__
 from ..config import Settings
 from ..embeddings import ollama_model_available, ollama_models_detail
+from ..index_versions import active_version
 from ..judgment_index import index_coverage
 from ..models import (
     DownloadRun,
@@ -369,7 +370,14 @@ def build_status(
     postgres = _postgres_metrics(session_factory)
     parquet = _parquet_metrics(data_dir)
 
-    qdrant_collection = settings.judgment_vector_collection
+    active_index = active_version(
+        session_factory, alias_name=settings.judgment_vector_alias
+    )
+    qdrant_collection = (
+        active_index["physical_collection"]
+        if active_index
+        else settings.judgment_vector_collection
+    )
     embedding_model = settings.embedding_model
     qdrant = _qdrant_metrics(
         qdrant_collection,
@@ -387,6 +395,7 @@ def build_status(
             session_factory,
             collection=qdrant_collection,
             model=embedding_model,
+            version_id=active_index["version_id"] if active_index else None,
         )
     except Exception:
         coverage = {
@@ -477,6 +486,16 @@ def build_status(
             "judgment_indexed_count": coverage["indexed_judgments"],
             "judgment_index_remaining": coverage["remaining_judgments"],
             "judgment_vector_collection": coverage["collection"],
+            "judgment_vector_alias": settings.judgment_vector_alias,
+            "judgment_vector_version_id": (
+                active_index["version_id"] if active_index else None
+            ),
+            "judgment_vector_version_status": (
+                active_index["status"] if active_index else "legacy"
+            ),
+            "judgment_vector_previous_version_id": (
+                active_index.get("previous_version_id") if active_index else None
+            ),
             "judgment_vector_model": coverage["model"],
             "judgment_vector_points": qdrant.get("points_count"),
             "judgment_indexed_at": coverage["latest_indexed_at"],

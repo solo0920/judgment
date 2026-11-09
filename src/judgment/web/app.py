@@ -39,6 +39,15 @@ from ..performance_test import (
     list_test_runs,
 )
 from ..rag import answer_question
+from ..vector_store import QdrantStore
+from ..index_versions import (
+    activate_version,
+    get_version,
+    list_versions,
+    reconcile_alias,
+    rollback_version,
+    validate_version,
+)
 from ..runtime_settings import get_test_mode, set_test_mode
 from .catalog import build_catalog
 from .performance import performance_options, query_performance
@@ -111,6 +120,7 @@ def _incoming_request_id(request: Request) -> str:
 PERFORMANCE_TARGETS = {
     "/api/status": ("服務狀態", "judgment.web.status.build_status"),
     "/api/system-usage": ("系統資源使用", "judgment.web.system_usage.build_system_usage"),
+    "/api/index-versions": ("索引版本", "judgment.web.app.index_versions"),
     "/api/catalog": ("資料庫 catalog", "judgment.web.catalog.build_catalog"),
     "/api/query": ("資料查詢", "judgment.web.query.run_query"),
     "/api/law": ("法規明細", "judgment.web.query.get_law_detail"),
@@ -287,6 +297,83 @@ def create_app(
                 data_dir=app.state.data_dir,
                 settings=settings,
             )
+
+    @app.get("/api/index-versions")
+    def index_versions() -> Dict[str, Any]:
+        return {
+            "versions": list_versions(app.state.session_factory),
+            "alias": settings.judgment_vector_alias,
+        }
+
+    @app.get("/api/index-versions/{version_id}")
+    def index_version_detail(version_id: int) -> Dict[str, Any]:
+        version = get_version(app.state.session_factory, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="找不到索引版本")
+        return {"version": version}
+
+    @app.post("/api/index-versions/{version_id}/validate")
+    def index_version_validate(version_id: int) -> Dict[str, Any]:
+        version = get_version(app.state.session_factory, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="找不到索引版本")
+        store = QdrantStore(settings.qdrant_url, api_key=settings.qdrant_api_key)
+        try:
+            return {
+                "validation": validate_version(
+                    app.state.session_factory, store=store, version=version
+                )
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"索引驗證失敗：{exc}") from exc
+
+    @app.post("/api/index-versions/{version_id}/activate")
+    def index_version_activate(version_id: int) -> Dict[str, Any]:
+        store = QdrantStore(settings.qdrant_url, api_key=settings.qdrant_api_key)
+        try:
+            return {
+                "version": activate_version(
+                    app.state.session_factory,
+                    store=store,
+                    version_id=version_id,
+                    alias_name=settings.judgment_vector_alias,
+                )
+            }
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"索引切換失敗：{exc}") from exc
+
+    @app.post("/api/index-versions/rollback")
+    def index_version_rollback() -> Dict[str, Any]:
+        store = QdrantStore(settings.qdrant_url, api_key=settings.qdrant_api_key)
+        try:
+            return {
+                "version": rollback_version(
+                    app.state.session_factory,
+                    store=store,
+                    alias_name=settings.judgment_vector_alias,
+                )
+            }
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"索引回滾失敗：{exc}") from exc
+
+    @app.get("/api/index-alias/reconcile")
+    def index_version_reconcile(repair: bool = False) -> Dict[str, Any]:
+        store = QdrantStore(settings.qdrant_url, api_key=settings.qdrant_api_key)
+        try:
+            return reconcile_alias(
+                app.state.session_factory,
+                store=store,
+                alias_name=settings.judgment_vector_alias,
+                repair=repair,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"索引狀態檢查失敗：{exc}") from exc
 
     @app.get("/api/system-usage")
     def system_usage() -> Dict[str, Any]:

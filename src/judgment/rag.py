@@ -12,6 +12,7 @@ from sqlalchemy import select
 from .config import Settings
 from .embeddings import EmbeddingError, OllamaEmbedder
 from .judgment_index import index_coverage
+from .index_versions import active_version
 from .law_rag import (
     build_insurance_responsibility_framework,
     extract_stat_entity,
@@ -161,9 +162,9 @@ def _fetch_documents(session_factory, jids: Sequence[str]) -> Dict[str, Judgment
 @traced(
     "rag.search",
     module=__name__,
-    params_fn=lambda *, question, settings, **_: {
+    params_fn=lambda *, question, settings, collection=None, **_: {
         "question_length": len(question or ""),
-        "collection": settings.judgment_vector_collection,
+        "collection": collection or settings.judgment_vector_collection,
         "embedding_model": settings.embedding_model,
         "top_k": settings.rag_top_k,
         "score_threshold": settings.rag_score_threshold,
@@ -175,7 +176,9 @@ def _search_hits(
     question: str,
     store: QdrantStore,
     embedder: OllamaEmbedder,
+    collection: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    collection = collection or settings.judgment_vector_collection
     with trace_segment(
         "rag.embed_query",
         module=__name__,
@@ -192,13 +195,13 @@ def _search_hits(
         module=__name__,
         function="QdrantStore.search",
         params={
-            "collection": settings.judgment_vector_collection,
+            "collection": collection,
             "limit": settings.rag_top_k,
             "score_threshold": settings.rag_score_threshold,
         },
     ):
         hits = store.search(
-            settings.judgment_vector_collection,
+            collection,
             vector,
             limit=max(1, settings.rag_top_k),
             score_threshold=settings.rag_score_threshold,
@@ -567,7 +570,14 @@ def answer_question(
         except Exception:
             logger.debug("partial answer callback failed", exc_info=True)
 
-    collection = settings.judgment_vector_collection
+    active_index = active_version(
+        session_factory, alias_name=settings.judgment_vector_alias
+    )
+    collection = (
+        active_index["physical_collection"]
+        if active_index
+        else settings.judgment_vector_collection
+    )
     try:
         with trace_segment(
             "rag.coverage",
@@ -579,6 +589,7 @@ def answer_question(
                 session_factory,
                 collection=collection,
                 model=settings.embedding_model,
+                version_id=active_index["version_id"] if active_index else None,
             )
     except Exception:
         coverage = {
@@ -600,6 +611,14 @@ def answer_question(
         settings.embedding_model,
         timeout=settings.embedding_timeout_seconds,
     )
+    search_collection = collection
+    if settings.qdrant_url:
+        try:
+            alias_target = store.get_alias(settings.judgment_vector_alias)
+        except Exception:
+            alias_target = None
+        if alias_target:
+            search_collection = settings.judgment_vector_alias
 
     law_sources: List[Dict[str, Any]] = []
     law_stats: Dict[str, Any] = {}
@@ -740,9 +759,9 @@ def answer_question(
                 "rag.qdrant_precheck",
                 module=__name__,
                 function="QdrantStore.collection_info",
-                params={"collection": collection},
+                params={"collection": search_collection},
             ):
-                collection_info = store.collection_info(collection)
+                collection_info = store.collection_info(search_collection)
         except QdrantError as exc:
             qdrant_available = False
             retrieval = {"status": "unavailable", "hits": 0, "law_hits": len(law_sources)}
@@ -765,7 +784,7 @@ def answer_question(
                         question=question,
                         started=started,
                         notice=(
-                            f"Qdrant collection「{collection}」尚未建立，"
+                            f"Qdrant collection「{search_collection}」尚未建立，"
                             "請先執行 judgment-index-vectors。"
                         ),
                         retrieval=retrieval,
@@ -803,6 +822,7 @@ def answer_question(
                 question=question,
                 store=store,
                 embedder=embedder,
+                collection=search_collection,
             )
             retrieval["law_hits"] = len(law_sources)
         except (EmbeddingError, QdrantError) as exc:

@@ -7,6 +7,7 @@ MODE="${1:-run}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
 MAX_CHARS="${MAX_CHARS:-1600}"
 RECREATE="${RECREATE:-0}"
+AUTO_ACTIVATE="${AUTO_ACTIVATE:-1}"
 LOG_DIR=".run"
 export MAX_CHARS
 
@@ -39,7 +40,7 @@ if (( TOTAL == 0 )); then
   exit 1
 fi
 
-if [[ "$RECREATE" == "1" ]]; then
+if [[ "${FORCE:-0}" == "1" ]]; then
   INDEXED=0
   REMAINING="$TOTAL"
 fi
@@ -59,18 +60,22 @@ if (( CAP < 1 )); then
 fi
 
 args=(
+  --build-version
   --limit "$CAP"
   --batch-size "$BATCH_SIZE"
   --max-chars "$MAX_CHARS"
 )
+if [[ "$AUTO_ACTIVATE" == "1" ]]; then
+  args+=(--activate)
+fi
 if [[ "$RECREATE" == "1" ]]; then
-  args+=(--recreate)
+  args+=(--no-resume)
 fi
 
 if [[ "${PLAN_ONLY:-0}" == "1" ]]; then
   percent="$(awk -v i="$INDEXED" -v t="$TOTAL" 'BEGIN { printf "%.1f", (t ? 100 * i / t : 0) }')"
   echo "偵測結果：目前 ${INDEXED} / ${TOTAL}（${percent}%），剩餘 ${REMAINING} 筆。"
-  echo "本次上限：${CAP} 筆；batch ${BATCH_SIZE}；max_chars ${MAX_CHARS}；recreate=${RECREATE}。"
+  echo "本次上限：${CAP} 筆；batch ${BATCH_SIZE}；max_chars ${MAX_CHARS}；auto_activate=${AUTO_ACTIVATE}；no_resume=${RECREATE}。"
   echo "指令：uv run judgment-index-vectors ${args[*]}"
   exit 0
 fi
@@ -86,7 +91,7 @@ INTERRUPTED=0
 trap 'INTERRUPTED=1' INT
 
 {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] auto run start (limit=${CAP}, batch=${BATCH_SIZE}, max_chars=${MAX_CHARS}, recreate=${RECREATE})"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] auto run start (limit=${CAP}, batch=${BATCH_SIZE}, max_chars=${MAX_CHARS}, auto_activate=${AUTO_ACTIVATE}, no_resume=${RECREATE})"
   echo "本次待索引 ${CAP} 筆；目前 ${INDEXED} / ${TOTAL}（$(awk -v i="$INDEXED" -v t="$TOTAL" 'BEGIN { printf "%.1f", (t ? 100 * i / t : 0) }')%），剩餘 ${REMAINING} 筆。"
   echo "日誌：${LOG}"
   status

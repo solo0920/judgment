@@ -55,6 +55,11 @@ class Settings:
     qdrant_url: str = ""
     qdrant_api_key: str = ""
     judgment_vector_collection: str = "judgment_documents"
+    judgment_vector_alias: str = "judgments_current"
+    judgment_vector_collection_prefix: str = "judgments"
+    judgment_embedding_version: str = "bge-m3@v1"
+    judgment_index_recipe_version: str = "doc-head-tail-v1"
+    judgment_point_id_version: str = "jid-uuid5-v1"
     embedding_url: str = ""
     embedding_model: str = "bge-m3"
     embedding_timeout_seconds: float = 120.0
@@ -112,6 +117,26 @@ class Settings:
                 "JUDGMENT_VECTOR_COLLECTION", "judgment_documents"
             ).strip()
             or "judgment_documents",
+            judgment_vector_alias=os.getenv(
+                "JUDGMENT_VECTOR_ALIAS", "judgments_current"
+            ).strip()
+            or "judgments_current",
+            judgment_vector_collection_prefix=os.getenv(
+                "JUDGMENT_VECTOR_COLLECTION_PREFIX", "judgments"
+            ).strip()
+            or "judgments",
+            judgment_embedding_version=os.getenv(
+                "JUDGMENT_EMBEDDING_VERSION", "bge-m3@v1"
+            ).strip()
+            or "bge-m3@v1",
+            judgment_index_recipe_version=os.getenv(
+                "JUDGMENT_INDEX_RECIPE_VERSION", "doc-head-tail-v1"
+            ).strip()
+            or "doc-head-tail-v1",
+            judgment_point_id_version=os.getenv(
+                "JUDGMENT_POINT_ID_VERSION", "jid-uuid5-v1"
+            ).strip()
+            or "jid-uuid5-v1",
             embedding_url=os.getenv("EMBEDDING_URL", "").rstrip("/"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "bge-m3").strip()
             or "bge-m3",
@@ -140,6 +165,11 @@ class Settings:
         qdrant_url: str | None = None,
         qdrant_api_key: str | None = None,
         judgment_vector_collection: str | None = None,
+        judgment_vector_alias: str | None = None,
+        judgment_vector_collection_prefix: str | None = None,
+        judgment_embedding_version: str | None = None,
+        judgment_index_recipe_version: str | None = None,
+        judgment_point_id_version: str | None = None,
         embedding_url: str | None = None,
         embedding_model: str | None = None,
         llm_url: str | None = None,
@@ -161,6 +191,20 @@ class Settings:
             changes["qdrant_api_key"] = qdrant_api_key
         if judgment_vector_collection:
             changes["judgment_vector_collection"] = judgment_vector_collection
+        if judgment_vector_alias:
+            changes["judgment_vector_alias"] = judgment_vector_alias
+        if judgment_vector_collection_prefix:
+            changes["judgment_vector_collection_prefix"] = (
+                judgment_vector_collection_prefix
+            )
+        if judgment_embedding_version:
+            changes["judgment_embedding_version"] = judgment_embedding_version
+        if judgment_index_recipe_version:
+            changes["judgment_index_recipe_version"] = (
+                judgment_index_recipe_version
+            )
+        if judgment_point_id_version:
+            changes["judgment_point_id_version"] = judgment_point_id_version
         if embedding_url is not None:
             changes["embedding_url"] = embedding_url.rstrip("/")
         if embedding_model:

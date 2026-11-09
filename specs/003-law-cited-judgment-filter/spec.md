@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Status**: Partially implemented (filter + PostgreSQL import; review queue, aliases and index switching pending)
+**Status**: Partially implemented (filter, PostgreSQL import, versioned Qdrant collections and atomic alias switching; review queue and law alias maintenance pending)
 
 **Input**: 使用者提供之需求（原文）：
 
@@ -197,3 +197,16 @@
 - 每次匯入寫入 `judgment_import_runs`，包含掃描數、命中數、寫入數、引用數、耗時與錯誤。
 - 支援 `--dry-run`、`--limit`、`--archive`、`--batch-size` 與 `--replace`。
 - 尚未實作：人工複核佇列、法規別名維護、試跑／正式索引原子切換、Qdrant 判決索引與完整篩選效能紀錄。
+
+## Implementation Note (2026-11-09): 版本化索引與 Alias
+
+已補上 FR-023 的第一階段能力：
+
+- Qdrant 使用 `judgments_vNNN` 實體 collection，正式查詢使用 `judgments_current` alias。
+- 新版本建置時不修改 active collection；完成驗證後才以 Qdrant `POST /collections/aliases` 原子切換。
+- `judgment_index_versions` 記錄版本、collection、alias、embedding model／version、維度、來源 snapshot、驗證結果、狀態、前後版本與時間。
+- `judgment_vector_index` 改為 `(jid, version_id)` 複合主鍵，並記錄 `index_text_hash`、`payload_hash`、`source_year`、`source_updated_at`。
+- 相同 embedding model／dimension／index recipe 時，新版本會複製舊 collection 的 points，只重新 embedding 新增、異動或 metadata 變更的判決；已移除判決會從新 collection 刪除。
+- 驗證包含 PostgreSQL per-version count、Qdrant exact count、dimension 與 collection 可讀性；驗證失敗不得切換。
+- 保留 active＋前一個成功版本，支援 alias rollback；第一階段不自動刪除舊 collection。
+- 仍待完成：人工複核佇列、法規別名維護、正式 UI 管理介面、自動 retention、完整篩選效能紀錄。

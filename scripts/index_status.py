@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from judgment.config import Settings
 from judgment.db import build_engine, build_session_factory
+from judgment.index_versions import active_version
 
 RATES = {1600: 7.7, 1200: 9.6, 1000: 10.9, 800: 12.5, 600: 15.0}
 
@@ -23,6 +24,15 @@ def index_counts() -> Dict[str, Any]:
     engine = build_engine(settings.database_url)
     factory = build_session_factory(engine)
     try:
+        active = active_version(
+            factory, alias_name=settings.judgment_vector_alias
+        )
+        collection = (
+            active["physical_collection"]
+            if active
+            else settings.judgment_vector_collection
+        )
+        version_id = active["version_id"] if active else None
         with factory() as session:
             total = session.execute(
                 text(
@@ -30,19 +40,31 @@ def index_counts() -> Dict[str, Any]:
                     "WHERE full_text IS NOT NULL AND full_text <> ''"
                 )
             ).scalar_one()
-            indexed = session.execute(
-                text(
-                    "SELECT count(*) FROM judgment_documents d "
-                    "JOIN judgment_vector_index v ON v.jid = d.jid "
-                    "WHERE d.full_text IS NOT NULL AND d.full_text <> '' "
-                    "AND v.collection = :collection AND v.model = :model "
-                    "AND v.content_hash = d.content_hash"
-                ),
-                {
-                    "collection": settings.judgment_vector_collection,
-                    "model": settings.embedding_model,
-                },
-            ).scalar_one()
+            if version_id is not None:
+                indexed = session.execute(
+                    text(
+                        "SELECT count(*) FROM judgment_documents d "
+                        "JOIN judgment_vector_index v ON v.jid = d.jid "
+                        "WHERE d.full_text IS NOT NULL AND d.full_text <> '' "
+                        "AND v.version_id = :version_id "
+                        "AND v.content_hash = d.content_hash"
+                    ),
+                    {"version_id": version_id},
+                ).scalar_one()
+            else:
+                indexed = session.execute(
+                    text(
+                        "SELECT count(*) FROM judgment_documents d "
+                        "JOIN judgment_vector_index v ON v.jid = d.jid "
+                        "WHERE d.full_text IS NOT NULL AND d.full_text <> '' "
+                        "AND v.collection = :collection AND v.model = :model "
+                        "AND v.content_hash = d.content_hash"
+                    ),
+                    {
+                        "collection": collection,
+                        "model": settings.embedding_model,
+                    },
+                ).scalar_one()
     finally:
         engine.dispose()
 

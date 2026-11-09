@@ -252,15 +252,69 @@ class JudgmentDocument(Base):
     )
 
 
+class JudgmentIndexVersion(Base):
+    __tablename__ = "judgment_index_versions"
+
+    version_id = Column(Integer, primary_key=True, autoincrement=True)
+    physical_collection = Column(String(128), nullable=False, unique=True, index=True)
+    alias_name = Column(String(128), nullable=False, default="judgments_current", index=True)
+    build_mode = Column(String(32), nullable=False, default="full")
+    embedding_model = Column(String(128), nullable=False, default="")
+    embedding_version = Column(String(128), nullable=False, default="")
+    embedding_dimension = Column(Integer, nullable=False, default=0)
+    index_recipe_version = Column(String(128), nullable=False, default="")
+    point_id_version = Column(String(64), nullable=False, default="jid-uuid5-v1")
+    document_count = Column(Integer, nullable=False, default=0)
+    indexed_count = Column(Integer, nullable=False, default=0)
+    source_snapshot = Column(JSON, nullable=False, default=dict)
+    validation_result = Column(JSON, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="building", index=True)
+    previous_version_id = Column(
+        Integer,
+        ForeignKey("judgment_index_versions.version_id"),
+        nullable=True,
+    )
+    last_indexed_id = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    validated_at = Column(DateTime(timezone=True), nullable=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_judgment_index_versions_alias_status",
+            "alias_name",
+            "status",
+        ),
+        Index("ix_judgment_index_versions_created", "created_at"),
+    )
+
+
 class JudgmentVectorIndex(Base):
     __tablename__ = "judgment_vector_index"
 
     jid = Column(String(255), primary_key=True)
+    version_id = Column(
+        Integer,
+        ForeignKey("judgment_index_versions.version_id"),
+        primary_key=True,
+    )
     collection = Column(String(128), nullable=False, default="")
     model = Column(String(128), nullable=False, default="")
+    embedding_version = Column(String(128), nullable=False, default="")
+    index_recipe_version = Column(String(128), nullable=False, default="")
+    source_year = Column(String(8), nullable=False, default="")
     content_hash = Column(String(64), nullable=False, default="")
+    index_text_hash = Column(String(64), nullable=False, default="")
+    payload_hash = Column(String(64), nullable=False, default="")
     dimensions = Column(Integer, nullable=False, default=0)
+    source_updated_at = Column(DateTime(timezone=True), nullable=True)
     indexed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_judgment_vector_index_version", "version_id"),
+    )
 
 
 class PerformanceRecord(Base):

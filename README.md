@@ -130,7 +130,7 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 
 - `data/`：判決 RAR、原始判決 Parquet、法規／命令原始資料
 - `postgres/judgment.dump`：`pg_dump -Fc`，含判決、法規 metadata 與 `judgment_vector_index`
-- `qdrant/`：`judgment_documents` collection snapshot
+- `qdrant/`：`judgments_current` alias 指向的 active collection snapshot；manifest 同時記錄 alias 與 physical collection。若當時 alias 不存在，才使用 `JUDGMENT_VECTOR_COLLECTION`。
 - `config/`：`.env`、`docker-compose.yml`、`pyproject.toml`、`uv.lock`
 - `manifest.json`、checksums、`restore.sh` 與 `USAGE.md`（兩個腳本的使用說明）
 
@@ -161,7 +161,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 可用 `--dry-run` 先檢查備份內容與目標路徑。`restore.sh` 會覆蓋 PostgreSQL schema 與 Qdrant collection，執行前會要求輸入 `YES` 確認；自動化環境可加 `--yes`。
 
-> PostgreSQL 的 `judgment_vector_index` 必須與 Qdrant collection 一起還原。若只還原 PostgreSQL、Qdrant 是空的，索引器會誤以為部分索引已完成；此時必須先 `DELETE FROM judgment_vector_index;` 再重新索引。若只還原 Qdrant、PostgreSQL 是空的，則會重新 embedding 全部判決。
+> PostgreSQL 的 `judgment_vector_index` 必須與 Qdrant collection 一起還原。若只還原 PostgreSQL、Qdrant 是空的，索引器會誤以為部分索引已完成；此時必須先 `DELETE FROM judgment_vector_index;` 再重新索引。若只還原 Qdrant、PostgreSQL 是空的，則會重新 embedding 全部判決。還原時 `restore.sh` 會依 manifest 的 alias mapping 重建 `judgments_current`。
 
 以目前資料量估算，完整備份約需 16–18 GB 以上空間（`data/` 約 13 GB、PostgreSQL dump 約 2 GB、Qdrant snapshot 約 1.5 GB，索引越大會再增加）；建議使用 32 GB 以上的 USB，並加密保存，因為 `config/.env` 可能包含資料庫密碼。
 
@@ -187,7 +187,11 @@ cd /Volumes/USB/judgment-backup-20261108
 | `PERFORMANCE_RETENTION_DAYS` | `90` | 效能紀錄保留天數；實際清理時不會低於 90 天 |
 | `QDRANT_URL` | 空 | Qdrant 連線位址；`.env.example` 本機預設 `http://127.0.0.1:6333` |
 | `QDRANT_API_KEY` | 空 | Qdrant API key（本機不需要） |
-| `JUDGMENT_VECTOR_COLLECTION` | `judgment_documents` | 判決文件級向量 collection |
+| `JUDGMENT_VECTOR_COLLECTION` | `judgment_documents` | 判決文件級向量 collection（legacy 實體名稱） |
+| `JUDGMENT_VECTOR_ALIAS` | `judgments_current` | 正式查詢使用的 Qdrant alias |
+| `JUDGMENT_VECTOR_COLLECTION_PREFIX` | `judgments` | 版本化實體 collection 前綴，例如 `judgments_v002` |
+| `JUDGMENT_EMBEDDING_VERSION` | `bge-m3@v1` | 向量重用指紋的一部分；模型或前處理改變時必須更新 |
+| `JUDGMENT_INDEX_RECIPE_VERSION` | `doc-head-tail-v1` | index text 規則版本；會自動附加 max_chars |
 | `EMBEDDING_URL` | 空 | Ollama API 位址；本機預設 `http://127.0.0.1:11434` |
 | `EMBEDDING_MODEL` | `bge-m3` | 判決與查詢使用的 embedding 模型（1024 維） |
 | `EMBEDDING_TIMEOUT_SECONDS` | `120` | Embedding 請求逾時 |
@@ -431,6 +435,11 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/health` | 存活檢查，回傳版本。 |
 | `GET` | `/api/status` | 服務狀態、資料筆數、架構、最近版本與下載執行。 |
 | `GET` | `/api/system-usage` | 主機 CPU／RAM／Swap、Docker 容器與 system df、前端／後端程式大小、PostgreSQL／Qdrant volume 與資料庫容量、Parquet 容量、磁碟空間與元件合計。 |
+| `GET` | `/api/index-versions` | 列出索引版本、active alias 與版本狀態。 |
+| `POST` | `/api/index-versions/{id}/validate` | 驗證指定版本（count、dimension、collection）。 |
+| `POST` | `/api/index-versions/{id}/activate` | 原子切換 alias 到指定版本。 |
+| `POST` | `/api/index-versions/rollback` | 將 alias 切回上一個成功版本。 |
+| `GET` | `/api/index-alias/reconcile` | 比對 Qdrant alias 與 PostgreSQL active 版本，可加 `?repair=true`。 |
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
 | `POST` | `/api/query` | 執行唯讀查詢並回傳摘要、分布、查詢語句、資料列與分頁資訊。 |
@@ -834,6 +843,45 @@ uv run judgment-index-vectors --recreate --batch-size 16
 - 狀態頁與 RAG 側欄會顯示「已索引／判決總數／索引覆蓋率／collection points」；未建立 collection 或服務離線時會明確標示，不以其他數字代替。
 - 狀態頁左側提供分類 sidebar；「系統資料使用」分頁呼叫 `GET /api/system-usage`，顯示主機 CPU／RAM／Swap、Docker 容器 CPU／RAM／Net I/O／Block I/O／PIDs、Docker images／containers／volumes／build cache、PostgreSQL 資料庫與前 6 大資料表容量、Qdrant collection／points／segments，以及磁碟 total／used／free／百分比。硬碟使用組成另列前端、後端、Docker 映像／容器／快取、PostgreSQL volume、Qdrant volume、Parquet（法規＋判決）與 Judgment 元件合計，並顯示目前 HDD 已使用量。
 
+### 版本化索引與 Qdrant Alias
+
+正式索引改用 Blue-Green collection：
+
+```text
+judgments_v001
+judgments_v002
+judgments_current -> 目前正式版本
+```
+
+新版本建置期間不修改 active collection；完成驗證後才以 Qdrant `POST /collections/aliases` 原子切換。PostgreSQL `judgment_index_versions` 保存版本、physical collection、alias、embedding model／version、維度、來源 snapshot、驗證結果、前後版本與時間；`judgment_vector_index` 使用 `(jid, version_id)` 複合主鍵。
+
+```bash
+# 將現有 judgment_documents 登記為 active 版本並建立 alias（不重新 embedding）
+uv run judgment-index-vectors --bootstrap
+
+# 建立新版本；相同 model／recipe 時複製舊 points，只 embedding 差異資料
+uv run judgment-index-vectors --build-version
+
+# 驗證後啟用
+uv run judgment-index-vectors --validate-version 3
+uv run judgment-index-vectors --activate-version 3
+
+# 建置並在驗證通過後自動切換
+uv run judgment-index-vectors --build-version --activate
+
+# 查看版本、回滾、檢查 alias 與 PostgreSQL 是否一致
+uv run judgment-index-vectors --list-versions
+uv run judgment-index-vectors --rollback
+curl "http://127.0.0.1:9200/api/index-versions"
+curl "http://127.0.0.1:9200/api/index-alias/reconcile"
+```
+
+- 相容條件：相同 `JUDGMENT_EMBEDDING_VERSION`、`JUDGMENT_INDEX_RECIPE_VERSION`、embedding model、維度與 point ID 規則。
+- 增量重用的指紋包含 `content_hash`、`index_text_hash`、`payload_hash`、`source_updated_at`；metadata-only 變更也會重新 embedding。
+- 已刪除或不再符合資格的判決會從新 collection 刪除。
+- 驗證失敗不得切換；第一階段保留 active＋前一個成功版本，不自動刪除舊 collection。
+- `JUDGMENT_VECTOR_ALIAS` 預設 `judgments_current`，`JUDGMENT_VECTOR_COLLECTION_PREFIX` 預設 `judgments`。
+
 #### 全量索引：自動接續
 
 索引腳本不再分五次；每次執行都會先查詢 PostgreSQL，算出尚未索引的判決筆數，再從那裡開始：
@@ -843,10 +891,11 @@ uv run judgment-index-vectors --recreate --batch-size 16
 ./scripts/index_full_task.sh status   # 只顯示進度，不執行索引
 ```
 
-- 執行中按 `Ctrl-C` 可中止；下次再執行 `./scripts/index_full_task.sh` 會重新偵測剩餘筆數，已完成的判決不會重複 embedding。
+- 執行中按 `Ctrl-C` 可中止；下次再執行 `./scripts/index_full_task.sh` 會接續同一個 building 版本，已完成的判決不會重複 embedding。
 - `LIMIT=2000 ./scripts/index_full_task.sh` 可限制本次最多索引筆數，適合測試。
 - `PLAN_ONLY=1 ./scripts/index_full_task.sh` 只顯示偵測到的剩餘筆數與即將執行的指令，不會啟動索引。
-- `RECREATE=1 ./scripts/index_full_task.sh` 會先刪除 collection 與索引紀錄，從 0 重建；可搭配 `MAX_CHARS=1000` 等設定。
+- `AUTO_ACTIVATE=0 ./scripts/index_full_task.sh` 建置完成後只標記 ready，不自動切換 alias。
+- `FORCE=1 ./scripts/index_full_task.sh` 即使目前 coverage 100% 仍建立新版本；`RECREATE=1` 會忽略既有 building 版本，但不會刪除 active collection。
 - `BATCH_SIZE`、`MAX_CHARS` 仍可用環境變數覆寫。
 - 日誌寫入 `.run/index_full_task_<timestamp>.log`，`.run/index_full_task.log` 指向最新一份。
 - 執行中會在 terminal 顯示 10 行進度條：每行代表 10%，每行 100 個字元，每個字元代表 0.1%，合計 1,000 個字元 = 100%。例如：
@@ -940,15 +989,15 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：130 passed（含靜態資源、服務狀態、系統資源使用、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：133 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
 - 判決匯入：24 個月份共掃描 2,485,151 筆（既有 8 個月 + 新增 16 個月），命中 99 項金融法規清單並寫入 738,743 筆判決、1,578,718 筆引用；`judgment_documents` 約 4.4 GB。新增 16 個月份掃描 1,655,684 筆、寫入 494,413 筆，耗時 858.6 秒。
 - 原始判決 Parquet：24 個壓縮檔共 2,485,151 筆，約 6.2 GB；以 `jid` filter 單筆讀取後解析 `raw_json`，點擊 RAG 引用卡內容可開啟完整判決 dialog，並保留 PDF 連結。
 - 判決法院正規化：738,743 筆全部有 `court_normalized`，對應 37 個標準法院，0 筆未解析、原始 `court` 保留。
-- 判決向量索引：以 `--stride 24` 建立跨語料抽樣索引；本次新增 20,601 points（batch 128、1,024 維、`bge-m3`），加上既有 10,372 points，Qdrant `judgment_documents` 與 PostgreSQL `judgment_vector_index` 共 30,973 筆，coverage 30,973 / 738,743＝4.2%，新增索引耗時 44.3 分鐘。依本次實測 7.7 points/s 推算，剩餘 707,770 筆完整索引約需 25–27 小時，未在本次同步執行。
-- 抽樣索引的限制：一般 RAG 的語意候選只來自 Qdrant 已索引的 30,973 筆（4.2%），其餘 707,770 筆不會進入向量相似度排名。PostgreSQL 關鍵字／條件查詢、法規與引用統計、Parquet 全文快照仍涵蓋全部 738,743 筆；若問題需要「所有判決」的語意召回，必須先完成全量向量索引。
+- 判決向量索引：已完成全量 738,743 筆（1,024 維、`bge-m3`）；Qdrant `judgment_documents` 與 PostgreSQL `judgment_vector_index` coverage 738,743 / 738,743＝100%。正式查詢使用 `judgments_current` alias，後續版本以 Blue-Green collection 建置。
+- 全量索引已完成：一般 RAG 的語意候選涵蓋全部 738,743 筆；PostgreSQL 關鍵字／條件查詢、法規與引用統計、Parquet 全文快照仍可獨立使用。
 - 全量索引資源估算：Qdrant 由目前 229 MB 增至約 5–5.5 GB（向量約 2.8 GB、payload 約 1.2 GB、索引與 WAL 另計），索引期間峰值可能短暫達 7–8 GB；Qdrant 記憶體約 3–4 GB。以 HNSW 對數成長推算，單次搜尋由實測中位 6.9 ms 增至約 10–20 ms，RAG 總時間（2–6.5 秒，主要為 LLM）影響小於 1%。索引期間會與 Ollama embedding 競爭資源，建議離峰執行。每月新增約 3 萬筆判決的增量索引約需 1.1 小時。
 - 法規／命令範例問題：以「證券營業員常觸犯什麼法規或命令?」提問，系統在 30 筆全文提及「證券營業員」的判決中統計引用次數，回傳洗錢防制法、民法、保險法、證券交易法等法規卡；「有哪些法規是和壽險及產險相關的?」會依名稱與類別關鍵字整理保險法、簡易人壽保險法、人壽保險各類保險定名準則、財產保險業財務報告編製準則等 8 筆法規／命令。
 - 法規／命令 RAG 實測：以「證交法有多少條文?」提問，別名解析為 `證券交易法`，回傳 229 條與法規卡，約 0.16 秒；「銀行法是何時開始有的?」回傳民國 20 年 3 月 28 日（1931-03-28），約 0.08 秒；「保險業務員最常觸犯什麼法條?」依 42 筆判決的引用統計列出 `保險業務員管理規則` 第 19、15 條與 `民法` 第 184 條等，約 0.21 秒。法規／命令與判決並存時，回答卡會同時顯示判決卡與法規／命令卡，引用編號共用。

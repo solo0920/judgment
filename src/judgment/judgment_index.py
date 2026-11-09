@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -11,11 +12,26 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import delete, func, insert, or_, select
+from sqlalchemy import delete, exists, func, insert, or_, select
 
 from .config import Settings
 from .db import build_engine, build_session_factory, init_db
 from .embeddings import EmbeddingError, OllamaEmbedder
+from .index_versions import (
+    activate_version,
+    active_version,
+    capture_source_snapshot,
+    create_version,
+    ensure_legacy_version,
+    find_resumable_version,
+    get_version,
+    list_versions,
+    mark_version_failed,
+    recipe_version,
+    rollback_version,
+    update_version_progress,
+    validate_version,
+)
 from .models import JudgmentDocument, JudgmentVectorIndex
 from .observability import record_performance
 from .processing_state import ProcessingStateStore, parent_run_id
@@ -36,11 +52,27 @@ _COLUMNS = (
     JudgmentDocument.full_text_length,
     JudgmentDocument.content_hash,
     JudgmentDocument.pdf_url,
+    JudgmentDocument.updated_at,
 )
 
 
 def vector_point_id(jid: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"judgment:{jid}"))
+
+
+def _hash_text(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _payload_hash(payload: Dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _source_year(jdate: Any) -> str:
+    text = str(jdate or "").strip()
+    return text[:4] if text[:4].isdigit() else ""
 
 
 def _collapse_whitespace(text: str) -> str:
@@ -89,24 +121,29 @@ def index_coverage(
     *,
     collection: str,
     model: str,
+    version_id: Optional[int] = None,
 ) -> Dict[str, Any]:
+    index_filters = [
+        JudgmentVectorIndex.collection == collection,
+        JudgmentVectorIndex.model == model,
+    ]
+    if version_id is not None:
+        index_filters.append(
+            JudgmentVectorIndex.version_id == int(version_id)
+        )
     with session_factory() as session:
         total = int(session.scalar(select(func.count()).select_from(JudgmentDocument)) or 0)
         indexed = int(
             session.scalar(
                 select(func.count())
                 .select_from(JudgmentVectorIndex)
-                .where(
-                    JudgmentVectorIndex.collection == collection,
-                    JudgmentVectorIndex.model == model,
-                )
+                .where(*index_filters)
             )
             or 0
         )
         latest = session.scalar(
             select(func.max(JudgmentVectorIndex.indexed_at)).where(
-                JudgmentVectorIndex.collection == collection,
-                JudgmentVectorIndex.model == model,
+                *index_filters
             )
         )
     return {
@@ -115,6 +152,7 @@ def index_coverage(
         "remaining_judgments": max(0, total - indexed),
         "collection": collection,
         "model": model,
+        "version_id": version_id,
         "latest_indexed_at": latest.isoformat() if latest else None,
     }
 
@@ -123,6 +161,7 @@ def _candidate_statement(
     *,
     collection: str,
     model: str,
+    version_id: Optional[int],
     all_rows: bool,
     since: Optional[str],
     jid: Optional[str],
@@ -130,11 +169,16 @@ def _candidate_statement(
     last_id: int,
     batch_size: int,
 ):
+    index_join = JudgmentVectorIndex.jid == JudgmentDocument.jid
+    if version_id is not None:
+        index_join = index_join & (
+            JudgmentVectorIndex.version_id == int(version_id)
+        )
     statement = (
         select(*_COLUMNS)
         .outerjoin(
             JudgmentVectorIndex,
-            JudgmentVectorIndex.jid == JudgmentDocument.jid,
+            index_join,
         )
         .where(JudgmentDocument.id > last_id, JudgmentDocument.full_text != "")
     )
@@ -214,6 +258,13 @@ def index_judgments(
     batch_size = max(1, int(batch_size))
     stride = max(1, int(stride))
     max_chars = int(max_chars or settings.judgment_index_max_chars)
+    version_id = (
+        ensure_legacy_version(
+            session_factory, settings=settings, collection=collection
+        )
+        if not dry_run
+        else None
+    )
     store = store or QdrantStore(
         settings.qdrant_url,
         api_key=settings.qdrant_api_key,
@@ -332,7 +383,8 @@ def index_judgments(
         with session_factory() as session:
             session.execute(
                 delete(JudgmentVectorIndex).where(
-                    JudgmentVectorIndex.collection == collection
+                    JudgmentVectorIndex.collection == collection,
+                    JudgmentVectorIndex.version_id == int(version_id or 0),
                 )
             )
             session.commit()
@@ -348,6 +400,7 @@ def index_judgments(
                     _candidate_statement(
                         collection=collection,
                         model=model,
+                        version_id=version_id,
                         all_rows=scan_all,
                         since=since,
                         jid=jid,
@@ -417,7 +470,8 @@ def index_judgments(
                 jids = [str(row["jid"]) for row in rows]
                 session.execute(
                     delete(JudgmentVectorIndex).where(
-                        JudgmentVectorIndex.jid.in_(jids)
+                        JudgmentVectorIndex.version_id == int(version_id or 0),
+                        JudgmentVectorIndex.jid.in_(jids),
                     )
                 )
                 session.execute(
@@ -425,13 +479,20 @@ def index_judgments(
                     [
                         {
                             "jid": str(row["jid"]),
+                            "version_id": int(version_id or 0),
                             "collection": collection,
                             "model": model,
+                            "embedding_version": settings.judgment_embedding_version,
+                            "index_recipe_version": recipe_version(settings),
+                            "source_year": _source_year(row["jdate"]),
                             "content_hash": str(row["content_hash"] or ""),
+                            "index_text_hash": _hash_text(texts[index]),
+                            "payload_hash": "",
                             "dimensions": dimensions,
+                            "source_updated_at": row["updated_at"],
                             "indexed_at": datetime.now(timezone.utc),
                         }
-                        for row in rows
+                        for index, row in enumerate(rows)
                     ],
                 )
                 session.commit()
@@ -637,6 +698,500 @@ def index_judgments(
     return summary
 
 
+def build_index_version(
+    *,
+    session_factory,
+    settings: Settings,
+    store: Optional[QdrantStore] = None,
+    embedder: Optional[OllamaEmbedder] = None,
+    limit: Optional[int] = None,
+    batch_size: int = 64,
+    max_chars: Optional[int] = None,
+    auto_activate: bool = False,
+    resume: bool = True,
+    run_label: str = "",
+) -> Dict[str, Any]:
+    """Build a complete blue-green index version.
+
+    A compatible active version is copied point-for-point without recomputing
+    embeddings. Only new, changed or metadata-affected judgments are embedded.
+    The active collection is never modified.
+    """
+
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+    store = store or QdrantStore(
+        settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        timeout=120.0,
+    )
+    embedder = embedder or OllamaEmbedder(
+        settings.embedding_url,
+        settings.embedding_model,
+        timeout=settings.embedding_timeout_seconds,
+    )
+    if not store.configured:
+        raise QdrantError("QDRANT_URL 未設定")
+    if not embedder.configured:
+        raise EmbeddingError("EMBEDDING_URL 未設定")
+
+    model = settings.embedding_model
+    recipe_version = (
+        f"{settings.judgment_index_recipe_version}-{int(max_chars or settings.judgment_index_max_chars)}"
+    )
+    max_chars = int(max_chars or settings.judgment_index_max_chars)
+    batch_size = max(1, int(batch_size))
+    snapshot = capture_source_snapshot(session_factory)
+    if limit is not None:
+        snapshot["document_count"] = min(
+            int(snapshot.get("document_count") or 0), max(0, int(limit))
+        )
+        snapshot["limited"] = True
+    expected_count = int(snapshot.get("document_count") or 0)
+
+    active = active_version(session_factory, alias_name=settings.judgment_vector_alias)
+    version = (
+        find_resumable_version(
+            session_factory, alias_name=settings.judgment_vector_alias
+        )
+        if resume
+        else None
+    )
+    if version is not None:
+        old_snapshot = version.get("source_snapshot") or {}
+        if (
+            int(old_snapshot.get("max_judgment_id") or 0)
+            != int(snapshot.get("max_judgment_id") or 0)
+            or int(old_snapshot.get("document_count") or 0) != expected_count
+        ):
+            mark_version_failed(
+                session_factory,
+                version_id=int(version["version_id"]),
+                reason="來源資料已變更，放棄舊的 building 版本",
+            )
+            version = None
+    if version is None:
+        previous = active
+        compatible = bool(
+            previous
+            and previous.get("status") in {"active", "retired"}
+            and previous.get("embedding_model") == model
+            and previous.get("embedding_version")
+            == settings.judgment_embedding_version
+            and previous.get("index_recipe_version") == recipe_version
+            and previous.get("point_id_version")
+            == settings.judgment_point_id_version
+            and int(previous.get("embedding_dimension") or 0) > 0
+        )
+        if limit is not None:
+            compatible = False
+            auto_activate = False
+        build_mode = "reuse" if compatible else "full"
+        version = create_version(
+            session_factory,
+            settings=settings,
+            source_snapshot=snapshot,
+            build_mode=build_mode,
+            previous_version_id=(
+                previous["version_id"] if compatible and previous else None
+            ),
+            index_recipe_version=recipe_version,
+        )
+    else:
+        previous = (
+            get_version(
+                session_factory, int(version.get("previous_version_id") or 0)
+            )
+            if version.get("previous_version_id")
+            else None
+        )
+        build_mode = str(version.get("build_mode") or "full")
+
+    version_id = int(version["version_id"])
+    collection = str(version["physical_collection"])
+    indexed = int(version.get("indexed_count") or 0)
+    last_id = int(version.get("last_indexed_id") or 0)
+    dimensions = int(version.get("embedding_dimension") or 0)
+    reused_count = 0
+    embedded_count = 0
+    points_upserted = 0
+    deleted_points = 0
+    scanned = 0
+    batch_durations: List[float] = []
+    embedding_durations: List[float] = []
+    qdrant_durations: List[float] = []
+    db_durations: List[float] = []
+    progress_samples: List[Dict[str, Any]] = []
+    last_progress_at = 0.0
+
+    try:
+        if build_mode == "reuse" and previous and indexed == 0:
+            source_collection = str(previous["physical_collection"])
+            if store.collection_info(source_collection) is None:
+                raise QdrantError(
+                    f"來源 collection 不存在，無法增量沿用：{source_collection}"
+                )
+            dimensions = store.collection_dimension(source_collection) or int(
+                previous.get("embedding_dimension") or 0
+            )
+            store.copy_collection(source_collection, collection, batch_size=256)
+            for field in ("jid", "court", "jdate", "source_archive"):
+                store.ensure_payload_index(collection, field, "keyword")
+            update_version_progress(
+                session_factory,
+                version_id=version_id,
+                indexed_count=0,
+                last_indexed_id=0,
+                embedding_dimension=dimensions,
+            )
+        if indexed == 0:
+            last_id = 0
+
+        first_batch = True
+        while True:
+            if limit is not None and scanned >= max(0, int(limit)):
+                break
+            current_limit = batch_size
+            if limit is not None:
+                current_limit = min(
+                    current_limit, max(0, int(limit) - scanned)
+                )
+                if current_limit <= 0:
+                    break
+            with session_factory() as session:
+                rows = session.execute(
+                    select(*_COLUMNS)
+                    .where(
+                        JudgmentDocument.id > last_id,
+                        JudgmentDocument.id
+                        <= int(snapshot.get("max_judgment_id") or 0),
+                        JudgmentDocument.full_text != "",
+                    )
+                    .order_by(JudgmentDocument.id)
+                    .limit(current_limit)
+                ).mappings().all()
+            if not rows:
+                break
+
+            scan_started = time.perf_counter()
+            last_id = int(rows[-1]["id"])
+            scanned += len(rows)
+            texts = [
+                build_index_text(
+                    court=str(row["court_normalized"] or ""),
+                    title=str(row["title"] or ""),
+                    jdate=str(row["jdate"] or ""),
+                    matched_laws=row["matched_laws"] or [],
+                    full_text=str(row["full_text"] or ""),
+                    max_chars=max_chars,
+                )
+                for row in rows
+            ]
+            text_hashes = [_hash_text(text) for text in texts]
+            years = [_source_year(row["jdate"]) for row in rows]
+            snippets = [text[:600] for text in texts]
+            payloads = [
+                {
+                    "jid": str(row["jid"]),
+                    "court": str(row["court_normalized"] or ""),
+                    "title": str(row["title"] or ""),
+                    "jdate": str(row["jdate"] or ""),
+                    "matched_laws": list(row["matched_laws"] or []),
+                    "citation_count": int(row["citation_count"] or 0),
+                    "source_archive": str(row["source_archive"] or ""),
+                    "pdf_url": str(row["pdf_url"] or ""),
+                    "full_text_length": int(row["full_text_length"] or 0),
+                    "snippet": snippets[index],
+                    "model": model,
+                    "embedding_version": settings.judgment_embedding_version,
+                    "index_recipe_version": recipe_version,
+                    "source_year": years[index],
+                }
+                for index, row in enumerate(rows)
+            ]
+            payload_hashes = [_payload_hash(payload) for payload in payloads]
+
+            previous_rows: Dict[str, JudgmentVectorIndex] = {}
+            if build_mode == "reuse" and previous:
+                with session_factory() as session:
+                    previous_rows = {
+                        row.jid: row
+                        for row in session.scalars(
+                            select(JudgmentVectorIndex).where(
+                                JudgmentVectorIndex.version_id
+                                == int(previous["version_id"]),
+                                JudgmentVectorIndex.jid.in_(
+                                    [str(row["jid"]) for row in rows]
+                                ),
+                            )
+                        ).all()
+                    }
+
+            changed_indices: List[int] = []
+            reused_flags = [False] * len(rows)
+            for index, row in enumerate(rows):
+                old = previous_rows.get(str(row["jid"]))
+                reusable = False
+                if old is not None:
+                    reusable = (
+                        old.model == model
+                        and old.embedding_version
+                        == settings.judgment_embedding_version
+                        and old.index_recipe_version == recipe_version
+                        and old.content_hash == str(row["content_hash"] or "")
+                    )
+                    if reusable and old.index_text_hash:
+                        reusable = old.index_text_hash == text_hashes[index]
+                    if reusable and old.payload_hash:
+                        reusable = old.payload_hash == payload_hashes[index]
+                    if reusable and not old.index_text_hash:
+                        source_updated = row["updated_at"]
+                        if (
+                            source_updated
+                            and old.indexed_at
+                            and source_updated > old.indexed_at
+                        ):
+                            reusable = False
+                    if reusable and old.dimensions and dimensions:
+                        reusable = int(old.dimensions) == int(dimensions)
+                if not reusable:
+                    changed_indices.append(index)
+                else:
+                    reused_flags[index] = True
+
+            vectors: List[List[float]] = []
+            if changed_indices:
+                embed_started = time.perf_counter()
+                vectors = embedder.embed([texts[index] for index in changed_indices])
+                embedding_durations.append(
+                    (time.perf_counter() - embed_started) * 1000
+                )
+                dimensions = len(vectors[0]) if vectors else dimensions
+                qdrant_started = time.perf_counter()
+                created = store.ensure_collection(collection, size=dimensions)
+                if created or first_batch:
+                    for field in ("jid", "court", "jdate", "source_archive"):
+                        store.ensure_payload_index(collection, field, "keyword")
+                points = []
+                for vector, index in zip(vectors, changed_indices):
+                    row = rows[index]
+                    points.append(
+                        {
+                            "id": vector_point_id(str(row["jid"])),
+                            "vector": vector,
+                            "payload": payloads[index],
+                        }
+                    )
+                store.upsert(collection, points)
+                qdrant_durations.append(
+                    (time.perf_counter() - qdrant_started) * 1000
+                )
+                points_upserted += len(points)
+                embedded_count += len(points)
+            reused_count += len(rows) - len(changed_indices)
+
+            # Insert per-version rows for both reused and newly embedded
+            # judgments. This is what makes coverage and rollback reliable.
+            db_started = time.perf_counter()
+            version_rows = []
+            for index, row in enumerate(rows):
+                previous_row = previous_rows.get(str(row["jid"]))
+                version_rows.append(
+                    {
+                        "jid": str(row["jid"]),
+                        "version_id": version_id,
+                        "collection": collection,
+                        "model": model,
+                        "embedding_version": settings.judgment_embedding_version,
+                        "index_recipe_version": recipe_version,
+                        "source_year": years[index],
+                        "content_hash": str(row["content_hash"] or ""),
+                        "index_text_hash": text_hashes[index],
+                        "payload_hash": (
+                            str(previous_row.payload_hash or "")
+                            if reused_flags[index] and previous_row
+                            else payload_hashes[index]
+                        ),
+                        "dimensions": dimensions,
+                        "source_updated_at": row["updated_at"],
+                        "indexed_at": datetime.now(timezone.utc),
+                    }
+                )
+            with session_factory() as session:
+                jids = [row["jid"] for row in version_rows]
+                session.execute(
+                    delete(JudgmentVectorIndex).where(
+                        JudgmentVectorIndex.version_id == version_id,
+                        JudgmentVectorIndex.jid.in_(jids),
+                    )
+                )
+                if version_rows:
+                    session.execute(insert(JudgmentVectorIndex), version_rows)
+                session.commit()
+            db_durations.append((time.perf_counter() - db_started) * 1000)
+            batch_durations.append(
+                (time.perf_counter() - scan_started) * 1000
+            )
+            indexed += len(rows)
+            update_version_progress(
+                session_factory,
+                version_id=version_id,
+                indexed_count=indexed,
+                last_indexed_id=last_id,
+                embedding_dimension=dimensions,
+            )
+            now = time.perf_counter()
+            if not progress_samples or now - last_progress_at >= 60.0:
+                elapsed_s = max(0.001, now - started)
+                progress_samples.append(
+                    {
+                        "elapsed_s": round(elapsed_s, 1),
+                        "indexed": indexed,
+                        "rate": round(indexed / elapsed_s, 2),
+                    }
+                )
+                last_progress_at = now
+            first_batch = False
+            logger.info(
+                "version=%s indexed=%s reused=%s embedded=%s collection=%s",
+                version_id,
+                indexed,
+                reused_count,
+                embedded_count,
+                collection,
+            )
+
+        if build_mode == "reuse" and previous:
+            previous_version_id = int(previous["version_id"])
+            with session_factory() as session:
+                stale_jids = [
+                    str(jid)
+                    for jid in session.scalars(
+                        select(JudgmentVectorIndex.jid).where(
+                            JudgmentVectorIndex.version_id
+                            == previous_version_id,
+                            ~exists(
+                                select(JudgmentDocument.id).where(
+                                    JudgmentDocument.jid
+                                    == JudgmentVectorIndex.jid,
+                                    JudgmentDocument.full_text != "",
+                                    JudgmentDocument.id
+                                    <= int(
+                                        snapshot.get("max_judgment_id") or 0
+                                    ),
+                                )
+                            ),
+                        )
+                    ).all()
+                ]
+            if stale_jids:
+                deleted_points = store.delete_points(
+                    collection,
+                    [vector_point_id(jid) for jid in stale_jids],
+                )
+
+        update_version_progress(
+            session_factory,
+            version_id=version_id,
+            indexed_count=indexed,
+            last_indexed_id=last_id,
+            embedding_dimension=dimensions,
+        )
+        version_data = get_version(session_factory, version_id) or {}
+        validation = validate_version(
+            session_factory, store=store, version=version_data
+        )
+        activated = None
+        if validation.get("status") == "ready" and auto_activate:
+            activated = activate_version(
+                session_factory,
+                store=store,
+                version_id=version_id,
+                alias_name=settings.judgment_vector_alias,
+            )
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        validation_status = validation.get("status")
+        summary = {
+            "status": (
+                "success" if validation_status == "ready" else "validation_failed"
+            ),
+            "version_id": version_id,
+            "collection": collection,
+            "alias": settings.judgment_vector_alias,
+            "build_mode": build_mode,
+            "model": model,
+            "recipe_version": recipe_version,
+            "document_count": expected_count,
+            "scanned_count": scanned,
+            "indexed_count": indexed,
+            "reused_count": reused_count,
+            "embedded_count": embedded_count,
+            "points_upserted": points_upserted,
+            "deleted_points": deleted_points,
+            "dimensions": dimensions,
+            "duration_ms": duration_ms,
+            "batch_count": len(batch_durations),
+            "progress": _downsample_progress(progress_samples),
+            "validation": validation,
+            "activated": activated,
+            "task": run_label,
+        }
+        record_performance(
+            session_factory,
+            process="判決向量索引版本",
+            module="judgment.judgment_index.build_index_version",
+            status="success",
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc),
+            duration_ms=duration_ms,
+            params={
+                "version_id": version_id,
+                "collection": collection,
+                "alias": settings.judgment_vector_alias,
+                "build_mode": build_mode,
+                "model": model,
+                "recipe_version": recipe_version,
+                "task": run_label,
+            },
+            details=summary,
+        )
+        return summary
+    except Exception as exc:
+        mark_version_failed(
+            session_factory,
+            version_id=version_id,
+            reason=f"{exc.__class__.__name__}: {exc}",
+        )
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        record_performance(
+            session_factory,
+            process="判決向量索引版本",
+            module="judgment.judgment_index.build_index_version",
+            status="failed",
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc),
+            duration_ms=duration_ms,
+            params={
+                "version_id": version_id,
+                "collection": collection,
+                "alias": settings.judgment_vector_alias,
+                "build_mode": build_mode,
+                "model": model,
+                "recipe_version": recipe_version,
+                "task": run_label,
+            },
+            details={
+                "indexed_count": indexed,
+                "reused_count": reused_count,
+                "embedded_count": embedded_count,
+                "points_upserted": points_upserted,
+                "deleted_points": deleted_points,
+            },
+            error_message=f"{exc.__class__.__name__}: {exc}",
+        )
+        raise
+
+
 def configure_logging(level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
@@ -672,6 +1227,50 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="刪除 collection 後重新建立並索引所有判決",
     )
+    parser.add_argument(
+        "--build-version",
+        action="store_true",
+        help="建立完整藍綠版本；沿用相容的舊向量，只 embedding 差異資料",
+    )
+    parser.add_argument(
+        "--activate",
+        action="store_true",
+        help="搭配 --build-version，驗證成功後自動切換 alias",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="搭配 --build-version，忽略既有 building 版本並建立新版本",
+    )
+    parser.add_argument(
+        "--validate-version",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="驗證指定索引版本",
+    )
+    parser.add_argument(
+        "--activate-version",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="將指定索引版本切換為 active",
+    )
+    parser.add_argument(
+        "--rollback",
+        action="store_true",
+        help="將 alias 切回上一個成功版本",
+    )
+    parser.add_argument(
+        "--list-versions",
+        action="store_true",
+        help="列出索引版本",
+    )
+    parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="將現有 collection 登記為 v001 並確保 alias 存在",
+    )
     parser.add_argument("--dry-run", action="store_true", help="只統計候選資料，不呼叫服務")
     parser.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
     return parser.parse_args(argv)
@@ -692,22 +1291,94 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     engine = build_engine(settings.database_url)
     init_db(engine)
     session_factory = build_session_factory(engine)
+    store = QdrantStore(
+        settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        timeout=120.0,
+    )
     try:
-        summary = index_judgments(
-            session_factory=session_factory,
-            settings=settings,
-            limit=args.limit,
-            all_rows=args.all,
-            since=args.since,
-            jid=args.jid,
-            stride=args.stride,
-            batch_size=args.batch_size,
-            max_chars=args.max_chars,
-            recreate=args.recreate,
-            dry_run=args.dry_run,
-            run_label=os.getenv("INDEX_TASK", "").strip(),
-            track_state=not args.dry_run,
-        )
+        if args.list_versions:
+            summary = {"versions": list_versions(session_factory)}
+        elif args.bootstrap:
+            version_id = ensure_legacy_version(
+                session_factory,
+                settings=settings,
+                collection=settings.judgment_vector_collection,
+            )
+            alias_created = False
+            if store.configured and store.collection_info(
+                settings.judgment_vector_collection
+            ):
+                if store.get_alias(settings.judgment_vector_alias) is None:
+                    store.switch_alias(
+                        settings.judgment_vector_alias,
+                        settings.judgment_vector_collection,
+                    )
+                    alias_created = True
+            summary = {
+                "status": "success",
+                "version": get_version(session_factory, version_id),
+                "alias": settings.judgment_vector_alias,
+                "alias_created": alias_created,
+            }
+        elif args.validate_version is not None:
+            version = get_version(session_factory, args.validate_version)
+            if version is None:
+                raise LookupError(f"找不到索引版本：{args.validate_version}")
+            summary = {
+                "status": "success",
+                "validation": validate_version(
+                    session_factory, store=store, version=version
+                ),
+            }
+        elif args.activate_version is not None:
+            summary = {
+                "status": "success",
+                "version": activate_version(
+                    session_factory,
+                    store=store,
+                    version_id=args.activate_version,
+                    alias_name=settings.judgment_vector_alias,
+                ),
+            }
+        elif args.rollback:
+            summary = {
+                "status": "success",
+                "version": rollback_version(
+                    session_factory,
+                    store=store,
+                    alias_name=settings.judgment_vector_alias,
+                ),
+            }
+        elif args.build_version:
+            summary = build_index_version(
+                session_factory=session_factory,
+                settings=settings,
+                store=store,
+                limit=args.limit,
+                batch_size=args.batch_size,
+                max_chars=args.max_chars,
+                auto_activate=args.activate,
+                resume=not args.no_resume,
+                run_label=os.getenv("INDEX_TASK", "").strip(),
+            )
+        else:
+            store = None
+            summary = index_judgments(
+                session_factory=session_factory,
+                settings=settings,
+                limit=args.limit,
+                all_rows=args.all,
+                since=args.since,
+                jid=args.jid,
+                stride=args.stride,
+                batch_size=args.batch_size,
+                max_chars=args.max_chars,
+                recreate=args.recreate,
+                dry_run=args.dry_run,
+                run_label=os.getenv("INDEX_TASK", "").strip(),
+                track_state=not args.dry_run,
+            )
     except Exception as exc:
         logger.error("向量索引失敗：%s", exc)
         print(
@@ -720,7 +1391,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     finally:
         engine.dispose()
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
     return 0
 
 

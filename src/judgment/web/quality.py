@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
+from ..index_versions import active_version
 from ..judgment_index import index_coverage
 from ..judgment_quality import compute_raw_quality
 from ..judgment_raw_parquet import RAW_SCHEMA_VERSION, latest_raw_manifests
@@ -85,10 +86,19 @@ def _coverage(
             postgres_judgments = _int(
                 session.scalar(select(func.count()).select_from(JudgmentDocument))
             )
+        active_index = active_version(
+            session_factory, alias_name=settings.judgment_vector_alias
+        )
+        collection = (
+            active_index["physical_collection"]
+            if active_index
+            else settings.judgment_vector_collection
+        )
         index = index_coverage(
             session_factory,
-            collection=settings.judgment_vector_collection,
+            collection=collection,
             model=settings.embedding_model,
+            version_id=active_index["version_id"] if active_index else None,
         )
         indexed = _int(index.get("indexed_judgments"))
         total = _int(index.get("total_judgments"))
@@ -104,6 +114,8 @@ def _coverage(
             "vector_coverage_pct": _percent(indexed, total),
             "collection": index.get("collection") or settings.judgment_vector_collection,
             "model": index.get("model") or settings.embedding_model,
+            "alias": settings.judgment_vector_alias,
+            "version_id": active_index["version_id"] if active_index else None,
             "latest_indexed_at": index.get("latest_indexed_at"),
         }
     except Exception as exc:

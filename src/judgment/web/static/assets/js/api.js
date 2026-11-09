@@ -361,6 +361,44 @@ export const api = {
     return request("/api/system-usage", { trackClient: false });
   },
 
+  indexVersions() {
+    return request("/api/index-versions", { trackClient: false });
+  },
+
+  indexVersion(versionId) {
+    return request(`/api/index-versions/${encodeURIComponent(versionId)}`, {
+      trackClient: false,
+    });
+  },
+
+  validateIndexVersion(versionId) {
+    return request(
+      `/api/index-versions/${encodeURIComponent(versionId)}/validate`,
+      { method: "POST", trackClient: false },
+    );
+  },
+
+  activateIndexVersion(versionId) {
+    return request(
+      `/api/index-versions/${encodeURIComponent(versionId)}/activate`,
+      { method: "POST", trackClient: false },
+    );
+  },
+
+  rollbackIndexVersion() {
+    return request("/api/index-versions/rollback", {
+      method: "POST",
+      trackClient: false,
+    });
+  },
+
+  reconcileIndexAlias(repair = false) {
+    const params = new URLSearchParams({ repair: repair ? "true" : "false" });
+    return request(`/api/index-alias/reconcile?${params.toString()}`, {
+      trackClient: false,
+    });
+  },
+
   catalog() {
     return request("/api/catalog");
   },

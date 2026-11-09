@@ -105,3 +105,6 @@ def init_db(engine: Engine) -> None:
     _ensure_judgment_court_normalized(engine)
     _ensure_performance_flow(engine)
     _ensure_performance_test_columns(engine)
+    from .index_versions import ensure_index_version_schema
+
+    ensure_index_version_schema(engine)

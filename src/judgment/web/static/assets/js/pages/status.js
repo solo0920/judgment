@@ -442,6 +442,18 @@ function renderDataTab(status) {
             )}（${formatNumber(data.judgment_vector_points)} points）`,
           )}
           ${detailRow(
+            "索引版本",
+            `<strong>#${formatNumber(data.judgment_vector_version_id)}</strong> · ${escapeHtml(
+              data.judgment_vector_version_status || "legacy",
+            )}`,
+          )}
+          ${detailRow(
+            "Alias",
+            `<code>${escapeHtml(data.judgment_vector_alias || "—")}</code> → <code>${escapeHtml(
+              data.judgment_vector_collection || "—",
+            )}</code>`,
+          )}
+          ${detailRow(
             "索引模型",
             `<code>${escapeHtml(data.judgment_vector_model || "—")}</code>`,
           )}

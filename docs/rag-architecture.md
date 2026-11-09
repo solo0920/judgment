@@ -16,7 +16,7 @@
 | API | 驗證請求、呼叫 RAG、回傳 JSON | FastAPI、`POST /api/rag/query`、Pydantic `RagRequest` |
 | RAG 管線 | 法規／命令比對、檢索、取全文、組片段、生成、驗證 | `judgment.rag.answer_question()`、`judgment.law_rag` |
 | 資料層 | 法規／命令 metadata、條文、判決全文與索引追蹤 | PostgreSQL `law_documents`、`judgment_documents`、`judgment_vector_index`；法規 Parquet 快照 |
-| 向量層 | 文件級向量檢索 | Qdrant collection `judgment_documents` |
+| 向量層 | 文件級向量檢索 | Qdrant alias `judgments_current` -> 版本化 collection |
 | 模型層 | 查詢 embedding 與回答生成 | Ollama `bge-m3`、`gemma3:4b`（快速預設） |
 
 RAG **不是**直接把問題丟給 LLM。LLM 只會看到法規／命令條文，以及 Qdrant 檢索到、且仍存在於 PostgreSQL 的判決片段；回傳前還會檢查引用編號是否合法。法規／命令問題會先比對 `law_documents` 與法規 Parquet，不依賴判決索引覆蓋率。
@@ -186,7 +186,7 @@ HTTP 層：
 
 ### 5.2 Qdrant 檢索
 
-- Collection：`judgment_documents`。
+- Collection：`judgments_current` alias 指向目前 active 的版本化 collection（例如 `judgments_v002`）。
 - 距離：Cosine。
 - 參數：`top_k=4`、`score_threshold=0.35`。
 - 每個 point 對應一筆判決，point id 為 `uuid5(NAMESPACE_URL, "judgment:<jid>")`，重跑為 idempotent upsert。
@@ -206,7 +206,7 @@ HTTP 層：
 
 - 端點：`POST {LLM_URL}/api/chat`。
 - 模型：`gemma3:4b`（可由 `LLM_MODEL` 改成 27B 品質模式）。
-- 參數：`temperature=0.1`、`num_ctx=4096`、`num_predict=384`、`keep_alive=30m`、`stream=false`。
+- 參數：`temperature=0.1`、`num_ctx=4096`、`num_predict=384`、`keep_alive=30m`、`stream=true`；API 以 SSE 逐 token 回傳。
 - 系統提示要求：
   - 只能根據提供的判決片段回答。
   - 不得創造案號、法院、日期或法條。
@@ -289,8 +289,8 @@ uv run judgment-index-vectors --recreate --batch-size 16
 | 項目 | 數值 |
 | --- | --- |
 | 判決總數 | 244,330 |
-| 已索引 | 10,372 |
-| 覆蓋率 | 4.2% |
+| 已索引 | 738,743 |
+| 覆蓋率 | 100% |
 | Qdrant points | 10,372 |
 | 向量維度 | 1,024 |
 | 索引模型 | `bge-m3` |
@@ -301,7 +301,8 @@ uv run judgment-index-vectors --recreate --batch-size 16
 | 變數 | 目前值 | 用途 |
 | --- | --- | --- |
 | `QDRANT_URL` | `http://127.0.0.1:6333` | Qdrant REST |
-| `JUDGMENT_VECTOR_COLLECTION` | `judgment_documents` | 文件級向量 collection |
+| `JUDGMENT_VECTOR_ALIAS` | `judgments_current` | 正式查詢 alias |
+| `JUDGMENT_VECTOR_COLLECTION` | `judgment_documents` | legacy 實體 collection |
 | `EMBEDDING_URL` | `http://127.0.0.1:11434` | Ollama API |
 | `EMBEDDING_MODEL` | `bge-m3` | 查詢與索引 embedding |
 | `EMBEDDING_TIMEOUT_SECONDS` | `120` | Embedding 請求逾時 |
@@ -372,12 +373,12 @@ sequenceDiagram
 
 ## 10. 已知限制
 
-1. **索引覆蓋率只有 4.2%**：目前是 `--stride 24` 抽樣索引（10,372／244,330）。未被索引的判決不會出現在檢索結果中；覆蓋率會誠實顯示在 RAG 側欄與狀態頁。
+1. **全量索引已完成**：目前 `judgment_vector_index` 與 Qdrant 為 738,743／738,743（100%）；正式查詢使用 `judgments_current` alias，新版本以 Blue-Green collection 建置。
 2. **文件級向量而非片段級**：每筆判決只取 head/tail 1,600 字作為 embedding，判決中段的細節可能不會被檢索到。
 3. **沒有 reranker**：Qdrant cosine 分數直接決定候選順序；沒有 cross-encoder 或 bge-reranker 重新排序。
 4. **引用驗證是結構驗證**：只檢查 `[n]` 是否落在範圍內、拒答是否含案號；不驗證每個句子是否真的由對應片段支持。
 5. **LLM 生成速度與品質權衡**：快速 profile（`gemma3:4b`、top_k=4、4,000 字上下文、num_ctx=4096）實測整體 RAG 約 2–5 秒；切回 `gemma3:27b` 約 30–50 秒。一般模式前端等待上限為 300 秒，測試模式則對 embedding 與 LLM 使用無 timeout。4B 的複雜推理品質可能低於 27B，可透過 `LLM_MODEL` 切換。
-6. **非串流回應**：`stream=false`，使用者要等完整回答生成後才會看到結果。
+6. **串流回應**：API 使用 SSE `partial`／`token`／`result`，前端先顯示法規結果，再逐字顯示 LLM 回答。
 7. **Qdrant 與 PostgreSQL 可能短暫不同步**：索引器先寫 Qdrant 再寫 `judgment_vector_index`；RAG 以 PostgreSQL 全文為最終依據，找不到的判決會被跳過。
 8. **沒有使用者認證**：API 目前是唯讀，但若透過 tunnel 對外開放，任何知道網址的人都能提問；正式部署應加上存取控制與速率限制。
 

@@ -205,6 +205,7 @@ values = {
     "PG_SHA": postgres.get("sha256", ""),
     "QDRANT_URL": qdrant.get("url", "http://127.0.0.1:6333"),
     "QDRANT_COLLECTION": qdrant.get("collection", "judgment_documents"),
+    "QDRANT_ALIAS": qdrant.get("alias_name", "judgments_current"),
     "QDRANT_SNAPSHOT_REL": qdrant.get("snapshot", ""),
     "QDRANT_SHA": qdrant.get("sha256", ""),
     "QDRANT_POINTS": qdrant.get("points_count", 0),
@@ -323,7 +324,8 @@ JUDGMENT_DATA_DIR="${JUDGMENT_DATA_DIR:-./data/judgments}"
 LAW_DATA_DIR="${LAW_DATA_DIR:-./data/laws}"
 JUDGMENT_DATA_ABS="$(abs_path "$JUDGMENT_DATA_DIR")"
 LAW_DATA_ABS="$(abs_path "$LAW_DATA_DIR")"
-QDRANT_COLLECTION="${JUDGMENT_VECTOR_COLLECTION:-$QDRANT_COLLECTION}"
+QDRANT_COLLECTION="${QDRANT_COLLECTION:-${JUDGMENT_VECTOR_COLLECTION:-judgment_documents}}"
+QDRANT_ALIAS="${QDRANT_ALIAS:-${JUDGMENT_VECTOR_ALIAS:-judgments_current}}"
 
 info "啟動 PostgreSQL 與 Qdrant"
 docker compose up -d postgres qdrant
@@ -371,6 +373,18 @@ if [[ "$SKIP_QDRANT" != "1" ]]; then
   printf 'Qdrant points：%s（備份 %s）\n' "$RESTORED_POINTS" "$QDRANT_POINTS"
   if [[ "$QDRANT_POINTS" != "0" && "$RESTORED_POINTS" != "$QDRANT_POINTS" ]]; then
     echo "警告：Qdrant points 數量與備份 manifest 不一致。" >&2
+  fi
+  if [[ -n "$QDRANT_ALIAS" ]]; then
+    info "建立 Qdrant alias"
+    curl -sS -X POST "$QDRANT_URL/collections/aliases" \
+      -H 'Content-Type: application/json' \
+      -d "{\"actions\":[{\"delete_alias\":{\"alias_name\":\"$QDRANT_ALIAS\"}}]}" \
+      >/dev/null 2>&1 || true
+    curl -fsS -X POST "$QDRANT_URL/collections/aliases" \
+      -H 'Content-Type: application/json' \
+      -d "{\"actions\":[{\"create_alias\":{\"collection_name\":\"$QDRANT_COLLECTION\",\"alias_name\":\"$QDRANT_ALIAS\"}}]}" \
+      >/dev/null
+    printf 'Qdrant alias：%s -> %s\n' "$QDRANT_ALIAS" "$QDRANT_COLLECTION"
   fi
 fi
 

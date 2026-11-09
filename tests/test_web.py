@@ -492,6 +492,14 @@ def test_static_console_is_served(web_client) -> None:
     assert favicon.headers["content-type"].startswith("image/svg")
 
 
+def test_index_versions_endpoint_returns_alias(web_client) -> None:
+    response = web_client.get("/api/index-versions")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["alias"] == "judgments_current"
+    assert payload["versions"] == []
+
+
 def test_system_usage_endpoint_returns_resources(web_client, monkeypatch) -> None:
     import importlib
 
