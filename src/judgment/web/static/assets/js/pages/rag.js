@@ -1225,11 +1225,12 @@ export async function render(root) {
       projects.map((project) => [String(project.id), project]),
     );
     const pinned = historyEntries.filter((entry) => Boolean(entry.pinned));
+    const unpinned = historyEntries.filter((entry) => !entry.pinned);
     const filtered = activeProjectId
-      ? historyEntries.filter(
+      ? unpinned.filter(
           (entry) => String(entry.project_id || "") === activeProjectId,
         )
-      : historyEntries;
+      : unpinned;
     const visible = filtered.slice(0, recentLimit);
     const renderEntry = (entry, index) =>
       renderHistoryItem(
@@ -1250,8 +1251,10 @@ export async function render(root) {
       ? visible.map(renderEntry).join("")
       : `<div class="rag-library-empty">${
           activeProjectId
-            ? "這個專案還沒有項目。"
-            : "尚無提問紀錄。送出第一個問題後會保存在此瀏覽器。"
+            ? "這個專案還沒有未釘選的項目。"
+            : pinned.length
+              ? "最近的項目都已釘選。"
+              : "尚無提問紀錄。送出第一個問題後會保存在此瀏覽器。"
         }</div>`;
     if (filtered.length > recentLimit) {
       historyBox.insertAdjacentHTML(
