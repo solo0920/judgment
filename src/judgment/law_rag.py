@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections import Counter
 from pathlib import Path
@@ -238,6 +239,27 @@ def find_law_records(
             selected = [item[3] for item in prefix_hits[:limit]]
 
     if not selected:
+        concept_names: List[str] = []
+        for concept in _matched_legal_concepts(question):
+            for name in _LEGAL_CONCEPT_LAWS.get(concept, ()):
+                if name not in concept_names:
+                    concept_names.append(name)
+        if concept_names:
+            with session_factory() as session:
+                concept_records = session.scalars(
+                    select(LawDocument).where(
+                        LawDocument.is_current.is_(True),
+                        LawDocument.law_name.in_(concept_names),
+                    )
+                ).all()
+            by_name = {record.law_name: record for record in concept_records}
+            selected = [
+                int(by_name[name].id)
+                for name in concept_names
+                if name in by_name
+            ]
+
+    if not selected:
         return []
     with session_factory() as session:
         records = session.scalars(
@@ -318,9 +340,237 @@ def _question_terms(question: str) -> List[str]:
     return [term for term in terms if term not in {"如何", "什麼", "哪些", "規定", "問題"}]
 
 
-def _article_score(article: Dict[str, str], terms: Sequence[str]) -> int:
-    text = str(article.get("article_content") or "")
-    return sum(len(term) * text.count(term) for term in terms)
+# Query expansion for common legal concepts.  Article text rarely repeats the
+# popular name of a legal issue (for example, insider-trading provisions do not
+# contain the phrase「內線交易」), so article ranking needs the vocabulary used
+# by the statute itself.
+_LEGAL_CONCEPT_EXPANSIONS: Dict[str, Tuple[Tuple[str, float], ...]] = {
+    "內線交易": (
+        ("內線交易", 4.0),
+        ("內線", 3.0),
+        ("內部人", 2.0),
+        ("實際知悉", 3.0),
+        ("重大影響其股票價格", 4.0),
+        ("未公開", 2.0),
+        ("第一百五十七條之一", 4.0),
+        ("第一百七十一條", 3.0),
+        ("消息", 0.5),
+    ),
+    "短線交易": (
+        ("短線交易", 4.0),
+        ("六個月內", 2.0),
+        ("買進", 1.5),
+        ("賣出", 1.5),
+        ("第一百五十七條", 3.0),
+    ),
+    "操縱市場": (
+        ("操縱市場", 4.0),
+        ("操縱", 3.0),
+        ("抬高", 2.0),
+        ("壓低", 2.0),
+        ("連續以高價買入", 3.0),
+        ("連續以低價賣出", 3.0),
+        ("第一百五十五條", 3.0),
+        ("第一百七十一條", 2.0),
+    ),
+    "公開收購": (
+        ("公開收購", 3.0),
+        ("收購", 1.5),
+        ("有價證券", 1.0),
+    ),
+    "洗錢": (
+        ("洗錢", 3.0),
+        ("掩飾", 2.0),
+        ("隱匿", 2.0),
+        ("犯罪所得", 2.0),
+    ),
+    "非常規交易": (
+        ("非常規交易", 3.0),
+        ("不合營業常規", 3.0),
+        ("不利益之交易", 3.0),
+        ("重大損害", 2.0),
+    ),
+}
+
+_LEGAL_CONCEPT_ALIASES: Dict[str, str] = {
+    "內線": "內線交易",
+    "股市內線": "內線交易",
+    "短線": "短線交易",
+    "炒股": "操縱市場",
+    "操縱股價": "操縱市場",
+    "洗錢防制": "洗錢",
+    "非常規": "非常規交易",
+}
+
+_LEGAL_CONCEPT_LAWS: Dict[str, Tuple[str, ...]] = {
+    "內線交易": ("證券交易法",),
+    "短線交易": ("證券交易法",),
+    "操縱市場": ("證券交易法",),
+    "公開收購": ("證券交易法",),
+    "洗錢": ("洗錢防制法",),
+    "非常規交易": ("證券交易法", "公司法"),
+}
+
+_ARTICLE_NUM = "零〇一二三四五六七八九十百千兩"
+_ARTICLE_REF_RE = re.compile(
+    rf"第\s*(\d{{1,4}}|[{_ARTICLE_NUM}]{{1,8}})\s*"
+    rf"(?:條\s*之\s*(\d{{1,3}}|[{_ARTICLE_NUM}]{{1,4}})"
+    rf"|[-－]\s*(\d{{1,3}})\s*條"
+    rf"|條)"
+)
+_CJK_SEQUENCE_RE = re.compile(r"[\u4e00-\u9fff]+")
+_ASCII_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*")
+
+
+def _article_number_value(value: Any) -> int:
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    return _chinese_number(text) or 0
+
+
+def _article_ref_key(value: Any) -> str:
+    match = _ARTICLE_REF_RE.search(_normalize(value))
+    if not match:
+        return ""
+    base = _article_number_value(match.group(1))
+    suffix_text = match.group(2) or match.group(3)
+    suffix = _article_number_value(suffix_text) if suffix_text else 0
+    if not base:
+        return ""
+    return f"{base}-{suffix}" if suffix else str(base)
+
+
+def _extract_article_refs(question: str) -> set[str]:
+    refs: set[str] = set()
+    for match in _ARTICLE_REF_RE.finditer(_normalize(question)):
+        base = _article_number_value(match.group(1))
+        suffix_text = match.group(2) or match.group(3)
+        suffix = _article_number_value(suffix_text) if suffix_text else 0
+        if base:
+            refs.add(f"{base}-{suffix}" if suffix else str(base))
+    return refs
+
+
+def _matched_legal_concepts(question: str) -> List[str]:
+    text = _normalize(question)
+    concepts: List[str] = []
+    for concept in _LEGAL_CONCEPT_EXPANSIONS:
+        if _normalize(concept) in text:
+            concepts.append(concept)
+    for alias, concept in _LEGAL_CONCEPT_ALIASES.items():
+        if _normalize(alias) in text and concept not in concepts:
+            concepts.append(concept)
+    return concepts
+
+
+def _expanded_legal_terms(question: str) -> List[Tuple[str, float]]:
+    concepts = _matched_legal_concepts(question)
+    terms: List[Tuple[str, float]] = []
+    seen = set()
+    for concept in concepts:
+        for term, weight in _LEGAL_CONCEPT_EXPANSIONS.get(concept, ()):
+            normalized = _normalize(term)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            terms.append((term, weight))
+    return terms
+
+
+def _bm25_tokens(text: str) -> List[str]:
+    normalized = _normalize(text)
+    tokens: List[str] = []
+    for chunk in _CJK_SEQUENCE_RE.findall(normalized):
+        if len(chunk) == 1:
+            tokens.append(chunk)
+        else:
+            tokens.extend(chunk[index : index + 2] for index in range(len(chunk) - 1))
+    tokens.extend(match.group(0).casefold() for match in _ASCII_TOKEN_RE.finditer(text))
+    return tokens
+
+
+def _bm25_scores(
+    documents: Sequence[Sequence[str]],
+    query_tokens: Sequence[str],
+    *,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> List[float]:
+    if not documents:
+        return []
+    query = [token for token in query_tokens if token]
+    if not query:
+        return [0.0 for _ in documents]
+    term_frequencies = [Counter(document) for document in documents]
+    document_frequencies: Counter[str] = Counter()
+    for frequencies in term_frequencies:
+        document_frequencies.update(frequencies.keys())
+    total = len(documents)
+    average_length = sum(len(document) for document in documents) / total or 1.0
+    idf = {
+        term: math.log(1.0 + (total - frequency + 0.5) / (frequency + 0.5))
+        for term, frequency in document_frequencies.items()
+    }
+    scores: List[float] = []
+    for frequencies, document in zip(term_frequencies, documents):
+        length = len(document)
+        score = 0.0
+        for term in query:
+            frequency = frequencies.get(term, 0)
+            if not frequency:
+                continue
+            denominator = frequency + k1 * (
+                1.0 - b + b * length / average_length
+            )
+            score += (
+                idf.get(term, 0.0) * frequency * (k1 + 1.0) / denominator
+            )
+        scores.append(score)
+    return scores
+
+
+def _article_scores(
+    articles: Sequence[Dict[str, Any]],
+    question: str,
+) -> List[float]:
+    normalized_texts = [
+        _normalize(article.get("article_content") or "") for article in articles
+    ]
+    expanded_terms = _expanded_legal_terms(question)
+    explicit_refs = _extract_article_refs(question)
+    expanded_refs = {
+        _article_ref_key(term)
+        for term, _ in expanded_terms
+        if _article_ref_key(term)
+    }
+    query_terms = list(_question_terms(question))
+    query_terms.extend(term for term, _ in expanded_terms)
+    bm25 = _bm25_scores(
+        [_bm25_tokens(text) for text in normalized_texts],
+        _bm25_tokens(" ".join(query_terms)),
+    )
+    scores: List[float] = []
+    for index, article in enumerate(articles):
+        text = normalized_texts[index]
+        score = bm25[index] if index < len(bm25) else 0.0
+        matched_terms = 0
+        for term, weight in expanded_terms:
+            normalized_term = _normalize(term)
+            count = text.count(normalized_term) if normalized_term else 0
+            if count:
+                score += weight * min(count, 3)
+                matched_terms += 1
+        if matched_terms:
+            # Reward articles that cover several facets of the same concept.
+            score += 0.4 * matched_terms
+        if _article_ref_key(article.get("article_no")) in explicit_refs:
+            score += 1000.0
+        elif _article_ref_key(article.get("article_no")) in expanded_refs:
+            # Concept-level article index, e.g. 內線交易 -> 第 157-1、171 條.
+            score += 500.0
+        scores.append(score)
+    return scores
 
 
 def _article_key(value: Any) -> str:
@@ -333,40 +583,67 @@ def select_law_articles(
     *,
     priority: Optional[Sequence[str]] = None,
     limit: int = 4,
-    budget: int = 1200,
+    budget: int = 3000,
 ) -> List[Dict[str, str]]:
-    terms = _question_terms(question)
+    usable = [
+        article
+        for article in (articles or [])
+        if str(article.get("article_content") or "").strip()
+        and str(article.get("article_no") or "").strip()
+    ]
+    if not usable:
+        return []
+    relevance = _article_scores(usable, question)
     priority_order = {
         _article_key(article_no): index
         for index, article_no in enumerate(priority or [])
     }
-    candidates: List[Tuple[int, int, int, Dict[str, str]]] = []
-    for index, article in enumerate(articles or []):
-        content = str(article.get("article_content") or "").strip()
+    candidates: List[Dict[str, Any]] = []
+    for index, article in enumerate(usable):
         article_no = str(article.get("article_no") or "").strip()
-        if not content or not article_no:
-            continue
         article_key = _article_key(article_no)
-        priority_rank = priority_order.get(article_key, len(priority_order) + 1)
-        score = _article_score(article, terms)
+        in_priority = article_key in priority_order
         candidates.append(
-            (
-                0 if article_key in priority_order else 1,
-                priority_rank,
-                -score,
-                {"article_no": article_no, "article_content": content},
-            )
+            {
+                "article_no": article_no,
+                "article_content": str(article.get("article_content") or "").strip(),
+                "is_priority": in_priority,
+                "priority_rank": priority_order.get(article_key, len(priority_order) + 1),
+                "score": relevance[index] if index < len(relevance) else 0.0,
+            }
         )
-    candidates.sort(key=lambda item: (item[0], item[1], item[2], len(item[3]["article_content"])))
+    candidates.sort(
+        key=lambda item: (
+            0 if item["is_priority"] else 1,
+            item["priority_rank"],
+            -item["score"],
+            len(item["article_content"]),
+            item["article_no"],
+        )
+    )
+    best_score = max((item["score"] for item in candidates), default=0.0)
+    threshold = best_score * 0.2
     selected: List[Dict[str, str]] = []
     total = 0
-    for _, _, _, article in candidates:
+    for item in candidates:
         if len(selected) >= limit:
             break
-        content = article["article_content"]
+        # Priority articles come from explicit judgment-citation statistics and
+        # are always kept.  Otherwise avoid padding the answer with unrelated
+        # articles just because a law has 200+ sections.
+        if not item["is_priority"] and (
+            item["score"] <= 0 or item["score"] < threshold
+        ):
+            continue
+        content = item["article_content"]
         if total + len(content) > budget and selected:
             continue
-        selected.append(article)
+        selected.append(
+            {
+                "article_no": item["article_no"],
+                "article_content": content,
+            }
+        )
         total += len(content)
     return selected
 
@@ -466,7 +743,7 @@ def build_law_source(
         question,
         priority=priority_articles,
         limit=4,
-        budget=1200,
+        budget=3000,
     )
     promulgation = parse_first_promulgation(histories)
     return {

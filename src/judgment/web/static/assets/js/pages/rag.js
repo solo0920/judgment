@@ -374,7 +374,6 @@ function lawSourceCard(source, index) {
   const lawKey = source.law_key || "";
   const sourceType = source.source_type || "";
   const articles = (Array.isArray(source.articles) ? source.articles : [])
-    .slice(0, 2)
     .map((article) => {
       const articleNo = String(article.article_no || "");
       const articleAttributes =
@@ -422,6 +421,103 @@ function lawSourceCard(source, index) {
     </div>
     <div class="citation-links">${link}</div>
   </article>`;
+}
+
+function compactArticleText(value, maxLength = 150) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function lawAnswerMarkup(lawSources, fallback) {
+  if (!Array.isArray(lawSources) || !lawSources.length) {
+    return `<p class="answer-text">${escapeHtml(fallback)}</p>`;
+  }
+  return `<div class="law-answer-list">${lawSources
+    .map((source) => {
+      const lawKey = source.law_key || "";
+      const sourceType = source.source_type || "";
+      const lawName = source.law_name || "未命名法規";
+      const sourceLabel =
+        source.source_label || (sourceType === "order" ? "命令" : "法規");
+      const articleCount = Number(source.article_count || 0);
+      const index =
+        source.index != null
+          ? `<span class="law-answer-index">[${escapeHtml(String(source.index))}]</span>`
+          : "";
+      const laws = lawKey
+        ? `<button class="law-answer-law" type="button"
+            data-action="open-law-source"
+            data-law-key="${escapeHtml(lawKey)}"
+            data-source-type="${escapeHtml(sourceType)}"
+            title="點擊開啟 ${escapeHtml(lawName)} 的完整條文"
+            aria-label="開啟 ${escapeHtml(lawName)} 的完整條文">${escapeHtml(lawName)}</button>`
+        : `<strong>${escapeHtml(lawName)}</strong>`;
+      const articles = Array.isArray(source.articles) ? source.articles : [];
+      const articleList = articles.length
+        ? `<div class="law-answer-articles-label">相關條文</div>
+          <div class="law-answer-articles">${articles
+            .map((article) => {
+              const articleNo = String(article.article_no || "").trim();
+              const articleText = compactArticleText(article.article_content);
+              if (!lawKey || !articleNo) {
+                return `<div class="law-answer-article is-static">
+                  <span class="law-answer-article-no">${escapeHtml(articleNo || "條文")}</span>
+                  <span class="law-answer-article-text">${escapeHtml(articleText)}</span>
+                </div>`;
+              }
+              return `<button class="law-answer-article" type="button"
+                data-action="open-law-source"
+                data-law-key="${escapeHtml(lawKey)}"
+                data-source-type="${escapeHtml(sourceType)}"
+                data-article-no="${escapeHtml(articleNo)}"
+                title="點擊查看 ${escapeHtml(articleNo)} 的完整內容"
+                aria-label="開啟 ${escapeHtml(lawName)} ${escapeHtml(articleNo)} 的完整條文">
+                <span class="law-answer-article-no">${escapeHtml(articleNo)}</span>
+                <span class="law-answer-article-text">${escapeHtml(articleText)}</span>
+              </button>`;
+            })
+            .join("")}</div>`
+        : "";
+      return `<div class="law-answer-source">
+        <div class="law-answer-source-head">
+          ${laws}
+          <span class="law-answer-source-meta">（${escapeHtml(sourceLabel)}，${formatNumber(
+            articleCount,
+          )} 條）</span>
+          ${index}
+        </div>
+        ${articleList}
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function matchedChipsMarkup(matched, lawSources) {
+  if (!Array.isArray(matched) || !matched.length) return "";
+  const sourcesByName = new Map(
+    (Array.isArray(lawSources) ? lawSources : []).map((source) => [
+      String(source.law_name || ""),
+      source,
+    ]),
+  );
+  return `<div class="answer-section-label" style="margin-top:18px">
+      <span>命中詞彙</span>
+    </div>
+    <div class="chips">${matched
+      .map((term) => {
+        const source = sourcesByName.get(String(term));
+        if (!source?.law_key) {
+          return `<span class="chip">${escapeHtml(term)}</span>`;
+        }
+        return `<button class="chip chip-action" type="button"
+          data-action="open-law-source"
+          data-law-key="${escapeHtml(source.law_key)}"
+          data-source-type="${escapeHtml(source.source_type || "")}"
+          title="點擊開啟 ${escapeHtml(term)} 的完整條文"
+          aria-label="開啟 ${escapeHtml(term)} 的完整條文">${escapeHtml(term)}</button>`;
+      })
+      .join("")}</div>`;
 }
 
 function renderAnswerBody(payload) {
@@ -479,14 +575,7 @@ function renderAnswerBody(payload) {
       })}`;
   }
 
-  const matchedChips = matched.length
-    ? `<div class="answer-section-label" style="margin-top:18px">
-        <span>命中詞彙</span>
-      </div>
-      <div class="chips">${matched
-        .map((term) => `<span class="chip">${escapeHtml(term)}</span>`)
-        .join("")}</div>`
-    : "";
+  const matchedChips = matchedChipsMarkup(matched, lawSources);
 
   const testRun = payload.test_run;
   const llmModel = String(
@@ -609,7 +698,10 @@ function renderAnswerBody(payload) {
                 <span>法規／命令檢索結果</span>
                 <span>${partial && !showSources ? "法規資料庫" : `${lawSources.length} 筆來源`}</span>
               </div>
-              <p class="answer-text">${escapeHtml(lawAnswer)}</p>
+              <div class="law-answer-content">${lawAnswerMarkup(
+                lawSources,
+                lawAnswer,
+              )}</div>
             </div>`
           : ""
       }

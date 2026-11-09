@@ -2049,6 +2049,126 @@ button.chip:hover {
   line-height: 1.75;
 }
 
+.law-answer-content {
+  margin-top: 7px;
+}
+
+.law-answer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.law-answer-source {
+  min-width: 0;
+}
+
+.law-answer-source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 7px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.law-answer-law {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.law-answer-law:hover {
+  color: var(--ink);
+}
+
+.law-answer-source-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.law-answer-index {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.law-answer-articles-label {
+  margin-top: 7px;
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.law-answer-articles {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.law-answer-article {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.law-answer-article:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.law-answer-article.is-static {
+  cursor: default;
+}
+
+.law-answer-article-no {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.law-answer-article-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chip-action {
+  cursor: pointer;
+}
+
+@media (max-width: 560px) {
+  .law-answer-article {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+}
+
 .answer-text {
   color: var(--ink);
   font-size: clamp(14px, 1.4vw, 15.5px);

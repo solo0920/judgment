@@ -301,7 +301,7 @@ def _law_answer_summary(law_sources: Sequence[Dict[str, Any]]) -> str:
             if str(article.get("article_no") or "").strip()
         ]
         if article_nos:
-            line += "；相關條文：" + "、".join(article_nos[:3])
+            line += "；相關條文：" + "、".join(article_nos)
         if source.get("index") is not None:
             line += f" [{source['index']}]"
         lines.append(line)
@@ -344,7 +344,11 @@ def _build_llm_prompt(
     blocks = []
     for context in contexts:
         if context.get("kind") == "law":
-            blocks.append(f"[{context['index']}] {law_source_text(context)}")
+            blocks.append(
+                f"[{context['index']}] 法規／命令來源"
+                f"（引用此法規時請標 [{context['index']}]）："
+                f"{law_source_text(context)}"
+            )
             continue
         laws = "、".join(context.get("matched_laws") or []) or "—"
         blocks.append(
@@ -358,6 +362,8 @@ def _build_llm_prompt(
         + "\n\n請直接回答問題，不要重複參考資料原文、案號清單或標題；"
         "使用 2 到 3 句繁體中文，每個結論後標註對應的 [n]；"
         "[n] 是參考資料來源編號，不是法律條號，條號請寫「第15條」。"
+        "引用法規或命令的內容時，必須使用該法規／命令區塊標示的來源編號，"
+        "不可改用判決編號或條號代替。"
         "不要自行創造多個問題，並提醒這不是法律意見。"
     )
 

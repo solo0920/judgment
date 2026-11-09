@@ -22,8 +22,11 @@ from judgment.rag import (
     extract_excerpt,
 )
 from judgment.law_rag import (
+    _article_ref_key,
+    _extract_article_refs,
     build_insurance_responsibility_framework,
     law_sources_for_question,
+    select_law_articles,
 )
 
 
@@ -147,6 +150,50 @@ class FakeStore:
                 },
             }
         ]
+
+
+def _security_law_articles() -> list[dict]:
+    return [
+        {
+            "article_no": "第 153 條",
+            "article_content": (
+                "證券交易所之會員或證券經紀商、證券自營商在證券交易所市場"
+                "買賣證券，買賣一方不履行交付義務時，證券交易所應指定其他會員代為交付。"
+            ),
+        },
+        {
+            "article_no": "第 155 條",
+            "article_content": (
+                "對於在證券交易所上市之有價證券，不得有下列各款之行為："
+                "意圖抬高或壓低集中交易市場某種有價證券之交易價格，"
+                "自行或以他人名義連續以高價買入或以低價賣出。"
+            ),
+        },
+        {
+            "article_no": "第 157-1 條",
+            "article_content": (
+                "下列各款之人，實際知悉發行股票公司有重大影響其股票價格之消息時，"
+                "在該消息明確後，未公開前或公開後十八小時內，不得對該公司之"
+                "上市或在證券商營業處所買賣之股票自行或以他人名義買入或賣出。"
+            ),
+        },
+        {
+            "article_no": "第 171 條",
+            "article_content": (
+                "有下列情事之一者，處三年以上十年以下有期徒刑："
+                "一、違反第一百五十五條第一項、第二項、第一百五十七條之一"
+                "第一項或第二項規定。"
+            ),
+        },
+        {
+            "article_no": "第 43 條",
+            "article_content": (
+                "在證券交易所上市或證券商營業處所買賣之有價證券之給付或交割，"
+                "應以現款、現貨為之。"
+            ),
+        },
+    ]
+
 
 
 def test_build_index_text_keeps_head_and_tail() -> None:
@@ -331,6 +378,138 @@ def test_llm_answer_includes_law_retrieval_summary(monkeypatch, tmp_path: Path) 
     assert "銀行法" in payload["law_answer"]
     assert "返還借款" in payload["answer"]
     assert payload["answer_source"] == "llm"
+
+
+def test_article_reference_regex_handles_chinese_and_hyphen_forms() -> None:
+    assert _article_ref_key("第 157-1 條") == "157-1"
+    assert _article_ref_key("第157條之1") == "157-1"
+    assert _article_ref_key("第一百五十七條之一") == "157-1"
+    assert _article_ref_key("第一百七十一條") == "171"
+    assert _extract_article_refs(
+        "證券交易法第一百七十一條及第 157-1 條"
+    ) == {"171", "157-1"}
+
+
+def test_select_law_articles_expands_insider_trading_concept() -> None:
+    selected = select_law_articles(
+        _security_law_articles(),
+        "證券交易法對內線交易有什麼規範？",
+    )
+    assert [article["article_no"] for article in selected] == [
+        "第 157-1 條",
+        "第 171 條",
+    ]
+
+
+def test_select_law_articles_honors_explicit_article_reference() -> None:
+    selected = select_law_articles(
+        _security_law_articles(),
+        "證券交易法第171條的刑責是什麼？",
+    )
+    assert selected[0]["article_no"] == "第 171 條"
+
+
+def test_insider_trading_law_sources_select_157_1_and_171(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "證券交易法"): {
+            "article_count": 229,
+            "law_articles": _security_law_articles(),
+            "law_histories": "中華民國五十七年四月三十日制定公布全文 183 條",
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    sources = law_sources_for_question(
+        session_factory,
+        tmp_path,
+        "證券交易法對內線交易有什麼規範？",
+    )
+    assert len(sources) == 1
+    assert sources[0]["law_name"] == "證券交易法"
+    assert [article["article_no"] for article in sources[0]["articles"]] == [
+        "第 157-1 條",
+        "第 171 條",
+    ]
+
+
+def test_concept_lookup_finds_security_law_without_name(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "證券交易法"): {
+            "article_count": 229,
+            "law_articles": _security_law_articles(),
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    sources = law_sources_for_question(
+        session_factory,
+        tmp_path,
+        "內線交易有什麼規範？",
+    )
+    assert sources
+    assert sources[0]["law_name"] == "證券交易法"
+    assert [article["article_no"] for article in sources[0]["articles"]] == [
+        "第 157-1 條",
+        "第 171 條",
+    ]
+
+
+def test_llm_answer_includes_insider_trading_articles(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "證券交易法"): {
+            "article_count": 229,
+            "law_articles": _security_law_articles(),
+            "law_histories": "中華民國五十七年四月三十日制定公布全文 183 條",
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "依證券交易法第一百五十七條之一及第一百七十一條 [2]。",
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="證券交易法對內線交易有什麼規範？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["status"] == "operational"
+    assert "第 157-1 條" in payload["law_answer"]
+    assert "第 171 條" in payload["law_answer"]
+    assert [
+        article["article_no"]
+        for article in payload["law_sources"][0]["articles"]
+    ] == ["第 157-1 條", "第 171 條"]
 
 
 def test_answer_question_streams_law_partial_and_tokens(
