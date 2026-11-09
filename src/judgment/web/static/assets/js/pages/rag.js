@@ -2,6 +2,7 @@ import { api } from "../api.js";
 import {
   addHistory,
   clearHistory,
+  deleteHistoryEntry,
   getSetting,
   listHistory,
   setSetting,
@@ -10,6 +11,7 @@ import {
 } from "../store.js";
 import { renderTestFlowPanel } from "./performance.js";
 import {
+  copyText,
   emptyState,
   escapeHtml,
   formatDate,
@@ -890,13 +892,22 @@ function historySourceCount(entry) {
   return citations + judgments + lawSources;
 }
 
-function renderHistoryItem(entry, projectsById, index) {
+function renderHistoryItem(
+  entry,
+  projectsById,
+  index,
+  activeConversationId = null,
+) {
   const id = entry.id ?? index;
   const sources = historySourceCount(entry);
   const project = projectsById.get(String(entry.project_id || ""));
   const turns = Array.isArray(entry.turns) ? entry.turns : [];
   const updatedAt = entry.updated_at || entry.created_at;
-  return `<div class="rag-history-item${entry.pinned ? " is-pinned" : ""}">
+  const isActive =
+    activeConversationId !== null &&
+    activeConversationId !== undefined &&
+    String(activeConversationId) === String(id);
+  return `<div class="rag-history-item${entry.pinned ? " is-pinned" : ""}${isActive ? " is-active" : ""}">
     <button class="rag-history-open" type="button" data-history-open data-history-id="${escapeHtml(String(id))}">
       <span class="history-question">${escapeHtml(entry.title || "未命名提問")}</span>
       <span class="history-meta">
@@ -906,11 +917,19 @@ function renderHistoryItem(entry, projectsById, index) {
         ${turns.length > 1 ? `<span>· ${turns.length} 輪</span>` : ""}
       </span>
     </button>
-    <button class="rag-history-pin${entry.pinned ? " is-pinned" : ""}" type="button"
-      data-rag-action="toggle-pin" data-history-id="${escapeHtml(String(id))}"
-      title="${entry.pinned ? "取消釘選" : "釘選此項目"}"
-      aria-label="${entry.pinned ? "取消釘選" : "釘選此項目"}"
-      aria-pressed="${entry.pinned ? "true" : "false"}">${icon("pin", 13)}</button>
+    <div class="rag-history-actions">
+      <button class="rag-history-pin${entry.pinned ? " is-pinned" : ""}" type="button"
+        data-rag-action="toggle-pin" data-history-id="${escapeHtml(String(id))}"
+        title="${entry.pinned ? "取消釘選" : "釘選此項目"}"
+        aria-label="${entry.pinned ? "取消釘選" : "釘選此項目"}"
+        aria-pressed="${entry.pinned ? "true" : "false"}">${icon("pin", 13)}</button>
+      <button class="rag-history-more" type="button"
+        data-rag-action="open-history-menu" data-history-id="${escapeHtml(String(id))}"
+        title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false">${icon(
+          "more",
+          14,
+        )}</button>
+    </div>
   </div>`;
 }
 
@@ -1062,6 +1081,7 @@ export async function render(root) {
       </div>
     </div>
     <div id="rag-test-flow" class="rag-test-flow"></div>
+    <div class="rag-history-menu" id="rag-history-menu" role="menu" hidden></div>
     <dialog id="rag-judgment-dialog" class="judgment-dialog"></dialog>
     <dialog id="rag-law-dialog" class="judgment-dialog law-dialog"></dialog>
   </section>`;
@@ -1086,6 +1106,7 @@ export async function render(root) {
   const libraryContext = root.querySelector("#rag-library-context");
   const testModeBox = root.querySelector("#rag-test-mode");
   const testFlowBox = root.querySelector("#rag-test-flow");
+  const historyMenu = root.querySelector("#rag-history-menu");
   const judgmentDialog = root.querySelector("#rag-judgment-dialog");
   const lawDialog = root.querySelector("#rag-law-dialog");
   const syncDialogScrollLock = () => {
@@ -1098,6 +1119,8 @@ export async function render(root) {
   lawDialog?.addEventListener("close", syncDialogScrollLock);
   let flowPollTimer = null;
   let activeTestFlow = null;
+  let openHistoryMenuId = null;
+  let openHistoryMenuTrigger = null;
 
   const resizeInput = () => {
     input.style.height = "auto";
@@ -1122,6 +1145,17 @@ export async function render(root) {
 
   const hideFollowup = () => {
     followupForm.hidden = true;
+  };
+
+  const closeHistoryMenu = () => {
+    if (historyMenu.hidden && !openHistoryMenuTrigger) return;
+    historyMenu.hidden = true;
+    historyMenu.innerHTML = "";
+    if (openHistoryMenuTrigger) {
+      openHistoryMenuTrigger.setAttribute("aria-expanded", "false");
+    }
+    openHistoryMenuId = null;
+    openHistoryMenuTrigger = null;
   };
 
   const appendConversationTurn = (question, answerHtml) => {
@@ -1162,6 +1196,7 @@ export async function render(root) {
     setConversationMode(true);
     renderStoredConversation();
     showFollowup();
+    renderLibrary();
     setBusy(submit, false);
     setBusy(followupSubmit, false);
     window.setTimeout(() => {
@@ -1172,6 +1207,7 @@ export async function render(root) {
 
   const renderLibrary = () => {
     if (disposed) return;
+    closeHistoryMenu();
     if (!historyLoaded) {
       historyBox.innerHTML = `<div class="rag-library-empty">讀取本機紀錄中…</div>`;
       pinnedBox.innerHTML = `<div class="rag-library-empty">讀取本機紀錄中…</div>`;
@@ -1195,10 +1231,15 @@ export async function render(root) {
         )
       : historyEntries;
     const visible = filtered.slice(0, recentLimit);
+    const renderEntry = (entry, index) =>
+      renderHistoryItem(
+        entry,
+        projectMap,
+        index,
+        currentConversationId,
+      );
     pinnedBox.innerHTML = pinned.length
-      ? pinned
-          .map((entry, index) => renderHistoryItem(entry, projectMap, index))
-          .join("")
+      ? pinned.map(renderEntry).join("")
       : `<div class="rag-library-empty">尚無釘選項目。將最近項目釘選後會顯示在這裡。</div>`;
     projectsBox.innerHTML = renderProjects(
       projects,
@@ -1206,9 +1247,7 @@ export async function render(root) {
       activeProjectId,
     );
     historyBox.innerHTML = visible.length
-      ? visible
-          .map((entry, index) => renderHistoryItem(entry, projectMap, index))
-          .join("")
+      ? visible.map(renderEntry).join("")
       : `<div class="rag-library-empty">${
           activeProjectId
             ? "這個專案還沒有項目。"
@@ -1345,10 +1384,232 @@ export async function render(root) {
     resizeFollowupInput();
     setBusy(submit, false);
     setBusy(followupSubmit, false);
+    renderLibrary();
     if (judgmentDialog?.open) judgmentDialog.close();
     if (lawDialog?.open) lawDialog.close();
     input.focus();
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const positionHistoryMenu = (trigger) => {
+    if (!trigger || historyMenu.hidden) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = historyMenu.getBoundingClientRect();
+    const gap = 6;
+    let top = triggerRect.bottom + gap;
+    if (top + menuRect.height > window.innerHeight - 8) {
+      top = Math.max(8, triggerRect.top - menuRect.height - gap);
+    }
+    let left = triggerRect.right - menuRect.width;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuRect.width - 8));
+    historyMenu.style.left = `${Math.round(left)}px`;
+    historyMenu.style.top = `${Math.round(top)}px`;
+  };
+
+  const renderHistoryMenu = (entry) => {
+    historyMenu.innerHTML = `
+      <button type="button" role="menuitem" data-menu-action="rename">${icon("edit", 13)}<span>重新命名</span></button>
+      <button type="button" role="menuitem" data-menu-action="toggle-pin">${icon("pin", 13)}<span>${entry.pinned ? "取消釘選" : "釘選"}</span></button>
+      <button type="button" role="menuitem" data-menu-action="share">${icon("link", 13)}<span>分享</span></button>
+      <button type="button" role="menuitem" data-menu-action="move">${icon("folder", 13)}<span>移至專案</span></button>
+      <div class="rag-history-menu-divider"></div>
+      <button class="is-danger" type="button" role="menuitem" data-menu-action="delete">${icon("trash", 13)}<span>刪除</span></button>`;
+  };
+
+  const renderMoveProjectMenu = (entry) => {
+    const current = String(entry.project_id || "");
+    const options = [
+      { id: "", name: "未分類" },
+      ...projects.map((project) => ({
+        id: String(project.id),
+        name: project.name,
+      })),
+    ];
+    historyMenu.innerHTML = `
+      <div class="rag-history-menu-head">${icon("folder", 13)}<span>移至專案</span></div>
+      ${options
+        .map(
+          (option) => `<button type="button" role="menuitem"
+            data-menu-action="assign-project" data-project-id="${escapeHtml(option.id)}">
+            <span class="rag-history-menu-check">${
+              current === option.id ? icon("check", 12) : ""
+            }</span>
+            <span>${escapeHtml(option.name)}</span>
+          </button>`,
+        )
+        .join("")}
+      ${
+        projects.length
+          ? ""
+          : `<div class="rag-history-menu-note">尚未建立專案，可先從左側建立。</div>`
+      }
+      <div class="rag-history-menu-divider"></div>
+      <button type="button" role="menuitem" data-menu-action="back">${icon(
+        "chevronLeft",
+        13,
+      )}<span>返回</span></button>`;
+  };
+
+  const openHistoryMenu = (trigger, entryId) => {
+    const entry = historyEntries.find(
+      (item) => String(item.id) === String(entryId),
+    );
+    if (!entry) return;
+    closeHistoryMenu();
+    openHistoryMenuId = String(entry.id);
+    openHistoryMenuTrigger = trigger;
+    renderHistoryMenu(entry);
+    historyMenu.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    positionHistoryMenu(trigger);
+  };
+
+  const renameHistory = async (entry) => {
+    const next = window.prompt("重新命名對話", entry.title || "");
+    if (next === null) return;
+    const title = next.trim();
+    if (!title) {
+      toast("名稱不能空白。", "warn");
+      return;
+    }
+    if (title === entry.title) return;
+    const updated = await updateHistoryEntry(entry.id, { title });
+    if (!updated) {
+      toast("重新命名失敗。", "danger");
+      return;
+    }
+    entry.title = title;
+    renderLibrary();
+    toast("對話已重新命名。", "ok");
+  };
+
+  const shareHistory = async (entry) => {
+    const turns = Array.isArray(entry.turns) ? entry.turns : [];
+    const lines = [`# ${entry.title || "未命名對話"}`, ""];
+    if (turns.length) {
+      for (const turn of turns) {
+        lines.push("## 問題", "", turn.question || "", "");
+        lines.push("## 回答", "", turn.payload?.answer || "（沒有回答內容）", "");
+        const sources = Array.isArray(turn.payload?.law_sources)
+          ? turn.payload.law_sources
+              .map((source) => source.law_name)
+              .filter(Boolean)
+          : [];
+        if (sources.length) {
+          lines.push(`引用：${[...new Set(sources)].join("、")}`, "");
+        }
+      }
+    } else {
+      lines.push(entry.title || "");
+    }
+    const ok = await copyText(lines.join("\n"));
+    toast(
+      ok ? "對話內容已複製，可直接貼上分享。" : "無法複製對話內容。",
+      ok ? "ok" : "warn",
+    );
+  };
+
+  const deleteHistory = async (entry) => {
+    if (
+      !window.confirm(
+        `刪除對話「${entry.title || "未命名對話"}」？此操作無法復原。`,
+      )
+    ) {
+      return;
+    }
+    const deleted = await deleteHistoryEntry(entry.id);
+    if (!deleted) {
+      toast("刪除失敗。", "danger");
+      return;
+    }
+    const wasCurrent =
+      currentConversationId !== null &&
+      String(currentConversationId) === String(entry.id);
+    historyEntries = historyEntries.filter(
+      (item) => String(item.id) !== String(entry.id),
+    );
+    if (wasCurrent) {
+      newChat();
+    } else {
+      renderLibrary();
+    }
+    toast("對話已刪除。", "ok");
+  };
+
+  const assignProject = async (entry, projectId) => {
+    const updated = await updateHistoryEntry(entry.id, {
+      project_id: projectId,
+    });
+    if (!updated) {
+      toast("移至專案失敗。", "danger");
+      return;
+    }
+    entry.project_id = projectId;
+    const project = projects.find(
+      (item) => String(item.id) === String(projectId),
+    );
+    renderLibrary();
+    toast(
+      project ? `已移至專案「${project.name}」。` : "已移出專案。",
+      "ok",
+    );
+  };
+
+  const handleHistoryMenuClick = async (event) => {
+    const button = event.target.closest("[data-menu-action]");
+    if (!button) return;
+    const entry = historyEntries.find(
+      (item) => String(item.id) === openHistoryMenuId,
+    );
+    if (!entry) {
+      closeHistoryMenu();
+      return;
+    }
+    const action = button.dataset.menuAction;
+    if (action === "rename") {
+      closeHistoryMenu();
+      await renameHistory(entry);
+    } else if (action === "toggle-pin") {
+      closeHistoryMenu();
+      await togglePin(entry.id);
+    } else if (action === "share") {
+      closeHistoryMenu();
+      await shareHistory(entry);
+    } else if (action === "move") {
+      renderMoveProjectMenu(entry);
+      positionHistoryMenu(openHistoryMenuTrigger);
+    } else if (action === "assign-project") {
+      closeHistoryMenu();
+      await assignProject(entry, button.dataset.projectId || "");
+    } else if (action === "back") {
+      renderHistoryMenu(entry);
+      positionHistoryMenu(openHistoryMenuTrigger);
+    } else if (action === "delete") {
+      closeHistoryMenu();
+      await deleteHistory(entry);
+    }
+  };
+
+  const onDocumentClick = (event) => {
+    if (historyMenu.hidden) return;
+    const path =
+      typeof event.composedPath === "function" ? event.composedPath() : [];
+    if (path.includes(historyMenu) || historyMenu.contains(event.target)) {
+      return;
+    }
+    if (event.target.closest('[data-rag-action="open-history-menu"]')) return;
+    closeHistoryMenu();
+  };
+
+  const onDocumentKeydown = (event) => {
+    if (event.key === "Escape") closeHistoryMenu();
+  };
+
+  const onWindowScroll = (event) => {
+    if (event.target instanceof Node && historyMenu.contains(event.target)) {
+      return;
+    }
+    closeHistoryMenu();
   };
 
   const refreshHistory = async () => {
@@ -1960,6 +2221,7 @@ export async function render(root) {
       currentConversationId = null;
       conversationTurns = [];
       turnsBox.innerHTML = "";
+      renderLibrary();
     }
     const requestToken = ++requestSeq;
     const isStale = () => disposed || requestToken !== requestSeq;
@@ -2106,6 +2368,10 @@ export async function render(root) {
       newChat();
       return;
     }
+    if (action === "open-history-menu") {
+      openHistoryMenu(actionTarget, actionTarget.dataset.historyId);
+      return;
+    }
     if (action === "toggle-pin") {
       await togglePin(actionTarget.dataset.historyId);
       return;
@@ -2152,6 +2418,12 @@ export async function render(root) {
     await createProject(form);
   });
 
+  historyMenu.addEventListener("click", handleHistoryMenuClick);
+  document.addEventListener("click", onDocumentClick);
+  document.addEventListener("keydown", onDocumentKeydown);
+  window.addEventListener("scroll", onWindowScroll, true);
+  window.addEventListener("resize", closeHistoryMenu);
+
   clearButton.addEventListener("click", async () => {
     if (!historyEntries.length) {
       toast("目前沒有可清除的提問紀錄。", "info");
@@ -2175,6 +2447,11 @@ export async function render(root) {
   return () => {
     disposed = true;
     stopFlowPoll();
+    closeHistoryMenu();
+    document.removeEventListener("click", onDocumentClick);
+    document.removeEventListener("keydown", onDocumentKeydown);
+    window.removeEventListener("scroll", onWindowScroll, true);
+    window.removeEventListener("resize", closeHistoryMenu);
     document.documentElement.classList.remove("dialog-open");
     window.removeEventListener("judgment:test-mode", onTestModeChange);
     if (lastQuestion) {

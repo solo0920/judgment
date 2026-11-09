@@ -188,6 +188,26 @@ export async function updateHistoryEntry(id, patch = {}) {
   }
 }
 
+export async function deleteHistoryEntry(id) {
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId)) return false;
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(HISTORY_STORE, "readwrite");
+    transaction.objectStore(HISTORY_STORE).delete(numericId);
+    await transactionDone(transaction);
+    return true;
+  } catch (error) {
+    degraded = true;
+    const index = memory.history.findIndex(
+      (record) => Number(record.id) === numericId,
+    );
+    if (index === -1) return false;
+    memory.history.splice(index, 1);
+    return true;
+  }
+}
+
 export async function listHistory({ keyword = "", limit = 50 } = {}) {
   const needle = keyword.trim().toLowerCase();
   try {
