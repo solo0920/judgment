@@ -101,6 +101,8 @@ function normalizeEntry(entry) {
     title: String(entry.title || ""),
     detail: String(entry.detail || ""),
     payload: entry.payload || {},
+    pinned: Boolean(entry.pinned),
+    project_id: String(entry.project_id || ""),
     created_at: createdAt,
   };
 }
@@ -150,6 +152,37 @@ export async function addHistory(entry) {
     memory.history.push({ id, ...record });
     if (memory.history.length > MAX_HISTORY) memory.history.shift();
     return id;
+  }
+}
+
+export async function updateHistoryEntry(id, patch = {}) {
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId)) return null;
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(HISTORY_STORE, "readwrite");
+    const store = transaction.objectStore(HISTORY_STORE);
+    const existing = await requestToPromise(store.get(numericId));
+    if (!existing) {
+      await transactionDone(transaction);
+      return null;
+    }
+    const updated = { ...existing, ...patch, id: numericId };
+    await requestToPromise(store.put(updated));
+    await transactionDone(transaction);
+    return updated;
+  } catch (error) {
+    degraded = true;
+    const index = memory.history.findIndex(
+      (record) => Number(record.id) === numericId,
+    );
+    if (index === -1) return null;
+    memory.history[index] = {
+      ...memory.history[index],
+      ...patch,
+      id: numericId,
+    };
+    return memory.history[index];
   }
 }
 

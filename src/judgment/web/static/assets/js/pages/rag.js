@@ -1,5 +1,13 @@
 import { api } from "../api.js";
-import { addHistory, clearHistory, listHistory, storageMode } from "../store.js";
+import {
+  addHistory,
+  clearHistory,
+  getSetting,
+  listHistory,
+  setSetting,
+  storageMode,
+  updateHistoryEntry,
+} from "../store.js";
 import { renderTestFlowPanel } from "./performance.js";
 import {
   emptyState,
@@ -830,43 +838,131 @@ function renderAnswerError(error, processHtml = "") {
     </div>`;
 }
 
-function renderHistory(entries) {
-  if (!entries.length) {
-    return `<div class="history-empty">尚無提問紀錄。送出第一個問題後會保存在此瀏覽器。</div>`;
+function historySourceCount(entry) {
+  const payload = entry.payload || {};
+  const citations = Array.isArray(payload.citations)
+    ? payload.citations.length
+    : 0;
+  const judgments = Array.isArray(payload.judgments)
+    ? payload.judgments.length
+    : 0;
+  const lawSources = Array.isArray(payload.law_sources)
+    ? payload.law_sources.length
+    : 0;
+  return citations + judgments + lawSources;
+}
+
+function renderHistoryItem(entry, projectsById, index) {
+  const id = entry.id ?? index;
+  const sources = historySourceCount(entry);
+  const project = projectsById.get(String(entry.project_id || ""));
+  return `<div class="rag-history-item${entry.pinned ? " is-pinned" : ""}">
+    <button class="rag-history-open" type="button" data-history-open data-history-id="${escapeHtml(String(id))}">
+      <span class="history-question">${escapeHtml(entry.title || "未命名提問")}</span>
+      <span class="history-meta">
+        <span>${escapeHtml(formatRelativeTime(entry.created_at))}</span>
+        ${project ? `<span>· ${escapeHtml(project.name)}</span>` : ""}
+        <span>· ${sources ? `${sources} 筆來源` : "無引用"}</span>
+      </span>
+    </button>
+    <button class="rag-history-pin${entry.pinned ? " is-pinned" : ""}" type="button"
+      data-rag-action="toggle-pin" data-history-id="${escapeHtml(String(id))}"
+      title="${entry.pinned ? "取消釘選" : "釘選此項目"}"
+      aria-label="${entry.pinned ? "取消釘選" : "釘選此項目"}"
+      aria-pressed="${entry.pinned ? "true" : "false"}">${icon("pin", 13)}</button>
+  </div>`;
+}
+
+function renderProjects(projects, historyEntries, activeProjectId) {
+  const counts = new Map();
+  for (const entry of historyEntries) {
+    const key = String(entry.project_id || "");
+    if (key) counts.set(key, (counts.get(key) || 0) + 1);
   }
-  return entries
-    .map((entry, index) => {
-      const citations = Array.isArray(entry.payload?.citations)
-        ? entry.payload.citations.length
-        : 0;
-      const judgments = Array.isArray(entry.payload?.judgments)
-        ? entry.payload.judgments.length
-        : 0;
-      const lawSources = Array.isArray(entry.payload?.law_sources)
-        ? entry.payload.law_sources.length
-        : 0;
-      const sources = citations + judgments + lawSources;
-      return `<button class="history-item" type="button" data-history-index="${index}">
-        <span class="history-question">${escapeHtml(entry.title || "未命名提問")}</span>
-        <span class="history-meta">
-          <span>${escapeHtml(formatRelativeTime(entry.created_at))}</span>
-          <span>·</span>
-          <span>${sources ? `${sources} 筆來源` : "無引用"}</span>
-        </span>
-      </button>`;
-    })
-    .join("");
+  const rows = [
+    `<button class="rag-project${!activeProjectId ? " is-active" : ""}" type="button" data-rag-action="select-project" data-project-id="" aria-pressed="${!activeProjectId ? "true" : "false"}">
+      <span class="rag-project-name">${icon("grid", 13)}<span>全部</span></span>
+      <span class="rag-project-count">${historyEntries.length}</span>
+    </button>`,
+  ];
+  for (const project of projects) {
+    const id = String(project.id);
+    const count = counts.get(id) || 0;
+    rows.push(`<button class="rag-project${activeProjectId === id ? " is-active" : ""}" type="button" data-rag-action="select-project" data-project-id="${escapeHtml(id)}" aria-pressed="${activeProjectId === id ? "true" : "false"}">
+      <span class="rag-project-name">${icon("folder", 13)}<span>${escapeHtml(project.name)}</span></span>
+      <span class="rag-project-count">${count}</span>
+    </button>`);
+  }
+  if (!projects.length) {
+    rows.push(`<div class="rag-library-empty">尚未建立專案。</div>`);
+  }
+  rows.push(`<div class="rag-project-add-wrap">
+    <button class="rag-project-add" type="button" data-rag-action="show-project-form">${icon("plus", 13)}<span>建立專案</span></button>
+    <form class="rag-project-form" data-rag-form="project" hidden>
+      <input class="input" type="text" name="project_name" maxlength="60" placeholder="專案名稱" aria-label="專案名稱" autocomplete="off" />
+      <div class="rag-project-form-actions">
+        <button class="btn btn-primary btn-sm" type="submit">建立</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-rag-action="cancel-project">取消</button>
+      </div>
+    </form>
+  </div>`);
+  return rows.join("");
 }
 
 export async function render(root) {
   let disposed = false;
   let historyEntries = [];
+  let historyLoaded = false;
+  let projects = [];
+  let projectsLoaded = false;
+  let activeProjectId = "";
+  let recentLimit = 8;
   let lastQuestion = "";
+  let requestSeq = 0;
   let testMode = false;
   let testModels = { embedding: [], llm: [] };
 
   root.innerHTML = `<section class="page rag-page">
-    <header class="rag-hero">
+    <div class="rag-layout">
+      <aside class="rag-library" aria-label="對話庫">
+        <button class="rag-new-chat" type="button" data-rag-action="new-chat">
+          <span class="rag-new-chat-mark">${icon("plus", 16)}</span>
+          <span class="rag-new-chat-copy"><strong>新對話</strong><small>開始新的法律檢索</small></span>
+        </button>
+        <div class="rag-library-context" id="rag-library-context" hidden></div>
+        <section class="rag-library-section" data-rag-section="pinned">
+          <button class="rag-library-head" type="button" data-rag-toggle="pinned" aria-expanded="true">
+            <span class="rag-library-title">${icon("pin", 13)}已釘選</span>
+            <span class="rag-library-count" id="rag-pinned-count">0</span>
+            ${icon("chevronDown", 12, "rag-library-chevron")}
+          </button>
+          <div class="rag-library-body" id="rag-pinned-body">
+            <div class="rag-library-empty">尚無釘選項目。</div>
+          </div>
+        </section>
+        <section class="rag-library-section" data-rag-section="projects">
+          <button class="rag-library-head" type="button" data-rag-toggle="projects" aria-expanded="true">
+            <span class="rag-library-title">${icon("folder", 13)}專案</span>
+            <span class="rag-library-count" id="rag-projects-count">0</span>
+            ${icon("chevronDown", 12, "rag-library-chevron")}
+          </button>
+          <div class="rag-library-body" id="rag-projects-body"></div>
+        </section>
+        <section class="rag-library-section rag-library-recent">
+          <div class="rag-library-head is-static">
+            <span class="rag-library-title">${icon("history", 13)}最近項目 <span class="rag-library-count" id="rag-recent-count">0</span></span>
+            <button class="btn btn-ghost btn-sm" type="button" id="rag-clear-history">清除</button>
+          </div>
+          <div class="rag-library-body" id="rag-history">
+            <div class="rag-library-empty">讀取本機紀錄中…</div>
+          </div>
+          <div class="rag-library-foot" id="rag-storage-note">
+            提問紀錄儲存在瀏覽器 IndexedDB，不會上傳到伺服器。
+          </div>
+        </section>
+      </aside>
+      <div class="rag-workspace">
+        <header class="rag-hero">
       <span class="eyebrow">JUDGMENT · LEGAL RAG</span>
       <h1 class="rag-title">讓每一個答案，都能回到法規與判決</h1>
       <p class="rag-lead">以金融法規的現行條文與判決片段為檢索基礎。
@@ -923,20 +1019,9 @@ export async function render(root) {
             PostgreSQL 判決文件、Qdrant 向量索引與 Ollama 模型狀態皆為即時檢查；未就緒時會明確降級。
           </div>
         </section>
-
-        <section class="card">
-          <div class="side-card-head">
-            <span class="side-card-title">${icon("history", 14)}最近提問</span>
-            <button class="btn btn-ghost btn-sm" type="button" id="rag-clear-history">清除</button>
-          </div>
-          <div class="history-list" id="rag-history">
-            <div class="history-empty">讀取本機紀錄中…</div>
-          </div>
-          <div class="side-card-foot" id="rag-storage-note">
-            提問紀錄儲存在瀏覽器 IndexedDB，不會上傳到伺服器。
-          </div>
-        </section>
       </aside>
+    </div>
+      </div>
     </div>
     <div id="rag-test-flow" class="rag-test-flow"></div>
     <dialog id="rag-judgment-dialog" class="judgment-dialog"></dialog>
@@ -952,6 +1037,13 @@ export async function render(root) {
   const historyBox = root.querySelector("#rag-history");
   const storageNote = root.querySelector("#rag-storage-note");
   const clearButton = root.querySelector("#rag-clear-history");
+  const library = root.querySelector(".rag-library");
+  const pinnedBox = root.querySelector("#rag-pinned-body");
+  const projectsBox = root.querySelector("#rag-projects-body");
+  const pinnedCount = root.querySelector("#rag-pinned-count");
+  const projectsCount = root.querySelector("#rag-projects-count");
+  const recentCount = root.querySelector("#rag-recent-count");
+  const libraryContext = root.querySelector("#rag-library-context");
   const testModeBox = root.querySelector("#rag-test-mode");
   const testFlowBox = root.querySelector("#rag-test-flow");
   const judgmentDialog = root.querySelector("#rag-judgment-dialog");
@@ -972,18 +1064,196 @@ export async function render(root) {
     input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
   };
 
+  const renderLibrary = () => {
+    if (disposed) return;
+    if (!historyLoaded) {
+      historyBox.innerHTML = `<div class="rag-library-empty">讀取本機紀錄中…</div>`;
+      pinnedBox.innerHTML = `<div class="rag-library-empty">讀取本機紀錄中…</div>`;
+      pinnedCount.textContent = "0";
+      recentCount.textContent = "0";
+      if (projectsLoaded) {
+        projectsBox.innerHTML = renderProjects(projects, [], activeProjectId);
+      }
+      return;
+    }
+    const activeProject =
+      projects.find((project) => String(project.id) === activeProjectId) || null;
+    if (activeProjectId && !activeProject) activeProjectId = "";
+    const projectMap = new Map(
+      projects.map((project) => [String(project.id), project]),
+    );
+    const pinned = historyEntries.filter((entry) => Boolean(entry.pinned));
+    const filtered = activeProjectId
+      ? historyEntries.filter(
+          (entry) => String(entry.project_id || "") === activeProjectId,
+        )
+      : historyEntries;
+    const visible = filtered.slice(0, recentLimit);
+    pinnedBox.innerHTML = pinned.length
+      ? pinned
+          .map((entry, index) => renderHistoryItem(entry, projectMap, index))
+          .join("")
+      : `<div class="rag-library-empty">尚無釘選項目。將最近項目釘選後會顯示在這裡。</div>`;
+    projectsBox.innerHTML = renderProjects(
+      projects,
+      historyEntries,
+      activeProjectId,
+    );
+    historyBox.innerHTML = visible.length
+      ? visible
+          .map((entry, index) => renderHistoryItem(entry, projectMap, index))
+          .join("")
+      : `<div class="rag-library-empty">${
+          activeProjectId
+            ? "這個專案還沒有項目。"
+            : "尚無提問紀錄。送出第一個問題後會保存在此瀏覽器。"
+        }</div>`;
+    if (filtered.length > recentLimit) {
+      historyBox.insertAdjacentHTML(
+        "beforeend",
+        `<button class="rag-library-more" type="button" data-rag-action="more-recent">顯示更多 · ${formatNumber(
+          filtered.length - recentLimit,
+        )} 筆</button>`,
+      );
+    }
+    pinnedCount.textContent = String(pinned.length);
+    projectsCount.textContent = String(projects.length);
+    recentCount.textContent = String(filtered.length);
+    if (activeProject) {
+      libraryContext.hidden = false;
+      libraryContext.innerHTML = `<span>${icon(
+        "folder",
+        12,
+      )}<strong>${escapeHtml(
+        activeProject.name,
+      )}</strong></span><button type="button" data-rag-action="clear-project" title="返回全部項目" aria-label="返回全部項目">${icon(
+        "x",
+        12,
+      )}</button>`;
+    } else {
+      libraryContext.hidden = true;
+      libraryContext.innerHTML = "";
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const stored = await getSetting("rag.projects", []);
+      projects = Array.isArray(stored)
+        ? stored
+            .map((project) => ({
+              id: String(project?.id || ""),
+              name: String(project?.name || "").trim(),
+            }))
+            .filter((project) => project.id && project.name)
+        : [];
+    } catch (error) {
+      projects = [];
+    }
+    projectsLoaded = true;
+    if (!disposed) renderLibrary();
+  };
+
+  const selectProject = (projectId) => {
+    activeProjectId = String(projectId || "");
+    recentLimit = 8;
+    renderLibrary();
+  };
+
+  const showProjectForm = () => {
+    const form = projectsBox.querySelector('[data-rag-form="project"]');
+    if (!form) return;
+    form.hidden = false;
+    form.querySelector("input")?.focus();
+  };
+
+  const cancelProjectForm = () => {
+    const form = projectsBox.querySelector('[data-rag-form="project"]');
+    if (!form) return;
+    form.hidden = true;
+    form.reset();
+  };
+
+  const createProject = async (form) => {
+    const field = form.elements.project_name;
+    const name = String(field?.value || "").trim();
+    if (!name) {
+      toast("請輸入專案名稱。", "warn");
+      field?.focus();
+      return;
+    }
+    if (
+      projects.some(
+        (project) => project.name.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      toast("已有同名專案。", "warn");
+      field?.focus();
+      return;
+    }
+    const id =
+      typeof crypto !== "undefined" &&
+      typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `project-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    projects = [
+      ...projects,
+      { id, name: name.slice(0, 60), created_at: new Date().toISOString() },
+    ];
+    activeProjectId = id;
+    recentLimit = 8;
+    await setSetting("rag.projects", projects);
+    renderLibrary();
+    toast(`已建立專案「${name}」。`, "ok");
+  };
+
+  const togglePin = async (entryId) => {
+    const entry = historyEntries.find(
+      (item) => String(item.id) === String(entryId),
+    );
+    if (!entry) return;
+    const pinned = !entry.pinned;
+    const updated = await updateHistoryEntry(entry.id, { pinned });
+    if (!updated) {
+      toast("無法更新釘選狀態。", "danger");
+      return;
+    }
+    entry.pinned = pinned;
+    renderLibrary();
+    toast(pinned ? "已釘選項目。" : "已取消釘選。", "ok");
+  };
+
+  const newChat = () => {
+    requestSeq += 1;
+    stopFlowPoll();
+    paintTestFlow(null);
+    lastQuestion = "";
+    input.value = "";
+    resizeInput();
+    answerCard.innerHTML = answerPlaceholder();
+    setBusy(submit, false);
+    if (judgmentDialog?.open) judgmentDialog.close();
+    if (lawDialog?.open) lawDialog.close();
+    input.focus();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const refreshHistory = async () => {
     try {
-      historyEntries = await listHistory({ limit: 6 });
+      historyEntries = await listHistory({ limit: 120 });
       if (disposed) return;
-      historyBox.innerHTML = renderHistory(historyEntries);
+      historyLoaded = true;
+      renderLibrary();
       storageNote.textContent =
         storageMode() === "indexeddb"
           ? "提問紀錄儲存在瀏覽器 IndexedDB，不會上傳到伺服器。"
           : "瀏覽器儲存不可用，提問紀錄只保留在本次工作階段。";
     } catch (error) {
       if (disposed) return;
-      historyBox.innerHTML = `<div class="history-empty">無法讀取本機紀錄。</div>`;
+      historyEntries = [];
+      historyLoaded = true;
+      renderLibrary();
+      historyBox.innerHTML = `<div class="rag-library-empty">無法讀取本機紀錄。</div>`;
     }
   };
 
@@ -1577,6 +1847,9 @@ export async function render(root) {
       input.focus();
       return;
     }
+    const requestToken = ++requestSeq;
+    const isStale = () => disposed || requestToken !== requestSeq;
+    const projectId = activeProjectId;
     lastQuestion = trimmed;
     input.value = trimmed;
     resizeInput();
@@ -1593,7 +1866,7 @@ export async function render(root) {
     let partialPayload = null;
     let partialAnswer = "";
     const applyPartialAnswer = (payload) => {
-      if (disposed || !payload?.partial) return;
+      if (isStale() || !payload?.partial) return;
       const body = answerCard.querySelector(".answer-body");
       if (!body) return;
       partialPayload = payload;
@@ -1608,13 +1881,13 @@ export async function render(root) {
       }
     };
     const appendPartialToken = (text) => {
-      if (disposed || !text || !partialPayload?.streaming) return;
+      if (isStale() || !text || !partialPayload?.streaming) return;
       partialAnswer += text;
       const target = answerCard.querySelector("[data-partial-answer]");
       if (target) target.textContent = partialAnswer;
     };
     const resetPartialTokens = () => {
-      if (disposed || !partialPayload?.streaming) return;
+      if (isStale() || !partialPayload?.streaming) return;
       partialAnswer = "";
       const target = answerCard.querySelector("[data-partial-answer]");
       if (target) target.textContent = "正在重新生成回答…";
@@ -1623,12 +1896,14 @@ export async function render(root) {
       const payload = testMode
         ? await api.rag(trimmed, { testMode })
         : await api.ragStream(trimmed, {
-            onStep: (event) => processController?.step(event),
+            onStep: (event) => {
+              if (!isStale()) processController?.step(event);
+            },
             onPartial: applyPartialAnswer,
             onToken: appendPartialToken,
             onTokenReset: resetPartialTokens,
           });
-      if (disposed) return;
+      if (isStale()) return;
       stopFlowPoll();
       const processHtml = processController?.finish(true) || "";
       answerCard.innerHTML = renderAnswer(trimmed, payload, processHtml);
@@ -1644,6 +1919,7 @@ export async function render(root) {
         kind: "rag",
         title: trimmed,
         detail: `${payload.status || "preview"} · ${sources} 筆來源`,
+        project_id: projectId,
         payload: {
           question: trimmed,
           status: payload.status,
@@ -1653,14 +1929,16 @@ export async function render(root) {
       });
       await refreshHistory();
     } catch (error) {
+      if (isStale()) return;
       stopFlowPoll();
-      if (disposed) return;
       const processHtml = processController?.finish(false) || "";
       answerCard.innerHTML = renderAnswerError(error, processHtml);
       toast(error.message || "檢索失敗。", "danger");
     } finally {
-      stopFlowPoll();
-      if (!disposed) setBusy(submit, false);
+      if (!isStale()) {
+        stopFlowPoll();
+        setBusy(submit, false);
+      }
     }
   };
 
@@ -1685,14 +1963,63 @@ export async function render(root) {
     form.requestSubmit();
   });
 
-  historyBox.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-history-index]");
-    if (!button) return;
-    const entry = historyEntries[Number(button.dataset.historyIndex)];
+  library.addEventListener("click", async (event) => {
+    const toggle = event.target.closest("[data-rag-toggle]");
+    if (toggle) {
+      const section = toggle.closest(".rag-library-section");
+      const collapsed = section.classList.toggle("is-collapsed");
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      return;
+    }
+    const actionTarget = event.target.closest("[data-rag-action]");
+    const action = actionTarget?.dataset.ragAction || "";
+    if (action === "new-chat") {
+      newChat();
+      return;
+    }
+    if (action === "toggle-pin") {
+      await togglePin(actionTarget.dataset.historyId);
+      return;
+    }
+    if (action === "select-project") {
+      selectProject(actionTarget.dataset.projectId || "");
+      return;
+    }
+    if (action === "show-project-form") {
+      showProjectForm();
+      return;
+    }
+    if (action === "cancel-project") {
+      cancelProjectForm();
+      return;
+    }
+    if (action === "more-recent") {
+      recentLimit += 12;
+      renderLibrary();
+      return;
+    }
+    if (action === "clear-project") {
+      selectProject("");
+      return;
+    }
+    const openButton = event.target.closest("[data-history-open]");
+    if (!openButton) return;
+    const entry = historyEntries.find(
+      (item) => String(item.id) === String(openButton.dataset.historyId),
+    );
     if (!entry) return;
+    activeProjectId = String(entry.project_id || "");
+    renderLibrary();
     input.value = entry.title;
     resizeInput();
     runQuestion(entry.title);
+  });
+
+  library.addEventListener("submit", async (event) => {
+    const form = event.target.closest('[data-rag-form="project"]');
+    if (!form) return;
+    event.preventDefault();
+    await createProject(form);
   });
 
   clearButton.addEventListener("click", async () => {
@@ -1707,7 +2034,12 @@ export async function render(root) {
   });
 
   resizeInput();
-  await Promise.allSettled([loadStats(), refreshHistory(), loadTestMode()]);
+  await Promise.allSettled([
+    loadStats(),
+    refreshHistory(),
+    loadProjects(),
+    loadTestMode(),
+  ]);
   await loadCurrentTestFlow();
 
   return () => {
