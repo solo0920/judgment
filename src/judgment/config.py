@@ -61,6 +61,7 @@ class Settings:
     judgment_index_recipe_version: str = "doc-head-tail-v1"
     judgment_point_id_version: str = "jid-uuid5-v1"
     embedding_url: str = ""
+    embedding_fallback_url: str = ""
     embedding_model: str = "bge-m3"
     embedding_timeout_seconds: float = 120.0
     llm_url: str = ""
@@ -138,6 +139,9 @@ class Settings:
             ).strip()
             or "jid-uuid5-v1",
             embedding_url=os.getenv("EMBEDDING_URL", "").rstrip("/"),
+            embedding_fallback_url=os.getenv(
+                "EMBEDDING_FALLBACK_URL", ""
+            ).rstrip("/"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "bge-m3").strip()
             or "bge-m3",
             embedding_timeout_seconds=_env_float("EMBEDDING_TIMEOUT_SECONDS", 120.0),
@@ -171,6 +175,7 @@ class Settings:
         judgment_index_recipe_version: str | None = None,
         judgment_point_id_version: str | None = None,
         embedding_url: str | None = None,
+        embedding_fallback_url: str | None = None,
         embedding_model: str | None = None,
         llm_url: str | None = None,
         llm_model: str | None = None,
@@ -207,6 +212,10 @@ class Settings:
             changes["judgment_point_id_version"] = judgment_point_id_version
         if embedding_url is not None:
             changes["embedding_url"] = embedding_url.rstrip("/")
+        if embedding_fallback_url is not None:
+            changes["embedding_fallback_url"] = (
+                embedding_fallback_url.rstrip("/")
+            )
         if embedding_model:
             changes["embedding_model"] = embedding_model
         if llm_url is not None:

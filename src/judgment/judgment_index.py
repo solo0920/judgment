@@ -276,6 +276,7 @@ def index_judgments(
         settings.embedding_url,
         model,
         timeout=settings.embedding_timeout_seconds,
+        fallback_base_url=settings.embedding_fallback_url,
     )
     scan_all = bool(all_rows or recreate)
 
@@ -731,6 +732,7 @@ def build_index_version(
         settings.embedding_url,
         settings.embedding_model,
         timeout=settings.embedding_timeout_seconds,
+        fallback_base_url=settings.embedding_fallback_url,
     )
     if not store.configured:
         raise QdrantError("QDRANT_URL 未設定")

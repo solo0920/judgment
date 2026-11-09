@@ -610,6 +610,7 @@ def answer_question(
         settings.embedding_url,
         settings.embedding_model,
         timeout=settings.embedding_timeout_seconds,
+        fallback_base_url=settings.embedding_fallback_url,
     )
     search_collection = collection
     if settings.qdrant_url:

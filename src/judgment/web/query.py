@@ -1901,6 +1901,7 @@ def _query_qdrant(
         settings.embedding_url,
         settings.embedding_model,
         timeout=settings.embedding_timeout_seconds,
+        fallback_base_url=settings.embedding_fallback_url,
     )
     embed_started = time.perf_counter()
     try:

@@ -192,7 +192,8 @@ cd /Volumes/USB/judgment-backup-20261108
 | `JUDGMENT_VECTOR_COLLECTION_PREFIX` | `judgments` | 版本化實體 collection 前綴，例如 `judgments_v002` |
 | `JUDGMENT_EMBEDDING_VERSION` | `bge-m3@v1` | 向量重用指紋的一部分；模型或前處理改變時必須更新 |
 | `JUDGMENT_INDEX_RECIPE_VERSION` | `doc-head-tail-v1` | index text 規則版本；會自動附加 max_chars |
-| `EMBEDDING_URL` | 空 | Ollama API 位址；本機預設 `http://127.0.0.1:11434` |
+| `EMBEDDING_URL` | 空 | 主要 Ollama embedding API；本機預設 `http://127.0.0.1:11434` |
+| `EMBEDDING_FALLBACK_URL` | 空 | 主要 embedding API 無法連線時的本機 fallback；例如 x570 關機時改用 MBP Ollama |
 | `EMBEDDING_MODEL` | `bge-m3` | 判決與查詢使用的 embedding 模型（1024 維） |
 | `EMBEDDING_TIMEOUT_SECONDS` | `120` | Embedding 請求逾時 |
 | `LLM_URL` | 空 | Ollama API 位址；本機預設 `http://127.0.0.1:11434` |
@@ -882,6 +883,7 @@ curl "http://127.0.0.1:9200/api/index-alias/reconcile"
 - 已刪除或不再符合資格的判決會從新 collection 刪除。
 - 驗證失敗不得切換；第一階段保留 active＋前一個成功版本，不自動刪除舊 collection。
 - `JUDGMENT_VECTOR_ALIAS` 預設 `judgments_current`，`JUDGMENT_VECTOR_COLLECTION_PREFIX` 預設 `judgments`。
+- 目前本機可將 `EMBEDDING_URL` 指向 x570 Ollama、`EMBEDDING_FALLBACK_URL` 指向 MBP `http://127.0.0.1:11434`；x570 關機時自動改用本機，兩端必須使用同一個 `bge-m3` digest。
 
 #### 全量索引：自動接續
 
@@ -990,7 +992,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：131 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：133 passed（含靜態資源、服務狀態、系統資源使用、索引版本與 alias、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料：1,351 筆法規、10,454 筆命令、222,124 條文、2 個原始法規 Parquet（約 45 MB）。
 - 判決原始檔：`data/judgments/raw_rar/` 共 24 個月份（202409–202608）的 `.rar`，合計 6.2 GB；已建立 `manifest.json` 記錄檔名、月份、大小與 SHA-256。
