@@ -2278,19 +2278,6 @@ button.chip:hover {
   background: var(--accent-soft);
 }
 
-.rag-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 16px;
-  align-items: start;
-}
-
-.rag-side {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
 .answer-card {
   min-height: 380px;
   overflow: hidden;
@@ -5654,10 +5641,6 @@ button.chip:hover {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
-  .rag-grid {
-    grid-template-columns: minmax(0, 1fr) 290px;
-  }
-
   .arch-flow {
     grid-template-columns: 1fr 20px 1fr 20px 1fr 20px 1fr;
   }
@@ -5702,16 +5685,6 @@ button.chip:hover {
   .rag-library-context,
   .rag-library-recent {
     grid-column: 1 / -1;
-  }
-
-  .rag-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .rag-side {
-    display: grid;
-    grid-template-columns: 1fr;
-    align-items: start;
   }
 
   .status-columns {
@@ -5875,10 +5848,6 @@ button.chip:hover {
   }
 
   .rag-library {
-    grid-template-columns: 1fr;
-  }
-
-  .rag-side {
     grid-template-columns: 1fr;
   }
 

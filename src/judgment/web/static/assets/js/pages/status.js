@@ -251,6 +251,81 @@ function renderRuns(runs) {
   </div>`;
 }
 
+function renderRagIndex(status) {
+  const data = status.data || {};
+  const services = Array.isArray(status.services) ? status.services : [];
+  const byId = new Map(services.map((service) => [service.id, service]));
+  const qdrant = byId.get("qdrant");
+  const embedding = byId.get("embedding");
+  const rag = byId.get("rag");
+  const llm = byId.get("llm");
+  const indexed = Number(data.judgment_indexed_count || 0);
+  const total = Number(data.judgment_count || 0);
+  const coverage = total ? ((indexed / total) * 100).toFixed(1) : "0.0";
+  const points =
+    data.judgment_vector_points === null ||
+    data.judgment_vector_points === undefined
+      ? "—"
+      : formatNumber(data.judgment_vector_points);
+  const remaining = Number(data.judgment_index_remaining || 0);
+  const ragBadge =
+    rag?.status === "operational"
+      ? "RAG 就緒"
+      : rag?.status === "not_configured"
+        ? "未設定"
+        : rag?.status === "degraded"
+          ? "降級"
+          : "未知";
+  const rows = [
+    ["cube", "Qdrant 向量索引", qdrant],
+    ["layers", `Embedding（${data.judgment_vector_model || "—"}）`, embedding],
+    ["brain", "RAG 回答管線", rag],
+    ["sparkles", "LLM 模型", llm],
+  ];
+  return `<section class="card data-section rag-index-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("database", 14)}RAG 資料現況</span>
+      ${statusBadge(rag?.status, ragBadge)}
+    </div>
+    <div class="side-card-body">
+      <div class="mini-stats">
+        <div class="mini-stat">
+          <div class="mini-stat-value">${formatNumber(total)}</div>
+          <div class="mini-stat-label">判決</div>
+        </div>
+        <div class="mini-stat">
+          <div class="mini-stat-value">${formatNumber(indexed)}</div>
+          <div class="mini-stat-label">已索引</div>
+        </div>
+        <div class="mini-stat">
+          <div class="mini-stat-value">${coverage}%</div>
+          <div class="mini-stat-label">索引覆蓋</div>
+        </div>
+      </div>
+      <div class="side-status-list">
+        ${rows
+          .map(
+            ([iconName, label, service]) => `<div class="side-status-row">
+              <span>${icon(iconName, 13)}${escapeHtml(label)}</span>
+              ${statusBadge(
+                service?.status,
+                service?.status === "not_configured" ? "未設定" : undefined,
+              )}
+            </div>`,
+          )
+          .join("")}
+      </div>
+      <div class="side-card-foot" style="padding:0;border:0;margin-top:10px">
+        Collection：${escapeHtml(data.judgment_vector_collection || "—")} ·
+        ${points} points · 剩餘 ${formatNumber(remaining)} 筆待索引
+      </div>
+    </div>
+    <div class="side-card-foot">
+      PostgreSQL 判決文件、Qdrant 向量索引與 Ollama 模型狀態皆為即時檢查；未就緒時會明確降級。
+    </div>
+  </section>`;
+}
+
 function renderOverview(status) {
   const data = status.data || {};
   const services = Array.isArray(status.services) ? status.services : [];
@@ -291,6 +366,8 @@ function renderOverview(status) {
 
     <div class="service-grid">${services.map(serviceCard).join("")}</div>
 
+    ${renderRagIndex(status)}
+
     <div class="status-summary">
       <div class="metric-card">
         <div class="metric-label">現行法規</div>
@@ -329,9 +406,7 @@ function renderOverview(status) {
             )}；LLM：${escapeHtml(llm?.detail || "未設定")}。這些狀態不會被偽裝成可用。`,
           })}</div>`
         : ""
-    }
-
-  }`;
+    }`;
 }
 
 function renderArchitectureTab(status) {
@@ -381,6 +456,10 @@ function renderApiTab(status) {
 
 function renderDataTab(status) {
   const data = status.data || {};
+  const indexed = Number(data.judgment_indexed_count || 0);
+  const total = Number(data.judgment_count || 0);
+  const coverage = total ? ((indexed / total) * 100).toFixed(1) : "0.0";
+  const remaining = Number(data.judgment_index_remaining || 0);
   return `<div class="status-summary">
       <div class="metric-card">
         <div class="metric-label">現行法規</div>
@@ -405,7 +484,7 @@ function renderDataTab(status) {
       <div class="metric-card">
         <div class="metric-label">判決索引</div>
         <div class="metric-value">${formatNumber(data.judgment_indexed_count)}</div>
-        <div class="metric-foot">/ ${formatNumber(data.judgment_count)} 筆判決</div>
+        <div class="metric-foot">/ ${formatNumber(data.judgment_count)} 筆判決 · 覆蓋 ${coverage}%</div>
       </div>
     </div>
     <div class="status-columns is-single">
@@ -440,6 +519,10 @@ function renderDataTab(status) {
             `<strong>${formatNumber(data.judgment_indexed_count)}</strong> / ${formatNumber(
               data.judgment_count,
             )}（${formatNumber(data.judgment_vector_points)} points）`,
+          )}
+          ${detailRow(
+            "索引覆蓋",
+            `<strong>${coverage}%</strong> · 剩餘 ${formatNumber(remaining)} 筆`,
           )}
           ${detailRow(
             "索引版本",

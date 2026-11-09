@@ -999,28 +999,9 @@ export async function render(root) {
       </div>
     </header>
 
-    <div class="rag-grid">
-      <section class="card answer-card" id="answer-card" aria-live="polite">
-        ${answerPlaceholder()}
-      </section>
-
-      <aside class="rag-side">
-        <section class="card">
-          <div class="side-card-head">
-            <span class="side-card-title">${icon("database", 14)}資料現況</span>
-            <span id="rag-stats-mode" class="badge badge-neutral badge-mono">讀取中</span>
-          </div>
-          <div class="side-card-body" id="rag-stats">
-            <div class="skeleton skeleton-line" style="width:88%"></div>
-            <div class="skeleton skeleton-line" style="width:64%"></div>
-            <div class="skeleton skeleton-line" style="width:74%"></div>
-          </div>
-          <div class="side-card-foot">
-            PostgreSQL 判決文件、Qdrant 向量索引與 Ollama 模型狀態皆為即時檢查；未就緒時會明確降級。
-          </div>
-        </section>
-      </aside>
-    </div>
+    <section class="card answer-card" id="answer-card" aria-live="polite">
+      ${answerPlaceholder()}
+    </section>
       </div>
     </div>
     <div id="rag-test-flow" class="rag-test-flow"></div>
@@ -1032,8 +1013,6 @@ export async function render(root) {
   const input = root.querySelector("#rag-question");
   const submit = root.querySelector("#rag-submit");
   const answerCard = root.querySelector("#answer-card");
-  const statsBox = root.querySelector("#rag-stats");
-  const statsMode = root.querySelector("#rag-stats-mode");
   const historyBox = root.querySelector("#rag-history");
   const storageNote = root.querySelector("#rag-storage-note");
   const clearButton = root.querySelector("#rag-clear-history");
@@ -1257,117 +1236,55 @@ export async function render(root) {
     }
   };
 
-  const loadStats = async () => {
+  const loadModeNotice = async () => {
     try {
       const status = await api.status();
       if (disposed) return;
       const data = status.data || {};
-      const services = new Map((status.services || []).map((item) => [item.id, item]));
-      const qdrant = services.get("qdrant");
-      const embedding = services.get("embedding");
+      const services = new Map(
+        (status.services || []).map((item) => [item.id, item]),
+      );
       const rag = services.get("rag");
-      const llm = services.get("llm");
       const indexed = Number(data.judgment_indexed_count || 0);
       const totalJudgments = Number(data.judgment_count || 0);
-      const coverage = totalJudgments
-        ? ((indexed / totalJudgments) * 100).toFixed(1)
-        : "0.0";
-      const points =
-        data.judgment_vector_points === null ||
-        data.judgment_vector_points === undefined
-          ? "—"
-          : formatNumber(data.judgment_vector_points);
-
-      statsBox.innerHTML = `<div class="mini-stats">
-          <div class="mini-stat">
-            <div class="mini-stat-value">${formatNumber(totalJudgments)}</div>
-            <div class="mini-stat-label">判決</div>
-          </div>
-          <div class="mini-stat">
-            <div class="mini-stat-value">${formatNumber(indexed)}</div>
-            <div class="mini-stat-label">已索引</div>
-          </div>
-          <div class="mini-stat">
-            <div class="mini-stat-value">${coverage}%</div>
-            <div class="mini-stat-label">索引覆蓋</div>
-          </div>
-        </div>
-        <div class="side-status-list">
-          <div class="side-status-row">
-            <span>${icon("cube", 13)}Qdrant 向量索引</span>
-            ${statusBadge(qdrant?.status, qdrant?.status === "not_configured" ? "未設定" : undefined)}
-          </div>
-          <div class="side-status-row">
-            <span>${icon("layers", 13)}Embedding（${escapeHtml(
-              data.judgment_vector_model || "—",
-            )}）</span>
-            ${statusBadge(
-              embedding?.status,
-              embedding?.status === "not_configured" ? "未設定" : undefined,
-            )}
-          </div>
-          <div class="side-status-row">
-            <span>${icon("brain", 13)}RAG 回答管線</span>
-            ${statusBadge(rag?.status, rag?.status === "not_configured" ? "未設定" : undefined)}
-          </div>
-          <div class="side-status-row">
-            <span>${icon("sparkles", 13)}LLM 模型</span>
-            ${statusBadge(llm?.status, llm?.status === "not_configured" ? "未設定" : undefined)}
-          </div>
-        </div>
-        <div class="side-card-foot" style="padding:0;border:0;margin-top:10px">
-          Collection：${escapeHtml(data.judgment_vector_collection || "—")} ·
-          ${points} points · 剩餘 ${formatNumber(
-            data.judgment_index_remaining,
-          )} 筆待索引
-        </div>`;
-
       const heroNotice = root.querySelector("#rag-mode-notice");
-      if (heroNotice) {
-        if (rag?.status === "operational") {
-          heroNotice.innerHTML = notice({
-            tone: "ok",
-            title: "檢索與回答就緒",
-            text: `Qdrant、Embedding 與 LLM 均可使用；目前索引涵蓋 ${formatNumber(
-              indexed,
-            )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
-          });
-        } else if (rag?.status === "degraded") {
-          heroNotice.innerHTML = notice({
-            tone: "warn",
-            title: "部分 AI 元件未就緒",
-            text: escapeHtml(rag.detail || "RAG 會降級為只顯示檢索結果。"),
-          });
-        } else {
-          heroNotice.innerHTML = notice({
-            tone: "info",
-            title: "向量索引尚未就緒 · 不是法律意見",
-            text: escapeHtml(
-              rag?.detail ||
-                "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
-            ),
-          });
-        }
+      if (!heroNotice) return;
+      if (rag?.status === "operational") {
+        heroNotice.innerHTML = notice({
+          tone: "ok",
+          title: "檢索與回答就緒",
+          text: `Qdrant、Embedding 與 LLM 均可使用；目前索引涵蓋 ${formatNumber(
+            indexed,
+          )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
+        });
+      } else if (rag?.status === "degraded") {
+        heroNotice.innerHTML = notice({
+          tone: "warn",
+          title: "部分 AI 元件未就緒",
+          text: escapeHtml(rag.detail || "RAG 會降級為只顯示檢索結果。"),
+        });
+      } else {
+        heroNotice.innerHTML = notice({
+          tone: "info",
+          title: "向量索引尚未就緒 · 不是法律意見",
+          text: escapeHtml(
+            rag?.detail ||
+              "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
+          ),
+        });
       }
-
-      statsMode.className = `badge ${
-        rag?.status === "operational"
-          ? "badge-ok"
-          : rag?.status === "not_configured"
-            ? "badge-neutral"
-            : "badge-warn"
-      } badge-mono`;
-      statsMode.textContent =
-        rag?.status === "operational"
-          ? "RAG 就緒"
-          : rag?.status === "not_configured"
-            ? "未設定"
-            : "降級";
     } catch (error) {
       if (disposed) return;
-      statsBox.innerHTML = `<p class="muted" style="font-size:11px">目前無法取得服務狀態。</p>`;
-      statsMode.className = "badge badge-danger badge-mono";
-      statsMode.textContent = "離線";
+      const heroNotice = root.querySelector("#rag-mode-notice");
+      if (heroNotice) {
+        heroNotice.innerHTML = notice({
+          tone: "warn",
+          title: "無法取得 RAG 服務狀態",
+          text: escapeHtml(
+            error.message || "請稍後再試，或前往系統狀態頁查看。",
+          ),
+        });
+      }
     }
   };
 
@@ -2035,7 +1952,7 @@ export async function render(root) {
 
   resizeInput();
   await Promise.allSettled([
-    loadStats(),
+    loadModeNotice(),
     refreshHistory(),
     loadProjects(),
     loadTestMode(),
