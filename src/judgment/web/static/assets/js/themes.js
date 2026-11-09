@@ -101,16 +101,6 @@ export function applyTheme(id, { persist = true } = {}) {
   const meta = document.getElementById("theme-color-meta");
   if (meta) meta.setAttribute("content", theme.metaColor);
 
-  const label = document.getElementById("theme-label");
-  if (label) label.textContent = theme.name;
-
-  const swatches = document.getElementById("theme-swatches");
-  if (swatches) {
-    swatches.innerHTML = theme.swatches
-      .map((color) => `<i class="style-swatch" style="--swatch:${escapeHtml(color)}"></i>`)
-      .join("");
-  }
-
   document.querySelectorAll(".theme-option").forEach((option) => {
     const active = option.dataset.themeId === theme.id;
     option.classList.toggle("is-active", active);

@@ -111,25 +111,13 @@
         </nav>
 
         <div class="header-actions">
-          <a
-            class="api-trigger system-test-trigger"
-            id="system-test-trigger"
-            data-route="tests"
-            href="#/tests"
-            title="系統測試：API 連線、測試模式與模型測試 Flow"
-            aria-label="系統測試"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m5 7 5 5-5 5"/>
-              <path d="M12 17h7"/>
-            </svg>
-            <span class="api-trigger-label">系統測試</span>
-          </a>
           <div class="style-picker" id="style-picker">
             <button
               type="button"
               class="style-trigger"
               id="style-trigger"
+              aria-label="選擇介面風格"
+              title="選擇介面風格"
               aria-haspopup="true"
               aria-expanded="false"
               aria-controls="style-menu"
@@ -139,14 +127,6 @@
                 <circle cx="7.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/>
                 <circle cx="10" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
                 <circle cx="14.5" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
-              </svg>
-              <span class="style-trigger-copy">
-                <span>STYLE</span>
-                <strong id="theme-label">NVIDIA</strong>
-              </span>
-              <span class="style-swatches" id="theme-swatches" aria-hidden="true"></span>
-              <svg class="style-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m6 9 6 6 6-6"/>
               </svg>
             </button>
             <div class="style-menu" id="style-menu" role="menu" aria-label="選擇首頁風格" hidden></div>

@@ -56,7 +56,7 @@ function flowSignature(run, runs, selectedRunId) {
   });
 }
 
-export async function render(root, ctx) {
+export async function render(root, ctx, { embedded = false } = {}) {
   let disposed = false;
   let testMode = false;
   let testModels = { embedding: [], llm: [] };
@@ -67,21 +67,35 @@ export async function render(root, ctx) {
   let flowTimer = null;
   let lastFlowSignature = "";
 
-  root.innerHTML = `<section class="page tests-page">
-    <div class="page-header">
+  const actionsMarkup = `<div class="page-actions">
+      <span class="badge badge-neutral badge-mono" id="tests-mode-badge">讀取中</span>
+      <button class="btn btn-secondary" type="button" id="tests-refresh">
+        ${icon("refresh", 15)}<span>重新整理</span>
+      </button>
+    </div>`;
+  const headerMarkup = embedded
+    ? `<div class="tests-embed-head">
+        <div>
+          <div class="eyebrow">SYSTEM TEST</div>
+          <div class="tests-embed-title">系統測試</div>
+          <div class="tests-embed-copy">後端 API 連線、測試模式與多模型測試 Flow。測試模式開啟後，下一次 RAG 提問會依序執行所有可用模型。</div>
+        </div>
+        ${actionsMarkup}
+      </div>`
+    : `<div class="page-header">
       <div>
         <div class="eyebrow">SYSTEM TEST</div>
         <h1 class="page-title">系統測試</h1>
         <p class="page-subtitle">合併後端 API 連線、測試模式與多模型測試 Flow。
           測試模式開啟後，下一次 RAG 提問會依序執行所有可用 embedding 與 LLM 模型，且不設逾時。</p>
       </div>
-      <div class="page-actions">
-        <span class="badge badge-neutral badge-mono" id="tests-mode-badge">讀取中</span>
-        <button class="btn btn-secondary" type="button" id="tests-refresh">
-          ${icon("refresh", 15)}<span>重新整理</span>
-        </button>
-      </div>
-    </div>
+      ${actionsMarkup}
+    </div>`;
+
+  root.innerHTML = `<section class="${
+    embedded ? "tests-page tests-page-embedded" : "page tests-page"
+  }">
+    ${headerMarkup}
 
     <div class="tests-grid">
       <section class="card tests-card tests-api-card" aria-labelledby="tests-api-title">
@@ -507,7 +521,7 @@ export async function render(root, ctx) {
     await refreshFlow();
   }, 2500);
 
-  if (typeof ctx?.setTitle === "function") {
+  if (!embedded && typeof ctx?.setTitle === "function") {
     ctx.setTitle("系統測試 · Judgment RAG Console");
   }
 

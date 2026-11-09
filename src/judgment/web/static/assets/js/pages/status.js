@@ -16,6 +16,7 @@ import {
   toast,
 } from "../utils.js";
 import { isSupported as indexedDbSupported } from "../store.js";
+import * as testsPage from "./tests.js";
 
 const SERVICE_ICONS = {
   frontend: "browser",
@@ -44,6 +45,12 @@ const API_SOURCE_LABELS = {
 
 const STATUS_TABS = [
   { id: "overview", label: "服務總覽", hint: "健康狀態與資料量", icon: "activity" },
+  {
+    id: "tests",
+    label: "系統測試",
+    hint: "API、測試模式與模型 Flow",
+    icon: "terminal",
+  },
   { id: "resources", label: "系統資料使用", hint: "CPU、RAM、Docker、硬碟", icon: "cpu" },
   { id: "architecture", label: "前後端架構", hint: "Client → Data → AI", icon: "layers" },
   { id: "data", label: "資料版本", hint: "Parquet 與 PostgreSQL", icon: "database" },
@@ -1000,6 +1007,7 @@ function renderStatusSidebar(status, activeTab, usage) {
     data: `<span class="badge badge-neutral badge-mono">${formatNumber(
       data.version_count,
     )}</span>`,
+    tests: `<span class="badge badge-neutral badge-mono">TEST</span>`,
     runs: `<span class="badge badge-neutral badge-mono">${formatNumber(
       data.run_count,
     )}</span>`,
@@ -1096,6 +1104,10 @@ export async function render(root, ctx) {
   let usage = null;
   let usageLoading = false;
   let usageError = null;
+  let testsMounted = false;
+  let testsMounting = false;
+  let testsCleanup = null;
+  let testsMountToken = 0;
 
   root.innerHTML = `<section class="page status-page">
     <div class="page-header">
@@ -1103,7 +1115,7 @@ export async function render(root, ctx) {
         <div class="eyebrow">OBSERVABILITY</div>
         <h1 class="page-title">系統架構與服務狀態</h1>
         <p class="page-subtitle">檢視前端、FastAPI、PostgreSQL、Parquet 與 AI 元件的即時健康狀態，
-          並從左側分類切換服務總覽、系統資料使用、架構、資料版本與最近下載紀錄。</p>
+          並從左側分類切換服務總覽、系統測試、系統資料使用、架構、資料版本與最近下載紀錄。</p>
       </div>
       <div class="page-actions">
         <label class="auto-refresh">
@@ -1122,7 +1134,7 @@ export async function render(root, ctx) {
             <div class="eyebrow">STATUS SECTIONS</div>
             <div class="skeleton skeleton-line" style="width:90px;height:18px"></div>
           </div>
-          ${Array.from({ length: 6 })
+          ${Array.from({ length: 7 })
             .map(
               () =>
                 `<div class="skeleton skeleton-line" style="width:100%;height:52px;margin-top:8px"></div>`,
@@ -1139,9 +1151,53 @@ export async function render(root, ctx) {
   const refreshButton = root.querySelector("#refresh-status");
   const autoRefresh = root.querySelector("#auto-refresh");
 
+  const unmountTests = () => {
+    testsMountToken += 1;
+    if (typeof testsCleanup === "function") {
+      try {
+        testsCleanup();
+      } catch (error) {
+        /* keep status navigation usable if tests cleanup fails */
+      }
+    }
+    testsCleanup = null;
+    testsMounted = false;
+    testsMounting = false;
+  };
+
+  const mountTests = async () => {
+    const token = ++testsMountToken;
+    testsMounting = true;
+    content.innerHTML = "";
+    try {
+      const cleanup = await testsPage.render(
+        content,
+        { setTitle: () => {} },
+        { embedded: true },
+      );
+      if (token !== testsMountToken || activeTab !== "tests") {
+        if (typeof cleanup === "function") cleanup();
+        return;
+      }
+      testsCleanup = typeof cleanup === "function" ? cleanup : null;
+      testsMounted = true;
+    } catch (error) {
+      if (token === testsMountToken && activeTab === "tests") {
+        content.innerHTML = renderError(error);
+      }
+    } finally {
+      if (token === testsMountToken) testsMounting = false;
+    }
+  };
+
   const paint = () => {
     if (!latest) return;
     nav.innerHTML = renderStatusSidebar(latest, activeTab, usage);
+    if (activeTab === "tests") {
+      if (!testsMounted && !testsMounting) mountTests();
+      return;
+    }
+    unmountTests();
     content.innerHTML = renderStatusTab(
       activeTab,
       latest,
@@ -1185,7 +1241,7 @@ export async function render(root, ctx) {
       if (!quiet) toast("服務狀態已更新。", "ok", 2200);
     } catch (error) {
       if (disposed) return;
-      content.innerHTML = renderError(error);
+      if (activeTab !== "tests") content.innerHTML = renderError(error);
       if (!quiet) toast(error.message || "無法取得服務狀態。", "danger");
     } finally {
       if (!disposed) {
@@ -1199,6 +1255,10 @@ export async function render(root, ctx) {
     await loadStatus({ quiet });
     if (activeTab === "resources") {
       await loadUsage({ quiet });
+    }
+    if (!quiet && activeTab === "tests") {
+      const testsRefresh = content.querySelector("#tests-refresh");
+      if (testsRefresh) testsRefresh.click();
     }
   };
 
@@ -1243,6 +1303,7 @@ export async function render(root, ctx) {
 
   return () => {
     disposed = true;
+    unmountTests();
     if (autoTimer) window.clearInterval(autoTimer);
   };
 }

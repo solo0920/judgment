@@ -467,9 +467,12 @@ def test_static_console_is_served(web_client) -> None:
     assert page.status_code == 200
     assert "Judgment RAG Console" in page.text
     assert "/assets/js/app.js" in page.text
-    assert 'id="system-test-trigger"' in page.text
-    assert 'data-route="tests"' in page.text
-    assert 'href="#/tests"' in page.text
+    assert 'id="style-trigger"' in page.text
+    assert 'aria-label="選擇介面風格"' in page.text
+    assert 'class="style-trigger-copy"' not in page.text
+    assert 'id="system-test-trigger"' not in page.text
+    assert 'data-route="tests"' not in page.text
+    assert 'href="#/tests"' not in page.text
     assert 'id="header-status"' not in page.text
     assert 'data-route="performance"' in page.text
     assert 'data-route="quality"' in page.text
@@ -485,7 +488,9 @@ def test_static_console_is_served(web_client) -> None:
     theme_script = web_client.get("/assets/js/themes.js")
     assert theme_script.status_code == 200
     assert 'DEFAULT_THEME = "nvidia"' in theme_script.text
-    assert 'id="theme-label">NVIDIA<' in page.text
+    assert 'id="style-menu"' in page.text
+    assert 'id="theme-label"' not in page.text
+    assert 'id="theme-swatches"' not in page.text
 
     favicon = web_client.get("/favicon.svg")
     assert favicon.status_code == 200

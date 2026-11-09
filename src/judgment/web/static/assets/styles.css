@@ -445,60 +445,6 @@ samp {
 }
 
 /* ----------------------------------------------------------- API settings */
-.api-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border: 1px solid var(--header-line);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--header-muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
-}
-
-.api-trigger:hover,
-.api-trigger:focus-visible {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-  outline: none;
-}
-
-.api-trigger.is-active {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.api-trigger svg {
-  width: 14px;
-  height: 14px;
-  color: var(--accent);
-  flex: none;
-}
-
-.api-trigger.is-custom {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.api-trigger.is-invalid {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.api-trigger.is-invalid svg {
-  color: var(--danger);
-}
-
 .api-dialog-form {
   display: flex;
   flex-direction: column;
@@ -627,10 +573,12 @@ samp {
 .style-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 11px 7px 12px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 1px solid var(--header-line);
-  border-radius: var(--radius-pill);
+  border-radius: 50%;
   background: var(--surface);
   color: var(--header-ink);
   box-shadow: var(--shadow-xs);
@@ -642,59 +590,16 @@ samp {
   box-shadow: var(--shadow-sm);
 }
 
+.style-trigger[aria-expanded="true"] {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-sm);
+}
+
 .style-trigger > svg:first-child {
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   color: var(--accent);
   flex: none;
-}
-
-.style-trigger-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.1;
-}
-
-.style-trigger-copy span {
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 500;
-  letter-spacing: 0.17em;
-}
-
-.style-trigger-copy strong {
-  margin-top: 3px;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.style-swatches {
-  display: inline-flex;
-  align-items: center;
-  padding-left: 8px;
-  border-left: 1px solid var(--line);
-}
-
-.style-swatch {
-  width: 10px;
-  height: 10px;
-  margin-left: -2px;
-  border: 1.5px solid var(--surface);
-  border-radius: 50%;
-  background: var(--swatch, var(--accent));
-}
-
-.style-chevron {
-  width: 14px;
-  height: 14px;
-  color: var(--faint);
-  transition: transform 0.2s ease;
-}
-
-.style-trigger[aria-expanded="true"] .style-chevron {
-  transform: rotate(180deg);
 }
 
 .style-menu {
@@ -6005,33 +5910,6 @@ button.chip:hover {
     margin-left: auto;
   }
 
-  .style-trigger-copy span,
-  .style-trigger-copy strong {
-    display: none;
-  }
-
-  .api-trigger {
-    padding: 8px;
-  }
-
-  .api-trigger-label {
-    display: none;
-  }
-
-  .style-trigger {
-    gap: 4px;
-    padding: 7px 9px;
-  }
-
-  .style-trigger > svg:first-child {
-    display: none;
-  }
-
-  .style-swatches {
-    border-left: 0;
-    padding-left: 0;
-  }
-
   .primary-nav {
     order: 3;
     flex-basis: 100%;
@@ -8985,6 +8863,37 @@ button.chip:hover {
   align-items: flex-start;
 }
 
+.tests-page-embedded {
+  min-width: 0;
+}
+
+.tests-embed-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.tests-embed-head .page-actions {
+  flex: none;
+}
+
+.tests-embed-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2vw, 1.8rem);
+  font-weight: var(--display-weight, 650);
+  letter-spacing: var(--display-tracking, -0.02em);
+}
+
+.tests-embed-copy {
+  max-width: 720px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
 .tests-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
@@ -9131,6 +9040,15 @@ button.chip:hover {
 @media (max-width: 900px) {
   .tests-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tests-embed-head {
+    flex-direction: column;
+  }
+
+  .tests-embed-head .page-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 
