@@ -249,7 +249,9 @@ def _qdrant_metrics(
     }
 
 
-def _embedding_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
+def _embedding_metrics(
+    *, base_url: str, model: str, fallback_url: str = ""
+) -> Dict[str, Any]:
     started = time.perf_counter()
     base_url = base_url.rstrip("/")
     model = model.strip() or "bge-m3"
@@ -262,6 +264,21 @@ def _embedding_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
         }
     detail = ollama_models_detail(base_url)
     if detail["status"] != "operational":
+        if fallback_url:
+            fallback_detail = ollama_models_detail(fallback_url)
+            if fallback_detail["status"] == "operational" and ollama_model_available(
+                fallback_url, model
+            ):
+                return {
+                    "status": "operational",
+                    "latency_ms": _ms(started),
+                    "detail": (
+                        f"主要 {base_url} 不可用；fallback 模型：{model} · "
+                        f"{fallback_url}"
+                    ),
+                    "model": model,
+                    "models": fallback_detail["models"],
+                }
         return {
             "status": "degraded",
             "latency_ms": _ms(started),
@@ -269,6 +286,21 @@ def _embedding_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
             "model": model,
         }
     available = ollama_model_available(base_url, model)
+    if not available and fallback_url:
+        fallback_detail = ollama_models_detail(fallback_url)
+        if fallback_detail["status"] == "operational" and ollama_model_available(
+            fallback_url, model
+        ):
+            return {
+                "status": "operational",
+                "latency_ms": _ms(started),
+                "detail": (
+                    f"主要 {base_url} 找不到模型 {model}；fallback · "
+                    f"{fallback_url}"
+                ),
+                "model": model,
+                "models": fallback_detail["models"],
+            }
     return {
         "status": "operational" if available else "degraded",
         "latency_ms": _ms(started),
@@ -385,7 +417,9 @@ def build_status(
         api_key=settings.qdrant_api_key,
     )
     embedding = _embedding_metrics(
-        base_url=settings.embedding_url, model=settings.embedding_model
+        base_url=settings.embedding_url,
+        model=settings.embedding_model,
+        fallback_url=settings.embedding_fallback_url,
     )
     llm = _llm_metrics(base_url=settings.llm_url, model=settings.llm_model)
     rag = _rag_metrics(qdrant, embedding, llm)
