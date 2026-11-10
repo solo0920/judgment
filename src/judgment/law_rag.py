@@ -731,6 +731,8 @@ def build_law_source(
     *,
     stats: Optional[Dict[str, Any]] = None,
     priority_articles: Optional[Sequence[str]] = None,
+    article_limit: int = 4,
+    article_budget: int = 3000,
 ) -> Dict[str, Any]:
     content = content or {}
     histories = str(
@@ -742,8 +744,8 @@ def build_law_source(
         articles,
         question,
         priority=priority_articles,
-        limit=4,
-        budget=3000,
+        limit=article_limit,
+        budget=article_budget,
     )
     promulgation = parse_first_promulgation(histories)
     return {
@@ -1077,6 +1079,8 @@ def law_sources_for_question(
     *,
     stats: Optional[Dict[str, Any]] = None,
     limit: int = 4,
+    article_limit: int = 4,
+    article_budget: int = 3000,
 ) -> List[Dict[str, Any]]:
     effective_limit = limit
     if is_related_laws_question(question):
@@ -1139,6 +1143,8 @@ def law_sources_for_question(
                 question,
                 stats=_stats_for_law(stats, record.law_name) if stats else None,
                 priority_articles=priority,
+                article_limit=article_limit,
+                article_budget=article_budget,
             )
         )
     return sources

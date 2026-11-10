@@ -1663,3 +1663,105 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     assert (frontend / "assets" / "themes.css").is_file()
     assert (frontend / "favicon.svg").is_file()
     assert (frontend / "_headers").is_file()
+
+
+def test_schema_suggestions_are_fuzzy(web_client) -> None:
+    response = web_client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+            "q": "銀行施行",
+            "limit": 1000,
+        },
+    )
+    assert response.status_code == 200
+    values = response.json()["values"]
+    assert "銀行法施行細則" in values
+
+
+def test_judgment_download_file_proxy(web_client, monkeypatch) -> None:
+    import importlib
+
+    web_app = importlib.import_module("judgment.web.app")
+
+    monkeypatch.setattr(web_app, "ensure_window", lambda: None)
+    monkeypatch.setattr(
+        web_app,
+        "file_response_headers",
+        lambda settings, fileset_id: {
+            "Content-Disposition": "attachment; filename=test.rar"
+        },
+    )
+    monkeypatch.setattr(
+        web_app,
+        "iter_fileset",
+        lambda settings, fileset_id: iter([b"hello"]),
+    )
+    response = web_client.get("/api/judgment-download/files/72011")
+    assert response.status_code == 200
+    assert response.content == b"hello"
+    assert "attachment" in response.headers["content-disposition"]
+
+    monkeypatch.setattr(
+        web_app,
+        "ensure_window",
+        lambda: (_ for _ in ()).throw(
+            web_app.DownloadWindowClosed("時段未開放")
+        ),
+    )
+    blocked = web_client.get("/api/judgment-download/files/72011")
+    assert blocked.status_code == 403
+
+
+def test_data_fuzzy_suggestions_and_multi_keyword_query(web_client) -> None:
+    law_suggestions = web_client.get(
+        "/api/data/suggest",
+        params={"kind": "law", "query": "銀行"},
+    )
+    assert law_suggestions.status_code == 200
+    law_values = [
+        item["value"] for item in law_suggestions.json()["suggestions"]
+    ]
+    assert "銀行法" in law_values
+
+    judgment_suggestions = web_client.get(
+        "/api/data/suggest",
+        params={"kind": "judgment", "query": "臺北"},
+    )
+    assert judgment_suggestions.status_code == 200
+    assert any(
+        item["type"] == "court"
+        for item in judgment_suggestions.json()["suggestions"]
+    )
+
+    law_query = web_client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {
+                "table": "law_documents",
+                "keywords": ["銀行", "金融法規"],
+            },
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert law_query.status_code == 200
+    assert law_query.json()["total"] == 2
+
+    judgment_query = web_client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {
+                "table": "judgment_documents",
+                "keywords": ["臺北", "返還借款"],
+            },
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert judgment_query.status_code == 200
+    assert judgment_query.json()["total"] == 1

@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, apiUrl } from "../api.js";
 import {
   escapeHtml,
   formatBytes,
@@ -740,7 +740,7 @@ function recentRunsMarkup(snapshot) {
     <div>
       <div class="report-kicker">RECENT RUNS</div>
       <h2 class="report-section-title">最近處理紀錄</h2>
-      <p class="processing-section-sub">包含資料更新、判決匯入、Parquet、Qdrant 與法規／命令下載。</p>
+      <p class="processing-section-sub">包含資料更新、判決下載、判決匯入、Parquet、Qdrant 與法規／命令下載。</p>
     </div>
   </div>`;
   if (!runs.length) {
@@ -839,6 +839,7 @@ const WORKFLOW_ICONS = {
   full_update: "download",
   law_download: "layers",
   order_download: "file",
+  judgment_download: "download",
   judgment_import: "database",
   judgment_parquet: "cube",
   index_versions: "brain",
@@ -919,6 +920,138 @@ function runMetaMarkup(run) {
   </div>`;
 }
 
+function judgmentMonthKey(item) {
+  return `${item.year}-${String(item.month_no).padStart(2, "0")}`;
+}
+
+function judgmentMonthTitle(item) {
+  const labels = { green: "最新版", gray: "舊版", red: "缺失" };
+  const status = item.status || "red";
+  return [
+    judgmentMonthKey(item),
+    labels[status] || status,
+    item.latest_fileset_id ? `fileset ${item.latest_fileset_id}` : "",
+    item.filename || "",
+    item.local_filename && item.local_filename !== item.filename
+      ? `本機：${item.local_filename}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function judgmentMonthDownloadMarkup(item) {
+  if (!item.download_url) return "";
+  const month = judgmentMonthKey(item);
+  return `<a class="judgment-month-download" href="${escapeHtml(
+    apiUrl(item.download_url),
+  )}" target="_blank" rel="noreferrer" title="下載 ${month} 判決（API 00:00–06:00）" aria-label="下載 ${month} 判決">${icon("download", 11)}</a>`;
+}
+
+function judgmentMonthCellMarkup(item) {
+  const status = item.status || "red";
+  return `<td class="judgment-month is-${escapeHtml(status)}" data-judgment-month-key="${escapeHtml(
+    judgmentMonthKey(item),
+  )}" title="${escapeHtml(judgmentMonthTitle(item))}"><span>${item.month_no}</span>${judgmentMonthDownloadMarkup(item)}</td>`;
+}
+
+function judgmentMonthsLoadingMarkup() {
+  return `<div class="judgment-months-loading"><span class="spinner"></span><span>讀取月份下載狀態…</span></div>`;
+}
+
+function renderJudgmentMonthTable(state) {
+  if (state?.loading && !state?.months?.length) {
+    return judgmentMonthsLoadingMarkup();
+  }
+  if (state?.error && !state?.months?.length) {
+    return notice({
+      tone: "danger",
+      title: "月份狀態讀取失敗",
+      text: escapeHtml(state.error),
+    });
+  }
+  const months = Array.isArray(state?.months) ? state.months : [];
+  if (!months.length) {
+    return `<div class="processing-empty">尚未有月份狀態；請先執行判決下載。</div>`;
+  }
+  const byKey = new Map(
+    months.map((item) => [judgmentMonthKey(item), item]),
+  );
+  const years = [...new Set(months.map((item) => item.year))].sort(
+    (left, right) => right - left,
+  );
+  const rows = years
+    .map((year) => {
+      const cells = Array.from({ length: 12 }, (_, index) => {
+        const item = byKey.get(`${year}-${String(index + 1).padStart(2, "0")}`);
+        if (!item) {
+          return `<td class="judgment-month is-empty"><span>${index + 1}</span></td>`;
+        }
+        return judgmentMonthCellMarkup(item);
+      }).join("");
+      return `<tr><th scope="row">${year}</th>${cells}</tr>`;
+    })
+    .join("");
+  const summary = state.summary || {};
+  return `<div class="judgment-months">
+    <div class="judgment-months-meta">
+      <span class="badge badge-ok" data-judgment-summary="green">最新版 ${formatNumber(summary.green || 0)}</span>
+      <span class="badge badge-neutral" data-judgment-summary="gray">舊版 ${formatNumber(summary.gray || 0)}</span>
+      <span class="badge badge-danger" data-judgment-summary="red">缺失 ${formatNumber(summary.red || 0)}</span>
+      <span class="muted" data-judgment-total>共 ${formatNumber(state.total_months || months.length)} 個月</span>
+    </div>
+    <div class="judgment-months-scroll">
+      <table class="judgment-months-table">
+        <thead><tr><th scope="col">年份</th>${Array.from(
+          { length: 12 },
+          (_, index) => `<th scope="col">${index + 1}</th>`,
+        ).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="judgment-months-hint">綠色：最新版已下載到 raw_rar；灰色：本機仍是舊版，執行判決下載會更新；紅色：該月份缺少判決資料。滑鼠移到月份可開啟下載連結（需 00:00–06:00 API 時段）。首次完整同步可能需下載數百個月份，會跨多個 00:00–06:00 時段續傳。</p>
+  </div>`;
+}
+
+function updateJudgmentMonthTable(container, state) {
+  const months = Array.isArray(state?.months) ? state.months : [];
+  const summary = state.summary || {};
+  const labels = { green: "最新版", gray: "舊版", red: "缺失" };
+  container.querySelectorAll("[data-judgment-summary]").forEach((badge) => {
+    const key = badge.dataset.judgmentSummary || "";
+    badge.textContent = `${labels[key] || key} ${formatNumber(summary[key] || 0)}`;
+  });
+  const total = container.querySelector("[data-judgment-total]");
+  if (total) {
+    total.textContent = `共 ${formatNumber(state.total_months || months.length)} 個月`;
+  }
+  for (const item of months) {
+    const key = judgmentMonthKey(item);
+    const cell = container.querySelector(
+      `[data-judgment-month-key="${key}"]`,
+    );
+    if (!cell) continue;
+    const status = item.status || "red";
+    if (!cell.classList.contains(`is-${status}`)) {
+      cell.classList.remove("is-green", "is-gray", "is-red", "is-empty");
+      cell.classList.add(`is-${status}`);
+    }
+    const title = judgmentMonthTitle(item);
+    if (cell.title !== title) cell.title = title;
+    const link = cell.querySelector(".judgment-month-download");
+    if (item.download_url) {
+      const href = apiUrl(item.download_url);
+      if (!link) {
+        cell.insertAdjacentHTML("beforeend", judgmentMonthDownloadMarkup(item));
+      } else if (link.getAttribute("href") !== href) {
+        link.href = href;
+      }
+    } else if (link) {
+      link.remove();
+    }
+  }
+}
+
 function workflowPanelMarkup(workflow) {
   const activeRun = workflow.active_run || null;
   const lastRun = activeRun || workflow.last_run || null;
@@ -955,11 +1088,41 @@ function workflowPanelMarkup(workflow) {
                 data-processing-action="stop">${icon("x", 14)}<span>停止</span></button>`
             : ""
         }
+        ${
+          workflow.id === "judgment_download"
+            ? `<div class="processing-download-progress" data-judgment-progress hidden>
+                <div class="processing-download-progress-head">
+                  <span class="badge badge-info" data-judgment-progress-phase>準備中</span>
+                  <strong class="processing-download-progress-month mono" data-judgment-progress-month>—</strong>
+                  <span class="processing-download-progress-file mono" data-judgment-progress-filename>—</span>
+                </div>
+                <div class="processing-download-progress-track">
+                  <span data-judgment-progress-bar></span>
+                </div>
+                <div class="processing-download-progress-meta">
+                  <span data-judgment-progress-percent>—</span>
+                  <span data-judgment-progress-size>—</span>
+                  <span class="muted" data-judgment-progress-note></span>
+                </div>
+              </div>`
+            : ""
+        }
       </div>
       <div class="side-card-foot">
         ${isFullUpdate ? "會依序執行法規／命令下載、判決匯入與可選的 Qdrant 索引。" : "執行結果會寫入共用處理狀態檔，可從處理總覽查看。"}
       </div>
     </section>
+    ${
+      workflow.id === "judgment_download"
+        ? `<section class="report-card processing-card">
+            <div class="side-card-head">
+              <span class="side-card-title">${icon("calendar", 14)}月份下載狀態</span>
+              <button class="btn btn-ghost btn-sm" type="button" title="重新掃描 raw_rar 目錄與月份狀態" data-processing-action="refresh-judgment-months">${icon("refresh", 13)}<span>重新整理</span></button>
+            </div>
+            <div data-judgment-months-slot>${judgmentMonthsLoadingMarkup()}</div>
+          </section>`
+        : ""
+    }
     <section class="report-card processing-card">
       <div class="side-card-head">
         <span class="side-card-title">${icon("history", 14)}最近執行</span>
@@ -1042,7 +1205,202 @@ export async function render(root) {
   let lastMarkup = "";
   let lastNavMarkup = "";
   let activeWorkflowId = "overview";
+  let judgmentStatus = null;
+  let judgmentStatusLoading = false;
+  let judgmentStatusError = null;
   let timer = null;
+
+  const syncJudgmentProgress = () => {
+    if (activeWorkflowId !== "judgment_download") return;
+    const panel = content.querySelector(".processing-workflow-panel");
+    if (!panel) return;
+    panel.querySelectorAll(".judgment-month.is-active").forEach((cell) => {
+      cell.classList.remove("is-active");
+      cell.removeAttribute("aria-current");
+    });
+    const box = panel.querySelector("[data-judgment-progress]");
+    if (!box) return;
+    const progress = judgmentStatus?.progress;
+    const judgmentWorkflow = (lastSnapshot?.workflows || []).find(
+      (workflow) => workflow.id === "judgment_download",
+    );
+    const hasActiveRun = Boolean(judgmentWorkflow?.active_run);
+    if ((!progress || progress.active === false) && !hasActiveRun) {
+      box.hidden = true;
+      box.classList.remove("is-indeterminate");
+      return;
+    }
+    box.hidden = false;
+    if (!progress || progress.active === false) {
+      const pendingPhase = box.querySelector("[data-judgment-progress-phase]");
+      if (pendingPhase) pendingPhase.textContent = "準備中";
+      const pendingMonth = box.querySelector("[data-judgment-progress-month]");
+      if (pendingMonth) pendingMonth.textContent = "—";
+      const pendingFile = box.querySelector(
+        "[data-judgment-progress-filename]",
+      );
+      if (pendingFile) {
+        pendingFile.textContent = "等待下載程序回報進度…";
+        pendingFile.title = "";
+      }
+      box.classList.add("is-indeterminate");
+      const pendingBar = box.querySelector("[data-judgment-progress-bar]");
+      if (pendingBar) pendingBar.style.width = "";
+      const pendingPercent = box.querySelector(
+        "[data-judgment-progress-percent]",
+      );
+      if (pendingPercent) pendingPercent.textContent = "—";
+      const pendingSize = box.querySelector("[data-judgment-progress-size]");
+      if (pendingSize) pendingSize.textContent = "—";
+      const pendingNote = box.querySelector("[data-judgment-progress-note]");
+      if (pendingNote) pendingNote.textContent = "已啟動，等待進度回報";
+      return;
+    }
+    const phaseLabels = {
+      preparing: "準備中",
+      scanning: "掃描中",
+      checking: "檢查中",
+      downloading: "下載中",
+      saving: "儲存中",
+      finalizing: "整理中",
+    };
+    const phaseLabel = phaseLabels[progress.phase] || "處理中";
+    const phase = box.querySelector("[data-judgment-progress-phase]");
+    if (phase) phase.textContent = phaseLabel;
+    const month = progress.month || "";
+    const monthElement = box.querySelector("[data-judgment-progress-month]");
+    if (monthElement) monthElement.textContent = month || "—";
+    const filename = progress.filename || "";
+    const filenameElement = box.querySelector(
+      "[data-judgment-progress-filename]",
+    );
+    if (filenameElement) {
+      filenameElement.textContent = filename || "—";
+      filenameElement.title = filename;
+    }
+    if (month) {
+      const cell = panel.querySelector(
+        `[data-judgment-month-key="${month}"]`,
+      );
+      if (cell) {
+        cell.classList.add("is-active");
+        cell.setAttribute("aria-current", "true");
+      }
+    }
+    const written = Number(progress.bytes_written);
+    const total = Number(progress.total_bytes);
+    const hasTotal = Number.isFinite(total) && total > 0;
+    let percent = null;
+    const rawPercent = progress.percent;
+    if (
+      rawPercent !== null &&
+      rawPercent !== undefined &&
+      rawPercent !== "" &&
+      Number.isFinite(Number(rawPercent))
+    ) {
+      percent = Number(rawPercent);
+    } else if (hasTotal && Number.isFinite(written)) {
+      percent = (written / total) * 100;
+    }
+    const indeterminate = percent === null;
+    box.classList.toggle("is-indeterminate", indeterminate);
+    const bar = box.querySelector("[data-judgment-progress-bar]");
+    if (bar) {
+      bar.style.width = indeterminate
+        ? ""
+        : `${Math.min(100, Math.max(0, percent)).toFixed(1)}%`;
+    }
+    const percentElement = box.querySelector(
+      "[data-judgment-progress-percent]",
+    );
+    if (percentElement) {
+      const clamped = indeterminate ? null : Math.min(100, Math.max(0, percent));
+      percentElement.textContent =
+        clamped === null
+          ? "—"
+          : `${clamped.toFixed(clamped >= 10 ? 0 : 1)}%`;
+    }
+    const sizeElement = box.querySelector("[data-judgment-progress-size]");
+    if (sizeElement) {
+      const writtenText =
+        Number.isFinite(written) && written > 0 ? formatBytes(written) : "—";
+      sizeElement.textContent = hasTotal
+        ? `${writtenText} / ${formatBytes(total)}`
+        : writtenText;
+    }
+    const noteElement = box.querySelector("[data-judgment-progress-note]");
+    if (noteElement) {
+      const notes = [];
+      const index = Number(progress.candidate_index);
+      const count = Number(progress.candidate_total);
+      if (
+        Number.isFinite(index) &&
+        index > 0 &&
+        Number.isFinite(count) &&
+        count > 0
+      ) {
+        notes.push(`第 ${formatNumber(index)} / ${formatNumber(count)} 個月`);
+      }
+      if (progress.fileset_id) {
+        notes.push(`fileset ${progress.fileset_id}`);
+      }
+      if (progress.message && progress.phase !== "downloading") {
+        notes.push(String(progress.message));
+      }
+      noteElement.textContent = notes.join(" · ");
+    }
+  };
+
+  const syncJudgmentDom = () => {
+    if (activeWorkflowId !== "judgment_download") return;
+    const slot = content.querySelector("[data-judgment-months-slot]");
+    if (slot) {
+      const months = Array.isArray(judgmentStatus?.months)
+        ? judgmentStatus.months
+        : [];
+      if (judgmentStatusError && !judgmentStatus) {
+        slot.innerHTML = notice({
+          tone: "danger",
+          title: "月份狀態讀取失敗",
+          text: escapeHtml(judgmentStatusError),
+        });
+        delete slot.dataset.judgmentMonthCount;
+      } else if (!judgmentStatus) {
+        if (!slot.querySelector(".judgment-months-loading")) {
+          slot.innerHTML = judgmentMonthsLoadingMarkup();
+        }
+        delete slot.dataset.judgmentMonthCount;
+      } else if (slot.dataset.judgmentMonthCount !== String(months.length)) {
+        slot.innerHTML = renderJudgmentMonthTable(judgmentStatus);
+        slot.dataset.judgmentMonthCount = String(months.length);
+      } else {
+        updateJudgmentMonthTable(slot, judgmentStatus);
+      }
+    }
+    syncJudgmentProgress();
+  };
+
+  const loadJudgmentStatus = async ({ quiet = false } = {}) => {
+    if (judgmentStatusLoading) return;
+    judgmentStatusLoading = true;
+    if (!judgmentStatus && activeWorkflowId === "judgment_download") {
+      syncJudgmentDom();
+    }
+    try {
+      judgmentStatus = await api.judgmentDownloadStatus();
+      judgmentStatusError = null;
+    } catch (error) {
+      judgmentStatusError = error.message || "讀取月份狀態失敗。";
+      if (!quiet) {
+        toast(judgmentStatusError, "danger", 7000);
+      }
+    } finally {
+      judgmentStatusLoading = false;
+      if (activeWorkflowId === "judgment_download") {
+        syncJudgmentDom();
+      }
+    }
+  };
 
   const syncControls = (snapshot) => {
     const capabilities = snapshot.capabilities || {};
@@ -1087,6 +1445,7 @@ export async function render(root) {
         content.innerHTML = markup;
         lastMarkup = markup;
       }
+      syncJudgmentDom();
       const updatedAt = content.querySelector("[data-processing-updated-at]");
       if (updatedAt) {
         const nextUpdatedAt = formatDateTime(snapshot.generated_at);
@@ -1095,6 +1454,9 @@ export async function render(root) {
         }
       }
       syncControls(snapshot);
+      if (activeWorkflowId === "judgment_download") {
+        loadJudgmentStatus({ quiet: true });
+      }
     } catch (error) {
       if (disposed) return;
       const markup = errorMarkup(error.message, lastSnapshot);
@@ -1173,7 +1535,9 @@ export async function render(root) {
     if (!button || button.disabled) return;
     const action = button.dataset.processingAction;
     if (action === "refresh") refresh({ silent: false });
-    else if (action === "update") startUpdate(button);
+    else if (action === "refresh-judgment-months") {
+      loadJudgmentStatus({ quiet: false });
+    } else if (action === "update") startUpdate(button);
     else if (action === "run-workflow") {
       const workflowId = button.dataset.workflowId || "";
       if (workflowId === "full_update") startUpdate(button);
@@ -1198,6 +1562,10 @@ export async function render(root) {
       const markup = panelMarkup(lastSnapshot, activeWorkflowId);
       content.innerHTML = markup;
       lastMarkup = markup;
+      syncJudgmentDom();
+    }
+    if (activeWorkflowId === "judgment_download") {
+      loadJudgmentStatus({ quiet: true });
     }
   };
 

@@ -52,6 +52,7 @@ const STATUS_TABS = [
     icon: "terminal",
   },
   { id: "resources", label: "系統資料使用", hint: "CPU、RAM、Docker、硬碟", icon: "cpu" },
+  { id: "local-model", label: "Local Model", hint: "Ollama 主機與模型", icon: "server" },
   { id: "architecture", label: "前後端架構", hint: "Client → Data → AI", icon: "layers" },
   { id: "data", label: "資料版本", hint: "Parquet 與 PostgreSQL", icon: "database" },
   { id: "api", label: "API 端點", hint: "REST 與 OpenAPI", icon: "terminal" },
@@ -989,6 +990,144 @@ function renderResourceError(error) {
   </div>`;
 }
 
+function localModelHealth(host) {
+  if (host.status === "operational") {
+    return { label: "已連線", badge: "badge-ok" };
+  }
+  return { label: "無法連線", badge: "badge-danger" };
+}
+
+function renderLocalModelHost(host, editingId) {
+  const health = localModelHealth(host);
+  const models = Array.isArray(host.models) ? host.models : [];
+  const modelRows = models.length
+    ? models
+        .map((model) => {
+          const name = String(model.name || "");
+          const isChat = host.chat_model === name;
+          const isEmbedding = host.embedding_model === name;
+          const size = model.size ? formatBytes(model.size) : "";
+          const modified = model.modified_at
+            ? formatDateTime(model.modified_at)
+            : "";
+          return `<div class="ollama-model-row">
+            <div class="ollama-model-main">
+              <strong>${escapeHtml(name)}</strong>
+              <span class="ollama-model-meta">${[size, modified]
+                .filter(Boolean)
+                .map((value) => escapeHtml(value))
+                .join(" · ") || "—"}</span>
+            </div>
+            <div class="ollama-model-roles">
+              ${isChat ? `<span class="badge badge-ok">聊天</span>` : ""}
+              ${isEmbedding ? `<span class="badge badge-ok">嵌入</span>` : ""}
+            </div>
+            <div class="ollama-model-actions">
+              <button class="btn btn-ghost btn-sm" type="button" data-ollama-action="${isChat ? "clear-model" : "select-model"}" data-id="${host.id}" data-model="${escapeHtml(name)}" data-role="chat">
+                ${isChat ? "斷開聊天" : "連接聊天"}
+              </button>
+              <button class="btn btn-ghost btn-sm" type="button" data-ollama-action="${isEmbedding ? "clear-model" : "select-model"}" data-id="${host.id}" data-model="${escapeHtml(name)}" data-role="embedding">
+                ${isEmbedding ? "斷開嵌入" : "連接嵌入"}
+              </button>
+            </div>
+          </div>`;
+        })
+        .join("")
+    : `<div class="ollama-empty">${host.status === "operational" ? "此主機沒有可用模型。" : "無法取得模型列表，請確認主機狀態。"}</div>`;
+  return `<article class="ollama-host-card${host.is_active ? " is-active" : ""}">
+    <div class="ollama-host-head">
+      <div class="ollama-host-title">
+        <div class="ollama-host-name">
+          <strong>${escapeHtml(host.name || host.base_url)}</strong>
+          ${host.is_active ? `<span class="badge badge-ok">目前使用</span>` : ""}
+          <span class="badge ${health.badge}">${health.label}</span>
+        </div>
+        <span class="mono ollama-host-url">${escapeHtml(host.base_url)}</span>
+        ${host.detail ? `<span class="ollama-host-detail">${escapeHtml(host.detail)}</span>` : ""}
+      </div>
+      <div class="qb-actions">
+        ${
+          host.is_active
+            ? `<button class="btn btn-secondary btn-sm" type="button" data-ollama-action="deactivate-host">停用主機</button>`
+            : `<button class="btn btn-primary btn-sm" type="button" data-ollama-action="activate-host" data-id="${host.id}">使用此主機</button>`
+        }
+        <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="edit-host" data-id="${host.id}">${icon("edit", 13)}<span>編輯</span></button>
+        <button class="btn btn-ghost btn-sm" type="button" data-ollama-action="delete-host" data-id="${host.id}">${icon("trash", 13)}<span>刪除</span></button>
+      </div>
+    </div>
+    <div class="ollama-model-list">${modelRows}</div>
+  </article>`;
+}
+
+function renderLocalModel(hosts, loading, error, editingId) {
+  if (error) {
+    return `<div class="report-card">
+      ${notice({
+        tone: "danger",
+        title: "Local Model 讀取失敗",
+        text: escapeHtml(error.message || "請確認後端服務是否啟動。"),
+      })}
+      <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
+        <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="refresh-hosts">${icon("refresh", 14)}<span>重試</span></button>
+      </div>
+    </div>`;
+  }
+  const data = hosts || { hosts: [], active_host_id: null };
+  const hostList = Array.isArray(data.hosts) ? data.hosts : [];
+  const editingHost = editingId
+    ? hostList.find((host) => Number(host.id) === Number(editingId))
+    : null;
+  const editUrl = editingHost
+    ? editingHost.base_url.replace(
+        new RegExp(`:${editingHost.port}$`),
+        "",
+      )
+    : "http://127.0.0.1";
+  const submitLabel = editingHost ? "儲存變更" : "新增主機";
+  return `<div class="report-card ollama-card">
+    <div class="report-head">
+      <div class="report-title-group">
+        <div class="report-kicker">LOCAL MODEL</div>
+        <div class="report-title">Ollama 主機與模型</div>
+        <div class="report-sub">管理可用的 Ollama 連線、目前使用的主機，以及主機上的聊天／嵌入模型。每次開啟此頁都會重新取得主機與模型列表。</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="refresh-hosts">${icon("refresh", 14)}<span>重新整理</span></button>
+    </div>
+    <div class="report-section">
+      <form class="ollama-host-form" data-ollama-form="host">
+        <input type="hidden" name="host_id" value="${editingHost ? editingHost.id : ""}" />
+        <label class="field"><span class="field-label">名稱 <span class="field-tag">選填</span></span>
+          <input class="input" name="name" value="${escapeHtml(editingHost?.name || "")}" placeholder="例如：x570 Ollama" />
+        </label>
+        <label class="field"><span class="field-label">主機網址</span>
+          <input class="input" name="url" value="${escapeHtml(editUrl)}" placeholder="http://127.0.0.1" required />
+        </label>
+        <label class="field"><span class="field-label">Port</span>
+          <input class="input" name="port" type="number" min="1" max="65535" value="${editingHost?.port || 11434}" required />
+        </label>
+        <div class="ollama-host-form-actions">
+          <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>${submitLabel}</span></button>
+          ${editingHost ? `<button class="btn btn-ghost btn-sm" type="button" data-ollama-action="cancel-host-edit">取消編輯</button>` : ""}
+        </div>
+      </form>
+      ${
+        loading
+          ? `<div class="ollama-loading"><span class="spinner"></span><span>讀取 Ollama 主機與模型…</span></div>`
+          : hostList.length
+            ? `<div class="ollama-host-list">${hostList
+                .map((host) => renderLocalModelHost(host, editingId))
+                .join("")}</div>`
+            : emptyState({
+                iconName: "server",
+                title: "尚未設定 Ollama 主機",
+                text: "請在上方輸入網址與 Port 新增，或使用 .env 的預設連線。",
+              })
+      }
+      <p class="report-sub" style="margin-top:12px">設為聊天或嵌入模型後，系統會使用目前主機的對應模型執行 AI 出題與 RAG；未設定時沿用 .env 的 LLM_MODEL／EMBEDDING_MODEL。</p>
+    </div>
+  </div>`;
+}
+
 function renderStatusSidebar(status, activeTab, usage) {
   const data = status?.data || {};
   const overall = status ? statusMeta(status.status) : null;
@@ -1008,6 +1147,7 @@ function renderStatusSidebar(status, activeTab, usage) {
       data.version_count,
     )}</span>`,
     tests: `<span class="badge badge-neutral badge-mono">TEST</span>`,
+    "local-model": `<span class="badge badge-neutral badge-mono">OLLAMA</span>`,
     runs: `<span class="badge badge-neutral badge-mono">${formatNumber(
       data.run_count,
     )}</span>`,
@@ -1038,12 +1178,30 @@ function renderStatusSidebar(status, activeTab, usage) {
     </div>`;
 }
 
-function renderStatusTab(tab, status, usage, usageLoading, usageError) {
+function renderStatusTab(
+  tab,
+  status,
+  usage,
+  usageLoading,
+  usageError,
+  ollamaState,
+) {
   if (tab === "resources") {
     if (usage) return renderResources(usage);
     if (usageLoading) return renderResourceSkeleton();
     if (usageError) return renderResourceError(usageError);
     return renderResourceSkeleton();
+  }
+  if (tab === "local-model") {
+    const state = ollamaState || {};
+    const loading =
+      Boolean(state.loading) || (!state.hosts && !state.error);
+    return renderLocalModel(
+      state.hosts || null,
+      loading,
+      state.error || null,
+      state.editingId || null,
+    );
   }
   if (tab === "architecture") return renderArchitectureTab(status);
   if (tab === "api") return renderApiTab(status);
@@ -1104,6 +1262,10 @@ export async function render(root, ctx) {
   let usage = null;
   let usageLoading = false;
   let usageError = null;
+  let ollamaHosts = null;
+  let ollamaHostsLoading = false;
+  let ollamaHostsError = null;
+  let ollamaEditingId = null;
   let testsMounted = false;
   let testsMounting = false;
   let testsCleanup = null;
@@ -1115,7 +1277,7 @@ export async function render(root, ctx) {
         <div class="eyebrow">OBSERVABILITY</div>
         <h1 class="page-title">系統架構與服務狀態</h1>
         <p class="page-subtitle">檢視前端、FastAPI、PostgreSQL、Parquet 與 AI 元件的即時健康狀態，
-          並從左側分類切換服務總覽、系統測試、系統資料使用、架構、資料版本與最近下載紀錄。</p>
+          並從左側分類切換服務總覽、系統測試、Local Model、系統資料使用、架構、資料版本與最近下載紀錄。</p>
       </div>
       <div class="page-actions">
         <label class="auto-refresh">
@@ -1134,7 +1296,7 @@ export async function render(root, ctx) {
             <div class="eyebrow">STATUS SECTIONS</div>
             <div class="skeleton skeleton-line" style="width:90px;height:18px"></div>
           </div>
-          ${Array.from({ length: 7 })
+          ${Array.from({ length: 8 })
             .map(
               () =>
                 `<div class="skeleton skeleton-line" style="width:100%;height:52px;margin-top:8px"></div>`,
@@ -1204,6 +1366,12 @@ export async function render(root, ctx) {
       usage,
       usageLoading,
       usageError,
+      {
+        hosts: ollamaHosts,
+        loading: ollamaHostsLoading,
+        error: ollamaHostsError,
+        editingId: ollamaEditingId,
+      },
     );
   };
 
@@ -1226,6 +1394,32 @@ export async function render(root, ctx) {
         if (activeTab === "resources") paint();
       }
     }
+  };
+
+  const loadOllamaHosts = async ({ quiet = false } = {}) => {
+    if (ollamaHostsLoading) return;
+    ollamaHostsLoading = true;
+    ollamaHostsError = null;
+    if (activeTab === "local-model") paint();
+    try {
+      const data = await api.ollamaHosts();
+      if (disposed) return;
+      ollamaHosts = data;
+    } catch (error) {
+      if (disposed) return;
+      ollamaHostsError = error;
+      if (!quiet) toast(error.message || "無法取得 Ollama 主機。", "danger");
+    } finally {
+      if (!disposed) {
+        ollamaHostsLoading = false;
+        if (activeTab === "local-model") paint();
+      }
+    }
+  };
+
+  const reloadOllamaHosts = async () => {
+    await loadOllamaHosts({ quiet: true });
+    await loadStatus({ quiet: true });
   };
 
   const loadStatus = async ({ quiet = false } = {}) => {
@@ -1256,6 +1450,9 @@ export async function render(root, ctx) {
     if (activeTab === "resources") {
       await loadUsage({ quiet });
     }
+    if (activeTab === "local-model") {
+      await loadOllamaHosts({ quiet });
+    }
     if (!quiet && activeTab === "tests") {
       const testsRefresh = content.querySelector("#tests-refresh");
       if (testsRefresh) testsRefresh.click();
@@ -1272,11 +1469,118 @@ export async function render(root, ctx) {
     if (activeTab === "resources" && !usage && !usageLoading) {
       loadUsage();
     }
+    if (activeTab === "local-model") {
+      loadOllamaHosts();
+    }
   });
 
   content.addEventListener("click", (event) => {
     if (event.target.closest("#status-retry")) loadStatus();
     if (event.target.closest("#status-resources-retry")) loadUsage();
+  });
+
+  content.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-ollama-action]");
+    if (!button) return;
+    const action = button.dataset.ollamaAction;
+    const hostId = Number(button.dataset.id || 0);
+    if (action === "refresh-hosts") {
+      await loadOllamaHosts();
+      return;
+    }
+    if (action === "edit-host") {
+      ollamaEditingId = hostId;
+      paint();
+      root
+        .querySelector(".ollama-host-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (action === "cancel-host-edit") {
+      ollamaEditingId = null;
+      paint();
+      return;
+    }
+    if (action === "delete-host") {
+      if (!window.confirm(`確定刪除 Ollama 主機 #${hostId}？`)) return;
+      try {
+        await api.deleteOllamaHost(hostId);
+        if (Number(ollamaEditingId) === hostId) ollamaEditingId = null;
+        toast("Ollama 主機已刪除。", "info");
+        await reloadOllamaHosts();
+      } catch (error) {
+        toast(error.message || "刪除主機失敗。", "danger");
+      }
+      return;
+    }
+    if (action === "activate-host") {
+      try {
+        await api.activateOllamaHost(hostId);
+        toast("已切換使用的 Ollama 主機。", "ok");
+        await reloadOllamaHosts();
+      } catch (error) {
+        toast(error.message || "切換主機失敗。", "danger");
+      }
+      return;
+    }
+    if (action === "deactivate-host") {
+      try {
+        await api.deactivateOllamaHosts();
+        toast("已停用指定的 Ollama 主機，將沿用 .env 設定。", "info");
+        await reloadOllamaHosts();
+      } catch (error) {
+        toast(error.message || "停用主機失敗。", "danger");
+      }
+      return;
+    }
+    if (action === "select-model" || action === "clear-model") {
+      const model = String(button.dataset.model || "");
+      const role = String(button.dataset.role || "");
+      try {
+        if (action === "select-model") {
+          await api.selectOllamaModel(hostId, { model, role });
+          toast(`已設定 ${role === "chat" ? "聊天" : "嵌入"}模型：${model}`, "ok");
+        } else {
+          await api.clearOllamaModel(hostId, { model, role });
+          toast(`已取消 ${role === "chat" ? "聊天" : "嵌入"}模型。`, "info");
+        }
+        await reloadOllamaHosts();
+      } catch (error) {
+        toast(error.message || "模型設定失敗。", "danger");
+      }
+    }
+  });
+
+  content.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form[data-ollama-form='host']");
+    if (!form) return;
+    event.preventDefault();
+    const data = new FormData(form);
+    const hostId = Number(data.get("host_id") || 0);
+    const payload = {
+      name: String(data.get("name") || "").trim(),
+      url: String(data.get("url") || "").trim(),
+      port: Number(data.get("port") || 11434),
+    };
+    try {
+      if (hostId) {
+        await api.updateOllamaHost(hostId, payload);
+        toast("Ollama 主機已更新。", "ok");
+      } else {
+        await api.addOllamaHost(payload);
+        toast("Ollama 主機已新增。", "ok");
+      }
+      ollamaEditingId = null;
+      await reloadOllamaHosts();
+    } catch (error) {
+      const detail = error.detail || error.payload?.detail;
+      const message =
+        detail?.errors?.join(" · ") ||
+        detail?.message ||
+        error.message ||
+        "儲存主機失敗。";
+      toast(message, "danger", 8000);
+    }
   });
 
   refreshButton.addEventListener("click", () => refreshCurrent());

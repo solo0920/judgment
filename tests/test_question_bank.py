@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from judgment import question_bank_ai
 from judgment.benchmark import BenchmarkManager, deterministic_metrics
 from judgment.config import Settings
 from judgment.models import (
@@ -20,12 +21,16 @@ from judgment.models import (
 from judgment.question_bank import (
     create_item,
     create_suite,
+    delete_item,
     get_item,
     get_suite,
     list_items,
     remove_suite_item,
     revalidate_items,
+    restore_item,
     review_item,
+    submit_for_review,
+    tag_suggestions,
     update_item,
 )
 
@@ -168,6 +173,324 @@ def test_create_review_and_benchmark_suite(session_factory) -> None:
     assert frozen["status"] == "frozen"
     assert frozen["version"] == 2
     assert get_suite(session_factory, frozen["id"])["item_count"] == 1
+
+
+def test_submit_for_review_moves_item_into_queue(session_factory) -> None:
+    _seed_security_law(session_factory)
+    item = create_item(session_factory, _payload(), actor="tester")
+    assert item["status"] == "draft"
+    stats = list_items(session_factory, status="draft", limit=1)["stats"]
+    assert stats["draft"] == 1
+    assert stats["pending_review"] == 0
+
+    submitted = submit_for_review(session_factory, item["id"], actor="tester")
+    assert submitted["status"] == "pending_review"
+    assert submitted["version"] == 1
+    stats = list_items(session_factory, status="pending_review", limit=1)["stats"]
+    assert stats["draft"] == 0
+    assert stats["pending_review"] == 1
+
+    reviewed = review_item(
+        session_factory,
+        item["id"],
+        decision="approved",
+        reviewer="reviewer",
+    )
+    assert reviewed["status"] == "accepted"
+    resubmitted = submit_for_review(session_factory, item["id"], actor="tester")
+    assert resubmitted["status"] == "pending_review"
+
+
+def test_tag_suggestions_and_multi_tag_filter(session_factory) -> None:
+    _seed_security_law(session_factory)
+    create_item(
+        session_factory,
+        {
+            **_payload(),
+            "question": "證券交易法對內線交易有什麼規範？",
+            "tags": ["內線交易", "證券交易法"],
+        },
+        actor="tester",
+    )
+    create_item(
+        session_factory,
+        {
+            **_payload(),
+            "question": "證券交易法對公開收購有什麼規定？",
+            "tags": ["公開收購", "證券交易法"],
+        },
+        actor="tester",
+    )
+
+    suggestions = tag_suggestions(session_factory, query="證交")
+    assert [item["tag"] for item in suggestions["tags"]] == ["證券交易法"]
+    fuzzy = tag_suggestions(session_factory, query="證卷")
+    assert [item["tag"] for item in fuzzy["tags"]] == ["證券交易法"]
+    inner = tag_suggestions(session_factory, query="內線")
+    assert [item["tag"] for item in inner["tags"]] == ["內線交易"]
+
+    single = list_items(session_factory, tags=["證券交易法"], limit=10)
+    assert single["total"] == 2
+    assert len(single["items"]) == 2
+    combined = list_items(
+        session_factory,
+        tags=["證券交易法", "內線交易"],
+        limit=10,
+    )
+    assert combined["total"] == 1
+    assert combined["items"][0]["question"].startswith("證券交易法對內線交易")
+
+
+def test_restore_item_lists_and_restores_retired(session_factory) -> None:
+    _seed_security_law(session_factory)
+    item = create_item(
+        session_factory,
+        {**_payload(), "status": "pending_review"},
+        actor="tester",
+    )
+    assert delete_item(session_factory, item["id"], actor="tester") is True
+
+    listing = list_items(session_factory, status="retired", limit=10)
+    assert listing["total"] == 1
+    assert [entry["id"] for entry in listing["items"]] == [item["id"]]
+
+    restored = restore_item(session_factory, item["id"])
+    assert restored["status"] == "pending_review"
+    assert restored["deleted_at"] is None
+    assert list_items(session_factory, status="retired", limit=10)["total"] == 0
+
+
+def test_update_item_can_restore_retired_item(session_factory) -> None:
+    _seed_security_law(session_factory)
+    item = create_item(
+        session_factory,
+        {**_payload(), "status": "pending_review"},
+        actor="tester",
+    )
+    assert delete_item(session_factory, item["id"], actor="tester") is True
+    assert get_item(session_factory, item["id"]) is None
+
+    restored = update_item(
+        session_factory,
+        item["id"],
+        {**_payload(), "status": "pending_review"},
+        actor="tester",
+        restore=True,
+    )
+    assert restored["status"] == "pending_review"
+    assert restored["deleted_at"] is None
+    assert restored["version"] == 2
+
+
+def test_create_ai_item_uses_law_candidates(session_factory, monkeypatch) -> None:
+    _seed_security_law(session_factory)
+    fake_source = {
+        "law_name": "證券交易法",
+        "source_type": "law",
+        "source_label": "法規",
+        "articles": [
+            {
+                "article_no": "第 157-1 條",
+                "article_content": "實際知悉重大消息，未公開前不得買賣。",
+            },
+            {
+                "article_no": "第 171 條",
+                "article_content": "違反第一百五十七條之一者，處有期徒刑。",
+            },
+        ],
+    }
+    parsed = {
+        "question_type": "law_concept",
+        "difficulty": "medium",
+        "visibility": "shared",
+        "expected_laws": [
+            {"law_name": "證券交易法", "source_type": "law"},
+            {"law_name": "不存在的法規", "source_type": "law"},
+        ],
+        "expected_articles": [
+            {"law_name": "證券交易法", "article_no": "第 157-1 條"},
+            {"law_name": "證券交易法", "article_no": "第 999 條"},
+        ],
+        "expected_judgments": [{"jid": "FAKE,000,000,0,20260101,1"}],
+        "reference_answer": "證券交易法第 157-1 條禁止內線交易。",
+        "tags": ["內線交易", "證券交易法"],
+        "notes": "",
+        "rubric": {"must_refuse": False},
+    }
+    monkeypatch.setattr(
+        question_bank_ai,
+        "law_sources_for_question",
+        lambda *args, **kwargs: [fake_source],
+    )
+    monkeypatch.setattr(
+        question_bank_ai,
+        "_ollama_answer",
+        lambda **kwargs: parsed["reference_answer"],
+    )
+    monkeypatch.setattr(
+        question_bank_ai,
+        "_ollama_labels",
+        lambda **kwargs: (
+            {key: value for key, value in parsed.items() if key != "reference_answer"},
+            [],
+        ),
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=Path("data/laws"),
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        llm_model="test-model",
+    )
+
+    result = question_bank_ai.create_ai_item(
+        session_factory,
+        settings=settings,
+        law_data_dir=Path("data/laws"),
+        question="證券交易法對內線交易有什麼規範？",
+        actor="ai-test",
+    )
+    item = result["item"]
+    assert item["status"] == "pending_review"
+    assert item["source"] == "ollama_auto"
+    assert item["question_type"] == "law_concept"
+    assert item["expected_judgments"] == []
+    assert [law["law_name"] for law in item["expected_laws"]] == ["證券交易法"]
+    assert [article["article_no"] for article in item["expected_articles"]] == [
+        "第 157-1 條"
+    ]
+    assert "test-model" in item["notes"]
+    assert result["warnings"]
+
+
+def test_create_ai_item_falls_back_to_answer_labels(
+    session_factory, monkeypatch
+) -> None:
+    _seed_security_law(session_factory)
+    fake_source = {
+        "law_name": "證券交易法",
+        "source_type": "law",
+        "source_label": "法規",
+        "articles": [
+            {
+                "article_no": "第 157-1 條",
+                "article_content": "實際知悉重大消息，未公開前不得買賣。",
+            },
+            {
+                "article_no": "第 171 條",
+                "article_content": "違反第一百五十七條之一者，處有期徒刑。",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        question_bank_ai,
+        "law_sources_for_question",
+        lambda *args, **kwargs: [fake_source],
+    )
+    monkeypatch.setattr(
+        question_bank_ai,
+        "_ollama_answer",
+        lambda **kwargs: "依證券交易法第 157-1 條，內部人不得在重大消息公開前買賣。",
+    )
+    monkeypatch.setattr(
+        question_bank_ai,
+        "_ollama_labels",
+        lambda **kwargs: ({}, ["Ollama 未能產生標註 JSON。"]),
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=Path("data/laws"),
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        llm_model="test-model",
+    )
+
+    result = question_bank_ai.create_ai_item(
+        session_factory,
+        settings=settings,
+        law_data_dir=Path("data/laws"),
+        question="證券交易法對內線交易有什麼規範？",
+        actor="ai-test",
+    )
+    item = result["item"]
+    assert item["status"] == "pending_review"
+    assert [article["article_no"] for article in item["expected_articles"]] == [
+        "第 157-1 條"
+    ]
+    assert item["tags"] == ["證券交易法"]
+    assert result["warnings"]
+
+
+def test_create_ai_item_restores_retired_duplicate(
+    session_factory, monkeypatch
+) -> None:
+    _seed_security_law(session_factory)
+    original = create_item(
+        session_factory,
+        {**_payload(), "status": "pending_review"},
+        actor="tester",
+    )
+    assert delete_item(session_factory, original["id"], actor="tester") is True
+
+    fake_source = {
+        "law_name": "證券交易法",
+        "source_type": "law",
+        "source_label": "法規",
+        "articles": [
+            {
+                "article_no": "第 157-1 條",
+                "article_content": "實際知悉重大消息，未公開前不得買賣。",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        question_bank_ai,
+        "law_sources_for_question",
+        lambda *args, **kwargs: [fake_source],
+    )
+    monkeypatch.setattr(
+        question_bank_ai,
+        "_ollama_answer",
+        lambda **kwargs: "證券交易法第 157-1 條禁止內線交易。",
+    )
+    monkeypatch.setattr(
+        question_bank_ai,
+        "_ollama_labels",
+        lambda **kwargs: (
+            {
+                "question_type": "law_concept",
+                "difficulty": "medium",
+                "expected_laws": [
+                    {"law_name": "證券交易法", "source_type": "law"}
+                ],
+                "expected_articles": [
+                    {"law_name": "證券交易法", "article_no": "第 157-1 條"}
+                ],
+                "tags": ["內線交易"],
+            },
+            [],
+        ),
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=Path("data/laws"),
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        llm_model="test-model",
+    )
+
+    result = question_bank_ai.create_ai_item(
+        session_factory,
+        settings=settings,
+        law_data_dir=Path("data/laws"),
+        question=original["question"],
+        actor="ai-test",
+    )
+    restored = result["item"]
+    assert restored["id"] == original["id"]
+    assert restored["status"] == "pending_review"
+    assert restored["deleted_at"] is None
+    assert restored["version"] == 2
 
 
 def test_update_creates_version_and_returns_to_review(session_factory) -> None:

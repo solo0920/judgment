@@ -328,7 +328,7 @@ export async function render(root) {
           </button>
           <button class="status-tab" type="button" data-quality-tab="create">
             <span class="status-tab-icon">${icon("plus", 15)}</span>
-            <span class="status-tab-copy"><strong>題庫新增</strong><small>建立題目、標註與 JSON 匯入</small></span>
+            <span class="status-tab-copy"><strong>題庫新增</strong><small>Ollama 自動出題與 JSON 匯入</small></span>
           </button>
           <button class="status-tab" type="button" data-quality-tab="manage">
             <span class="status-tab-icon">${icon("database", 15)}</span>

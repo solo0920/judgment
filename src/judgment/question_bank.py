@@ -4,7 +4,9 @@ import hashlib
 import json
 import re
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func, or_, select
@@ -538,6 +540,7 @@ def update_item(
     actor: str = "",
     change_note: str = "",
     article_cache: Optional[Dict[str, Dict[str, LawArticleVersion]]] = None,
+    restore: bool = False,
 ) -> Dict[str, Any]:
     validation = validate_payload(
         session_factory,
@@ -554,7 +557,7 @@ def update_item(
     normalized = validation["normalized"]
     with session_factory() as session:
         item = session.get(QuestionBankItem, int(item_id))
-        if item is None or item.deleted_at is not None:
+        if item is None or (item.deleted_at is not None and not restore):
             raise QuestionBankError("找不到題目。", errors=["找不到題目。"])
         item.fingerprint = validation["fingerprint"]
         item.question = normalized["question"]
@@ -579,6 +582,8 @@ def update_item(
             if requested_status in QUESTION_STATUSES
             else "pending_review"
         )
+        if restore:
+            item.deleted_at = None
         session.add(
             QuestionBankItemVersion(
                 item_id=item.id,
@@ -633,6 +638,7 @@ def list_items(
     question_type: str = "",
     difficulty: str = "",
     tag: str = "",
+    tags: Optional[Sequence[str]] = None,
     stale: Optional[bool] = None,
     include_deleted: bool = False,
     limit: int = 50,
@@ -640,47 +646,66 @@ def list_items(
 ) -> Dict[str, Any]:
     limit = max(1, min(200, int(limit or 50)))
     offset = max(0, int(offset or 0))
+    if status == "retired":
+        include_deleted = True
     with session_factory() as session:
-        statement = select(QuestionBankItem)
+        conditions = []
         if not include_deleted:
-            statement = statement.where(QuestionBankItem.deleted_at.is_(None))
+            conditions.append(QuestionBankItem.deleted_at.is_(None))
         if query:
             needle = f"%{query.strip()}%"
-            statement = statement.where(
+            conditions.append(
                 or_(
                     QuestionBankItem.question.ilike(needle),
                     QuestionBankItem.reference_answer.ilike(needle),
                 )
             )
         if status:
-            statement = statement.where(QuestionBankItem.status == status)
+            conditions.append(QuestionBankItem.status == status)
         if question_type:
-            statement = statement.where(
-                QuestionBankItem.question_type == question_type
-            )
+            conditions.append(QuestionBankItem.question_type == question_type)
         if difficulty:
-            statement = statement.where(QuestionBankItem.difficulty == difficulty)
+            conditions.append(QuestionBankItem.difficulty == difficulty)
         if stale is not None:
-            statement = statement.where(QuestionBankItem.stale.is_(bool(stale)))
-        items = list(
-            session.scalars(
-                statement.order_by(QuestionBankItem.updated_at.desc())
-                .offset(offset)
-                .limit(limit)
-            ).all()
-        )
-        if tag:
-            items = [
-                item
-                for item in items
-                if tag in [str(value) for value in (item.tags or [])]
-            ]
+            conditions.append(QuestionBankItem.stale.is_(bool(stale)))
+        statement = select(QuestionBankItem)
         total_statement = select(func.count()).select_from(QuestionBankItem)
-        if not include_deleted:
-            total_statement = total_statement.where(
-                QuestionBankItem.deleted_at.is_(None)
+        for condition in conditions:
+            statement = statement.where(condition)
+            total_statement = total_statement.where(condition)
+        wanted_tags = [
+            str(value).strip()
+            for value in (tags or [])
+            if str(value).strip()
+        ]
+        if tag:
+            wanted_tags.append(str(tag).strip())
+        wanted_tags = list(dict.fromkeys(wanted_tags))
+        if wanted_tags:
+            all_items = list(
+                session.scalars(
+                    statement.order_by(QuestionBankItem.updated_at.desc())
+                ).all()
             )
-        total = int(session.scalar(total_statement) or 0)
+            all_items = [
+                item
+                for item in all_items
+                if all(
+                    wanted in [str(value) for value in (item.tags or [])]
+                    for wanted in wanted_tags
+                )
+            ]
+            total = len(all_items)
+            items = all_items[offset : offset + limit]
+        else:
+            items = list(
+                session.scalars(
+                    statement.order_by(QuestionBankItem.updated_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                ).all()
+            )
+            total = int(session.scalar(total_statement) or 0)
         return {
             "items": [serialize_item(item) for item in items],
             "total": total,
@@ -688,6 +713,71 @@ def list_items(
             "offset": offset,
             "stats": question_bank_stats(session),
         }
+
+
+def _normalize_tag_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "")).casefold()
+
+
+def _tag_match_score(query: str, tag: str) -> int:
+    needle = _normalize_tag_text(query)
+    target = _normalize_tag_text(tag)
+    if not needle or not target:
+        return 0
+    if needle == target:
+        return 1000
+    if target.startswith(needle):
+        return 900 - (len(target) - len(needle))
+    position = target.find(needle)
+    if position >= 0:
+        return 800 - position
+    iterator = iter(target)
+    if all(character in iterator for character in needle):
+        return 700 - (len(target) - len(needle))
+    ratio = SequenceMatcher(None, needle, target).ratio()
+    overlap = len(set(needle) & set(target)) / max(1, len(set(needle)))
+    score = int(ratio * 500 + overlap * 300)
+    return score if score >= 220 else 0
+
+
+def tag_suggestions(
+    session_factory: sessionmaker[Session],
+    *,
+    query: str = "",
+    limit: int = 12,
+) -> Dict[str, Any]:
+    limit = max(1, min(50, int(limit or 12)))
+    with session_factory() as session:
+        items = session.scalars(
+            select(QuestionBankItem).where(QuestionBankItem.deleted_at.is_(None))
+        ).all()
+        counts: Counter[str] = Counter()
+        for item in items:
+            for value in item.tags or []:
+                tag = str(value).strip()
+                if tag:
+                    counts[tag] += 1
+    needle = str(query or "").strip()
+    if not needle:
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    else:
+        scored = []
+        for tag, count in counts.items():
+            score = _tag_match_score(needle, tag)
+            if score:
+                scored.append((score, count, tag))
+        if scored:
+            best = max(item[0] for item in scored)
+            cutoff = max(220, int(best * 0.55))
+            scored = [item for item in scored if item[0] >= cutoff]
+        scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
+        ranked = [(tag, count) for _, count, tag in scored]
+    return {
+        "query": needle,
+        "tags": [
+            {"tag": tag, "count": count} for tag, count in ranked[:limit]
+        ],
+    }
 
 
 def question_bank_stats(session: Session) -> Dict[str, Any]:
@@ -761,6 +851,48 @@ def review_item(
                 comment=str(comment or "")[:4000],
             )
         )
+        session.commit()
+        session.refresh(item)
+        return serialize_item(item, reviews=_reviews_for(session, item.id))
+
+
+def submit_for_review(
+    session_factory: sessionmaker[Session],
+    item_id: int,
+    *,
+    actor: str = "",
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        item = session.get(QuestionBankItem, int(item_id))
+        if item is None or item.deleted_at is not None:
+            raise QuestionBankError("找不到題目。", errors=["找不到題目。"])
+        if item.status == "retired":
+            raise QuestionBankError(
+                "已退役題目不能送審。",
+                errors=["已退役題目不能送審。"],
+            )
+        item.status = "pending_review"
+        item.last_reviewed_at = None
+        item.reviewed_by = ""
+        item.review_comment = ""
+        session.commit()
+        session.refresh(item)
+        return serialize_item(item, reviews=_reviews_for(session, item.id))
+
+
+def restore_item(
+    session_factory: sessionmaker[Session],
+    item_id: int,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        item = session.get(QuestionBankItem, int(item_id))
+        if item is None:
+            raise QuestionBankError("找不到題目。", errors=["找不到題目。"])
+        item.deleted_at = None
+        item.status = "pending_review"
+        item.reviewed_by = ""
+        item.review_comment = ""
+        item.last_reviewed_at = None
         session.commit()
         session.refresh(item)
         return serialize_item(item, reviews=_reviews_for(session, item.id))

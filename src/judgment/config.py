@@ -76,6 +76,11 @@ class Settings:
     rag_score_threshold: float = 0.35
     rag_max_context_chars: int = 4000
     judgment_index_max_chars: int = 1600
+    opendata_judicial_account: str = ""
+    opendata_judicial_password: str = ""
+    judgment_download_category: str = "051"
+    judgment_download_start_id: int = 71644
+    judgment_download_known_latest_id: int = 72011
     test_embedding_models: tuple[str, ...] = ()
     test_llm_models: tuple[str, ...] = ()
 
@@ -163,6 +168,22 @@ class Settings:
             rag_score_threshold=_env_float("RAG_SCORE_THRESHOLD", 0.35),
             rag_max_context_chars=_env_int("RAG_MAX_CONTEXT_CHARS", 4000),
             judgment_index_max_chars=_env_int("JUDGMENT_INDEX_MAX_CHARS", 1600),
+            opendata_judicial_account=os.getenv(
+                "OPENDATA_JUDICIAL_GOV_TW_ACCOUNT", ""
+            ).strip(),
+            opendata_judicial_password=os.getenv(
+                "OPENDATA_JUDICIAL_GOV_TW_PASSWORD", ""
+            ),
+            judgment_download_category=os.getenv(
+                "JUDGMENT_DOWNLOAD_CATEGORY", "051"
+            ).strip()
+            or "051",
+            judgment_download_start_id=_env_int(
+                "JUDGMENT_DOWNLOAD_START_ID", 71644
+            ),
+            judgment_download_known_latest_id=_env_int(
+                "JUDGMENT_DOWNLOAD_KNOWN_LATEST_ID", 72011
+            ),
             test_embedding_models=_env_csv("TEST_EMBEDDING_MODELS", ()),
             test_llm_models=_env_csv("TEST_LLM_MODELS", ()),
         )

@@ -425,6 +425,22 @@ class OllamaModelCapability(Base):
     )
 
 
+class OllamaHost(Base):
+    __tablename__ = "ollama_hosts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False, default="")
+    base_url = Column(String(300), nullable=False, unique=True, index=True)
+    port = Column(Integer, nullable=False, default=11434)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    chat_model = Column(String(200), nullable=False, default="")
+    embedding_model = Column(String(200), nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
 class DownloadRun(Base):
     __tablename__ = "download_runs"
 

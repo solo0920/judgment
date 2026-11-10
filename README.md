@@ -379,10 +379,10 @@ WHERE citation_count > 0 AND jid <> ''
 
 `#/quality` 的 sidebar 提供題庫工作區：
 
-- **題庫新增**：手動建立或貼上 JSON 匯入；預期法規、條文與判決 jid 會對現行 PostgreSQL metadata／條文驗證。
-- **題庫管理**：狀態、版本、fingerprint、標籤、stale 標記、soft delete 與 JSON 匯出。
+- **題庫新增**：輸入問題後由本機 Ollama 回答並自動產生題型、難度、法規／條文、參考答案與標籤，建立為待審題目；也可貼上 JSON 批次匯入。預期法規、條文與判決 jid 會對現行 PostgreSQL metadata／條文驗證。
+- **題庫管理**：狀態、版本、fingerprint、標籤、stale 標記、soft delete 與 JSON 匯出；草稿、已拒絕或已核准題目可在此重新送審。狀態／題型／難度下拉選單變更會自動套用篩選；標籤支援 fuzzy 搜尋與多標籤（AND）篩選，選擇「已刪除／退役」可列出 soft delete 題目並復原為待審。
 - **Benchmark 題庫**：只允許 accepted、未 stale 的題目；可建立 smoke／core／full suite、凍結版本。
-- **題庫人工驗收批注**：approve／changes requested／reject、rubric 分數、批注與審核紀錄。
+- **題庫人工驗收批注**：左側題目清單、右側題目內容與核准／退回／拒絕／刪除；待審／退回、已核准、已拒絕、草稿分頁，rubric 分數、批注與審核紀錄。待審為 0 時會提示如何送審或切換到已核准題目重新驗收。
 - 題目修改會建立新版本；法規條文內容變更時，啟動與「重新驗證」會自動標記 stale，提醒人工重新驗收。
 - 題目 fingerprint 以正規化問題文字計算，跨版本保留相同題目身份，供長期同題比較。
 
@@ -449,11 +449,11 @@ uv run judgment-normalize-courts --all
 | 路由 | 頁面 | 功能 |
 | --- | --- | --- |
 | `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。 |
-| `#/data` | 資料庫查詢 | 先切換「法規命令／判決」，再選擇資料庫；側欄提供「查詢／Schema」切換，Schema 模式列出該資料庫的資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
+| `#/data` | 資料庫查詢 | 左側 sidebar：查詢法規命令、查詢判決、資料庫 Schema。法規命令與判決查詢支援 fuzzy 多條件（AND）與 suggestion，選取後立即查詢；可展開進階 metadata 條件。Schema 模式可切換法規命令／判決與資料庫，列出資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
 | `#/quality` | 資料品質 | 左側 sidebar：品質總覽、題庫新增、題庫管理、Benchmark 題庫、題庫人工驗收批注。品質總覽以 DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。題庫工作區支援法規／條文／判決驗證、版本、JSON 匯入匯出、suite 凍結與人工批注。 |
 | `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
-| `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 8 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。另含判決、法規、命令三條即時流程圖、判決壓縮檔逐檔進度、各階段子進度與顏色、整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
-| `#/status` | 系統狀態 | 左側分類切換服務總覽、系統資料使用、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。 |
+| `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 9 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。另含判決、法規、命令三條即時流程圖、判決壓縮檔逐檔進度、各階段子進度與顏色、整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
+| `#/status` | 系統狀態 | 左側分類切換服務總覽、系統測試、Local Model、系統資料使用、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。Local Model 可管理 Ollama 主機與模型、切換使用中的主機。 |
 
 ### HTTP API
 
@@ -468,11 +468,22 @@ uv run judgment-normalize-courts --all
 | `POST` | `/api/index-versions/rollback` | 將 alias 切回上一個成功版本。 |
 | `GET` | `/api/index-alias/reconcile` | 比對 Qdrant alias 與 PostgreSQL active 版本，可加 `?repair=true`。 |
 | `GET` | `/api/catalog` | 依「法規命令／判決」分類回傳資料庫清單與各資料表可用的篩選欄位。 |
+| `GET` | `/api/data/suggest` | 法規／判決 fuzzy suggestion；判決包含法院、案件字號與命中法規。 |
 | `GET` | `/api/quality` | DuckDB 原始判決 Parquet 品質檢查、分布統計、archive 明細、PostgreSQL 收錄與向量索引覆蓋。 |
-| `GET` | `/api/question-bank/items` | 題庫列表；支援搜尋、狀態、題型、難度、標籤與 stale 篩選。 |
-| `POST` | `/api/question-bank/items` | 新增題目；驗證現行法規、條文與判決 jid，並建立 fingerprint 與版本 1。 |
+| `GET` | `/api/question-bank/items` | 題庫列表；支援搜尋、狀態、題型、難度、多標籤（AND）與 stale 篩選。 |
+| `GET` | `/api/question-bank/tags` | 標籤 fuzzy 搜尋；回傳相近標籤與題目數。 |
+| `POST` | `/api/question-bank/items` | 新增題目；驗證現行法規、條文與判決 jid，並建立 fingerprint 與版本 1。可帶 `status`（`pending_review` 或 `draft`）。 |
+| `POST` | `/api/question-bank/ai-items` | 輸入問題，由本機 Ollama 回答並自動產生題型、難度、法規／條文、參考答案與標籤，建立為待審題目。 |
 | `GET` / `PATCH` / `DELETE` | `/api/question-bank/items/{id}` | 讀取、修改建立新版本、soft delete（retired）。 |
+| `POST` | `/api/question-bank/items/{id}/submit` | 送交人工驗收；將草稿、已核准或已拒絕題目改為 `pending_review`。 |
+| `POST` | `/api/question-bank/items/{id}/restore` | 復原 soft delete 題目，狀態改為 `pending_review`。 |
 | `POST` | `/api/question-bank/items/{id}/review` | 人工驗收：approved／rejected／changes_requested、rubric 分數與批注。 |
+| `GET` / `POST` | `/api/ollama/hosts` | 列出 Ollama 主機（含即時狀態與模型）／新增主機。 |
+| `PATCH` / `DELETE` | `/api/ollama/hosts/{id}` | 編輯／刪除 Ollama 主機。 |
+| `POST` | `/api/ollama/hosts/{id}/activate` | 設為目前使用的 Ollama 主機。 |
+| `POST` | `/api/ollama/hosts/deactivate` | 停用目前主機，改回 `.env` 設定。 |
+| `POST` | `/api/ollama/hosts/{id}/models/select` | 設定主機的聊天或嵌入模型。 |
+| `POST` | `/api/ollama/hosts/{id}/models/clear` | 取消主機的聊天或嵌入模型設定。 |
 | `POST` | `/api/question-bank/import` | JSON 批次匯入；以 fingerprint upsert。 |
 | `GET` | `/api/question-bank/export` | 匯出題庫 JSON。 |
 | `POST` | `/api/question-bank/revalidate` | 重新驗證全部題目；法規條文內容變更時標記 stale。 |
@@ -495,7 +506,7 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/processing` | 資料處理快照：三條流程、各階段進度、逐檔壓縮檔狀態、階段耗時堆疊、外部程序偵測、更新能力與注意事項。 |
 | `GET` | `/api/processing/plan` | 更新前檢查結果：未處理壓縮檔、索引待補筆數與建議步驟；不會啟動任何程序。 |
 | `POST` | `/api/processing/update` | 啟動可中斷續跑的資料更新；body 為 `{"index": false}`。已在執行中或外部匯入／更新程序佔用時回傳 409。 |
-| `POST` | `/api/processing/workflows/{workflow_id}/run` | 啟動白名單中的單一工作流程（法規下載、命令下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、法規條文版本回填）；同一時間僅允許一個處理程序，衝突或外部程序佔用時回傳 409。 |
+| `POST` | `/api/processing/workflows/{workflow_id}/run` | 啟動白名單中的單一工作流程（法規下載、命令下載、判決下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、法規條文版本回填）；同一時間僅允許一個處理程序，衝突或外部程序佔用時回傳 409。 |
 | `POST` | `/api/processing/stop` | 對由 Web 啟動的資料更新或工作流程送出 SIGINT；外部程序不會被強制停止。 |
 | `POST` | `/api/rag/query` | 以 Qdrant 檢索判決並由 LLM 產生有引用編號的回答；問題上限 500 字，服務未就緒時降級。 |
 | `POST` | `/api/rag/query/stream` | 與 `/api/rag/query` 相同，但以 SSE 逐段回傳 `step`、`partial`、`token`、`token_reset`、`result`、`error`；RAG 頁用來即時顯示後端處理流程、先顯示法規結果，再逐 token 顯示 LLM 回答。 |
@@ -507,13 +518,13 @@ uv run judgment-normalize-courts --all
 ```json
 {
   "database": "postgres",
-  "filters": {"table": "law_documents", "keyword": "銀行法", "is_current": true},
+  "filters": {"table": "law_documents", "keywords": ["銀行", "金融法規"], "is_current": true},
   "page": 1,
   "page_size": 25
 }
 ```
 
-`database` 可為 `postgres`、`parquet`、`qdrant`、`indexeddb`；`page_size` 上限 200。所有查詢皆為唯讀，不會修改 PostgreSQL 或 Parquet。
+`keywords` 可傳多個字串，後端會在法規／判決的搜尋欄位上以 AND 套用；`keyword` 仍保留單一關鍵字用法。`database` 可為 `postgres`、`parquet`、`qdrant`、`indexeddb`；`page_size` 上限 200。所有查詢皆為唯讀，不會修改 PostgreSQL 或 Parquet。
 
 ### 資料處理頁與資料更新
 
@@ -525,7 +536,8 @@ uv run judgment-normalize-courts --all
 - **逐檔進度**：從狀態檔的 `archives` 讀取每個壓縮檔的解壓縮、原始備份、篩選與 PostgreSQL 進度，直接顯示在檔名後方。沒有狀態檔時，改用 PostgreSQL 的 `source_archive` 顯示哪些壓縮檔已處理。
 - **整體時間**：以各階段實際耗時比例組成堆疊長條，而非用筆數推估。
 - **外部程序**：後端以 `ps` 偵測直接在 terminal 啟動的 `judgment-index-vectors`、`judgment-import-judgments`、`judgment-law-download` 與 `judgment.processing_update`。這些程序若沒有寫入狀態檔，只會標示「外部程序」與可驗證的整體覆蓋率；不會替它們產生假的逐階段百分比。外部匯入／更新執行中時，資料更新按鈕會停用；外部索引執行中時，仍可更新但不可勾選接續索引。
-- **工作流程 sidebar**：左側列出「處理總覽」與 8 個白名單流程（完整資料更新、法規下載、命令下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、法規條文版本回填）。右側面板顯示該流程使用的 Python 程式、Shell／入口腳本與實際命令，並提供「執行此流程」按鈕；結果寫入共用狀態檔，面板顯示最近一次 run 的狀態、開始時間、耗時、訊息與日誌路徑。
+- **工作流程 sidebar**：左側列出「處理總覽」與 9 個白名單流程（完整資料更新、法規下載、命令下載、判決下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、法規條文版本回填）。右側面板顯示該流程使用的 Python 程式、Shell／入口腳本與實際命令，並提供「執行此流程」按鈕；結果寫入共用狀態檔，面板顯示最近一次 run 的狀態、開始時間、耗時、訊息與日誌路徑。
+- **判決下載**：使用 `.env` 的 `OPENDATA_JUDICIAL_GOV_TW_ACCOUNT`／`OPENDATA_JUDICIAL_GOV_TW_PASSWORD` 取得 Token，讀取司法院裁判書分類（預設 `051`）的 resources，下載到 `JUDGMENT_DATA_DIR/raw_rar`。只在 Asia/Taipei 00:00–06:00 執行；跨時段會停止並保留進度，下次續傳。以 HEAD（若 405 則 GET stream 只讀 headers）比對 `Content-Length`／`Last-Modified`／`ETag`，未變更檔案不重新下載；有更新時下載到暫存檔並原子取代，同月份新版本會移除舊檔。預設會檢查 1996-01 到最新月份（目前 2026-08）共 368 個月份，缺檔下載、舊版更新；`72012` 是 `Delete-Infor.csv`，會被辨識為非判決壓縮檔並停止往後探測。`raw_rar/download_manifest.json` 記錄 fileset、validators、SHA-256、baseline 與 `months` 月分狀態。處理頁的判決下載面板會顯示 1996–2026 月曆表：綠色最新版、灰色舊版、紅色缺失；表格的「重新整理」會重新掃描 `raw_rar`，手動放入的檔案也會立即反映；滑鼠移到月份會出現下載圖示，點擊後由後端帶 Token proxy 下載該月份 fileset（需 00:00–06:00 時段）。快速檢查既有檔案可用 `judgment-download --incremental`；只更新月分狀態可用 `--refresh-status`。
 - **執行與停止**：單一流程由 `judgment.workflow_runner` 在背景啟動，可執行命令只來自 `src/judgment/workflows.py` 白名單；完整資料更新仍走 `ProcessingManager.start_update`，可勾選接續索引。所有長流程共用「停止」與可續跑機制；已有 Web 或 terminal 程序執行時，按鈕停用或回傳 409，不會同時啟動第二個處理程序。
 
 「資料更新」按鈕會依序：
@@ -1086,7 +1098,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 - 效能 Flow 實測：快速 profile 的 RAG 請求產生約 20 段 Flow，包含 `http.request`、`rag.answer_question`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm`、`rag.validate_citations` 與 `client.render`；`summary.models` 為 `bge-m3`、`gemma3:4b`。伺服器端 LLM 區段約 1–4 秒，前端 client 全流程與伺服器總耗時接近。時間軸以每個點位的 `started_at` 顯示開始時間，主要數字為「本點到下一點」區間；「累計」採流水線累加，例如 `http.request` 顯示 1 ms 並累計 1 ms，`rag.coverage` 顯示 30 ms 並累計 32 ms，`rag.llm_request` 顯示 2.9 s，最後 `client.render` 才累計到整體 3.9–4.0 秒。
 - 以 Playwright 驗證效能 Flow 頁：模型篩選、21 段巢狀時間軸、每點實際開始時間、點到點區間、流水線累計、module／function／params、時間軸比例條、模型統計、最慢區段、Flow JSON 展開、390px 無水平溢出與 0 console error。
 - 以 Playwright 驗證十種主題切換與持久化、四個頁面、法規／判決類別切換、判決命中法規查詢、匯入紀錄查詢、查詢報表、法規明細、判決原文與返回流程、服務狀態與 390px 行動版；無 console error、無失敗請求、無水平溢出。
-- 以 Playwright 驗證資料處理頁工作流程 sidebar：9 個項目（總覽＋8 個流程）、選取「法規下載」顯示程式 `judgment-law-download --source law`、Shell／入口 `src/judgment/law_download/cli.py`、實際命令與執行按鈕；桌面 1300px 與行動版 390px 均無水平溢出、0 console error。
+- 以 Playwright 驗證資料處理頁工作流程 sidebar：10 個項目（總覽＋9 個流程）、選取「判決下載」顯示程式 `judgment-download`、Shell／入口 `src/judgment/judgment_download.py`、實際命令與執行按鈕；桌面 1300px 與行動版 390px 均無水平溢出、0 console error。
 - 以 Playwright 驗證判決法院正規化：下拉選單只有 37 個標準法院＋全部、無重複或髒值，以標準名稱篩選／排序／開啟原文皆一致，返回查詢結果後條件與資料列保留。
 - 以 Playwright 驗證 `file://frontend/index.html`、系統測試頁的 API 連線測試／儲存流程，以及靜態主機（含 `?api=` 覆寫）的跨來源 API 呼叫。
 - 以 Playwright 驗證系統測試頁：header「系統測試」入口、API 表單、測試模式 ON/OFF 切換、模型清單、測試 Flow、RAG 頁測試模式提示，以及 `/api/test-mode` 狀態一致；後端電源改由 `./up.sh`／`./down.sh` 管理。

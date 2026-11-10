@@ -16,7 +16,7 @@ const STATUS_META = {
   changes_requested: { label: "退回修改", badge: "badge-warn" },
   accepted: { label: "已核准", badge: "badge-ok" },
   rejected: { label: "已拒絕", badge: "badge-danger" },
-  retired: { label: "已退役", badge: "badge-neutral" },
+  retired: { label: "已刪除／退役", badge: "badge-neutral" },
 };
 
 const TYPE_LABELS = {
@@ -115,15 +115,92 @@ function labelsMarkup(item) {
     : `<span class="qb-muted">尚未標註 expected labels</span>`;
 }
 
-function createFormMarkup(item) {
-  const editing = Boolean(item);
+function importMarkup() {
+  return `<details class="qb-import">
+    <summary>${icon("upload", 14)}JSON 批次匯入</summary>
+    <p class="qb-muted">格式：<code>{"items":[{question, question_type, difficulty, expected_laws, expected_articles, expected_judgments, reference_answer, tags, rubric}]}</code>。相同題目 fingerprint 預設更新。</p>
+    <textarea class="input" id="qb-import-json" rows="6" placeholder='{"items":[...]}'></textarea>
+    <div class="qb-actions">
+      <button class="btn btn-secondary btn-sm" type="button" data-qb-action="import-json">${icon("upload", 13)}<span>匯入 JSON</span></button>
+    </div>
+  </details>`;
+}
+
+function aiResultMarkup(result) {
+  const item = result?.item || {};
+  const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  return `<section class="report-card qb-card qb-ai-result">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("sparkles", 14)}Ollama 已建立題目 #${item.id}</span>
+      ${statusBadge(item.status)}
+    </div>
+    <div class="qb-ai-answer">
+      <strong>${escapeHtml(item.question || "")}</strong>
+      <div class="qb-ai-meta">
+        ${escapeHtml(TYPE_LABELS[item.question_type] || item.question_type || "")}
+        · ${escapeHtml(DIFFICULTY_LABELS[item.difficulty] || item.difficulty || "")}
+        · ${escapeHtml(result?.model || "本機 Ollama")}
+      </div>
+      ${labelsMarkup(item)}
+      ${
+        item.reference_answer
+          ? `<div class="qb-reference"><span class="summary-label">Ollama 參考答案</span><p>${escapeHtml(item.reference_answer)}</p></div>`
+          : ""
+      }
+      ${
+        tags.length
+          ? `<div class="chips">${tags.map((tag) => `<span class="chip">${escapeHtml(tag)}</span>`).join("")}</div>`
+          : ""
+      }
+      ${
+        warnings.length
+          ? `<div class="qb-ai-warnings"><strong>需要注意</strong><ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul></div>`
+          : ""
+      }
+      <div class="qb-actions">
+        <button class="btn btn-primary btn-sm" type="button" data-qb-action="review-ai-item">${icon("shield", 13)}<span>前往驗收</span></button>
+        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="reset-ai">${icon("plus", 13)}<span>再新增一題</span></button>
+      </div>
+    </div>
+    ${importMarkup()}
+  </section>`;
+}
+
+function aiCreateFormMarkup(state) {
+  if (state.aiResult) return aiResultMarkup(state.aiResult);
   return `<section class="report-card qb-card">
     <div class="side-card-head">
-      <span class="side-card-title">${icon(editing ? "edit" : "plus", 14)}${editing ? `編輯題目 #${item.id}` : "新增題目"}</span>
-      ${editing ? `<button class="btn btn-ghost btn-sm" type="button" data-qb-action="new">取消編輯</button>` : ""}
+      <span class="side-card-title">${icon("sparkles", 14)}AI 題庫新增</span>
+      <span class="badge badge-neutral">本機 Ollama</span>
+    </div>
+    <form class="qb-form qb-ai-form" data-qb-form="ai-create" id="qb-create-form">
+      <label class="field qb-wide">
+        <span class="field-label">題目 <span class="field-tag">question</span></span>
+        <textarea class="input" name="question" rows="4" required placeholder="輸入問題，Ollama 會回答並自動判斷題型、難度、法規／條文、參考答案與標籤。">${escapeHtml(state.aiQuestion || "")}</textarea>
+      </label>
+      <p class="qb-form-hint">送出後由本機 Ollama 回答並自動建立欄位；題目會以「待審」建立，仍需人工覆核後才會成為 benchmark-ready。</p>
+      <div class="qb-actions">
+        <button class="btn btn-primary" type="submit" ${state.aiLoading ? "disabled" : ""}>${
+          state.aiLoading
+            ? `<span class="spinner"></span><span>Ollama 產生中…</span>`
+            : `${icon("sparkles", 14)}<span>讓 Ollama 產生並建立</span>`
+        }</button>
+        <button class="btn btn-secondary" type="button" data-qb-action="reset-ai" ${state.aiLoading ? "disabled" : ""}>清除</button>
+      </div>
+    </form>
+    ${importMarkup()}
+  </section>`;
+}
+
+function manualFormMarkup(item) {
+  return `<section class="report-card qb-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("edit", 14)}編輯題目 #${item.id}</span>
+      <button class="btn btn-ghost btn-sm" type="button" data-qb-action="new">取消編輯</button>
     </div>
     <form class="qb-form" data-qb-form="create" id="qb-create-form">
-      <input type="hidden" name="item_id" value="${editing ? item.id : ""}" />
+      <input type="hidden" name="item_id" value="${item.id}" />
       <label class="field qb-wide">
         <span class="field-label">題目 <span class="field-tag">question</span></span>
         <textarea class="input" name="question" rows="3" required placeholder="例如：證券交易法對內線交易有什麼規範？">${escapeHtml(item?.question || "")}</textarea>
@@ -173,23 +250,21 @@ function createFormMarkup(item) {
         <span>此題應正確拒絕回答（無資料／超出範圍）</span>
       </label>
       <div class="qb-actions">
-        <button class="btn btn-primary" type="submit">${icon("check", 14)}<span>${editing ? "儲存新版本" : "建立題目"}</span></button>
+        <button class="btn btn-primary" type="submit">${icon("check", 14)}<span>儲存新版本</span></button>
         <button class="btn btn-secondary" type="button" data-qb-action="reset-create">清除</button>
       </div>
       <div class="qb-form-hint">修改已存在的題目會建立新版本；已核准題目修改後會回到待審，需重新驗收。</div>
     </form>
-    <details class="qb-import">
-      <summary>${icon("upload", 14)}JSON 批次匯入</summary>
-      <p class="qb-muted">格式：<code>{"items":[{question, question_type, difficulty, expected_laws, expected_articles, expected_judgments, reference_answer, tags, rubric}]}</code>。相同題目 fingerprint 預設更新。</p>
-      <textarea class="input" id="qb-import-json" rows="6" placeholder='{"items":[...]}'></textarea>
-      <div class="qb-actions">
-        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="import-json">${icon("upload", 13)}<span>匯入 JSON</span></button>
-      </div>
-    </details>
+    ${importMarkup()}
   </section>`;
 }
 
-function itemCardMarkup(item, { reviewMode = false } = {}) {
+function createFormMarkup(item, state) {
+  return item ? manualFormMarkup(item) : aiCreateFormMarkup(state);
+}
+
+function itemCardMarkup(item) {
+  const retired = item.status === "retired" || Boolean(item.deleted_at);
   return `<article class="qb-item" data-qb-item="${item.id}">
     <div class="qb-item-head">
       <span class="qb-id">#${item.id}</span>
@@ -212,9 +287,18 @@ function itemCardMarkup(item, { reviewMode = false } = {}) {
       ${item.reviewed_by ? `<span>審核 ${escapeHtml(item.reviewed_by)}</span>` : ""}
       ${item.review_comment ? `<span class="qb-comment">${escapeHtml(item.review_comment)}</span>` : ""}
       <div class="qb-actions">
-        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="edit" data-id="${item.id}">${icon("edit", 13)}<span>編輯</span></button>
-        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="review" data-id="${item.id}">${icon("shield", 13)}<span>${reviewMode ? "批注" : "驗收"}</span></button>
-        <button class="btn btn-ghost btn-sm" type="button" data-qb-action="delete" data-id="${item.id}">${icon("trash", 13)}<span>刪除</span></button>
+        ${
+          retired
+            ? `<button class="btn btn-primary btn-sm" type="button" data-qb-action="restore" data-id="${item.id}">${icon("refresh", 13)}<span>復原題目</span></button>`
+            : `<button class="btn btn-secondary btn-sm" type="button" data-qb-action="edit" data-id="${item.id}">${icon("edit", 13)}<span>編輯</span></button>
+               ${
+                 !["pending_review", "changes_requested"].includes(item.status)
+                   ? `<button class="btn btn-secondary btn-sm" type="button" data-qb-action="submit-review" data-id="${item.id}">${icon("upload", 13)}<span>${item.status === "draft" ? "送審" : "重新送審"}</span></button>`
+                   : ""
+               }
+               <button class="btn btn-secondary btn-sm" type="button" data-qb-action="review" data-id="${item.id}">${icon("shield", 13)}<span>驗收</span></button>
+               <button class="btn btn-ghost btn-sm" type="button" data-qb-action="delete" data-id="${item.id}">${icon("trash", 13)}<span>刪除</span></button>`
+        }
       </div>
     </div>
   </article>`;
@@ -244,7 +328,31 @@ function manageMarkup(state) {
         <option value="">全部難度</option>
         ${Object.entries(DIFFICULTY_LABELS).map(([value, label]) => `<option value="${value}" ${state.filters.difficulty === value ? "selected" : ""}>${label}</option>`).join("")}
       </select>
-      <input class="input" name="tag" placeholder="標籤" value="${escapeHtml(state.filters.tag)}" />
+      <div class="qb-tag-filter" data-qb-tag-filter>
+        <div class="qb-tag-values">
+          ${
+            state.filters.tags.length
+              ? state.filters.tags
+                  .map(
+                    (tag) =>
+                      `<span class="chip qb-tag-chip">${escapeHtml(tag)}<button class="qb-tag-remove" type="button" data-qb-action="remove-tag" data-tag="${escapeHtml(tag)}" aria-label="移除標籤 ${escapeHtml(tag)}">${icon("x", 9)}</button></span>`,
+                  )
+                  .join("")
+              : `<span class="qb-tag-placeholder">標籤</span>`
+          }
+        </div>
+        <button class="qb-tag-add" type="button" data-qb-action="open-tag-search" aria-label="加入標籤" aria-haspopup="listbox">${icon("plus", 13)}</button>
+        ${state.filters.tags
+          .map(
+            (tag) =>
+              `<input type="hidden" name="tags" value="${escapeHtml(tag)}" />`,
+          )
+          .join("")}
+        <div class="qb-tag-popover" data-qb-tag-popover hidden>
+          <input class="input" type="search" data-qb-tag-search placeholder="輸入相近字搜尋標籤…" autocomplete="off" />
+          <div class="qb-tag-results" data-qb-tag-results role="listbox" aria-live="polite"></div>
+        </div>
+      </div>
       <button class="btn btn-primary btn-sm" type="submit">${icon("search", 13)}<span>篩選</span></button>
     </form>
     <div class="qb-list">
@@ -260,49 +368,182 @@ function manageMarkup(state) {
   </section>`;
 }
 
+const REVIEW_FILTERS = [
+  ["queue", "待審／退回"],
+  ["accepted", "已核准"],
+  ["rejected", "已拒絕"],
+  ["draft", "草稿"],
+];
+
+function reviewCounts(state) {
+  const stats = state.stats || {};
+  return {
+    queue:
+      Number(stats.pending_review || 0) + Number(stats.changes_requested || 0),
+    accepted: Number(stats.accepted || 0),
+    rejected: Number(stats.rejected || 0),
+    draft: Number(stats.draft || 0),
+  };
+}
+
+function reviewEmptyMarkup(state, counts) {
+  const filter = state.reviewFilter || "queue";
+  const copy = {
+    queue: {
+      title: "目前沒有待審或退回修改的題目。",
+      text: counts.accepted
+        ? `已有 ${formatNumber(counts.accepted)} 題核准。新題目建立後會自動送審，也可以切換到「已核准」重新驗收既有題目。`
+        : "建立題目後會預設送交人工驗收；若只想先保存，建立時取消勾選「立即送審」即可存成草稿。",
+    },
+    accepted: {
+      title: "目前沒有已核准題目。",
+      text: "題目通過人工驗收後會列在這裡；也可以在題庫管理按「送審」送出驗收。",
+    },
+    rejected: {
+      title: "目前沒有已拒絕題目。",
+      text: "被拒絕的題目會保留在題庫中，可修改後重新送審。",
+    },
+    draft: {
+      title: "目前沒有草稿題目。",
+      text: "建立題目時取消勾選「立即送審」就會存成草稿，之後可在題庫管理按「送審」。",
+    },
+  }[filter] || {
+    title: "目前沒有題目。",
+    text: "建立新題目後會出現在這裡。",
+  };
+  const actions = [
+    filter !== "draft"
+      ? `<button class="btn btn-primary btn-sm" type="button" data-qb-action="new">${icon("plus", 13)}<span>新增題目</span></button>`
+      : "",
+    filter === "queue" && counts.accepted
+      ? `<button class="btn btn-secondary btn-sm" type="button" data-qb-action="review-filter" data-filter="accepted">${icon("shield", 13)}<span>查看已核准 ${formatNumber(counts.accepted)}</span></button>`
+      : "",
+    `<button class="btn btn-secondary btn-sm" type="button" data-qb-action="go-manage">${icon("database", 13)}<span>前往題庫管理</span></button>`,
+  ]
+    .filter(Boolean)
+    .join("");
+  return `<div class="qb-empty qb-empty-block">
+    <span class="qb-empty-icon">${icon("info", 18)}</span>
+    <div class="qb-empty-copy">
+      <strong>${escapeHtml(copy.title)}</strong>
+      <p>${escapeHtml(copy.text)}</p>
+      <div class="qb-actions">${actions}</div>
+    </div>
+  </div>`;
+}
+
+function reviewFilterLabel(filter) {
+  const entry = REVIEW_FILTERS.find(([key]) => key === filter);
+  return entry ? entry[1] : "待審／退回";
+}
+
+function reviewItemRowMarkup(item, selected) {
+  return `<button class="qb-review-item${selected ? " is-active" : ""}" type="button" data-qb-action="select-review-item" data-id="${item.id}" aria-pressed="${selected ? "true" : "false"}">
+    <span class="qb-review-item-top">
+      <span class="qb-id">#${item.id}</span>
+      <span class="qb-review-item-meta">
+        ${escapeHtml(TYPE_LABELS[item.question_type] || item.question_type)}
+        · ${escapeHtml(DIFFICULTY_LABELS[item.difficulty] || item.difficulty)}
+        · v${item.version}
+        ${item.benchmark_ready ? " · Benchmark ready" : ""}
+        ${item.stale ? ' · <span class="qb-stale">待重新驗收</span>' : ""}
+      </span>
+      ${statusBadge(item.status)}
+    </span>
+    <strong>${escapeHtml(item.question)}</strong>
+  </button>`;
+}
+
+function reviewDetailPaneMarkup(item) {
+  return `<article class="qb-review-pane-card">
+    <div class="qb-review-pane-head">
+      <div class="qb-review-pane-title">
+        <span class="qb-review-item-meta">#${item.id} · v${item.version} · ${escapeHtml(TYPE_LABELS[item.question_type] || item.question_type)} · ${escapeHtml(DIFFICULTY_LABELS[item.difficulty] || item.difficulty)}</span>
+        <strong>${escapeHtml(item.question)}</strong>
+      </div>
+      <div class="qb-review-pane-side">
+        ${statusBadge(item.status)}
+        <div class="qb-actions">
+          <button class="btn btn-secondary btn-sm" type="button" data-qb-action="edit" data-id="${item.id}">${icon("edit", 13)}<span>編輯</span></button>
+          <button class="btn btn-ghost btn-sm" type="button" data-qb-action="delete" data-id="${item.id}">${icon("trash", 13)}<span>刪除</span></button>
+        </div>
+      </div>
+    </div>
+    <div class="qb-fingerprint mono">fingerprint ${escapeHtml(item.fingerprint?.slice(0, 16) || "—")}</div>
+    ${labelsMarkup(item)}
+    ${item.review_comment ? `<div class="qb-review-note"><span class="summary-label">最近批注${item.reviewed_by ? ` · ${escapeHtml(item.reviewed_by)}` : ""}</span><p>${escapeHtml(item.review_comment)}</p></div>` : ""}
+    ${item.reference_answer ? `<div class="qb-reference"><span class="summary-label">參考答案</span><p>${escapeHtml(item.reference_answer)}</p></div>` : ""}
+    <form class="qb-review-form" data-qb-form="review" data-id="${item.id}">
+      <div class="qb-score-grid">
+        ${[
+          ["clarity", "題目清晰"],
+          ["labels", "法條標注"],
+          ["answer", "參考答案"],
+          ["difficulty", "難度與標籤"],
+          ["overall", "整體"],
+        ].map(([key, label]) => `<label class="field"><span class="field-label">${label} <span class="field-tag">1–5</span></span><input class="input" type="number" min="1" max="5" name="score_${key}" value="4" /></label>`).join("")}
+      </div>
+      <label class="field"><span class="field-label">批注</span><textarea class="input" name="comment" rows="3" placeholder="標註理由、需要修改的欄位，或驗收結論。"></textarea></label>
+      <div class="qb-actions qb-review-decisions">
+        <button class="btn btn-primary btn-sm" type="button" data-qb-action="decide" data-decision="approved">${icon("check", 13)}<span>核准</span></button>
+        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="decide" data-decision="changes_requested">${icon("edit", 13)}<span>退回修改</span></button>
+        <button class="btn btn-ghost btn-sm" type="button" data-qb-action="decide" data-decision="rejected">${icon("x", 13)}<span>拒絕</span></button>
+      </div>
+    </form>
+    ${
+      item.reviews?.length
+        ? `<div class="qb-review-history"><span class="summary-label">審核紀錄</span>${item.reviews.map((review) => `<div class="qb-review-row"><span>${escapeHtml(review.reviewer || "匿名")}</span>${statusBadge(review.decision === "approved" ? "accepted" : review.decision)}<span>${escapeHtml(formatDateTime(review.created_at))}</span><p>${escapeHtml(review.comment || "—")}</p></div>`).join("")}</div>`
+        : ""
+    }
+  </article>`;
+}
+
+function reviewPlaceholderMarkup() {
+  return `<div class="qb-empty qb-empty-block qb-review-placeholder">
+    <span class="qb-empty-icon">${icon("info", 18)}</span>
+    <div class="qb-empty-copy">
+      <strong>從左側選擇題目</strong>
+      <p>點選題目後，這裡會顯示題幹、預期標註、參考答案與核准選項。</p>
+    </div>
+  </div>`;
+}
+
 function reviewPanelMarkup(state) {
   const selected = state.reviewDetail;
-  return `<section class="report-card qb-card">
+  const counts = reviewCounts(state);
+  const filter = state.reviewFilter || "queue";
+  const filters = REVIEW_FILTERS.map(
+    ([key, label]) =>
+      `<button class="chip qb-review-tab${filter === key ? " is-active" : ""}" type="button" role="tab" aria-selected="${filter === key ? "true" : "false"}" data-qb-action="review-filter" data-filter="${key}"><span>${label}</span><span class="qb-review-tab-count">${formatNumber(counts[key] || 0)}</span></button>`,
+  ).join("");
+  const listMarkup = state.reviewItems.length
+    ? state.reviewItems
+        .map((item) =>
+          reviewItemRowMarkup(
+            item,
+            Number(selected?.id) === Number(item.id),
+          ),
+        )
+        .join("")
+    : `<div class="qb-empty qb-empty-compact">${icon("info", 16)}<span>目前沒有${escapeHtml(reviewFilterLabel(filter))}題目。</span></div>`;
+  const detailMarkup = selected
+    ? reviewDetailPaneMarkup(selected)
+    : state.reviewItems.length
+      ? reviewPlaceholderMarkup()
+      : reviewEmptyMarkup(state, counts);
+  return `<section class="report-card qb-card qb-review-card">
     <div class="side-card-head">
       <span class="side-card-title">${icon("shield", 14)}題庫人工驗收批注</span>
-      <span class="badge badge-warn">待審 ${formatNumber(state.stats.pending_review || 0)}</span>
+      <span class="badge ${counts.queue ? "badge-warn" : "badge-neutral"}">待審 ${formatNumber(counts.queue)}</span>
     </div>
-    <label class="field qb-reviewer-field">
-      <span class="field-label">驗收者名稱</span>
-      <input class="input" id="qb-reviewer-name" value="${escapeHtml(state.reviewer)}" placeholder="目前任何人可驗收；Google Auth 後改由管理者" />
-    </label>
-    ${
-      selected
-        ? `<div class="qb-review-detail">
-            <button class="btn btn-ghost btn-sm" type="button" data-qb-action="review-back">${icon("chevronLeft", 13)}<span>返回待審列表</span></button>
-            ${itemCardMarkup(selected, { reviewMode: true })}
-            ${labelsMarkup(selected)}
-            ${selected.reference_answer ? `<div class="qb-reference"><span class="summary-label">參考答案</span><p>${escapeHtml(selected.reference_answer)}</p></div>` : ""}
-            <form class="qb-review-form" data-qb-form="review" data-id="${selected.id}">
-              <div class="qb-score-grid">
-                ${[
-                  ["clarity", "題目清晰"],
-                  ["labels", "法規／條文標註"],
-                  ["answer", "參考答案"],
-                  ["difficulty", "難度與標籤"],
-                  ["overall", "整體"],
-                ].map(([key, label]) => `<label class="field"><span class="field-label">${label} <span class="field-tag">1–5</span></span><input class="input" type="number" min="1" max="5" name="score_${key}" value="4" /></label>`).join("")}
-              </div>
-              <label class="field"><span class="field-label">批注</span><textarea class="input" name="comment" rows="3" placeholder="標註理由、需要修改的欄位，或驗收結論。"></textarea></label>
-              <div class="qb-actions">
-                <button class="btn btn-primary btn-sm" type="button" data-qb-action="decide" data-decision="approved">${icon("check", 13)}<span>核准</span></button>
-                <button class="btn btn-secondary btn-sm" type="button" data-qb-action="decide" data-decision="changes_requested">${icon("edit", 13)}<span>退回修改</span></button>
-                <button class="btn btn-ghost btn-sm" type="button" data-qb-action="decide" data-decision="rejected">${icon("x", 13)}<span>拒絕</span></button>
-              </div>
-            </form>
-            ${
-              selected.reviews?.length
-                ? `<div class="qb-review-history"><span class="summary-label">審核紀錄</span>${selected.reviews.map((review) => `<div class="qb-review-row"><span>${escapeHtml(review.reviewer || "匿名")}</span>${statusBadge(review.decision === "approved" ? "accepted" : review.decision)}<span>${escapeHtml(formatDateTime(review.created_at))}</span><p>${escapeHtml(review.comment || "—")}</p></div>`).join("")}</div>`
-                : ""
-            }
-          </div>`
-        : `<div class="qb-list">${state.reviewItems.length ? state.reviewItems.map((item) => itemCardMarkup(item, { reviewMode: true })).join("") : emptyState("目前沒有待審題目。")}</div>`
-    }
+    <p class="qb-review-hint">新題目建立或修改後會進入待審；點選左側題目即可在右側查看內容、核准、退回或刪除。</p>
+    <div class="qb-review-split">
+      <aside class="qb-review-list-pane" aria-label="驗收題目清單">
+        <div class="qb-review-tabs" role="tablist" aria-label="驗收狀態">${filters}</div>
+        <div class="qb-review-list">${listMarkup}</div>
+      </aside>
+      <section class="qb-review-detail-pane" aria-live="polite">${detailMarkup}</section>
+    </div>
   </section>`;
 }
 
@@ -822,6 +1063,9 @@ export function createQuestionBankController(
     editing: null,
     editingFrom: "",
     editingSuite: null,
+    aiQuestion: "",
+    aiLoading: false,
+    aiResult: null,
     items: [],
     total: 0,
     offset: 0,
@@ -831,7 +1075,7 @@ export function createQuestionBankController(
       status: "",
       question_type: "",
       difficulty: "",
-      tag: "",
+      tags: [],
     },
     stats: {},
     suites: [],
@@ -845,24 +1089,17 @@ export function createQuestionBankController(
     suiteManageOpen: false,
     reviewItems: [],
     reviewDetail: null,
-    reviewer: (() => {
-      try {
-        return window.localStorage.getItem("judgment.reviewer") || "anonymous";
-      } catch (error) {
-        return "anonymous";
-      }
-    })(),
+    reviewFilter: "queue",
   };
 
   const panel = (name) => root.querySelector(`#quality-panel-${panelNames[name]}`);
 
-  const setReviewer = (value) => {
-    state.reviewer = String(value || "").trim() || "anonymous";
-    try {
-      window.localStorage.setItem("judgment.reviewer", state.reviewer);
-    } catch (error) {
-      /* local preference only */
-    }
+  let tagSearchRequest = 0;
+  let tagSearchTimer = null;
+
+  const currentReviewer = () => {
+    // TODO: 接上 Google Auth 後，改為回傳目前登入的 Google 帳號。
+    return "anonymous";
   };
 
   const notifyStats = () => {
@@ -886,7 +1123,83 @@ export function createQuestionBankController(
   const renderCreate = () => {
     const target = panel("create");
     if (!target) return;
-    target.innerHTML = createFormMarkup(state.editing);
+    target.innerHTML = createFormMarkup(state.editing, state);
+  };
+
+  const renderTagSuggestions = (container, tags) => {
+    const results = container?.querySelector("[data-qb-tag-results]");
+    if (!results) return;
+    results.innerHTML = tags.length
+      ? tags
+          .map(
+            (item) =>
+              `<button class="qb-tag-option" type="button" role="option" data-qb-action="select-tag" data-tag="${escapeHtml(item.tag)}"><span>${escapeHtml(item.tag)}</span><small>${formatNumber(item.count)}</small></button>`,
+          )
+          .join("")
+      : `<div class="qb-tag-empty">沒有其他相符標籤</div>`;
+  };
+
+  const loadTagSuggestions = async (container, query = "") => {
+    if (!container) return;
+    const results = container.querySelector("[data-qb-tag-results]");
+    const token = ++tagSearchRequest;
+    if (results) {
+      results.innerHTML = `<div class="qb-tag-loading"><span class="spinner"></span><span>搜尋標籤…</span></div>`;
+    }
+    try {
+      const data = await api.questionBankTags(query, 12);
+      if (token !== tagSearchRequest) return;
+      const tags = (data.tags || []).filter(
+        (item) => !state.filters.tags.includes(item.tag),
+      );
+      renderTagSuggestions(container, tags);
+    } catch (error) {
+      if (token !== tagSearchRequest) return;
+      if (results) {
+        results.innerHTML = `<div class="qb-tag-empty">${escapeHtml(
+          error.message || "標籤搜尋失敗。",
+        )}</div>`;
+      }
+    }
+  };
+
+  const openTagSearch = (container, { focus = false } = {}) => {
+    if (!container) return;
+    const popover = container.querySelector("[data-qb-tag-popover]");
+    const input = container.querySelector("[data-qb-tag-search]");
+    if (!popover || !input) return;
+    if (popover.hidden) {
+      popover.hidden = false;
+      input.value = "";
+      loadTagSuggestions(container, "");
+    }
+    if (focus) {
+      input.focus();
+      input.select();
+    }
+  };
+
+  const closeTagSearch = (container) => {
+    if (tagSearchTimer) {
+      window.clearTimeout(tagSearchTimer);
+      tagSearchTimer = null;
+    }
+    const popover = container?.querySelector("[data-qb-tag-popover]");
+    if (popover) popover.hidden = true;
+  };
+
+  const toggleTag = async (tag) => {
+    const value = String(tag || "").trim();
+    if (!value) return;
+    if (state.filters.tags.includes(value)) {
+      state.filters.tags = state.filters.tags.filter(
+        (entry) => entry !== value,
+      );
+    } else {
+      state.filters.tags = [...state.filters.tags, value];
+    }
+    state.offset = 0;
+    await loadManage();
   };
 
   const ensureSuiteSelection = () => {
@@ -989,10 +1302,19 @@ export function createQuestionBankController(
   const loadManage = async () => {
     const target = panel("manage");
     if (!target) return;
+    if (tagSearchTimer) {
+      window.clearTimeout(tagSearchTimer);
+      tagSearchTimer = null;
+    }
     target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取題庫中…</span></div></section>`;
     try {
       const result = await api.questionBankItems(
-        state.filters,
+        {
+          ...state.filters,
+          ...(state.filters.status === "retired"
+            ? { include_deleted: true }
+            : {}),
+        },
         state.limit,
         state.offset,
       );
@@ -1045,43 +1367,86 @@ export function createQuestionBankController(
     }
   };
 
+  const renderReview = () => {
+    const target = panel("review");
+    if (!target) return;
+    target.innerHTML = reviewPanelMarkup(state);
+  };
+
+  const selectReviewItem = async (id) => {
+    const item = state.reviewItems.find(
+      (entry) => Number(entry.id) === Number(id),
+    );
+    if (!item) return;
+    state.reviewDetail = item;
+    renderReview();
+    const detailPane = panel("review")?.querySelector(".qb-review-detail-pane");
+    if (detailPane && window.matchMedia("(max-width: 1020px)").matches) {
+      detailPane.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    try {
+      const detail = await api.questionBankItem(item.id);
+      if (Number(state.reviewDetail?.id) === Number(item.id)) {
+        state.reviewDetail = detail;
+        renderReview();
+      }
+    } catch (error) {
+      toast(error.message || "題目內容讀取失敗。", "danger");
+    }
+  };
+
   const loadReview = async () => {
     const target = panel("review");
     if (!target) return;
-    target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取待審題目中…</span></div></section>`;
+    target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取驗收題目中…</span></div></section>`;
+    const filter = state.reviewFilter || "queue";
+    const statuses =
+      filter === "queue"
+        ? ["pending_review", "changes_requested"]
+        : filter === "accepted"
+          ? ["accepted"]
+          : filter === "rejected"
+            ? ["rejected"]
+            : ["draft"];
     try {
-      const [pending, changes] = await Promise.all([
-        api.questionBankItems({ status: "pending_review" }, 100, 0),
-        api.questionBankItems({ status: "changes_requested" }, 100, 0),
-      ]);
-      state.reviewItems = [...(pending.items || []), ...(changes.items || [])];
-      state.stats = pending.stats || state.stats;
-      if (state.reviewDetail) {
-        state.reviewDetail = await api.questionBankItem(state.reviewDetail.id);
-      }
-      target.innerHTML = reviewPanelMarkup(state);
-      const reviewerInput = target.querySelector("#qb-reviewer-name");
-      if (reviewerInput) {
-        reviewerInput.value = state.reviewer;
-        reviewerInput.addEventListener("change", () => setReviewer(reviewerInput.value));
-      }
+      const results = await Promise.all(
+        statuses.map((status) => api.questionBankItems({ status }, 200, 0)),
+      );
+      state.reviewItems = results.flatMap((result) => result.items || []);
+      state.stats = results[0]?.stats || state.stats;
+      const currentId = Number(state.reviewDetail?.id || 0);
+      const stillListed = state.reviewItems.some(
+        (item) => Number(item.id) === currentId,
+      );
+      const selectedId = stillListed
+        ? currentId
+        : Number(state.reviewItems[0]?.id || 0);
+      state.reviewDetail = selectedId
+        ? await api.questionBankItem(selectedId)
+        : null;
+      renderReview();
       notifyStats();
     } catch (error) {
       target.innerHTML = `<section class="report-card qb-card">${notice({
         tone: "danger",
-        title: "待審題目讀取失敗",
+        title: "驗收題目讀取失敗",
         text: escapeHtml(error.message || "請稍後再試。"),
       })}</section>`;
     }
   };
 
   function show(tab) {
+    const previous = state.tab;
     state.tab = tab;
     for (const name of Object.keys(panelNames)) {
       const element = panel(name);
       if (element) element.hidden = name !== tab;
     }
     if (tab === "create") {
+      if (previous !== "create" && !state.editing) {
+        state.aiQuestion = "";
+        state.aiResult = null;
+      }
       renderCreate();
     } else if (tab === "manage") {
       loadManage();
@@ -1093,14 +1458,30 @@ export function createQuestionBankController(
   }
 
   const openReview = (id) => {
-    const item = state.items.find((entry) => Number(entry.id) === Number(id));
+    const candidates = [
+      ...state.items,
+      ...state.reviewItems,
+      ...(state.reviewDetail ? [state.reviewDetail] : []),
+    ];
+    const item = candidates.find((entry) => Number(entry.id) === Number(id));
     state.reviewDetail = item || { id: Number(id) };
+    const status = item?.status;
+    if (["accepted", "rejected", "draft"].includes(status)) {
+      state.reviewFilter = status;
+    } else if (status) {
+      state.reviewFilter = "queue";
+    }
     navigate("review");
   };
 
   const handleCreate = async (form) => {
     const payload = readCreatePayload(form);
     const itemId = Number(form.elements.item_id?.value || 0);
+    if (!itemId) {
+      payload.status = form.elements.submit_for_review?.checked
+        ? "pending_review"
+        : "draft";
+    }
     try {
       if (itemId) {
         await api.updateQuestionBankItem(itemId, {
@@ -1110,7 +1491,12 @@ export function createQuestionBankController(
         toast("已建立新版本，狀態回到待審。", "ok");
       } else {
         await api.createQuestionBankItem(payload);
-        toast("題目已建立。", "ok");
+        toast(
+          payload.status === "draft"
+            ? "題目已存為草稿，可在題庫管理按「送審」。"
+            : "題目已建立並送交人工驗收。",
+          "ok",
+        );
       }
       state.editing = null;
       const returnTab = ["manage", "suite", "review"].includes(
@@ -1129,13 +1515,49 @@ export function createQuestionBankController(
     }
   };
 
+  const handleAICreate = async (form) => {
+    const question = String(
+      new FormData(form).get("question") || "",
+    ).trim();
+    if (question.length < 4) {
+      toast("題目至少需要 4 個字。", "danger");
+      return;
+    }
+    state.aiQuestion = question;
+    state.aiLoading = true;
+    state.aiResult = null;
+    renderCreate();
+    try {
+      const result = await api.createQuestionBankItemWithAI({ question });
+      state.aiResult = result;
+      state.aiQuestion = "";
+      await loadStats();
+      toast(
+        `Ollama 已建立題目 #${result.item.id}，狀態為待審，請人工覆核。`,
+        "ok",
+        8000,
+      );
+    } catch (error) {
+      const detail = error.detail || error.payload?.detail;
+      const message =
+        detail?.errors?.join(" · ") ||
+        detail?.message ||
+        error.message ||
+        "Ollama 產生失敗。";
+      toast(message, "danger", 12000);
+    } finally {
+      state.aiLoading = false;
+      renderCreate();
+    }
+  };
+
   const handleReviewDecision = async (form, decision) => {
     const itemId = Number(form.dataset.id || 0);
     if (!itemId) return;
     try {
       await api.reviewQuestionBankItem(itemId, {
         decision,
-        reviewer: state.reviewer,
+        reviewer: currentReviewer(),
         rubric_scores: reviewScores(form),
         comment: String(form.querySelector('[name="comment"]')?.value || ""),
       });
@@ -1147,7 +1569,6 @@ export function createQuestionBankController(
             : "題目已拒絕。",
         decision === "approved" ? "ok" : "info",
       );
-      state.reviewDetail = null;
       await loadStats();
       await loadReview();
     } catch (error) {
@@ -1189,10 +1610,29 @@ export function createQuestionBankController(
   };
 
   const onClick = async (event) => {
+    const openTagContainer = root.querySelector(
+      "[data-qb-tag-filter] [data-qb-tag-popover]:not([hidden])",
+    )?.closest("[data-qb-tag-filter]");
+    if (openTagContainer && !event.target.closest("[data-qb-tag-filter]")) {
+      closeTagSearch(openTagContainer);
+    }
     const action = event.target.closest("[data-qb-action]")?.dataset.qbAction;
     if (!action) return;
     const button = event.target.closest("[data-qb-action]");
     const id = Number(button.dataset.id || 0);
+    if (action === "open-tag-search") {
+      const container = button.closest("[data-qb-tag-filter]");
+      openTagSearch(container, { focus: true });
+      return;
+    }
+    if (action === "select-tag") {
+      await toggleTag(button.dataset.tag);
+      return;
+    }
+    if (action === "remove-tag") {
+      await toggleTag(button.dataset.tag);
+      return;
+    }
     if (action === "bank-tab") {
       setBankTab(button.dataset.tab);
       return;
@@ -1205,11 +1645,21 @@ export function createQuestionBankController(
     if (action === "new") {
       state.editing = null;
       state.editingFrom = "";
+      state.aiQuestion = "";
+      state.aiResult = null;
+      state.aiLoading = false;
       navigate("create");
       return;
     }
     if (action === "reset-create") {
       state.editing = null;
+      renderCreate();
+      return;
+    }
+    if (action === "reset-ai") {
+      state.aiQuestion = "";
+      state.aiResult = null;
+      state.aiLoading = false;
       renderCreate();
       return;
     }
@@ -1234,9 +1684,71 @@ export function createQuestionBankController(
       openReview(id);
       return;
     }
-    if (action === "review-back") {
+    if (action === "review-ai-item") {
+      const item = state.aiResult?.item;
+      if (!item) return;
+      state.reviewFilter = "queue";
+      state.reviewDetail = item;
+      navigate("review");
+      return;
+    }
+    if (action === "review-filter") {
+      const filter = String(button.dataset.filter || "queue");
+      state.reviewFilter = ["queue", "accepted", "rejected", "draft"].includes(filter)
+        ? filter
+        : "queue";
       state.reviewDetail = null;
-      loadReview();
+      await loadReview();
+      return;
+    }
+    if (action === "select-review-item") {
+      await selectReviewItem(id);
+      return;
+    }
+    if (action === "go-manage") {
+      navigate("manage");
+      return;
+    }
+    if (action === "submit-review") {
+      try {
+        await api.submitQuestionBankItemForReview(id);
+        toast("已送交人工驗收。", "ok");
+        await loadStats();
+        if (state.tab === "manage") await loadManage();
+        else if (state.tab === "review") await loadReview();
+      } catch (error) {
+        const detail = error.detail || error.payload?.detail;
+        const message =
+          detail?.errors?.join(" · ") ||
+          detail?.message ||
+          error.message ||
+          "送審失敗。";
+        toast(message, "danger", 8000);
+      }
+      return;
+    }
+    if (action === "restore") {
+      if (
+        !window.confirm(
+          `確定復原題目 #${id}？復原後會回到待審狀態，需重新驗收。`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await api.restoreQuestionBankItem(id);
+        toast("題目已復原並回到待審。", "ok");
+        await loadStats();
+        await loadManage();
+      } catch (error) {
+        const detail = error.detail || error.payload?.detail;
+        const message =
+          detail?.errors?.join(" · ") ||
+          detail?.message ||
+          error.message ||
+          "復原失敗。";
+        toast(message, "danger", 8000);
+      }
       return;
     }
     if (action === "delete") {
@@ -1272,7 +1784,12 @@ export function createQuestionBankController(
         await api.deleteQuestionBankItem(id);
         toast("題目已刪除。", "info");
         await loadStats();
-        await loadManage();
+        if (state.tab === "review") {
+          state.reviewDetail = null;
+          await loadReview();
+        } else {
+          await loadManage();
+        }
       } catch (error) {
         toast(error.message || "刪除失敗。", "danger");
       }
@@ -1379,6 +1896,8 @@ export function createQuestionBankController(
     const kind = form.dataset.qbForm;
     if (kind === "create") {
       await handleCreate(form);
+    } else if (kind === "ai-create") {
+      await handleAICreate(form);
     } else if (kind === "filter") {
       const data = new FormData(form);
       state.filters = {
@@ -1386,7 +1905,10 @@ export function createQuestionBankController(
         status: String(data.get("status") || ""),
         question_type: String(data.get("question_type") || ""),
         difficulty: String(data.get("difficulty") || ""),
-        tag: String(data.get("tag") || "").trim(),
+        tags: data
+          .getAll("tags")
+          .map((value) => String(value).trim())
+          .filter(Boolean),
       };
       state.offset = 0;
       await loadManage();
@@ -1396,6 +1918,13 @@ export function createQuestionBankController(
   };
 
   const onChange = async (event) => {
+    const filterSelect = event.target.closest?.(
+      "form[data-qb-form='filter'] select",
+    );
+    if (filterSelect) {
+      filterSelect.form.requestSubmit();
+      return;
+    }
     const select = event.target.closest?.("[data-qb-suite-select]");
     if (!select) return;
     const suiteId = Number(select.value || 0);
@@ -1409,10 +1938,56 @@ export function createQuestionBankController(
     state.suiteManageOpen = Boolean(details.open);
   };
 
+  const onTagHover = (event) => {
+    const button = event.target.closest?.(
+      "[data-qb-action='open-tag-search']",
+    );
+    if (!button) return;
+    openTagSearch(button.closest("[data-qb-tag-filter]"));
+  };
+
+  const onTagLeave = (event) => {
+    const container = event.target.closest?.("[data-qb-tag-filter]");
+    if (!container) return;
+    if (event.relatedTarget && container.contains(event.relatedTarget)) return;
+    closeTagSearch(container);
+  };
+
+  const onTagInput = (event) => {
+    const input = event.target.closest?.("[data-qb-tag-search]");
+    if (!input) return;
+    const container = input.closest("[data-qb-tag-filter]");
+    if (tagSearchTimer) window.clearTimeout(tagSearchTimer);
+    tagSearchTimer = window.setTimeout(() => {
+      loadTagSuggestions(container, input.value);
+    }, 160);
+  };
+
+  const onTagKeydown = (event) => {
+    const input = event.target.closest?.("[data-qb-tag-search]");
+    if (!input) return;
+    const container = input.closest("[data-qb-tag-filter]");
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeTagSearch(container);
+      input.blur();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      container?.querySelector("[data-qb-action='select-tag']")?.click();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      container?.querySelector("[data-qb-action='select-tag']")?.focus();
+    }
+  };
+
   root.addEventListener("click", onClick);
   root.addEventListener("submit", onSubmit);
   root.addEventListener("change", onChange);
   root.addEventListener("toggle", onToggle, true);
+  root.addEventListener("mouseover", onTagHover);
+  root.addEventListener("mouseout", onTagLeave);
+  root.addEventListener("input", onTagInput);
+  root.addEventListener("keydown", onTagKeydown);
 
   const refresh = async () => {
     await loadStats();
@@ -1429,10 +2004,15 @@ export function createQuestionBankController(
     show,
     refresh,
     destroy() {
+      if (tagSearchTimer) window.clearTimeout(tagSearchTimer);
       root.removeEventListener("click", onClick);
       root.removeEventListener("submit", onSubmit);
       root.removeEventListener("change", onChange);
       root.removeEventListener("toggle", onToggle, true);
+      root.removeEventListener("mouseover", onTagHover);
+      root.removeEventListener("mouseout", onTagLeave);
+      root.removeEventListener("input", onTagInput);
+      root.removeEventListener("keydown", onTagKeydown);
     },
     getStats: () => state.stats,
   };

@@ -464,14 +464,17 @@ def import_judgments(
     if archives is None:
         if not source_dir.is_dir():
             raise FileNotFoundError(f"找不到判決資料目錄：{source_dir}")
-        archive_paths = sorted(source_dir.glob("*.rar"))
+        archive_paths = []
+        for pattern in ("*.rar", "*.7z", "*.zip"):
+            archive_paths.extend(sorted(source_dir.glob(pattern)))
         raw_rar_dir = source_dir / "raw_rar"
         if raw_rar_dir.is_dir():
-            archive_paths.extend(sorted(raw_rar_dir.glob("*.rar")))
+            for pattern in ("*.rar", "*.7z", "*.zip"):
+                archive_paths.extend(sorted(raw_rar_dir.glob(pattern)))
     else:
         archive_paths = [Path(item).expanduser().resolve() for item in archives]
     if not archive_paths:
-        raise FileNotFoundError(f"在 {source_dir} 找不到 .rar 判決檔")
+        raise FileNotFoundError(f"在 {source_dir} 找不到 .rar／.7z／.zip 判決檔")
     for archive in archive_paths:
         if not archive.is_file():
             raise FileNotFoundError(f"找不到判決壓縮檔：{archive}")
@@ -1440,7 +1443,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--data-dir",
         type=Path,
         default=None,
-        help="判決 .rar 所在目錄（預設 JUDGMENT_DATA_DIR 或 /data/judgments；也會讀取 raw_rar/）",
+        help="判決 .rar／.7z／.zip 所在目錄（預設 JUDGMENT_DATA_DIR 或 /data/judgments；也會讀取 raw_rar/）",
     )
     parser.add_argument(
         "--law-list",

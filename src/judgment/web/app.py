@@ -10,11 +10,11 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,14 @@ from ..observability import (
     trace_segment,
 )
 from ..judgment_parquet import get_judgment_from_parquet
+from ..judgment_download import (
+    DownloadWindowClosed,
+    JudgmentDownloadError,
+    download_status,
+    ensure_window,
+    file_response_headers,
+    iter_fileset,
+)
 from ..llm_capabilities import (
     model_capability_status,
     refresh_model_capabilities,
@@ -57,9 +65,25 @@ from ..question_bank import (
     list_suites,
     remove_suite_item,
     revalidate_items,
+    restore_item,
     review_item,
+    submit_for_review,
+    tag_suggestions,
     update_item,
     update_suite,
+)
+from ..question_bank_ai import create_ai_item
+from ..ollama_hosts import (
+    OllamaHostError,
+    activate_host,
+    add_host,
+    clear_model,
+    deactivate_hosts,
+    delete_host,
+    list_hosts,
+    runtime_settings,
+    select_model,
+    update_host,
 )
 from ..rag import answer_question
 from ..vector_store import QdrantStore
@@ -83,6 +107,7 @@ from .processing import (
 )
 from .quality import build_quality_snapshot
 from .query import (
+    data_suggestions,
     get_judgment_detail,
     get_law_detail,
     run_query,
@@ -124,6 +149,21 @@ class QuestionBankReviewRequest(BaseModel):
     reviewer: str = Field(default="", max_length=120)
     rubric_scores: Dict[str, Any] = Field(default_factory=dict)
     comment: str = Field(default="", max_length=4000)
+
+
+class QuestionBankAICreateRequest(BaseModel):
+    question: str = Field(min_length=4, max_length=2000)
+
+
+class OllamaHostRequest(BaseModel):
+    name: str = Field(default="", max_length=120)
+    url: str = Field(default="http://127.0.0.1", max_length=300)
+    port: int = Field(default=11434, ge=1, le=65535)
+
+
+class OllamaModelChoiceRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+    role: Literal["chat", "embedding"]
 
 
 class BenchmarkRunRequest(BaseModel):
@@ -197,6 +237,9 @@ def create_app(
             app.state.engine = engine
             app.state.session_factory = build_session_factory(engine)
             app.state.benchmark_manager.session_factory = app.state.session_factory
+            app.state.benchmark_manager.settings = runtime_settings(
+                app.state.settings, app.state.session_factory
+            )
             try:
                 revalidated = revalidate_items(app.state.session_factory)
                 if revalidated.get("stale"):
@@ -354,8 +397,99 @@ def create_app(
             return build_status(
                 session_factory=app.state.session_factory,
                 data_dir=app.state.data_dir,
-                settings=settings,
+                settings=runtime_settings(
+                    app.state.settings, app.state.session_factory
+                ),
             )
+
+    @app.get("/api/ollama/hosts")
+    def ollama_hosts() -> Dict[str, Any]:
+        return list_hosts(app.state.session_factory)
+
+    @app.post("/api/ollama/hosts")
+    def ollama_host_create(payload: OllamaHostRequest) -> Dict[str, Any]:
+        try:
+            host = add_host(
+                app.state.session_factory,
+                name=payload.name,
+                url=payload.url,
+                port=payload.port,
+            )
+            _sync_runtime_settings()
+            return host
+        except OllamaHostError as exc:
+            raise _ollama_host_error(exc) from exc
+
+    @app.patch("/api/ollama/hosts/{host_id}")
+    def ollama_host_update(
+        host_id: int, payload: OllamaHostRequest
+    ) -> Dict[str, Any]:
+        try:
+            host = update_host(
+                app.state.session_factory,
+                host_id,
+                name=payload.name,
+                url=payload.url,
+                port=payload.port,
+            )
+            _sync_runtime_settings()
+            return host
+        except OllamaHostError as exc:
+            raise _ollama_host_error(exc) from exc
+
+    @app.delete("/api/ollama/hosts/{host_id}")
+    def ollama_host_delete(host_id: int) -> Dict[str, Any]:
+        if not delete_host(app.state.session_factory, host_id):
+            raise HTTPException(status_code=404, detail="找不到 Ollama 主機。")
+        _sync_runtime_settings()
+        return {"status": "deleted", "id": host_id}
+
+    @app.post("/api/ollama/hosts/{host_id}/activate")
+    def ollama_host_activate(host_id: int) -> Dict[str, Any]:
+        try:
+            host = activate_host(app.state.session_factory, host_id)
+            _sync_runtime_settings()
+            return host
+        except OllamaHostError as exc:
+            raise _ollama_host_error(exc) from exc
+
+    @app.post("/api/ollama/hosts/deactivate")
+    def ollama_host_deactivate() -> Dict[str, Any]:
+        result = deactivate_hosts(app.state.session_factory)
+        _sync_runtime_settings()
+        return result
+
+    @app.post("/api/ollama/hosts/{host_id}/models/select")
+    def ollama_model_select(
+        host_id: int, payload: OllamaModelChoiceRequest
+    ) -> Dict[str, Any]:
+        try:
+            host = select_model(
+                app.state.session_factory,
+                host_id,
+                model=payload.model,
+                role=payload.role,
+            )
+            _sync_runtime_settings()
+            return host
+        except OllamaHostError as exc:
+            raise _ollama_host_error(exc) from exc
+
+    @app.post("/api/ollama/hosts/{host_id}/models/clear")
+    def ollama_model_clear(
+        host_id: int, payload: OllamaModelChoiceRequest
+    ) -> Dict[str, Any]:
+        try:
+            host = clear_model(
+                app.state.session_factory,
+                host_id,
+                model=payload.model,
+                role=payload.role,
+            )
+            _sync_runtime_settings()
+            return host
+        except OllamaHostError as exc:
+            raise _ollama_host_error(exc) from exc
 
     @app.get("/api/index-versions")
     def index_versions() -> Dict[str, Any]:
@@ -480,6 +614,28 @@ def create_app(
                 detail=f"無法啟動資料更新：{exc.__class__.__name__}: {exc}",
             ) from exc
 
+    @app.get("/api/judgment-download/status")
+    def judgment_download_state() -> Dict[str, Any]:
+        return download_status(app.state.settings)
+
+    @app.get("/api/judgment-download/files/{fileset_id}")
+    def judgment_download_file(fileset_id: int) -> StreamingResponse:
+        try:
+            ensure_window()
+        except DownloadWindowClosed as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        try:
+            headers = file_response_headers(app.state.settings, fileset_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except JudgmentDownloadError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return StreamingResponse(
+            iter_fileset(app.state.settings, fileset_id),
+            media_type="application/octet-stream",
+            headers=headers,
+        )
+
     @app.post("/api/processing/workflows/{workflow_id}/run")
     def processing_workflow_run(workflow_id: str) -> Dict[str, Any]:
         try:
@@ -528,6 +684,17 @@ def create_app(
             },
         )
 
+    def _ollama_host_error(exc: OllamaHostError) -> HTTPException:
+        return HTTPException(
+            status_code=422,
+            detail={"message": str(exc), "errors": [str(exc)]},
+        )
+
+    def _sync_runtime_settings() -> None:
+        app.state.benchmark_manager.settings = runtime_settings(
+            app.state.settings, app.state.session_factory
+        )
+
     @app.get("/api/question-bank/stats")
     def question_bank_summary() -> Dict[str, Any]:
         listing = list_items(app.state.session_factory, limit=1)
@@ -540,6 +707,7 @@ def create_app(
         question_type: str = "",
         difficulty: str = "",
         tag: str = "",
+        tags: Optional[List[str]] = Query(default=None),
         stale: Optional[bool] = None,
         include_deleted: bool = False,
         limit: int = 50,
@@ -552,10 +720,22 @@ def create_app(
             question_type=question_type,
             difficulty=difficulty,
             tag=tag,
+            tags=tags,
             stale=stale,
             include_deleted=include_deleted,
             limit=limit,
             offset=offset,
+        )
+
+    @app.get("/api/question-bank/tags")
+    def question_bank_tag_suggestions(
+        query: str = "",
+        limit: int = 12,
+    ) -> Dict[str, Any]:
+        return tag_suggestions(
+            app.state.session_factory,
+            query=query,
+            limit=limit,
         )
 
     @app.post("/api/question-bank/items")
@@ -567,6 +747,24 @@ def create_app(
                 app.state.session_factory,
                 payload,
                 actor=_actor(request, str(payload.get("created_by") or "")),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.post("/api/question-bank/ai-items")
+    def question_bank_ai_create(
+        payload: QuestionBankAICreateRequest,
+        request: Request,
+    ) -> Dict[str, Any]:
+        try:
+            return create_ai_item(
+                app.state.session_factory,
+                settings=runtime_settings(
+                    app.state.settings, app.state.session_factory
+                ),
+                law_data_dir=app.state.data_dir,
+                question=payload.question,
+                actor=_actor(request),
             )
         except QuestionBankError as exc:
             raise _question_bank_error(exc) from exc
@@ -605,6 +803,24 @@ def create_app(
         if not deleted:
             raise HTTPException(status_code=404, detail="找不到題目。")
         return {"status": "deleted", "id": item_id}
+
+    @app.post("/api/question-bank/items/{item_id}/submit")
+    def question_bank_submit(item_id: int, request: Request) -> Dict[str, Any]:
+        try:
+            return submit_for_review(
+                app.state.session_factory,
+                item_id,
+                actor=_actor(request),
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
+
+    @app.post("/api/question-bank/items/{item_id}/restore")
+    def question_bank_restore(item_id: int) -> Dict[str, Any]:
+        try:
+            return restore_item(app.state.session_factory, item_id)
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
 
     @app.post("/api/question-bank/items/{item_id}/review")
     def question_bank_review(
@@ -907,6 +1123,22 @@ def create_app(
                 detail=f"查詢失敗：{exc.__class__.__name__}: {exc}",
             ) from exc
 
+    @app.get("/api/data/suggest")
+    def data_suggest(
+        kind: str,
+        query: str = "",
+        limit: int = 12,
+    ) -> Dict[str, Any]:
+        try:
+            return data_suggestions(
+                kind=kind,
+                query=query,
+                limit=limit,
+                session_factory=app.state.session_factory,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/judgment")
     def judgment_detail(jid: str, source: str = "postgres") -> Dict[str, Any]:
         try:
@@ -1081,7 +1313,9 @@ def create_app(
                 result = answer_question(
                     session_factory=app.state.session_factory,
                     question=request.question,
-                    settings=settings,
+                    settings=runtime_settings(
+                        app.state.settings, app.state.session_factory
+                    ),
                 )
                 flow = current_flow()
                 if flow is not None:
@@ -1144,7 +1378,9 @@ def create_app(
                 result = answer_question(
                     session_factory=app.state.session_factory,
                     question=request.question,
-                    settings=settings,
+                    settings=runtime_settings(
+                        app.state.settings, app.state.session_factory
+                    ),
                     on_partial=emit_partial,
                     on_token=emit_token,
                     on_token_reset=reset_token,

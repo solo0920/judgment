@@ -325,6 +325,21 @@ def _apply_filters(
                     ]
                 )
             )
+        keywords = filters.get("keywords")
+        if isinstance(keywords, list):
+            for term in keywords:
+                text = str(term or "").strip()
+                if not text:
+                    continue
+                pattern = f"%{_escape_like(text)}%"
+                statement = statement.where(
+                    or_(
+                        *[
+                            column.ilike(pattern, escape="\\")
+                            for column in TABLE_SEARCH_COLUMNS["law_documents"]
+                        ]
+                    )
+                )
 
         level = str(filters.get("law_level") or "").strip()
         if level:
@@ -386,6 +401,21 @@ def _apply_filters(
                     ]
                 )
             )
+        keywords = filters.get("keywords")
+        if isinstance(keywords, list):
+            for term in keywords:
+                text = str(term or "").strip()
+                if not text:
+                    continue
+                pattern = f"%{_escape_like(text)}%"
+                statement = statement.where(
+                    or_(
+                        *[
+                            column.ilike(pattern, escape="\\")
+                            for column in TABLE_SEARCH_COLUMNS["judgment_documents"]
+                        ]
+                    )
+                )
         court = str(filters.get("court") or "").strip()
         if court:
             statement = statement.where(model.court_normalized == court)
@@ -506,6 +536,12 @@ def _describe_filters(table: str, filters: Dict[str, Any]) -> List[str]:
             parts.append(f"{key} = '{_yyyymmdd(value)}'")
         else:
             parts.append(f"{key} = '{value}'")
+    keywords = filters.get("keywords")
+    if isinstance(keywords, list):
+        for term in keywords:
+            text = str(term or "").strip()
+            if text:
+                parts.append(f"keyword ≈ '{text}'")
     for key in ("min_articles", "min_law_count", "min_citations", "is_current"):
         value = filters.get(key)
         if value in (None, "", False):
@@ -785,13 +821,18 @@ def _row_matches_parquet(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         return False
 
     keyword = str(filters.get("keyword") or "").strip().lower()
-    if keyword:
-        haystack = " ".join(
-            str(row.get(key) or "")
-            for key in ("law_name", "law_level", "law_category", "law_modified_date")
-        ).lower()
-        if keyword not in haystack:
-            return False
+    haystack = " ".join(
+        str(row.get(key) or "")
+        for key in ("law_name", "law_level", "law_category", "law_modified_date")
+    ).lower()
+    if keyword and keyword not in haystack:
+        return False
+    keywords = filters.get("keywords")
+    if isinstance(keywords, list):
+        for term in keywords:
+            text = str(term or "").strip().lower()
+            if text and text not in haystack:
+                return False
 
     if not _parquet_column_matches(row, filters):
         return False
@@ -941,6 +982,21 @@ def _query_judgment_parquet(
         ]
         if matches:
             combine(reduce(pc.or_, matches))
+    keywords = filters.get("keywords")
+    if isinstance(keywords, list):
+        for term in keywords:
+            needle = str(term or "").strip().lower()
+            if not needle:
+                continue
+            matches = [
+                pc.match_substring(
+                    pc.utf8_lower(pc.fill_null(table[key], "")),
+                    needle,
+                )
+                for key in haystack_columns
+            ]
+            if matches:
+                combine(reduce(pc.or_, matches))
 
     filtered = table.filter(mask) if mask is not None else table
     if filters.get("column_filters"):
@@ -2105,29 +2161,26 @@ def _rank_suggestions(
     q = query.casefold().strip()
     if not q:
         return values[:limit], len(values)
-    contains = [value for value in values if q in value.casefold()]
-    if contains:
-        scored = [(_suggestion_score(query, value), value) for value in contains]
-    else:
-        tokens = _suggestion_tokens(query)
-        candidates = [
-            value
-            for value in values
-            if any(token in value.casefold() for token in tokens)
-        ]
-        if not candidates:
-            candidates = values[:5000]
-        scored = []
-        strong = []
-        for value in candidates:
-            score = _suggestion_score(query, value)
-            if score >= 250:
-                item = (score, value)
-                scored.append(item)
-                if _suggestion_coverage(query, value) >= 0.75:
-                    strong.append(item)
-        if strong:
-            scored = strong
+    tokens = _suggestion_tokens(query)
+    candidates = {
+        value
+        for value in values
+        if any(token in value.casefold() for token in tokens)
+    }
+    candidates.update(value for value in values if q in value.casefold())
+    if not candidates:
+        candidates = set(values[:5000])
+    scored = []
+    strong = []
+    for value in candidates:
+        score = _suggestion_score(query, value)
+        if score >= 250:
+            item = (score, value)
+            scored.append(item)
+            if _suggestion_coverage(query, value) >= 0.75:
+                strong.append(item)
+    if strong:
+        scored = strong
     scored.sort(key=lambda item: (-item[0], len(item[1]), item[1]))
     return [value for _, value in scored[:limit]], len(scored)
 
@@ -2157,6 +2210,11 @@ def schema_suggestions(
         if column not in allowed:
             raise ValueError(f"不支援的欄位：{column}")
         model = TABLE_MODELS[table]
+        fetch_limit = (
+            20000
+            if table == "law_documents" and column == "law_name"
+            else 5000
+        )
         column_key = {
             "court": "court_normalized",
             "matched_laws": "matched_laws_text",
@@ -2184,13 +2242,13 @@ def schema_suggestions(
                                 ]
                             )
                         )
-                raw_values = session.scalars(statement.limit(5000)).all()
+                raw_values = session.scalars(statement.limit(fetch_limit)).all()
                 if not raw_values and query:
                     raw_values = session.scalars(
                         select(db_column)
                         .where(db_column.is_not(None))
                         .distinct()
-                        .limit(5000)
+                        .limit(fetch_limit)
                     ).all()
                 values = _suggestion_values(raw_values)
     elif database == "parquet":
@@ -2244,6 +2302,152 @@ def schema_suggestions(
         "warnings": warnings,
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
+
+
+def _fuzzy_suggestion_score(query: str, value: str) -> int:
+    needle = re.sub(r"\s+", "", str(query or "")).casefold()
+    target = re.sub(r"\s+", "", str(value or "")).casefold()
+    if not needle:
+        return 1
+    if not target:
+        return 0
+    if needle == target:
+        return 1000
+    if target.startswith(needle):
+        return 900 - (len(target) - len(needle))
+    position = target.find(needle)
+    if position >= 0:
+        return 800 - position
+    iterator = iter(target)
+    if all(character in iterator for character in needle):
+        return 700 - (len(target) - len(needle))
+    ratio = difflib.SequenceMatcher(None, needle, target).ratio()
+    overlap = len(set(needle) & set(target)) / max(1, len(set(needle)))
+    score = int(ratio * 500 + overlap * 300)
+    return score if score >= 220 else 0
+
+
+def data_suggestions(
+    *,
+    kind: str,
+    query: str,
+    limit: int,
+    session_factory: sessionmaker[Session],
+) -> Dict[str, Any]:
+    kind = str(kind or "").strip().lower()
+    query = str(query or "").strip()
+    limit = max(1, min(30, int(limit or 12)))
+    suggestions: List[Dict[str, Any]] = []
+    if kind == "law":
+        with session_factory() as session:
+            records = session.scalars(
+                select(LawDocument)
+                .where(LawDocument.is_current.is_(True))
+                .order_by(LawDocument.law_name.asc())
+            ).all()
+        scored = []
+        for record in records:
+            score = _fuzzy_suggestion_score(query, record.law_name)
+            if score:
+                scored.append((score, record.law_name, record))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        for _, _, record in scored[:limit]:
+            suggestions.append(
+                {
+                    "type": "law",
+                    "value": record.law_name,
+                    "label": record.law_name,
+                    "meta": " · ".join(
+                        part
+                        for part in (
+                            record.law_level,
+                            record.law_category,
+                            f"{record.article_count} 條"
+                            if record.article_count
+                            else "",
+                        )
+                        if part
+                    ),
+                    "law_key": record.law_key,
+                    "source_type": record.source_type,
+                }
+            )
+    elif kind == "judgment":
+        with session_factory() as session:
+            laws = session.scalars(
+                select(LawDocument)
+                .where(LawDocument.is_current.is_(True))
+                .order_by(LawDocument.law_name.asc())
+            ).all()
+            scored_laws = []
+            for record in laws:
+                score = _fuzzy_suggestion_score(query, record.law_name)
+                if score:
+                    scored_laws.append((score, record.law_name))
+            scored_laws.sort(key=lambda item: (-item[0], item[1]))
+            for _, value in scored_laws[: min(4, limit)]:
+                suggestions.append(
+                    {
+                        "type": "law",
+                        "value": value,
+                        "label": value,
+                        "meta": "命中法規",
+                    }
+                )
+            courts = session.scalars(
+                select(JudgmentDocument.court_normalized)
+                .where(JudgmentDocument.court_normalized.is_not(None))
+                .distinct()
+                .limit(500)
+            ).all()
+            scored_courts = []
+            for court in courts:
+                value = str(court or "").strip()
+                score = _fuzzy_suggestion_score(query, value)
+                if value and score:
+                    scored_courts.append((score, value))
+            scored_courts.sort(key=lambda item: (-item[0], item[1]))
+            for _, value in scored_courts[: max(1, min(limit, 8))]:
+                suggestions.append(
+                    {
+                        "type": "court",
+                        "value": value,
+                        "label": value,
+                        "meta": "法院",
+                    }
+                )
+            if query:
+                pattern = f"%{_escape_like(query)}%"
+                jids = session.scalars(
+                    select(JudgmentDocument.jid)
+                    .where(JudgmentDocument.jid.ilike(pattern, escape="\\"))
+                    .order_by(JudgmentDocument.jid.asc())
+                    .limit(limit)
+                ).all()
+                for jid in jids:
+                    value = str(jid or "").strip()
+                    if value:
+                        suggestions.append(
+                            {
+                                "type": "jid",
+                                "value": value,
+                                "label": value,
+                                "meta": "案件字號",
+                            }
+                        )
+    else:
+        raise ValueError("kind 必須是 law 或 judgment")
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for item in suggestions:
+        key = (item.get("type"), item.get("value"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return {"kind": kind, "query": query, "suggestions": deduped}
 
 
 @traced(

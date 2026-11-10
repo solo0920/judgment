@@ -357,6 +357,78 @@ export const api = {
     return request("/api/status", { trackClient: false });
   },
 
+  ollamaHosts() {
+    return request("/api/ollama/hosts", {
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  addOllamaHost(payload) {
+    return request("/api/ollama/hosts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  updateOllamaHost(hostId, payload) {
+    return request(`/api/ollama/hosts/${encodeURIComponent(hostId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  deleteOllamaHost(hostId) {
+    return request(`/api/ollama/hosts/${encodeURIComponent(hostId)}`, {
+      method: "DELETE",
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  activateOllamaHost(hostId) {
+    return request(
+      `/api/ollama/hosts/${encodeURIComponent(hostId)}/activate`,
+      { method: "POST", timeout: 30000, trackClient: false },
+    );
+  },
+
+  deactivateOllamaHosts() {
+    return request("/api/ollama/hosts/deactivate", {
+      method: "POST",
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  selectOllamaModel(hostId, payload) {
+    return request(
+      `/api/ollama/hosts/${encodeURIComponent(hostId)}/models/select`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 30000,
+        trackClient: false,
+      },
+    );
+  },
+
+  clearOllamaModel(hostId, payload) {
+    return request(
+      `/api/ollama/hosts/${encodeURIComponent(hostId)}/models/clear`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 30000,
+        trackClient: false,
+      },
+    );
+  },
+
   systemUsage() {
     return request("/api/system-usage", { trackClient: false });
   },
@@ -412,6 +484,18 @@ export const api = {
         page,
         page_size: pageSize,
       }),
+    });
+  },
+
+  dataSuggest({ kind, query = "", limit = 12 }) {
+    const params = new URLSearchParams({
+      kind,
+      query,
+      limit: String(limit),
+    });
+    return request(`/api/data/suggest?${params.toString()}`, {
+      timeout: 45000,
+      trackClient: false,
     });
   },
 
@@ -518,6 +602,13 @@ export const api = {
     });
   },
 
+  judgmentDownloadStatus() {
+    return request("/api/judgment-download/status", {
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
   questionBankStats() {
     return request("/api/question-bank/stats", { trackClient: false });
   },
@@ -526,11 +617,26 @@ export const api = {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
       if (value === null || value === undefined || value === "") continue;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item === null || item === undefined || item === "") continue;
+          params.append(key, String(item));
+        }
+        continue;
+      }
       params.set(key, String(value));
     }
     params.set("limit", String(limit));
     params.set("offset", String(offset));
     return request(`/api/question-bank/items?${params.toString()}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  questionBankTags(query = "", limit = 12) {
+    const params = new URLSearchParams({ query, limit: String(limit) });
+    return request(`/api/question-bank/tags?${params.toString()}`, {
       timeout: 45000,
       trackClient: false,
     });
@@ -552,6 +658,15 @@ export const api = {
     });
   },
 
+  createQuestionBankItemWithAI(payload) {
+    return request("/api/question-bank/ai-items", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 420000,
+      trackClient: false,
+    });
+  },
+
   updateQuestionBankItem(itemId, payload) {
     return request(`/api/question-bank/items/${encodeURIComponent(itemId)}`, {
       method: "PATCH",
@@ -567,6 +682,28 @@ export const api = {
       timeout: 45000,
       trackClient: false,
     });
+  },
+
+  restoreQuestionBankItem(itemId) {
+    return request(
+      `/api/question-bank/items/${encodeURIComponent(itemId)}/restore`,
+      {
+        method: "POST",
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  submitQuestionBankItemForReview(itemId) {
+    return request(
+      `/api/question-bank/items/${encodeURIComponent(itemId)}/submit`,
+      {
+        method: "POST",
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
   },
 
   reviewQuestionBankItem(itemId, payload) {

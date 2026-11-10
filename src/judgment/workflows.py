@@ -86,6 +86,18 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
         long_running=True,
     ),
     WorkflowDefinition(
+        id="judgment_download",
+        label="判決下載",
+        description="檢查 1996-01 到最新月份的裁判書壓縮檔，缺檔下載、舊版以新 fileset 取代；僅於 00:00–06:00（Asia/Taipei）執行，可跨時段續傳。",
+        branch="judgment",
+        stage="download",
+        kind="judgment_download",
+        program="judgment-download",
+        script="src/judgment/judgment_download.py",
+        command=(sys.executable, "-m", "judgment.judgment_download"),
+        long_running=True,
+    ),
+    WorkflowDefinition(
         id="judgment_import",
         label="判決匯入",
         description="掃描本機未處理的判決 .rar，建立原始 Parquet 備份並匯入符合金融法規清單的判決。",

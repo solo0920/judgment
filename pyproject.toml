@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 judgment-import-judgments = "judgment.judgment_import:main"
+judgment-download = "judgment.judgment_download:main"
 judgment-index-vectors = "judgment.judgment_index:main"
 judgment-law-download = "judgment.law_download.cli:main"
 judgment-backfill-law-articles = "judgment.law_article_versions:main"

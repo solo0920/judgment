@@ -57,7 +57,7 @@ function createState(db, pageSize) {
     const value = field.default === undefined ? fallback : field.default;
     values[field.key] = Array.isArray(value) ? [...value] : value;
   }
-  return { values, page: 1, pageSize, result: null, sort: null, columnFilters: {} };
+  return { values, page: 1, pageSize, result: null, sort: null, columnFilters: {}, fuzzyTerms: [] };
 }
 
 function fieldVisible(field, values) {
@@ -242,6 +242,9 @@ function readFilters(db, state) {
 
 function queryFilters(db, state) {
   const filters = readFilters(db, state);
+  if (Array.isArray(state.fuzzyTerms) && state.fuzzyTerms.length) {
+    filters.keywords = [...state.fuzzyTerms];
+  }
   if (
     (db.id === "postgres" || db.id === "parquet") &&
     state.sort?.key
@@ -269,48 +272,97 @@ function dbNotice(db) {
   })}</div>`;
 }
 
-function renderDatabaseOptions(databases, selectedId) {
-  return `<div class="db-options" role="radiogroup" aria-label="選擇資料庫">
-    ${databases
-      .map((db) => {
-        const meta = statusMeta(db.status);
-        return `<label class="db-option">
-          <input type="radio" name="database" value="${escapeHtml(db.id)}" ${
-            db.id === selectedId ? "checked" : ""
-          } />
-          <span class="db-option-body">
-            <span class="db-option-top">
-              <span class="db-option-name">${escapeHtml(db.label)}</span>
-              <span class="db-option-radio" aria-hidden="true"></span>
-            </span>
-            <span class="db-option-desc">${escapeHtml(db.description || "")}</span>
-            <span class="db-option-state">
-              <span class="status-dot ${
-                meta.tone === "ok"
-                  ? "is-ok"
-                  : meta.tone === "warn"
-                    ? "is-warn"
-                    : meta.tone === "danger"
-                      ? "is-danger"
-                      : "is-idle"
-              }" aria-hidden="true"></span>
-              ${escapeHtml(db.shortLabel || meta.label)} · ${escapeHtml(meta.label)}
-            </span>
-          </span>
-        </label>`;
-      })
-      .join("")}
-  </div>`;
+function renderDatabaseSelect(databases, selectedId) {
+  return `<label class="field data-source-field">
+    <span class="field-label">資料來源</span>
+    <select class="select" name="database">
+      ${databases
+        .map((db) => {
+          const meta = statusMeta(db.status);
+          return `<option value="${escapeHtml(db.id)}" ${
+            db.id === selectedId ? "selected" : ""
+          }>${escapeHtml(db.label)} · ${escapeHtml(meta.label)}</option>`;
+        })
+        .join("")}
+    </select>
+  </label>`;
 }
 
-function renderSidebarViewSwitch(view) {
-  return `<div class="sidebar-view-switch" role="tablist" aria-label="查詢或 schema">
-    <button class="sidebar-view-button ${view === "query" ? "is-active" : ""}"
-      type="button" role="tab" aria-selected="${view === "query"}"
-      data-action="sidebar-view" data-view="query">${icon("search", 13)}<span>查詢</span></button>
-    <button class="sidebar-view-button ${view === "schema" ? "is-active" : ""}"
-      type="button" role="tab" aria-selected="${view === "schema"}"
-      data-action="sidebar-view" data-view="schema">${icon("table", 13)}<span>Schema</span></button>
+function renderDataNav(selectedCategory, sidebarView) {
+  const items = [
+    {
+      id: "law",
+      label: "查詢法規命令",
+      hint: "Fuzzy 法規名稱、類別與命令",
+      icon: "file",
+    },
+    {
+      id: "judgment",
+      label: "查詢判決",
+      hint: "Fuzzy 法院、案號與案由",
+      icon: "layers",
+    },
+    {
+      id: "schema",
+      label: "資料庫 Schema",
+      hint: "資料表、欄位與預覽",
+      icon: "table",
+    },
+  ];
+  return `<nav class="data-nav" aria-label="資料查詢功能">
+    ${items
+      .map((item) => {
+        const active =
+          item.id === "schema"
+            ? sidebarView === "schema"
+            : sidebarView === "query" && selectedCategory === item.id;
+        return `<button class="data-nav-item${active ? " is-active" : ""}" type="button"
+          data-action="data-nav" data-tab="${item.id}" ${
+            active ? 'aria-current="page"' : ""
+          }>
+          <span class="data-nav-icon">${icon(item.icon, 15)}</span>
+          <span class="data-nav-copy">
+            <strong>${escapeHtml(item.label)}</strong>
+            <small>${escapeHtml(item.hint)}</small>
+          </span>
+        </button>`;
+      })
+      .join("")}
+  </nav>`;
+}
+
+function renderFuzzySearch(category, db, state) {
+  if (db.id !== "postgres" && db.id !== "parquet") return "";
+  const terms = Array.isArray(state.fuzzyTerms) ? state.fuzzyTerms : [];
+  const label = category === "law" ? "Fuzzy 法規／命令" : "Fuzzy 判決";
+  const placeholder =
+    category === "law"
+      ? "輸入法規名稱或相近字…"
+      : "輸入法院、案號、案由或相近字…";
+  return `<div class="data-fuzzy" data-data-fuzzy data-fuzzy-kind="${category}">
+    <div class="data-fuzzy-head">
+      <span class="filter-title">${label}</span>
+      <span class="field-tag">多條件 AND</span>
+    </div>
+    <div class="data-fuzzy-row">
+      <div class="data-fuzzy-values">
+        ${
+          terms.length
+            ? terms
+                .map(
+                  (term) =>
+                    `<span class="chip data-fuzzy-chip">${escapeHtml(term)}<button class="data-fuzzy-remove" type="button" data-action="remove-fuzzy-term" data-term="${escapeHtml(term)}" aria-label="移除 ${escapeHtml(term)}">${icon("x", 9)}</button></span>`,
+                )
+                .join("")
+            : `<span class="data-fuzzy-placeholder">${placeholder}</span>`
+        }
+      </div>
+      <button class="data-fuzzy-add" type="button" data-action="open-fuzzy" aria-label="加入 fuzzy 條件" aria-haspopup="listbox">${icon("plus", 13)}</button>
+    </div>
+    <div class="data-fuzzy-popover" data-data-fuzzy-popover hidden>
+      <input class="input" type="search" data-data-fuzzy-search placeholder="${placeholder}" autocomplete="off" />
+      <div class="data-fuzzy-results" data-data-fuzzy-results role="listbox" aria-live="polite"></div>
+    </div>
   </div>`;
 }
 
@@ -343,29 +395,6 @@ function renderSchemaPanel(db, categoryLabel, selectedTableId = "") {
   </div>`;
 }
 
-function renderCategoryOptions(categories, selectedId) {
-  return `<div class="category-options" role="radiogroup" aria-label="資料類型">
-    ${categories
-      .map((category) => {
-        const selected = category.id === selectedId;
-        const description =
-          category.id === "judgment" && category.count !== undefined
-            ? `${formatNumber(category.count)} 筆已篩選判決`
-            : category.description || "";
-        return `<label class="category-option${selected ? " is-selected" : ""}">
-          <input type="radio" name="category" value="${escapeHtml(category.id)}" ${
-            selected ? "checked" : ""
-          } />
-          <span class="category-option-body">
-            <span class="category-option-label">${escapeHtml(category.label)}</span>
-            <span class="category-option-desc">${escapeHtml(description)}</span>
-          </span>
-        </label>`;
-      })
-      .join("")}
-  </div>`;
-}
-
 function sidebarNote(db) {
   const notes = {
     postgres:
@@ -382,8 +411,8 @@ function sidebarNote(db) {
 
 function emptyReport(db) {
   const copy = {
-    postgres: "選擇資料表與 metadata 條件，執行後會產生 SQL、摘要、分布與資料列。",
-    parquet: "選擇資料集與回傳欄位，直接掃描原始 Parquet。",
+    postgres: "使用左側 fuzzy 查詢加入法規或判決條件，再視需要展開進階 metadata 條件。",
+    parquet: "使用左側 fuzzy 查詢加入條件，直接掃描原始 Parquet；可展開進階條件調整欄位。",
     qdrant: "輸入語意查詢後，以 embedding 相似度檢索已建立向量索引的判決；未索引時會明確顯示狀態。",
     indexeddb: "查詢存在這個瀏覽器的提問紀錄與設定，不需要伺服器。",
   };
@@ -395,15 +424,15 @@ function emptyReport(db) {
     })}
     <div class="query-hint-grid">
       <div class="query-hint">
-        <strong>01 · 選擇資料庫</strong>
-        <span>使用左側 radio 切換 PostgreSQL、Parquet、Qdrant 或 IndexedDB。</span>
+        <strong>01 · 選擇功能</strong>
+        <span>左側切換查詢法規命令、查詢判決或資料庫 Schema。</span>
       </div>
       <div class="query-hint">
-        <strong>02 · 設定 metadata</strong>
-        <span>欄位會依資料庫與資料表動態改變，重設可回到預設值。</span>
+        <strong>02 · 加入 fuzzy 條件</strong>
+        <span>輸入相近字並從 suggestion 選擇，按 + 可加入多個條件（AND）。</span>
       </div>
       <div class="query-hint">
-        <strong>03 · 執行查詢</strong>
+        <strong>03 · 檢視結果</strong>
         <span>右側產生摘要、分布、實際查詢語句與可匯出的資料表。</span>
       </div>
     </div>
@@ -1759,6 +1788,8 @@ export async function render(root, ctx) {
   let schemaSuggestContext = null;
   let schemaSuggestActive = -1;
   let schemaSuggestSeq = 0;
+  let fuzzySearchSeq = 0;
+  let fuzzySearchTimer = null;
   let lawView = null;
   let judgmentView = null;
 
@@ -1768,7 +1799,7 @@ export async function render(root, ctx) {
         <div class="eyebrow">DATA EXPLORER</div>
         <div class="data-title-line">
           <h1 class="page-title">資料庫查詢與報表</h1>
-          <p class="page-subtitle data-page-subtitle">從左側切換「法規命令」或「判決」，再選擇資料庫與資料表；判決只包含命中金融法規清單的文件。</p>
+          <p class="page-subtitle data-page-subtitle">左側選擇「查詢法規命令」、「查詢判決」或「資料庫 Schema」；查詢支援 fuzzy 多條件（AND），也可展開進階 metadata 篩選。</p>
         </div>
       </div>
       <div class="page-actions">
@@ -1779,15 +1810,14 @@ export async function render(root, ctx) {
       </div>
     </div>
     <div class="data-layout">
-      <aside class="card query-sidebar" id="query-sidebar" aria-label="查詢條件">
-        <div id="category-switch"></div>
+      <aside class="card query-sidebar" id="query-sidebar" aria-label="資料查詢功能">
+        <div id="data-nav"></div>
         <div id="db-options-wrap">
           <div style="padding:16px">
             <div class="skeleton skeleton-line" style="width:86%"></div>
             <div class="skeleton skeleton-line" style="width:62%"></div>
           </div>
         </div>
-        <div id="sidebar-view-switch"></div>
         <div id="filter-area"></div>
         <div id="schema-area" hidden></div>
       </aside>
@@ -1805,9 +1835,8 @@ export async function render(root, ctx) {
   </section>`;
 
   const sidebar = root.querySelector("#query-sidebar");
-  const categorySwitch = root.querySelector("#category-switch");
+  const dataNav = root.querySelector("#data-nav");
   const dbOptionsWrap = root.querySelector("#db-options-wrap");
-  const viewSwitch = root.querySelector("#sidebar-view-switch");
   const filterArea = root.querySelector("#filter-area");
   const schemaArea = root.querySelector("#schema-area");
   const reportBox = root.querySelector("#query-main");
@@ -2328,25 +2357,36 @@ export async function render(root, ctx) {
   const renderSelectedDatabase = (db, { resetReport = false } = {}) => {
     blurSchemaSearch();
     const state = stateFor(db);
-    categorySwitch.innerHTML = renderCategoryOptions(categories, selectedCategory);
-    dbOptionsWrap.innerHTML = renderDatabaseOptions(getDatabases(), db.id);
-    viewSwitch.innerHTML = renderSidebarViewSwitch(sidebarView);
+    dataNav.innerHTML = renderDataNav(selectedCategory, sidebarView);
+    dbOptionsWrap.innerHTML = renderDatabaseSelect(getDatabases(), db.id);
     if (sidebarView === "schema") {
       filterArea.hidden = true;
       filterArea.innerHTML = "";
       schemaArea.hidden = false;
-      schemaArea.innerHTML = renderSchemaPanel(
+      schemaArea.innerHTML = `<div class="schema-category-switch" role="tablist" aria-label="Schema 類別">
+        ${["law", "judgment"]
+          .map((id) => {
+            const category = categories.find((item) => item.id === id);
+            if (!category) return "";
+            return `<button class="chip${selectedCategory === id ? " is-active" : ""}" type="button" role="tab" aria-selected="${selectedCategory === id}" data-action="schema-category" data-category="${id}">${escapeHtml(category.label)}</button>`;
+          })
+          .join("")}
+      </div>${renderSchemaPanel(
         db,
         getCategory(selectedCategory)?.label || selectedCategory,
         schemaSelection?.tableId || "",
-      );
+      )}`;
     } else {
       schemaArea.hidden = true;
       schemaArea.innerHTML = "";
       filterArea.hidden = false;
-      filterArea.innerHTML = `${dbNotice(db)}${renderFilters(db, state)}<div class="sidebar-note">${sidebarNote(
-        db,
-      )}</div>`;
+      const fuzzy = renderFuzzySearch(selectedCategory, db, state);
+      const filters = renderFilters(db, state);
+      filterArea.innerHTML = `${dbNotice(db)}${
+        fuzzy
+          ? `${fuzzy}<details class="data-advanced"><summary>進階 metadata 條件</summary>${filters}</details>`
+          : filters
+      }<div class="sidebar-note">${sidebarNote(db)}</div>`;
     }
     updateCatalogMeta();
     if (sidebarView === "schema") {
@@ -2417,7 +2457,7 @@ export async function render(root, ctx) {
       databases[0];
     selectedId = preferred?.id || null;
     if (!preferred) {
-      categorySwitch.innerHTML = renderCategoryOptions(categories, selectedCategory);
+      dataNav.innerHTML = renderDataNav(selectedCategory, sidebarView);
       dbOptionsWrap.innerHTML = `<div class="sidebar-notice">${notice({
         tone: "warn",
         title: "沒有可用的資料來源",
@@ -2512,6 +2552,94 @@ export async function render(root, ctx) {
     }
   };
 
+  const renderFuzzyResults = (container, suggestions) => {
+    const results = container?.querySelector("[data-data-fuzzy-results]");
+    if (!results) return;
+    results.innerHTML = suggestions.length
+      ? suggestions
+          .map(
+            (item) =>
+              `<button class="data-fuzzy-option" type="button" role="option" data-action="select-fuzzy-term" data-term="${escapeHtml(item.value)}"><span>${escapeHtml(item.label || item.value)}</span><small>${escapeHtml(item.meta || "")}</small></button>`,
+          )
+          .join("")
+      : `<div class="data-fuzzy-empty">沒有相近結果；按 Enter 可直接加入目前輸入的關鍵字。</div>`;
+  };
+
+  const loadFuzzySuggestions = async (container, query = "") => {
+    if (!container) return;
+    const db = getDatabase(selectedId);
+    const state = db ? stateFor(db) : null;
+    if (!state) return;
+    const kind = container.dataset.fuzzyKind || selectedCategory;
+    const results = container.querySelector("[data-data-fuzzy-results]");
+    const token = ++fuzzySearchSeq;
+    if (results) {
+      results.innerHTML = `<div class="data-fuzzy-loading"><span class="spinner"></span><span>搜尋相近結果…</span></div>`;
+    }
+    try {
+      const data = await api.dataSuggest({ kind, query, limit: 12 });
+      if (token !== fuzzySearchSeq) return;
+      const suggestions = (data.suggestions || []).filter(
+        (item) => !state.fuzzyTerms.includes(item.value),
+      );
+      renderFuzzyResults(container, suggestions);
+    } catch (error) {
+      if (token !== fuzzySearchSeq) return;
+      if (results) {
+        results.innerHTML = `<div class="data-fuzzy-empty">${escapeHtml(
+          error.message || "搜尋失敗。",
+        )}</div>`;
+      }
+    }
+  };
+
+  const openFuzzySearch = (container, { focus = false } = {}) => {
+    if (!container) return;
+    const popover = container.querySelector("[data-data-fuzzy-popover]");
+    const input = container.querySelector("[data-data-fuzzy-search]");
+    if (!popover || !input) return;
+    if (popover.hidden) {
+      popover.hidden = false;
+      input.value = "";
+      loadFuzzySuggestions(container, "");
+    }
+    if (focus) {
+      input.focus();
+      input.select();
+    }
+  };
+
+  const closeFuzzySearch = (container) => {
+    if (fuzzySearchTimer) {
+      window.clearTimeout(fuzzySearchTimer);
+      fuzzySearchTimer = null;
+    }
+    const popover = container?.querySelector("[data-data-fuzzy-popover]");
+    if (popover) popover.hidden = true;
+  };
+
+  const addFuzzyTerm = async (term) => {
+    const db = getDatabase(selectedId);
+    if (!db) return;
+    const state = stateFor(db);
+    const value = String(term || "").trim();
+    if (!value || state.fuzzyTerms.includes(value)) return;
+    state.fuzzyTerms = [...state.fuzzyTerms, value];
+    closeFuzzySearch(filterArea.querySelector("[data-data-fuzzy]"));
+    renderSelectedDatabase(db);
+    await runQuery(1);
+  };
+
+  const removeFuzzyTerm = async (term) => {
+    const db = getDatabase(selectedId);
+    if (!db) return;
+    const state = stateFor(db);
+    const value = String(term || "").trim();
+    state.fuzzyTerms = state.fuzzyTerms.filter((entry) => entry !== value);
+    renderSelectedDatabase(db);
+    await runQuery(1);
+  };
+
   const loadCatalog = async () => {
     refreshButton.disabled = true;
     setBusy(refreshButton, true, "整理中…");
@@ -2544,7 +2672,7 @@ export async function render(root, ctx) {
       const category =
         categories.find((item) => item.id === lastCategory) || categories[0];
       if (!category) {
-        categorySwitch.innerHTML = "";
+        dataNav.innerHTML = "";
         dbOptionsWrap.innerHTML = `<div class="sidebar-notice">${notice({
           tone: "danger",
           title: "沒有可用的分類",
@@ -2562,12 +2690,23 @@ export async function render(root, ctx) {
         databaseId: preferredDatabase,
       });
       if (disposed) return;
+      const initialDb = getDatabase(selectedId);
+      const initialState = initialDb ? stateFor(initialDb) : null;
+      if (
+        initialDb &&
+        initialState &&
+        sidebarView === "query" &&
+        !initialState.result &&
+        (initialDb.id === "postgres" || initialDb.id === "parquet")
+      ) {
+        runQuery(1);
+      }
       toast("資料庫 catalog 已更新。", "ok", 2200);
     } catch (error) {
       if (disposed) return;
       catalog = null;
       categories = [];
-      categorySwitch.innerHTML = "";
+      dataNav.innerHTML = "";
       updateCatalogMeta();
       dbOptionsWrap.innerHTML = `<div class="sidebar-notice">${notice({
         tone: "danger",
@@ -2598,6 +2737,17 @@ export async function render(root, ctx) {
     }
     if (target.name === "database") {
       selectDatabase(target.value);
+      const nextDb = getDatabase(selectedId);
+      const nextState = nextDb ? stateFor(nextDb) : null;
+      if (
+        nextDb &&
+        nextState &&
+        !nextState.result &&
+        sidebarView === "query" &&
+        (nextDb.id === "postgres" || nextDb.id === "parquet")
+      ) {
+        runQuery(1);
+      }
       return;
     }
     const db = getDatabase(selectedId);
@@ -2619,6 +2769,15 @@ export async function render(root, ctx) {
   });
 
   sidebar.addEventListener("input", (event) => {
+    const fuzzyInput = event.target.closest("[data-data-fuzzy-search]");
+    if (fuzzyInput) {
+      const container = fuzzyInput.closest("[data-data-fuzzy]");
+      if (fuzzySearchTimer) window.clearTimeout(fuzzySearchTimer);
+      fuzzySearchTimer = window.setTimeout(() => {
+        loadFuzzySuggestions(container, fuzzyInput.value);
+      }, 160);
+      return;
+    }
     const db = getDatabase(selectedId);
     if (!db) return;
     const form = filterArea.querySelector("#data-filter-form");
@@ -2627,25 +2786,109 @@ export async function render(root, ctx) {
     state.values = readFieldValues(form, db, state);
   });
 
+  sidebar.addEventListener("keydown", (event) => {
+    const input = event.target.closest("[data-data-fuzzy-search]");
+    if (!input) return;
+    const container = input.closest("[data-data-fuzzy]");
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeFuzzySearch(container);
+      input.blur();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const first = container?.querySelector(
+        "[data-action='select-fuzzy-term']",
+      );
+      if (first) first.click();
+      else addFuzzyTerm(input.value);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      container
+        ?.querySelector("[data-action='select-fuzzy-term']")
+        ?.focus();
+    }
+  });
+
+  sidebar.addEventListener("mouseover", (event) => {
+    const add = event.target.closest("[data-action='open-fuzzy']");
+    if (!add) return;
+    openFuzzySearch(add.closest("[data-data-fuzzy]"));
+  });
+
+  sidebar.addEventListener("mouseout", (event) => {
+    const container = event.target.closest("[data-data-fuzzy]");
+    if (!container) return;
+    if (event.relatedTarget && container.contains(event.relatedTarget)) return;
+    closeFuzzySearch(container);
+  });
+
   sidebar.addEventListener("submit", (event) => {
     if (event.target.id !== "data-filter-form") return;
     event.preventDefault();
     runQuery(1);
   });
 
-  sidebar.addEventListener("click", (event) => {
+  sidebar.addEventListener("click", async (event) => {
+    const openFuzzyContainer = filterArea
+      .querySelector("[data-data-fuzzy] [data-data-fuzzy-popover]:not([hidden])")
+      ?.closest("[data-data-fuzzy]");
+    if (openFuzzyContainer && !event.target.closest("[data-data-fuzzy]")) {
+      closeFuzzySearch(openFuzzyContainer);
+    }
     const target = event.target.closest("[data-action]");
     const action = target?.dataset.action;
-    if (action === "sidebar-view") {
+    if (action === "data-nav") {
+      const tab = target.dataset.tab;
       const db = getDatabase(selectedId);
-      if (!db) return;
-      const state = stateFor(db);
-      const form = filterArea.querySelector("#data-filter-form");
-      if (form && sidebarView === "query") {
-        state.values = readFieldValues(form, db, state);
+      if (tab === "schema") {
+        if (sidebarView !== "schema") {
+          if (db) {
+            const state = stateFor(db);
+            const form = filterArea.querySelector("#data-filter-form");
+            if (form) state.values = readFieldValues(form, db, state);
+          }
+          sidebarView = "schema";
+          if (db) renderSelectedDatabase(db);
+        }
+        return;
       }
-      sidebarView = target.dataset.view === "schema" ? "schema" : "query";
-      renderSelectedDatabase(db);
+      const categoryId = tab === "judgment" ? "judgment" : "law";
+      if (sidebarView === "schema") sidebarView = "query";
+      if (selectedCategory !== categoryId) {
+        selectCategory(categoryId, {
+          databaseId: selectedId,
+          resetReport: false,
+        });
+      } else if (db) {
+        renderSelectedDatabase(db);
+      }
+      const nextDb = getDatabase(selectedId);
+      const nextState = nextDb ? stateFor(nextDb) : null;
+      if (
+        nextDb &&
+        nextState &&
+        !nextState.result &&
+        (nextDb.id === "postgres" || nextDb.id === "parquet")
+      ) {
+        runQuery(1);
+      }
+      return;
+    }
+    if (action === "open-fuzzy") {
+      openFuzzySearch(target.closest("[data-data-fuzzy]"), { focus: true });
+      return;
+    }
+    if (action === "select-fuzzy-term") {
+      await addFuzzyTerm(target.dataset.term);
+      return;
+    }
+    if (action === "remove-fuzzy-term") {
+      await removeFuzzyTerm(target.dataset.term);
+      return;
+    }
+    if (action === "schema-category") {
+      sidebarView = "schema";
+      selectCategory(target.dataset.category || "law", { resetReport: true });
       return;
     }
     if (action === "select-schema-table") {
@@ -2661,10 +2904,7 @@ export async function render(root, ctx) {
       judgmentView = null;
       const state = stateFor(db);
       states[stateKey(selectedCategory, db.id)] = createState(db, state.pageSize);
-      filterArea.innerHTML = `${dbNotice(db)}${renderFilters(
-        db,
-        states[stateKey(selectedCategory, db.id)],
-      )}<div class="sidebar-note">${sidebarNote(db)}</div>`;
+      renderSelectedDatabase(db);
       showEmpty(db);
       toast("已重設這個資料庫的查詢條件。", "info", 2400);
       return;
@@ -2901,6 +3141,7 @@ export async function render(root, ctx) {
 
   return () => {
     disposed = true;
+    if (fuzzySearchTimer) window.clearTimeout(fuzzySearchTimer);
     for (const timer of schemaSuggestTimers.values()) window.clearTimeout(timer);
     schemaSuggestTimers.clear();
     hideSchemaSuggestions();
