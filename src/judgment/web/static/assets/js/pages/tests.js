@@ -148,7 +148,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
         <div>
           <div class="eyebrow">SYSTEM TEST</div>
           <div class="tests-embed-title">系統測試</div>
-          <div class="tests-embed-copy">後端 API 連線、測試模式與多模型測試 Flow。測試模式開啟後，下一次 RAG 提問會依序執行所有可用模型。</div>
+          <div class="tests-embed-copy">後端 API 連線、測試模式與多模型測試 Flow。測試模式開啟後，下一次 RAG 提問會依序執行所有可用 embedding 與具備 chat 能力的 LLM 模型。</div>
         </div>
         ${actionsMarkup}
       </div>`
@@ -157,7 +157,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
         <div class="eyebrow">SYSTEM TEST</div>
         <h1 class="page-title">系統測試</h1>
         <p class="page-subtitle">合併後端 API 連線、測試模式與多模型測試 Flow。
-          測試模式開啟後，下一次 RAG 提問會依序執行所有可用 embedding 與 LLM 模型，且不設逾時。</p>
+          測試模式開啟後，下一次 RAG 提問會依序執行所有可用 embedding 與具備 chat 能力的 LLM 模型，且不設逾時。</p>
       </div>
       ${actionsMarkup}
     </div>`;
@@ -205,7 +205,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
           <span class="tests-card-icon">${icon("terminal", 16)}</span>
           <div>
             <div class="tests-card-title" id="tests-mode-title">測試模式</div>
-            <div class="tests-card-copy">開啟後，下一次 RAG 提問會依序執行所有可用模型，結果寫入測試 Flow。</div>
+            <div class="tests-card-copy">開啟後，下一次 RAG 提問會依序執行所有可用 embedding 與具備 chat 能力的 LLM 模型，結果寫入測試 Flow。</div>
           </div>
         </div>
         <div class="tests-mode-row">

@@ -703,7 +703,7 @@ header 右上角的「系統測試」頁整合**API 連線設定**與**測試模
 
 測試模式為 ON 時：
 
-- 下一次 RAG 提問會依序執行目前可用的 **所有 embedding 模型與所有 LLM 模型**。
+- 下一次 RAG 提問會依序執行目前可用的**所有 embedding 模型與所有具備 chat 能力的 LLM 模型**。
 - 前端不設請求 timeout；後端 embedding 與 LLM 呼叫也使用 `timeout=None`。
 - 模型清單從 Ollama `/api/tags` 自動偵測，排除 reranker；`bge-m3` 歸類為 embedding，其餘模型需經 **LLM 服務測試** 確認具備 chat 能力，才會列入 LLM 評測。
 - 可用 `TEST_EMBEDDING_MODELS`、`TEST_LLM_MODELS` 以逗號分隔覆寫要測試的模型；LLM 仍只保留具備 chat 能力者。
