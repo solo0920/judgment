@@ -3,6 +3,7 @@ import {
   downloadText,
   escapeHtml,
   formatDateTime,
+  formatDuration,
   formatNumber,
   icon,
   notice,
@@ -305,51 +306,474 @@ function reviewPanelMarkup(state) {
   </section>`;
 }
 
+function answerPercent(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return `${Math.round(number * 100)}%`;
+}
+
+function citationLabel(citation) {
+  if (!citation || typeof citation !== "object") return "引用";
+  const jid = String(citation.jid || "").trim();
+  if (jid) return jid;
+  const lawName = String(citation.law_name || "").trim();
+  const articleNo = String(citation.article_no || "").trim();
+  const lawLabel = `${lawName} ${articleNo}`.trim();
+  if (lawLabel) return lawLabel;
+  return String(citation.title || citation.text || "引用").slice(0, 80);
+}
+
+function answerStatsMarkup(answer) {
+  const metrics = answer?.metrics || {};
+  const scores = metrics.scores || {};
+  const values = [
+    ["法規召回", answerPercent(metrics.law_recall)],
+    ["條文召回", answerPercent(metrics.article_recall)],
+    ["規則分", answerPercent(scores.deterministic)],
+    ["Judge", answerPercent(scores.judge)],
+    ["人工", answerPercent(scores.human)],
+  ].filter(([, value]) => value);
+  if (!values.length) return "";
+  return `<div class="qb-bank-stats">${values
+    .map(
+      ([label, value]) =>
+        `<span class="qb-bank-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></span>`,
+    )
+    .join("")}</div>`;
+}
+
+function answerSourcesMarkup(answer) {
+  const sources = Array.isArray(answer?.law_sources) ? answer.law_sources : [];
+  const citations = Array.isArray(answer?.citations) ? answer.citations : [];
+  const sourceMarkup = sources.length
+    ? `<div class="qb-bank-sources">${sources
+        .map((source) => {
+          const name = String(source.law_name || "未命名法規");
+          const articles = (source.articles || [])
+            .map((article) => String(article.article_no || "").trim())
+            .filter(Boolean);
+          const body = `<strong>${escapeHtml(name)}</strong>${
+            articles.length
+              ? `<small>${escapeHtml(articles.join("、"))}</small>`
+              : ""
+          }`;
+          return source.law_url
+            ? `<a class="qb-bank-law" href="${escapeHtml(
+                source.law_url,
+              )}" target="_blank" rel="noreferrer">${body}</a>`
+            : `<span class="qb-bank-law">${body}</span>`;
+        })
+        .join("")}</div>`
+    : "";
+  const citationMarkup = citations.length
+    ? `<div class="qb-bank-sources qb-bank-citations">${citations
+        .map(
+          (citation) =>
+            `<span class="chip chip-mono">${escapeHtml(
+              citationLabel(citation),
+            )}</span>`,
+        )
+        .join("")}</div>`
+    : "";
+  if (!sourceMarkup && !citationMarkup) return "";
+  return `<div class="qb-bank-answer-block">
+    <div class="qb-bank-section-label"><span>引用來源</span><span>${formatNumber(
+      sources.length + citations.length,
+    )} 筆</span></div>
+    ${sourceMarkup}${citationMarkup}
+  </div>`;
+}
+
+function answerBodyMarkup(answer, item) {
+  if (!answer) {
+    return `<div class="qb-bank-empty">
+      <span class="qb-bank-empty-icon">${icon("history", 20)}</span>
+      <strong>尚無 RAG 答案</strong>
+      <span>跑一次 Benchmark 後，最近一次成功回答會顯示在這裡。</span>
+    </div>`;
+  }
+  const answerVersion = Number(answer.item_version || 0);
+  const itemVersion = Number(item?.version || 0);
+  const versionBadge =
+    answerVersion && itemVersion && answerVersion !== itemVersion
+      ? `<span class="badge badge-warn">答案 v${answerVersion} · 題目 v${itemVersion}</span>`
+      : "";
+  const sourceLabel =
+    answer.answer_source === "llm"
+      ? "LLM 生成"
+      : answer.answer_source === "structured"
+        ? "法規資料庫"
+        : String(answer.answer_source || "RAG");
+  return `<div class="qb-bank-answer-meta">
+      <span class="badge badge-ok"><span class="status-dot is-ok"></span>RAG 完成</span>
+      <span class="badge badge-neutral">${escapeHtml(sourceLabel)}</span>
+      ${versionBadge}
+      <span class="mono">${escapeHtml(answer.run_label || answer.run_id || "")}</span>
+      <span>${escapeHtml(formatDateTime(answer.finished_at))}</span>
+      <span>${escapeHtml(formatDuration(answer.duration_ms))}</span>
+      ${
+        answer.llm_model
+          ? `<span class="mono">${escapeHtml(answer.llm_model)}</span>`
+          : ""
+      }
+    </div>
+    <div class="qb-bank-answer-block">
+      <div class="qb-bank-section-label"><span>回答</span><span>${formatNumber(
+        String(answer.answer || "").length,
+      )} 字</span></div>
+      <p class="qb-bank-answer-text">${escapeHtml(
+        String(answer.answer || "").trim() || "（空白回答）",
+      )}</p>
+    </div>
+    ${answerSourcesMarkup(answer)}
+    ${answerStatsMarkup(answer)}`;
+}
+
+function bankAnswerPaneMarkup(state, item) {
+  const suiteId = state.selectedSuiteId;
+  const answer = item
+    ? state.suiteAnswers?.[String(suiteId)]?.[String(item.id)] || null
+    : null;
+  if (!item) {
+    return `<div class="qb-bank-empty">
+      <span class="qb-bank-empty-icon">${icon("cube", 20)}</span>
+      <strong>選擇題目</strong>
+      <span>從左側清單選擇一題，查看最近一次 RAG 答案。</span>
+    </div>`;
+  }
+  return `<div class="qb-bank-answer-head">
+      <div class="qb-bank-answer-heading">
+        <span class="qb-bank-answer-kicker">${icon(
+          "sparkles",
+          12,
+        )}RAG 最近一次答案</span>
+        <strong class="qb-bank-answer-question">#${item.id} ${escapeHtml(
+          item.question,
+        )}</strong>
+      </div>
+      ${
+        answer
+          ? `<span class="qb-bank-answer-state">${escapeHtml(
+              TYPE_LABELS[item.question_type] || item.question_type,
+            )} · v${item.version}</span>`
+          : ""
+      }
+    </div>
+    ${answerBodyMarkup(answer, item)}`;
+}
+
+function bankActionsMarkup(item) {
+  return `<span class="qb-bank-actions">
+    <button class="qb-bank-icon" type="button" data-qb-action="edit" data-id="${
+      item.id
+    }" title="編輯題目" aria-label="編輯題目 #${item.id}">${icon(
+      "edit",
+      13,
+    )}</button>
+    <button class="qb-bank-icon is-danger" type="button" data-qb-action="delete" data-id="${
+      item.id
+    }" title="從題庫移除" aria-label="從題庫移除 #${item.id}">${icon(
+      "trash",
+      13,
+    )}</button>
+  </span>`;
+}
+
+function bankRowMarkup(item, index, { selected, hasAnswer }) {
+  return `<div class="qb-bank-row${selected ? " is-active" : ""}" data-id="${
+    item.id
+  }">
+    <button class="qb-bank-select" type="button" data-qb-action="select-bank-item" data-id="${
+      item.id
+    }" aria-pressed="${selected ? "true" : "false"}">
+      <span class="qb-bank-index">${String(index + 1).padStart(2, "0")}</span>
+      <span class="qb-bank-item-copy">
+        <strong>${escapeHtml(item.question)}</strong>
+        <small>${escapeHtml(
+          TYPE_LABELS[item.question_type] || item.question_type,
+        )} · v${item.version} · ${
+          hasAnswer ? "已有 RAG 答案" : "尚無 RAG 答案"
+        }</small>
+      </span>
+    </button>
+    ${bankActionsMarkup(item)}
+  </div>`;
+}
+
+function bankFullItemMarkup(item, index, answer) {
+  return `<article class="qb-bank-full-item" data-id="${item.id}">
+    <div class="qb-bank-full-head">
+      <span class="qb-bank-index">${String(index + 1).padStart(2, "0")}</span>
+      <div class="qb-bank-full-title">
+        <strong>${escapeHtml(item.question)}</strong>
+        <small>${escapeHtml(
+          TYPE_LABELS[item.question_type] || item.question_type,
+        )} · v${item.version} · ${escapeHtml(
+          STATUS_META[item.status]?.label || item.status || "",
+        )}</small>
+      </div>
+      ${bankActionsMarkup(item)}
+    </div>
+    ${answerBodyMarkup(answer, item)}
+  </article>`;
+}
+
 function suiteMarkup(state) {
   const editing = state.editingSuite;
-  return `<section class="report-card qb-card">
-    <div class="side-card-head">
-      <span class="side-card-title">${icon("cube", 14)}Benchmark 題庫</span>
-      <span class="badge badge-info">${formatNumber(state.ready.length)} benchmark-ready</span>
-    </div>
-    <form class="qb-suite-form" data-qb-form="suite">
-      <input type="hidden" name="suite_id" value="${editing?.id || ""}" />
-      <div class="qb-form-grid">
-        <label class="field"><span class="field-label">Suite 名稱</span><input class="input" name="name" required value="${escapeHtml(editing?.name || "Pilot 30")}" /></label>
-        <label class="field"><span class="field-label">等級</span><select class="select" name="tier">${Object.entries(TIER_LABELS).map(([value, label]) => `<option value="${value}" ${editing?.tier === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-      </div>
-      <label class="field"><span class="field-label">說明</span><input class="input" name="description" value="${escapeHtml(editing?.description || "30 題 pilot；用於 RAG benchmark 與長期同題比較。")}" /></label>
-      <div class="qb-check-list">
-        ${state.ready.length
-          ? state.ready
-              .map((item) => {
-                const checked = editing
-                  ? editing.items?.some((entry) => Number(entry.id) === Number(item.id))
-                  : true;
-                return `<label class="qb-check-row"><input type="checkbox" name="item_ids" value="${item.id}" ${checked ? "checked" : ""}/><span><strong>#${item.id}</strong> ${escapeHtml(item.question)} <small>${escapeHtml(TYPE_LABELS[item.question_type] || item.question_type)}</small></span></label>`;
-              })
+  const suites = Array.isArray(state.suites) ? state.suites : [];
+  const selected =
+    suites.find((suite) => Number(suite.id) === Number(state.selectedSuiteId)) ||
+    suites[0] ||
+    null;
+  const items = Array.isArray(selected?.items) ? selected.items : [];
+  const answers = state.suiteAnswers?.[String(selected?.id)] || {};
+  const selectedItem =
+    items.find(
+      (item) => Number(item.id) === Number(state.selectedBankItemId),
+    ) || null;
+  const loading = Boolean(state.suiteAnswersLoading);
+  const error = String(state.suiteAnswersError || "");
+  const manageOpen = Boolean(state.suiteManageOpen) || !suites.length;
+  const tab = state.bankTab === "full" ? "full" : "split";
+  const tabs = suites.length
+    ? `<div class="qb-bank-tabs" role="tablist" aria-label="Benchmark 題庫檢視">
+        <button class="qb-bank-tab${
+          tab === "split" ? " is-active" : ""
+        }" type="button" role="tab" aria-selected="${
+          tab === "split" ? "true" : "false"
+        }" data-qb-action="bank-tab" data-tab="split">${icon(
+          "grid",
+          13,
+        )}<span>Benchmark 題庫</span><span class="badge badge-neutral">${formatNumber(
+          items.length,
+        )}</span></button>
+        <button class="qb-bank-tab${
+          tab === "full" ? " is-active" : ""
+        }" type="button" role="tab" aria-selected="${
+          tab === "full" ? "true" : "false"
+        }" data-qb-action="bank-tab" data-tab="full">${icon(
+          "table",
+          13,
+        )}<span>題庫全列表</span><span class="badge badge-neutral">${formatNumber(
+          items.length,
+        )}</span></button>
+      </div>`
+    : "";
+  let content = "";
+  if (!suites.length) {
+    content = `<div class="qb-bank-empty">
+      <span class="qb-bank-empty-icon">${icon("cube", 20)}</span>
+      <strong>尚未建立 Benchmark 題庫</strong>
+      <span>展開下方 Suite 設定並建立題庫後，就能在這裡瀏覽題目與最近一次 RAG 答案。</span>
+    </div>`;
+  } else if (loading) {
+    content = `<div class="qb-bank-loading"><span class="spinner" aria-hidden="true"></span><span>讀取最近一次 RAG 答案中…</span></div>`;
+  } else {
+    const errorMarkup = error
+      ? notice({
+          tone: "warn",
+          title: "最近一次 RAG 答案讀取失敗",
+          text: escapeHtml(error),
+        })
+      : "";
+    if (tab === "full") {
+      content = `${errorMarkup}<div class="qb-bank-full" data-qb-bank-view="full">${
+        items.length
+          ? items
+              .map((item, index) =>
+                bankFullItemMarkup(
+                  item,
+                  index,
+                  answers[String(item.id)] || null,
+                ),
+              )
               .join("")
-          : emptyState("沒有已驗收且 benchmark-ready 的題目；請先完成人工驗收。")}
+          : emptyState("這個 benchmark 題庫目前沒有題目。")
+      }</div>`;
+    } else {
+      content = `${errorMarkup}<div class="qb-bank-split" data-qb-bank-view="split">
+        <div class="qb-bank-list" data-qb-bank-list>${
+          items.length
+            ? items
+                .map((item, index) =>
+                  bankRowMarkup(item, index, {
+                    selected:
+                      Number(item.id) === Number(selectedItem?.id),
+                    hasAnswer: Boolean(answers[String(item.id)]),
+                  }),
+                )
+                .join("")
+            : emptyState("這個 benchmark 題庫目前沒有題目。")
+        }</div>
+        <div class="qb-bank-answer-pane" data-qb-bank-answer>${bankAnswerPaneMarkup(
+          state,
+          selectedItem,
+        )}</div>
+      </div>`;
+    }
+  }
+  return `<section class="report-card qb-card qb-bank-card">
+    <div class="side-card-head qb-bank-head">
+      <div class="qb-bank-heading">
+        <span class="side-card-title">${icon(
+          "cube",
+          14,
+        )}Benchmark 題庫</span>
+        <span class="qb-bank-sub">${
+          selected
+            ? `${escapeHtml(selected.name)} · v${selected.version} · ${formatNumber(
+                selected.item_count,
+              )} 題`
+            : "尚未建立 suite"
+        }</span>
       </div>
-      <div class="qb-actions">
-        <button class="btn btn-primary" type="submit">${icon("check", 14)}<span>${editing ? "儲存 suite" : "建立 suite"}</span></button>
-        ${editing ? `<button class="btn btn-secondary" type="button" data-qb-action="suite-new">取消編輯</button>` : ""}
+      <div class="qb-bank-controls">
+        ${
+          suites.length
+            ? `<label class="qb-suite-picker"><span>Suite</span><select class="select" data-qb-suite-select aria-label="選擇 benchmark suite">${suites
+                .map(
+                  (suite) =>
+                    `<option value="${suite.id}" ${
+                      Number(suite.id) === Number(selected?.id)
+                        ? "selected"
+                        : ""
+                    }>${escapeHtml(suite.name)} · ${formatNumber(
+                      suite.item_count,
+                    )} 題</option>`,
+                )
+                .join("")}</select></label>`
+            : ""
+        }
+        ${
+          selected
+            ? `<span class="badge ${
+                selected.status === "frozen" ? "badge-ok" : "badge-neutral"
+              }">${
+                selected.status === "frozen" ? "已凍結" : "草稿"
+              }</span>`
+            : ""
+        }
       </div>
-    </form>
-    <div class="qb-list">
-      ${state.suites.length ? state.suites.map((suite) => `<article class="qb-suite">
-        <div class="qb-item-head">
-          <div class="qb-item-title"><strong>${escapeHtml(suite.name)}</strong><span class="qb-meta">${escapeHtml(TIER_LABELS[suite.tier] || suite.tier)} · v${suite.version} · ${formatNumber(suite.item_count)} 題</span></div>
-          <span class="badge ${suite.status === "frozen" ? "badge-ok" : "badge-neutral"}">${suite.status === "frozen" ? "已凍結" : "草稿"}</span>
-        </div>
-        <div class="qb-suite-items">${(suite.items || []).slice(0, 8).map((item) => `<span class="chip">#${item.id} ${escapeHtml(item.question.slice(0, 22))}${item.question.length > 22 ? "…" : ""}</span>`).join("")}${suite.item_count > 8 ? `<span class="qb-muted">+${suite.item_count - 8}</span>` : ""}</div>
-        <div class="qb-actions">
-          <button class="btn btn-secondary btn-sm" type="button" data-qb-action="suite-edit" data-id="${suite.id}">${icon("edit", 13)}<span>編輯題目</span></button>
-          <button class="btn btn-secondary btn-sm" type="button" data-qb-action="suite-freeze" data-id="${suite.id}">${icon("shield", 13)}<span>凍結</span></button>
-          <button class="btn btn-ghost btn-sm" type="button" data-qb-action="suite-delete" data-id="${suite.id}">${icon("trash", 13)}<span>刪除</span></button>
-        </div>
-      </article>`).join("") : emptyState("尚未建立 benchmark suite。")}
     </div>
+    ${tabs}
+    ${content}
+    <details class="qb-suite-manage" ${manageOpen ? "open" : ""}>
+      <summary>${icon("sliders", 14)}Suite 設定與版本 <span class="qb-muted">${formatNumber(
+        suites.length,
+      )} 個 suite · ${formatNumber(state.ready.length)} 題 benchmark-ready</span></summary>
+      <div class="qb-suite-manage-body">
+        <form class="qb-suite-form" data-qb-form="suite">
+          <input type="hidden" name="suite_id" value="${editing?.id || ""}" />
+          <div class="qb-form-grid">
+            <label class="field"><span class="field-label">Suite 名稱</span><input class="input" name="name" required value="${escapeHtml(
+              editing?.name || "Pilot 30",
+            )}" /></label>
+            <label class="field"><span class="field-label">等級</span><select class="select" name="tier">${Object.entries(
+              TIER_LABELS,
+            )
+              .map(
+                ([value, label]) =>
+                  `<option value="${value}" ${
+                    editing?.tier === value ? "selected" : ""
+                  }>${label}</option>`,
+              )
+              .join("")}</select></label>
+          </div>
+          <label class="field"><span class="field-label">說明</span><input class="input" name="description" value="${escapeHtml(
+            editing?.description ||
+              "30 題 pilot；用於 RAG benchmark 與長期同題比較。",
+          )}" /></label>
+          <div class="qb-check-list">
+            ${
+              state.ready.length
+                ? state.ready
+                    .map((item) => {
+                      const checked = editing
+                        ? editing.items?.some(
+                            (entry) => Number(entry.id) === Number(item.id),
+                          )
+                        : true;
+                      return `<label class="qb-check-row"><input type="checkbox" name="item_ids" value="${
+                        item.id
+                      }" ${
+                        checked ? "checked" : ""
+                      }/><span><strong>#${item.id}</strong> ${escapeHtml(
+                        item.question,
+                      )} <small>${escapeHtml(
+                        TYPE_LABELS[item.question_type] || item.question_type,
+                      )}</small></span></label>`;
+                    })
+                    .join("")
+                : emptyState(
+                    "沒有已驗收且 benchmark-ready 的題目；請先完成人工驗收。",
+                  )
+            }
+          </div>
+          <div class="qb-actions">
+            <button class="btn btn-primary" type="submit">${icon(
+              "check",
+              14,
+            )}<span>${
+              editing ? "儲存 suite" : "建立 suite"
+            }</span></button>
+            ${
+              editing
+                ? `<button class="btn btn-secondary" type="button" data-qb-action="suite-new">取消編輯</button>`
+                : ""
+            }
+          </div>
+        </form>
+        <div class="qb-list">
+          ${
+            suites.length
+              ? suites
+                  .map(
+                    (suite) => `<article class="qb-suite">
+            <div class="qb-item-head">
+              <div class="qb-item-title"><strong>${escapeHtml(
+                suite.name,
+              )}</strong><span class="qb-meta">${escapeHtml(
+                TIER_LABELS[suite.tier] || suite.tier,
+              )} · v${suite.version} · ${formatNumber(
+                suite.item_count,
+              )} 題</span></div>
+              <span class="badge ${
+                suite.status === "frozen" ? "badge-ok" : "badge-neutral"
+              }">${suite.status === "frozen" ? "已凍結" : "草稿"}</span>
+            </div>
+            <div class="qb-suite-items">${(suite.items || [])
+              .slice(0, 8)
+              .map(
+                (item) =>
+                  `<span class="chip">#${item.id} ${escapeHtml(
+                    item.question.slice(0, 22),
+                  )}${item.question.length > 22 ? "…" : ""}</span>`,
+              )
+              .join("")}${
+              suite.item_count > 8
+                ? `<span class="qb-muted">+${suite.item_count - 8}</span>`
+                : ""
+            }</div>
+            <div class="qb-actions">
+              <button class="btn btn-secondary btn-sm" type="button" data-qb-action="suite-edit" data-id="${
+                suite.id
+              }">${icon("edit", 13)}<span>編輯 suite</span></button>
+              <button class="btn btn-secondary btn-sm" type="button" data-qb-action="suite-freeze" data-id="${
+                suite.id
+              }">${icon("shield", 13)}<span>凍結</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-qb-action="suite-delete" data-id="${
+                suite.id
+              }">${icon("trash", 13)}<span>刪除</span></button>
+            </div>
+          </article>`,
+                  )
+                  .join("")
+              : emptyState("尚未建立 benchmark suite。")
+          }
+        </div>
+      </div>
+    </details>
   </section>`;
 }
 
@@ -396,6 +820,7 @@ export function createQuestionBankController(
   const state = {
     tab: "",
     editing: null,
+    editingFrom: "",
     editingSuite: null,
     items: [],
     total: 0,
@@ -411,6 +836,13 @@ export function createQuestionBankController(
     stats: {},
     suites: [],
     ready: [],
+    selectedSuiteId: null,
+    selectedBankItemId: null,
+    bankTab: "split",
+    suiteAnswers: {},
+    suiteAnswersLoading: false,
+    suiteAnswersError: "",
+    suiteManageOpen: false,
     reviewItems: [],
     reviewDetail: null,
     reviewer: (() => {
@@ -457,6 +889,103 @@ export function createQuestionBankController(
     target.innerHTML = createFormMarkup(state.editing);
   };
 
+  const ensureSuiteSelection = () => {
+    const suites = Array.isArray(state.suites) ? state.suites : [];
+    if (!suites.length) {
+      state.selectedSuiteId = null;
+      state.selectedBankItemId = null;
+      return null;
+    }
+    let suite = suites.find(
+      (entry) => Number(entry.id) === Number(state.selectedSuiteId),
+    );
+    if (!suite) {
+      suite = suites[0];
+      state.selectedSuiteId = suite.id;
+      state.selectedBankItemId = null;
+    }
+    const items = Array.isArray(suite.items) ? suite.items : [];
+    if (
+      !items.some(
+        (item) => Number(item.id) === Number(state.selectedBankItemId),
+      )
+    ) {
+      state.selectedBankItemId = items[0]?.id ?? null;
+    }
+    return suite;
+  };
+
+  const renderSuites = () => {
+    const target = panel("suite");
+    if (!target) return;
+    target.innerHTML = suiteMarkup(state);
+  };
+
+  let suiteAnswerRequest = 0;
+
+  const loadSuiteAnswers = async (suiteId, { force = false } = {}) => {
+    if (!suiteId) return;
+    const requestId = ++suiteAnswerRequest;
+    if (!force && state.suiteAnswers[String(suiteId)]) {
+      state.suiteAnswersLoading = false;
+      state.suiteAnswersError = "";
+      renderSuites();
+      return;
+    }
+    state.suiteAnswersLoading = true;
+    state.suiteAnswersError = "";
+    renderSuites();
+    try {
+      const result = await api.benchmarkSuiteLatestAnswers(suiteId);
+      if (requestId !== suiteAnswerRequest) return;
+      state.suiteAnswers[String(suiteId)] = result.answers || {};
+    } catch (error) {
+      if (requestId !== suiteAnswerRequest) return;
+      state.suiteAnswersError = error.message || "請稍後再試。";
+    } finally {
+      if (requestId === suiteAnswerRequest) {
+        state.suiteAnswersLoading = false;
+        renderSuites();
+      }
+    }
+  };
+
+  const changeSuite = async (suiteId) => {
+    state.selectedSuiteId = suiteId;
+    state.selectedBankItemId = null;
+    state.suiteAnswersError = "";
+    const suite = ensureSuiteSelection();
+    if (!suite) {
+      renderSuites();
+      return;
+    }
+    await loadSuiteAnswers(suite.id);
+  };
+
+  const setBankTab = (tab) => {
+    state.bankTab = tab === "full" ? "full" : "split";
+    renderSuites();
+  };
+
+  const updateBankSelection = () => {
+    const target = panel("suite");
+    if (!target) return;
+    const suite = ensureSuiteSelection();
+    const items = Array.isArray(suite?.items) ? suite.items : [];
+    const item =
+      items.find(
+        (entry) => Number(entry.id) === Number(state.selectedBankItemId),
+      ) || null;
+    for (const row of target.querySelectorAll(".qb-bank-row")) {
+      const active = Number(row.dataset.id) === Number(state.selectedBankItemId);
+      row.classList.toggle("is-active", active);
+      const button = row.querySelector("[data-qb-action='select-bank-item']");
+      if (button) button.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+    const pane = target.querySelector("[data-qb-bank-answer]");
+    if (pane) pane.innerHTML = bankAnswerPaneMarkup(state, item);
+  };
+
   const loadManage = async () => {
     const target = panel("manage");
     if (!target) return;
@@ -481,7 +1010,7 @@ export function createQuestionBankController(
     }
   };
 
-  const loadSuites = async () => {
+  const loadSuites = async ({ refreshAnswers = false } = {}) => {
     const target = panel("suite");
     if (!target) return;
     target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取 benchmark 題庫中…</span></div></section>`;
@@ -492,6 +1021,20 @@ export function createQuestionBankController(
       ]);
       state.suites = suitesResult.suites || [];
       state.ready = readyResult.items || [];
+      const suite = ensureSuiteSelection();
+      state.suiteAnswersError = "";
+      state.suiteAnswersLoading = false;
+      if (
+        suite &&
+        (refreshAnswers || !state.suiteAnswers[String(suite.id)])
+      ) {
+        try {
+          const result = await api.benchmarkSuiteLatestAnswers(suite.id);
+          state.suiteAnswers[String(suite.id)] = result.answers || {};
+        } catch (error) {
+          state.suiteAnswersError = error.message || "請稍後再試。";
+        }
+      }
       target.innerHTML = suiteMarkup(state);
     } catch (error) {
       target.innerHTML = `<section class="report-card qb-card">${notice({
@@ -570,8 +1113,15 @@ export function createQuestionBankController(
         toast("題目已建立。", "ok");
       }
       state.editing = null;
+      const returnTab = ["manage", "suite", "review"].includes(
+        state.editingFrom,
+      )
+        ? state.editingFrom
+        : "manage";
+      state.editingFrom = "";
+      state.suiteAnswers = {};
       await loadStats();
-      navigate("manage");
+      navigate(returnTab);
     } catch (error) {
       const detail = error.detail || error.payload?.detail;
       const message = detail?.errors?.join(" · ") || detail?.message || error.message || "題目儲存失敗。";
@@ -628,6 +1178,8 @@ export function createQuestionBankController(
         toast("Benchmark 題庫已建立。", "ok");
       }
       state.editingSuite = null;
+      state.suiteManageOpen = true;
+      state.suiteAnswers = {};
       await loadSuites();
     } catch (error) {
       const detail = error.detail || error.payload?.detail;
@@ -641,8 +1193,18 @@ export function createQuestionBankController(
     if (!action) return;
     const button = event.target.closest("[data-qb-action]");
     const id = Number(button.dataset.id || 0);
+    if (action === "bank-tab") {
+      setBankTab(button.dataset.tab);
+      return;
+    }
+    if (action === "select-bank-item") {
+      state.selectedBankItemId = id;
+      updateBankSelection();
+      return;
+    }
     if (action === "new") {
       state.editing = null;
+      state.editingFrom = "";
       navigate("create");
       return;
     }
@@ -652,9 +1214,19 @@ export function createQuestionBankController(
       return;
     }
     if (action === "edit") {
-      const item = state.items.find((entry) => Number(entry.id) === id);
+      const currentSuite = state.suites.find(
+        (entry) => Number(entry.id) === Number(state.selectedSuiteId),
+      );
+      const candidates = [
+        ...state.items,
+        ...state.reviewItems,
+        ...(currentSuite?.items || []),
+        ...(state.reviewDetail ? [state.reviewDetail] : []),
+      ];
+      const item = candidates.find((entry) => Number(entry.id) === id);
       if (!item) return;
       state.editing = item;
+      state.editingFrom = state.tab;
       navigate("create");
       return;
     }
@@ -668,6 +1240,33 @@ export function createQuestionBankController(
       return;
     }
     if (action === "delete") {
+      if (state.tab === "suite") {
+        const suite = ensureSuiteSelection();
+        if (!suite) return;
+        const item = (suite.items || []).find(
+          (entry) => Number(entry.id) === id,
+        );
+        if (!item) return;
+        if (
+          !window.confirm(
+            `確定從「${suite.name}」移除題目 #${id}？題目仍會保留在題庫管理中。`,
+          )
+        ) {
+          return;
+        }
+        try {
+          await api.removeBenchmarkSuiteItem(suite.id, id);
+          toast("已從 Benchmark 題庫移除。", "info");
+          delete state.suiteAnswers[String(suite.id)];
+          if (Number(state.selectedBankItemId) === id) {
+            state.selectedBankItemId = null;
+          }
+          await loadSuites();
+        } catch (error) {
+          toast(error.message || "移除失敗。", "danger");
+        }
+        return;
+      }
       if (!window.confirm(`確定刪除題目 #${id}？題目會標記為 retired，歷史 benchmark 仍會保留。`)) return;
       try {
         await api.deleteQuestionBankItem(id);
@@ -729,11 +1328,13 @@ export function createQuestionBankController(
       const suite = state.suites.find((entry) => Number(entry.id) === id);
       if (!suite) return;
       state.editingSuite = suite;
+      state.suiteManageOpen = true;
       loadSuites();
       return;
     }
     if (action === "suite-new") {
       state.editingSuite = null;
+      state.suiteManageOpen = true;
       loadSuites();
       return;
     }
@@ -742,6 +1343,7 @@ export function createQuestionBankController(
         await api.updateBenchmarkSuite(id, { freeze: true });
         toast("Benchmark 題庫已凍結並建立新版本。", "ok");
         state.editingSuite = null;
+        state.suiteManageOpen = true;
         await loadSuites();
       } catch (error) {
         toast(error.message || "凍結失敗。", "danger");
@@ -754,6 +1356,8 @@ export function createQuestionBankController(
         await api.deleteBenchmarkSuite(id);
         toast("Benchmark 題庫已刪除。", "info");
         state.editingSuite = null;
+        state.suiteAnswers = {};
+        state.suiteManageOpen = true;
         await loadSuites();
       } catch (error) {
         toast(error.message || "刪除失敗。", "danger");
@@ -791,15 +1395,32 @@ export function createQuestionBankController(
     }
   };
 
+  const onChange = async (event) => {
+    const select = event.target.closest?.("[data-qb-suite-select]");
+    if (!select) return;
+    const suiteId = Number(select.value || 0);
+    if (!suiteId || suiteId === Number(state.selectedSuiteId)) return;
+    await changeSuite(suiteId);
+  };
+
+  const onToggle = (event) => {
+    const details = event.target;
+    if (!details?.matches?.(".qb-suite-manage")) return;
+    state.suiteManageOpen = Boolean(details.open);
+  };
+
   root.addEventListener("click", onClick);
   root.addEventListener("submit", onSubmit);
+  root.addEventListener("change", onChange);
+  root.addEventListener("toggle", onToggle, true);
 
   const refresh = async () => {
     await loadStats();
     if (state.tab === "create") renderCreate();
     else if (state.tab === "manage") await loadManage();
-    else if (state.tab === "suite") await loadSuites();
-    else if (state.tab === "review") await loadReview();
+    else if (state.tab === "suite") {
+      await loadSuites({ refreshAnswers: true });
+    } else if (state.tab === "review") await loadReview();
   };
 
   loadStats();
@@ -810,6 +1431,8 @@ export function createQuestionBankController(
     destroy() {
       root.removeEventListener("click", onClick);
       root.removeEventListener("submit", onSubmit);
+      root.removeEventListener("change", onChange);
+      root.removeEventListener("toggle", onToggle, true);
     },
     getStats: () => state.stats,
   };

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from judgment.benchmark import deterministic_metrics
+from judgment.benchmark import BenchmarkManager, deterministic_metrics
+from judgment.config import Settings
 from judgment.models import (
     Base,
+    BenchmarkCaseResult,
+    BenchmarkRun,
     LawArticleVersion,
     LawDatasetVersion,
     LawDocument,
@@ -18,6 +23,7 @@ from judgment.question_bank import (
     get_item,
     get_suite,
     list_items,
+    remove_suite_item,
     revalidate_items,
     review_item,
     update_item,
@@ -238,3 +244,134 @@ def test_deterministic_metrics_compare_expected_sources() -> None:
     assert metrics["citation_valid"] is True
     assert metrics["retrieved_laws"] == ["證券交易法"]
     assert metrics["retrieved_articles"] == ["157-1", "171"]
+
+
+def _settings() -> Settings:
+    return Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=Path("data/laws"),
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+    )
+
+
+def test_remove_suite_item_keeps_question_in_bank(session_factory) -> None:
+    _seed_security_law(session_factory)
+    item = create_item(session_factory, _payload(), actor="tester")
+    review_item(
+        session_factory,
+        item["id"],
+        decision="approved",
+        reviewer="reviewer",
+    )
+    suite = create_suite(
+        session_factory,
+        name="Pilot 30",
+        item_ids=[item["id"]],
+        actor="tester",
+    )
+    updated = remove_suite_item(session_factory, suite["id"], item["id"])
+    assert updated["item_count"] == 0
+    assert get_suite(session_factory, suite["id"])["item_count"] == 0
+    assert get_item(session_factory, item["id"]) is not None
+
+
+def test_latest_successful_answers_uses_latest_success(session_factory) -> None:
+    _seed_security_law(session_factory)
+    item = create_item(session_factory, _payload(), actor="tester")
+    review_item(
+        session_factory,
+        item["id"],
+        decision="approved",
+        reviewer="reviewer",
+    )
+    suite = create_suite(
+        session_factory,
+        name="Pilot 30",
+        item_ids=[item["id"]],
+        actor="tester",
+    )
+    with session_factory() as session:
+        session.add_all(
+            [
+                BenchmarkRun(
+                    run_id="run-old",
+                    suite_id=suite["id"],
+                    label="舊 run",
+                    status="success",
+                ),
+                BenchmarkRun(
+                    run_id="run-new",
+                    suite_id=suite["id"],
+                    label="新 run",
+                    status="success",
+                ),
+                BenchmarkRun(
+                    run_id="run-failed",
+                    suite_id=suite["id"],
+                    label="失敗 run",
+                    status="failed",
+                ),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                BenchmarkCaseResult(
+                    run_id="run-old",
+                    item_id=item["id"],
+                    item_version=1,
+                    question=item["question"],
+                    status="success",
+                    answer="較舊的成功答案",
+                    duration_ms=1000,
+                ),
+                BenchmarkCaseResult(
+                    run_id="run-new",
+                    item_id=item["id"],
+                    item_version=1,
+                    question=item["question"],
+                    status="success",
+                    answer="最新的成功答案",
+                    law_sources=[
+                        {
+                            "law_name": "證券交易法",
+                            "law_url": "https://law.test/sec",
+                            "articles": [
+                                {
+                                    "article_no": "第 157-1 條",
+                                    "article_content": "不應回傳完整條文",
+                                }
+                            ],
+                        }
+                    ],
+                    metrics={
+                        "law_recall": 1.0,
+                        "scores": {"deterministic": 0.8},
+                    },
+                    duration_ms=2000,
+                ),
+                BenchmarkCaseResult(
+                    run_id="run-failed",
+                    item_id=item["id"],
+                    item_version=1,
+                    question=item["question"],
+                    status="failed",
+                    answer="",
+                    error_message="timeout",
+                ),
+            ]
+        )
+        session.commit()
+
+    manager = BenchmarkManager(
+        settings=_settings(), session_factory=session_factory
+    )
+    answers = manager.latest_successful_answers([item["id"]])
+    latest = answers[item["id"]]
+    assert latest["answer"] == "最新的成功答案"
+    assert latest["run_id"] == "run-new"
+    assert latest["duration_ms"] == 2000
+    assert latest["law_sources"][0]["law_name"] == "證券交易法"
+    assert latest["law_sources"][0]["articles"] == [{"article_no": "第 157-1 條"}]
+    assert latest["metrics"]["law_recall"] == 1.0

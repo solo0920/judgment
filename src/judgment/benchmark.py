@@ -956,6 +956,94 @@ class BenchmarkManager:
                 for case, run in rows
             ]
 
+    def latest_successful_answers(
+        self, item_ids: Sequence[int]
+    ) -> Dict[int, Dict[str, Any]]:
+        """Return the most recent successful RAG answer for each question item."""
+        ids = sorted({int(value) for value in item_ids if int(value)})
+        if not ids:
+            return {}
+        with self.session_factory() as session:
+            latest = (
+                select(
+                    BenchmarkCaseResult.item_id.label("item_id"),
+                    func.max(BenchmarkCaseResult.id).label("result_id"),
+                )
+                .where(
+                    BenchmarkCaseResult.item_id.in_(ids),
+                    BenchmarkCaseResult.status == "success",
+                    BenchmarkCaseResult.answer != "",
+                )
+                .group_by(BenchmarkCaseResult.item_id)
+                .subquery()
+            )
+            rows = session.execute(
+                select(BenchmarkCaseResult, BenchmarkRun)
+                .join(
+                    BenchmarkRun,
+                    BenchmarkRun.run_id == BenchmarkCaseResult.run_id,
+                )
+                .join(latest, BenchmarkCaseResult.id == latest.c.result_id)
+                .order_by(BenchmarkCaseResult.id.asc())
+            ).all()
+            return {
+                int(case.item_id): self._serialize_answer_summary(case, run)
+                for case, run in rows
+            }
+
+    @staticmethod
+    def _serialize_answer_summary(
+        case: BenchmarkCaseResult, run: BenchmarkRun
+    ) -> Dict[str, Any]:
+        law_sources = []
+        for source in case.law_sources or []:
+            if not isinstance(source, dict):
+                continue
+            law_sources.append(
+                {
+                    "index": source.get("index"),
+                    "law_name": source.get("law_name") or "",
+                    "law_key": source.get("law_key") or "",
+                    "law_url": source.get("law_url") or "",
+                    "source_type": source.get("source_type") or "",
+                    "source_label": source.get("source_label") or "",
+                    "article_count": source.get("article_count"),
+                    "articles": [
+                        {"article_no": article.get("article_no") or ""}
+                        for article in (source.get("articles") or [])
+                        if isinstance(article, dict)
+                    ],
+                }
+            )
+        metrics = case.metrics or {}
+        scores = metrics.get("scores")
+        config = run.config or {}
+        return {
+            "result_id": int(case.id),
+            "item_id": int(case.item_id),
+            "item_version": int(case.item_version or 1),
+            "run_id": run.run_id,
+            "run_label": run.label,
+            "run_status": run.status,
+            "run_started_at": _iso(run.started_at),
+            "finished_at": _iso(case.finished_at),
+            "answer": case.answer,
+            "answer_source": case.answer_source,
+            "citations": case.citations or [],
+            "law_sources": law_sources,
+            "duration_ms": int(case.duration_ms or 0),
+            "llm_model": str(config.get("llm_model") or ""),
+            "embedding_model": str(config.get("embedding_model") or ""),
+            "metrics": {
+                "law_recall": metrics.get("law_recall"),
+                "article_recall": metrics.get("article_recall"),
+                "judgment_recall": metrics.get("judgment_recall"),
+                "citation_valid": metrics.get("citation_valid"),
+                "answer_length": metrics.get("answer_length"),
+                "scores": scores if isinstance(scores, dict) else {},
+            },
+        }
+
     def _serialize_run(self, run: BenchmarkRun) -> Dict[str, Any]:
         return {
             "id": run.id,

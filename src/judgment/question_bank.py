@@ -1122,6 +1122,35 @@ def delete_suite(
         return True
 
 
+def remove_suite_item(
+    session_factory: sessionmaker[Session],
+    suite_id: int,
+    item_id: int,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        suite = session.get(BenchmarkSuite, int(suite_id))
+        if suite is None or suite.status == "deleted":
+            raise QuestionBankError(
+                "找不到 benchmark 題庫。", errors=["找不到 benchmark 題庫。"]
+            )
+        link = session.scalars(
+            select(BenchmarkSuiteItem).where(
+                BenchmarkSuiteItem.suite_id == suite.id,
+                BenchmarkSuiteItem.item_id == int(item_id),
+            )
+        ).first()
+        if link is None:
+            raise QuestionBankError(
+                "題目不在這個 benchmark 題庫中。",
+                errors=["題目不在這個 benchmark 題庫中。"],
+            )
+        session.delete(link)
+        suite.updated_at = _now()
+        session.commit()
+        session.refresh(suite)
+        return serialize_suite(suite, items=_suite_rows(session, suite.id))
+
+
 def benchmark_ready_items(
     session_factory: sessionmaker[Session],
     *,

@@ -606,6 +606,20 @@ export const api = {
     });
   },
 
+  benchmarkSuiteLatestAnswers(suiteId) {
+    return request(
+      `/api/benchmark/suites/${encodeURIComponent(suiteId)}/latest-answers`,
+      { timeout: 45000, trackClient: false },
+    );
+  },
+
+  removeBenchmarkSuiteItem(suiteId, itemId) {
+    return request(
+      `/api/benchmark/suites/${encodeURIComponent(suiteId)}/items/${encodeURIComponent(itemId)}`,
+      { method: "DELETE", timeout: 45000, trackClient: false },
+    );
+  },
+
   createBenchmarkSuite(payload) {
     return request("/api/benchmark/suites", {
       method: "POST",

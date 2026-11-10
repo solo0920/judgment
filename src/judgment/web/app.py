@@ -51,6 +51,7 @@ from ..question_bank import (
     import_items,
     list_items,
     list_suites,
+    remove_suite_item,
     revalidate_items,
     review_item,
     update_item,
@@ -684,6 +685,34 @@ def create_app(
         if suite is None:
             raise HTTPException(status_code=404, detail="找不到 benchmark 題庫。")
         return suite
+
+    @app.get("/api/benchmark/suites/{suite_id}/latest-answers")
+    def benchmark_suite_latest_answers(suite_id: int) -> Dict[str, Any]:
+        suite = get_suite(app.state.session_factory, suite_id)
+        if suite is None:
+            raise HTTPException(status_code=404, detail="找不到 benchmark 題庫。")
+        item_ids = [
+            int(item["id"])
+            for item in (suite.get("items") or [])
+            if item.get("id") is not None
+        ]
+        return {
+            "suite_id": suite_id,
+            "answers": app.state.benchmark_manager.latest_successful_answers(
+                item_ids
+            ),
+        }
+
+    @app.delete("/api/benchmark/suites/{suite_id}/items/{item_id}")
+    def benchmark_suite_item_delete(
+        suite_id: int, item_id: int
+    ) -> Dict[str, Any]:
+        try:
+            return remove_suite_item(
+                app.state.session_factory, suite_id, item_id
+            )
+        except QuestionBankError as exc:
+            raise _question_bank_error(exc) from exc
 
     @app.patch("/api/benchmark/suites/{suite_id}")
     def benchmark_suite_update(
