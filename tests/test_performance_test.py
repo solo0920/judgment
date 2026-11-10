@@ -114,28 +114,48 @@ def test_test_mode_setting_roundtrip() -> None:
 
 
 def test_available_test_models_classifies_ollama_models(monkeypatch) -> None:
+    session_factory = _session_factory()
+    models = [
+        "phonon:latest",
+        "granite4:small-h",
+        "command-r:latest",
+        "gemma3:27b",
+        "qllama/bge-reranker-v2-m3:latest",
+        "bge-m3:latest",
+    ]
     monkeypatch.setattr(
-        "judgment.performance_test.ollama_models_detail",
+        "judgment.llm_capabilities.ollama_models_detail",
         lambda base_url, timeout=2.5: {
             "status": "operational",
-            "models": [
-                "phonon:latest",
-                "granite4:small-h",
-                "command-r:latest",
-                "gemma3:27b",
-                "qllama/bge-reranker-v2-m3:latest",
-                "bge-m3:latest",
-            ],
+            "models": models,
             "detail": "6 個模型",
         },
     )
-    models = available_test_models(_settings())
-    assert models["embedding"] == ["bge-m3"]
-    assert models["llm"][0] == "gemma3:27b"
-    assert "command-r:latest" in models["llm"]
-    assert "phonon:latest" in models["llm"]
-    assert all("reranker" not in item for item in models["llm"])
-    assert models["source"] == "ollama"
+
+    def fake_probe(base_url, model, **kwargs):
+        supports = model not in {"phonon:latest", "bge-m3:latest"}
+        return {
+            "ok": True,
+            "supports_chat": supports,
+            "capabilities": ["completion"] if supports else ["other"],
+            "detail": "probe",
+            "method": "show",
+        }
+
+    monkeypatch.setattr(
+        "judgment.llm_capabilities.probe_model_capability", fake_probe
+    )
+    result = available_test_models(
+        _settings(), session_factory=session_factory
+    )
+    assert result["embedding"] == ["bge-m3"]
+    assert result["llm"][0] == "gemma3:27b"
+    assert "command-r:latest" in result["llm"]
+    assert "granite4:small-h" in result["llm"]
+    assert "phonon:latest" not in result["llm"]
+    assert all("reranker" not in item for item in result["llm"])
+    assert result["source"] == "ollama"
+    assert set(result["capability"]["tested_now"]) == set(models)
 
 
 def test_run_test_mode_persists_run_and_steps(monkeypatch) -> None:
@@ -143,7 +163,7 @@ def test_run_test_mode_persists_run_and_steps(monkeypatch) -> None:
     _seed_judgment(session_factory)
     monkeypatch.setattr(
         "judgment.performance_test.available_test_models",
-        lambda settings: {
+        lambda settings, session_factory=None: {
             "embedding": ["fake-embed"],
             "llm": ["fake-llm"],
             "available": ["fake-embed", "fake-llm"],

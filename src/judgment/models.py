@@ -405,6 +405,26 @@ class PerformanceTestStep(Base):
     )
 
 
+class OllamaModelCapability(Base):
+    __tablename__ = "ollama_model_capabilities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    base_url = Column(String(300), nullable=False, default="", index=True)
+    model = Column(String(200), nullable=False, index=True)
+    supports_chat = Column(Boolean, nullable=False, default=False)
+    capabilities = Column(JSON, nullable=False, default=list)
+    detail = Column(Text, nullable=False, default="")
+    tested_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "base_url", "model", name="uq_ollama_model_capability"
+        ),
+        Index("ix_ollama_model_capabilities_chat", "supports_chat"),
+    )
+
+
 class DownloadRun(Base):
     __tablename__ = "download_runs"
 

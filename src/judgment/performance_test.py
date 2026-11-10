@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import Settings
 from .embeddings import OllamaEmbedder, ollama_models_detail
 from .law_rag import law_source_text
+from .llm_capabilities import (
+    model_capability_status,
+    refresh_model_capabilities,
+)
 from .models import PerformanceTestRun, PerformanceTestStep
 from .rag import (
     _build_citations,
@@ -84,22 +88,72 @@ def _is_embedding(name: str) -> bool:
     return any(hint in lowered for hint in EMBEDDING_HINTS) and not _is_reranker(name)
 
 
-def available_test_models(settings: Settings) -> Dict[str, Any]:
-    """Return embedding/LLM candidates from Ollama, with configured fallbacks."""
-    base_url = settings.embedding_url or settings.llm_url
-    detail = ollama_models_detail(base_url) if base_url else {
-        "status": "not_configured",
-        "models": [],
-        "detail": "未設定 Ollama URL",
-    }
-    available = _dedupe_model_names(
-        [str(item) for item in (detail.get("models") or []) if str(item).strip()]
-    )
+def available_test_models(
+    settings: Settings,
+    session_factory: Optional[sessionmaker[Session]] = None,
+    *,
+    refresh: bool = True,
+) -> Dict[str, Any]:
+    """Return embedding/LLM candidates from Ollama, with configured fallbacks.
+
+    When a session factory is supplied, chat capabilities are read from the
+    service-test cache and only chat-capable LLMs are exposed. With
+    ``refresh=True`` (used before evaluation runs) new Ollama models are probed
+    first; read-only pages use ``refresh=False`` to avoid probing on page load.
+    """
+    llm_base_url = str(settings.llm_url or settings.embedding_url or "").rstrip("/")
+    embedding_base_url = str(
+        settings.embedding_url or settings.llm_url or ""
+    ).rstrip("/")
+    capability: Optional[Dict[str, Any]] = None
+    if session_factory is not None:
+        capability = (
+            refresh_model_capabilities(session_factory, settings)
+            if refresh
+            else model_capability_status(session_factory, settings)
+        )
+        llm_available = _dedupe_model_names(
+            [str(item) for item in (capability.get("available") or [])]
+        )
+        embedding_available = llm_available
+        if embedding_base_url and embedding_base_url != llm_base_url:
+            embedding_detail = ollama_models_detail(embedding_base_url)
+            embedding_available = _dedupe_model_names(
+                [
+                    str(item)
+                    for item in (embedding_detail.get("models") or [])
+                    if str(item).strip()
+                ]
+            )
+        ollama_status = capability.get("status")
+        ollama_detail = capability.get("detail")
+    else:
+        detail = (
+            ollama_models_detail(embedding_base_url)
+            if embedding_base_url
+            else {
+                "status": "not_configured",
+                "models": [],
+                "detail": "未設定 Ollama URL",
+            }
+        )
+        llm_available = _dedupe_model_names(
+            [str(item) for item in (detail.get("models") or []) if str(item).strip()]
+        )
+        embedding_available = llm_available
+        ollama_status = detail.get("status")
+        ollama_detail = detail.get("detail")
+
+    available = _dedupe_model_names(llm_available + embedding_available)
     embedding_models = [
-        name for name in available if _is_embedding(name) and not _is_reranker(name)
+        name
+        for name in embedding_available
+        if _is_embedding(name) and not _is_reranker(name)
     ]
-    llm_models = [
-        name for name in available if name not in embedding_models and not _is_reranker(name)
+    discovered_llm = [
+        name
+        for name in llm_available
+        if name not in embedding_models and not _is_reranker(name)
     ]
 
     if settings.test_embedding_models:
@@ -108,25 +162,39 @@ def available_test_models(settings: Settings) -> Dict[str, Any]:
         embedding_models = _dedupe_model_names(
             [settings.embedding_model] + embedding_models
         )
+
     if settings.test_llm_models:
         llm_models = _dedupe_model_names(settings.test_llm_models)
     elif settings.llm_model:
-        llm_models = _dedupe_model_names([settings.llm_model] + llm_models)
+        llm_models = _dedupe_model_names([settings.llm_model] + discovered_llm)
+    else:
+        llm_models = discovered_llm
 
     embedding_keys = {_base_model_name(name) for name in embedding_models}
     llm_models = [
         name for name in llm_models if _base_model_name(name) not in embedding_keys
     ]
-    return {
+    if capability is not None:
+        chat_models = set(capability.get("chat_models") or [])
+        llm_models = [name for name in llm_models if name in chat_models]
+
+    payload = {
         "embedding": embedding_models,
         "llm": llm_models,
         "available": available,
-        "ollama_status": detail.get("status"),
-        "ollama_detail": detail.get("detail"),
+        "ollama_status": ollama_status,
+        "ollama_detail": ollama_detail,
         "source": "overrides"
         if (settings.test_embedding_models or settings.test_llm_models)
         else ("ollama" if available else "configured"),
     }
+    if capability is not None:
+        payload["capability"] = {
+            "tested_now": list(capability.get("tested_now") or []),
+            "new_models": list(capability.get("new_models") or []),
+            "failures": list(capability.get("failures") or []),
+        }
+    return payload
 
 
 def _step_rows(
@@ -476,7 +544,9 @@ def run_test_mode(
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     law_sources = list(law_sources or [])
-    models = available_test_models(settings)
+    models = available_test_models(
+        settings, session_factory=session_factory
+    )
     run_id, step_ids, total_steps = _create_test_run(
         session_factory,
         question=question,

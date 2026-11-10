@@ -478,6 +478,9 @@ uv run judgment-normalize-courts --all
 | `POST` | `/api/question-bank/revalidate` | 重新驗證全部題目；法規條文內容變更時標記 stale。 |
 | `GET` / `POST` | `/api/benchmark/suites` | 列出／建立 benchmark suite；只允許 accepted、未 stale 的題目。 |
 | `PATCH` / `DELETE` | `/api/benchmark/suites/{id}` | 更新題目清單、凍結版本或 soft delete suite。 |
+| `GET` | `/api/benchmark/models` | 回傳經過 chat 能力過濾的 benchmark 模型清單與 active index 版本。 |
+| `GET` | `/api/llm/models` | 讀取 Ollama 模型與已記錄的 chat 能力（不重新探測）。 |
+| `POST` | `/api/llm/models/test` | 執行 LLM 服務測試；只探測尚未記錄的新模型並寫入 `ollama_model_capabilities`。 |
 | `GET` / `POST` | `/api/benchmark/runs` | 列出或啟動 benchmark；使用正式 `judgments_current` alias，保存 suite／config／index 快照。 |
 | `GET` | `/api/benchmark/runs/{run_id}` | 讀取 run、逐題結果、LLM judge、人工評分、stage timing 與 Flow。 |
 | `POST` | `/api/benchmark/runs/{run_id}/stop` | 停止 benchmark；未執行題目標記 skipped。 |
@@ -702,8 +705,8 @@ header 右上角的「系統測試」頁整合**API 連線設定**與**測試模
 
 - 下一次 RAG 提問會依序執行目前可用的 **所有 embedding 模型與所有 LLM 模型**。
 - 前端不設請求 timeout；後端 embedding 與 LLM 呼叫也使用 `timeout=None`。
-- 模型清單從 Ollama `/api/tags` 自動偵測，排除 reranker；`bge-m3` 歸類為 embedding，其餘可聊天模型歸類為 LLM。
-- 可用 `TEST_EMBEDDING_MODELS`、`TEST_LLM_MODELS` 以逗號分隔覆寫要測試的模型。
+- 模型清單從 Ollama `/api/tags` 自動偵測，排除 reranker；`bge-m3` 歸類為 embedding，其餘模型需經 **LLM 服務測試** 確認具備 chat 能力，才會列入 LLM 評測。
+- 可用 `TEST_EMBEDDING_MODELS`、`TEST_LLM_MODELS` 以逗號分隔覆寫要測試的模型；LLM 仍只保留具備 chat 能力者。
 - 每個模型、每個階段都會建立一筆 `performance_test_steps`，記錄 `module`、`function`、status、progress、duration、error 與模型輸出摘要；整個測試是 `performance_test_runs`，並保存原始問題與主要回答。
 - 回覆仍會選出主要回答：優先使用 `LLM_MODEL`，若失敗或引用驗證不通過，改用第一個通過驗證的模型；若全部失敗則只回傳檢索結果。
 
@@ -731,13 +734,32 @@ header 右上角的「系統測試」頁整合**API 連線設定**與**測試模
 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
-| `GET` | `/api/test-mode` | 讀取測試模式與自動偵測到的模型清單 |
+| `GET` | `/api/test-mode` | 讀取測試模式與自動偵測到的模型清單（只含具備 chat 能力的 LLM） |
 | `POST` | `/api/test-mode` | 切換測試模式（`{"enabled": true/false}`） |
 | `GET` | `/api/test-runs/current` | 最新執行中或最近一筆測試 Flow |
 | `GET` | `/api/test-runs` | 歷史測試列表（`limit`） |
 | `GET` | `/api/test-runs/{run_id}` | 單一測試的完整 stages／steps |
+| `GET` | `/api/llm/models` | 讀取 Ollama 目前模型與已記錄的 chat 能力（不重新探測） |
+| `POST` | `/api/llm/models/test` | 執行 LLM 服務測試；只探測尚未記錄的新模型 |
 
 測試模式設定儲存在 PostgreSQL `app_settings`（key `test_mode`），重啟後保留；測試 Flow 儲存在 `performance_test_runs` 與 `performance_test_steps`。
+
+#### LLM 服務測試與 chat 能力
+
+系統測試頁的「LLM 服務測試」卡片會檢查 Ollama 上每個模型是否支援 chat，結果保存在 PostgreSQL `ollama_model_capabilities`，以 `(base_url, model)` 為唯一鍵。測試流程：
+
+1. 讀取 Ollama `/api/tags` 取得目前模型清單。
+2. 只對「沒有能力紀錄」的新模型呼叫 `/api/show`；已有紀錄的模型直接沿用，不再重測。
+3. `/api/show` 的 `capabilities` 含 `completion` 視為支援 chat；名稱含 `rerank`／`reranker` 的模型一律排除。
+4. 若 Ollama 版本未回傳 `capabilities`，改用最小 `/api/chat` 請求（`num_predict=1`）判定。
+5. 網路錯誤、逾時或非預期 HTTP 狀態等暫時性失敗不會寫入紀錄，下次服務測試會自動重試。
+
+開始 LLM 效能評估前（測試模式或 benchmark 啟動），系統會先呼叫同一個服務測試流程，只把具備 chat 能力的模型放進 LLM 候選清單：
+
+- `/api/test-mode`、`/api/benchmark/models` 與測試 Flow 的 LLM 清單都經過 chat 能力過濾。
+- Benchmark 啟動時若所選 LLM 不支援 chat 會直接拒絕，並提示可用模型。
+- Benchmark judge 若未設定或不支援 chat，會自動改用另一個支援 chat 的模型；若沒有第二個 chat 模型，則關閉 judge。
+- 這可避免 `phonon:latest`（`speech`）或 `bge-m3`（`embedding`）被當成 LLM，造成 Ollama 回傳 `HTTP 400 does not support chat`。
 
 
 

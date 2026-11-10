@@ -446,6 +446,21 @@ export const api = {
     return request("/api/test-mode", { trackClient: false });
   },
 
+  llmModels() {
+    return request("/api/llm/models", {
+      timeout: 60000,
+      trackClient: false,
+    });
+  },
+
+  testLlmModels() {
+    return request("/api/llm/models/test", {
+      method: "POST",
+      timeout: 120000,
+      trackClient: false,
+    });
+  },
+
   setTestMode(enabled) {
     return request("/api/test-mode", {
       method: "POST",

@@ -32,6 +32,10 @@ from ..observability import (
     trace_segment,
 )
 from ..judgment_parquet import get_judgment_from_parquet
+from ..llm_capabilities import (
+    model_capability_status,
+    refresh_model_capabilities,
+)
 from ..performance_test import (
     available_test_models,
     get_latest_test_run,
@@ -802,7 +806,9 @@ def create_app(
     @app.get("/api/benchmark/models")
     def benchmark_models() -> Dict[str, Any]:
         return {
-            "models": available_test_models(settings),
+            "models": available_test_models(
+                settings, app.state.session_factory, refresh=False
+            ),
             "index_version": active_version(
                 app.state.session_factory,
                 alias_name=settings.judgment_vector_alias,
@@ -828,7 +834,9 @@ def create_app(
     def test_mode_state() -> Dict[str, Any]:
         return {
             "enabled": get_test_mode(app.state.session_factory),
-            "models": available_test_models(settings),
+            "models": available_test_models(
+                settings, app.state.session_factory, refresh=False
+            ),
         }
 
     @app.post("/api/test-mode")
@@ -836,8 +844,22 @@ def create_app(
         set_test_mode(app.state.session_factory, request.enabled)
         return {
             "enabled": bool(request.enabled),
-            "models": available_test_models(settings),
+            "models": available_test_models(
+                settings, app.state.session_factory, refresh=False
+            ),
         }
+
+    @app.get("/api/llm/models")
+    def llm_models() -> Dict[str, Any]:
+        return model_capability_status(
+            app.state.session_factory, settings
+        )
+
+    @app.post("/api/llm/models/test")
+    def llm_models_test() -> Dict[str, Any]:
+        return refresh_model_capabilities(
+            app.state.session_factory, settings
+        )
 
     @app.get("/api/test-runs/current")
     def test_run_current() -> Dict[str, Any]:

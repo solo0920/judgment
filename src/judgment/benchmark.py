@@ -431,26 +431,49 @@ class BenchmarkManager:
                         "題庫包含尚未驗收或已過期的題目。",
                         errors=not_ready,
                     )
+                models = available_test_models(
+                    self.settings, session_factory=self.session_factory
+                )
+                chat_models = list(models.get("llm") or [])
+                if not chat_models:
+                    raise QuestionBankError(
+                        "Ollama 沒有支援 chat 的 LLM 模型。",
+                        errors=[
+                            "請先安裝或啟動支援 chat 的模型，再執行 LLM 服務測試。"
+                        ],
+                    )
                 normalized_config = _default_config(config)
                 if not normalized_config["llm_model"]:
-                    normalized_config["llm_model"] = self.settings.llm_model
+                    fallback = self.settings.llm_model
+                    normalized_config["llm_model"] = (
+                        fallback if fallback in chat_models else chat_models[0]
+                    )
+                if normalized_config["llm_model"] not in chat_models:
+                    raise QuestionBankError(
+                        "所選 LLM 模型不支援 chat。",
+                        errors=[
+                            f"{normalized_config['llm_model']} 不在 chat 模型清單："
+                            + "、".join(chat_models)
+                        ],
+                    )
                 if not normalized_config["embedding_model"]:
                     normalized_config["embedding_model"] = (
                         self.settings.embedding_model
                     )
-                if (
-                    normalized_config.get("judge_enabled")
-                    and not normalized_config.get("judge_model")
-                ):
-                    models = available_test_models(self.settings)
-                    candidates = [
-                        model
-                        for model in (models.get("llm") or [])
-                        if model != normalized_config["llm_model"]
-                    ]
-                    normalized_config["judge_model"] = (
-                        candidates[0] if candidates else ""
-                    )
+                if normalized_config.get("judge_enabled"):
+                    judge_model = normalized_config.get("judge_model") or ""
+                    if judge_model and judge_model not in chat_models:
+                        judge_model = ""
+                    if not judge_model:
+                        candidates = [
+                            model
+                            for model in chat_models
+                            if model != normalized_config["llm_model"]
+                        ]
+                        judge_model = candidates[0] if candidates else ""
+                    normalized_config["judge_model"] = judge_model
+                    if not judge_model:
+                        normalized_config["judge_enabled"] = False
                 run_id = uuid4().hex
                 snapshot = {
                     "suite": serialize_suite(

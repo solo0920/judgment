@@ -11,7 +11,7 @@ import {
   setApiBase,
   testApiConnection,
 } from "../api.js";
-import { escapeHtml, icon, setBusy, toast } from "../utils.js";
+import { escapeHtml, formatDateTime, icon, setBusy, toast } from "../utils.js";
 import { renderTestFlowPanel } from "./performance.js";
 
 const API_SOURCE_LABELS = {
@@ -39,6 +39,74 @@ function modelGroup(label, models) {
   </div>`;
 }
 
+function llmCapabilityRow(item) {
+  const supports = item?.supports_chat;
+  const tone =
+    supports === true
+      ? "badge-ok"
+      : supports === false
+        ? "badge-danger"
+        : "badge-neutral";
+  const label =
+    supports === true
+      ? "支援 chat"
+      : supports === false
+        ? "不支援 chat"
+        : "未測試";
+  const capabilities = (Array.isArray(item?.capabilities)
+    ? item.capabilities
+    : []
+  )
+    .map((value) => `<span class="chip chip-mono">${escapeHtml(value)}</span>`)
+    .join("");
+  return `<div class="tests-llm-row">
+    <div class="tests-llm-model">
+      <strong class="mono">${escapeHtml(item?.model || "—")}</strong>
+      <small>${escapeHtml(item?.detail || "")}</small>
+    </div>
+    <div class="tests-llm-meta">
+      <span class="badge ${tone}">${label}</span>
+      ${item?.tested_now ? `<span class="badge badge-info">本次新測</span>` : ""}
+      ${capabilities}
+      <span class="tests-llm-time">${
+        item?.tested_at
+          ? `測試於 ${escapeHtml(formatDateTime(item.tested_at))}`
+          : "尚無測試紀錄"
+      }</span>
+    </div>
+  </div>`;
+}
+
+function llmCapabilityMarkup(payload) {
+  const models = Array.isArray(payload?.models) ? payload.models : [];
+  const counts = payload?.counts || {};
+  const failures = Array.isArray(payload?.failures) ? payload.failures : [];
+  const summary = payload
+    ? `<span>Ollama <strong>${counts.available ?? models.length}</strong> 個模型</span>
+      <span>支援 chat <strong>${counts.chat ?? 0}</strong></span>
+      <span>不支援 <strong>${counts.unsupported ?? 0}</strong></span>
+      <span>未測試 <strong>${counts.untested ?? 0}</strong></span>
+      <span>本次新測 <strong>${(payload.tested_now || []).length}</strong></span>
+      <span class="muted">${escapeHtml(payload.detail || "")}</span>`
+    : `<span>正在讀取 Ollama 模型清單…</span>`;
+  return {
+    summary,
+    list: models.length
+      ? models.map(llmCapabilityRow).join("")
+      : `<div class="tests-llm-empty">尚無模型資料；請確認 Ollama 已啟動並執行 LLM 服務測試。</div>`,
+    failures: failures.length
+      ? `<div class="tests-llm-failures">${failures
+          .map(
+            (item) =>
+              `<span><strong class="mono">${escapeHtml(
+                item.model || "—",
+              )}</strong> ${escapeHtml(item.detail || "測試失敗")}</span>`,
+          )
+          .join("")}</div>`
+      : "",
+  };
+}
+
 function flowSignature(run, runs, selectedRunId) {
   return JSON.stringify({
     selected: selectedRunId,
@@ -61,6 +129,8 @@ export async function render(root, ctx, { embedded = false } = {}) {
   let testMode = false;
   let testModels = { embedding: [], llm: [] };
   let testModeBusy = false;
+  let llmCapabilities = null;
+  let llmTestBusy = false;
   let testRun = null;
   let testRuns = [];
   let selectedRunId = "";
@@ -160,6 +230,25 @@ export async function render(root, ctx, { embedded = false } = {}) {
       </section>
     </div>
 
+    <section class="card tests-card tests-llm-card" aria-labelledby="tests-llm-title">
+      <div class="tests-card-head">
+        <span class="tests-card-icon">${icon("brain", 16)}</span>
+        <div>
+          <div class="tests-card-title" id="tests-llm-title">LLM 服務測試</div>
+          <div class="tests-card-copy">檢查 Ollama 上每個模型是否支援 chat，並把結果寫入能力清單；已有測試紀錄的模型不會重測。LLM 效能評估只會納入支援 chat 的模型。</div>
+        </div>
+      </div>
+      <div class="tests-llm-head">
+        <div class="tests-llm-summary" id="tests-llm-summary">正在讀取 Ollama 模型清單…</div>
+        <button class="btn btn-primary btn-sm" type="button" id="tests-llm-test">
+          ${icon("activity", 14)}<span>執行 LLM 服務測試</span>
+        </button>
+      </div>
+      <div class="tests-llm-list" id="tests-llm-list"></div>
+      <div id="tests-llm-failures"></div>
+      <div class="tests-status" id="tests-llm-status" role="status"></div>
+    </section>
+
     <div id="tests-flow"></div>
   </section>`;
 
@@ -178,6 +267,11 @@ export async function render(root, ctx, { embedded = false } = {}) {
   const apiSave = root.querySelector("#tests-api-save");
   const refreshButton = root.querySelector("#tests-refresh");
   const flowBox = root.querySelector("#tests-flow");
+  const llmSummary = root.querySelector("#tests-llm-summary");
+  const llmList = root.querySelector("#tests-llm-list");
+  const llmFailures = root.querySelector("#tests-llm-failures");
+  const llmStatus = root.querySelector("#tests-llm-status");
+  const llmTest = root.querySelector("#tests-llm-test");
 
   const setStatus = (element, text, tone = "") => {
     if (!element) return;
@@ -387,6 +481,87 @@ export async function render(root, ctx, { embedded = false } = {}) {
     }
   };
 
+  const paintLlmCapabilities = () => {
+    const view = llmCapabilityMarkup(llmCapabilities);
+    if (llmSummary) llmSummary.innerHTML = view.summary;
+    if (llmList) llmList.innerHTML = view.list;
+    if (llmFailures) llmFailures.innerHTML = view.failures;
+    if (llmTest) {
+      llmTest.disabled = llmTestBusy;
+      llmTest.setAttribute("aria-busy", llmTestBusy ? "true" : "false");
+      const label = llmTest.querySelector("span");
+      if (label) {
+        label.textContent = llmTestBusy
+          ? "測試中…"
+          : "執行 LLM 服務測試";
+      }
+    }
+  };
+
+  const loadLlmCapabilities = async () => {
+    try {
+      const data = await api.llmModels();
+      if (disposed) return;
+      llmCapabilities = data;
+      setStatus(llmStatus, "");
+    } catch (error) {
+      if (disposed) return;
+      llmCapabilities = null;
+      setStatus(
+        llmStatus,
+        error.message || "無法讀取 Ollama 模型清單。",
+        "error",
+      );
+    }
+    if (!disposed) paintLlmCapabilities();
+  };
+
+  const runLlmServiceTest = async () => {
+    if (llmTestBusy) return;
+    llmTestBusy = true;
+    paintLlmCapabilities();
+    setStatus(llmStatus, "正在檢查 Ollama 模型與 chat 能力…");
+    try {
+      const data = await api.testLlmModels();
+      if (disposed) return;
+      llmCapabilities = data;
+      const tested = data.tested_now?.length || 0;
+      const chat = data.chat_models?.length || 0;
+      const failures = data.failures?.length || 0;
+      setStatus(
+        llmStatus,
+        `${
+          tested
+            ? `服務測試完成：本次新測 ${tested} 個模型`
+            : "服務測試完成：沒有新模型"
+        }，目前 ${chat} 個模型支援 chat${
+          failures ? `；${failures} 個模型暫時無法判定，下次會重試` : ""
+        }。`,
+        failures ? "warn" : "ok",
+      );
+      toast(
+        tested
+          ? `LLM 服務測試完成，新增 ${tested} 筆能力紀錄。`
+          : "LLM 服務測試完成，沒有新模型需要測試。",
+        failures ? "warn" : "ok",
+        5000,
+      );
+      await loadTestMode();
+    } catch (error) {
+      if (!disposed) {
+        setStatus(
+          llmStatus,
+          error.message || "LLM 服務測試失敗。",
+          "error",
+        );
+        toast(error.message || "LLM 服務測試失敗。", "danger", 6000);
+      }
+    } finally {
+      llmTestBusy = false;
+      if (!disposed) paintLlmCapabilities();
+    }
+  };
+
   const paintFlow = () => {
     if (!flowBox) return;
     const signature = flowSignature(testRun, testRuns, selectedRunId);
@@ -479,6 +654,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
   });
 
   modeToggle?.addEventListener("click", toggleTestMode);
+  llmTest?.addEventListener("click", runLlmServiceTest);
 
   flowBox?.addEventListener("change", async (event) => {
     if (event.target.id !== "test-run-select") return;
@@ -496,7 +672,11 @@ export async function render(root, ctx, { embedded = false } = {}) {
   refreshButton?.addEventListener("click", async () => {
     setBusy(refreshButton, true, "更新中…");
     syncApiForm();
-    await Promise.allSettled([loadTestMode(), loadTestRuns()]);
+    await Promise.allSettled([
+      loadTestMode(),
+      loadTestRuns(),
+      loadLlmCapabilities(),
+    ]);
     if (!disposed) await refreshFlow();
     if (!disposed) {
       setBusy(refreshButton, false);
@@ -513,7 +693,12 @@ export async function render(root, ctx, { embedded = false } = {}) {
 
   syncApiForm();
   paintTestMode();
-  await Promise.allSettled([loadTestMode(), loadTestRuns()]);
+  paintLlmCapabilities();
+  await Promise.allSettled([
+    loadTestMode(),
+    loadTestRuns(),
+    loadLlmCapabilities(),
+  ]);
   await refreshFlow();
 
   flowTimer = window.setInterval(async () => {
