@@ -13,7 +13,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
-from judgment.models import Base, JudgmentDocument, PerformanceRecord
+from judgment.models import (
+    Base,
+    JudgmentDocument,
+    JudgmentIndexVersion,
+    JudgmentVectorIndex,
+    PerformanceRecord,
+)
 from judgment.processing_state import (
     ProcessingStateStore,
     state_file_status,
@@ -23,6 +29,8 @@ from judgment.web.app import create_app
 from judgment.web.processing import (
     ProcessingManager,
     _build_timeline,
+    _import_month_timeline,
+    _index_month_coverage_runtime,
     _pipeline_processes_from_ps,
     build_processing_plan,
     build_processing_snapshot,
@@ -139,6 +147,28 @@ def test_state_store_tracks_run_archive_and_stages(
     status = state_file_status(state_path)
     assert status["status"] == "ok"
     assert status["runs"] == 1
+
+
+def test_state_store_accepts_partial_run(tmp_path: Path) -> None:
+    store = ProcessingStateStore(tmp_path / "processing.json")
+    run_id = store.start_run(
+        branch="judgment",
+        kind="judgment_download",
+        title="判決下載",
+        stages=["download"],
+        pid=os.getpid(),
+    )
+    store.start_stage(run_id, "download")
+    store.finish_stage(
+        run_id, "download", status="partial", message="待補齊月份已保留"
+    )
+    store.finish_run(run_id, status="partial", counts={"pending_count": 2})
+
+    run = store.read()["runs"][0]
+    assert run["status"] == "partial"
+    assert run["counts"]["pending_count"] == 2
+    assert run["stages"]["download"]["status"] == "partial"
+    assert run["stages"]["download"]["finished_at"]
 
 
 def test_state_store_marks_missing_process_stale(
@@ -789,6 +819,266 @@ def test_processing_snapshot_lists_workflows(processing_client: TestClient) -> N
     assert "index_versions" in workflows
     assert workflows["index_versions"]["script"] == "scripts/index_full_task.sh"
     assert workflows["law_download"]["program"].startswith("judgment-law-download")
+
+
+def test_processing_snapshot_exposes_index_runtime(
+    tmp_path: Path, monkeypatch, session_factory
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    store = ProcessingStateStore()
+    run_id = store.start_run(
+        branch="judgment",
+        kind="index",
+        title="Qdrant 向量索引版本",
+        stages=["ollama", "qdrant", "validate"],
+        pid=os.getpid(),
+    )
+    runtime = {
+        "version_id": 7,
+        "collection": "judgments_v007",
+        "alias": "judgments_current",
+        "build_mode": "reuse",
+        "model": "bge-m3",
+        "batch_size": 64,
+        "expected_count": 100,
+        "embedding": {
+            "status": "operational",
+            "model": "bge-m3",
+            "hosts": [
+                {
+                    "role": "primary",
+                    "url": "http://x570:11434",
+                    "host": "x570",
+                    "port": 11434,
+                    "status": "operational",
+                    "model": "bge-m3",
+                    "models": ["bge-m3"],
+                }
+            ],
+            "selected": {
+                "role": "primary",
+                "url": "http://x570:11434",
+                "host": "x570",
+                "port": 11434,
+                "model": "bge-m3",
+            },
+        },
+        "months": [
+            {
+                "month": "202608",
+                "archive": "202608.rar",
+                "total": 100,
+                "processed": 42,
+                "reused": 30,
+                "embedded": 12,
+                "percent": 42.0,
+                "status": "running",
+            }
+        ],
+        "current": {
+            "month": "202608",
+            "archive": "202608.rar",
+            "jid": "TPDV,115,金訴,1,20260801,1",
+            "batch_size": 64,
+            "indexed": 42,
+        },
+        "summary": {
+            "indexed": 42,
+            "total": 100,
+            "reused": 30,
+            "embedded": 12,
+        },
+    }
+    store.update_run(run_id, meta={"index_runtime": runtime})
+    store.finish_stage(run_id, "ollama", status="success", current=1, total=1)
+    store.finish_stage(run_id, "qdrant", status="running", current=42, total=100)
+    store.finish_run(run_id, status="running")
+
+    snapshot = build_processing_snapshot(
+        settings=_settings(tmp_path),
+        session_factory=session_factory,
+    )
+    workflow = next(
+        item for item in snapshot["workflows"] if item["id"] == "index_versions"
+    )
+    assert workflow["index_runtime"]["available"] is True
+    assert workflow["index_runtime"]["embedding"]["selected"]["host"] == "x570"
+    assert workflow["index_runtime"]["months"][0]["archive"] == "202608.rar"
+    assert workflow["index_runtime"]["current"]["jid"].startswith("TPDV")
+    assert [stage["key"] for stage in workflow["progress"]["stages"]] == [
+        "ollama",
+        "qdrant",
+        "validate",
+    ]
+
+
+def test_index_month_coverage_fallback_for_active_version(
+    tmp_path: Path, session_factory
+) -> None:
+    settings = _settings(tmp_path)
+    with session_factory() as session:
+        version = JudgmentIndexVersion(
+            physical_collection="judgments_v001",
+            alias_name=settings.judgment_vector_alias,
+            embedding_model=settings.embedding_model,
+            embedding_version=settings.judgment_embedding_version,
+            embedding_dimension=4,
+            status="active",
+            document_count=2,
+            indexed_count=1,
+        )
+        session.add(version)
+        session.flush()
+        session.add_all(
+            [
+                JudgmentDocument(
+                    jid="J-1",
+                    issue_month="202601",
+                    jdate="20260101",
+                    court="臺灣臺北地方法院",
+                    court_normalized="臺灣臺北地方法院",
+                    title="測試",
+                    source_archive="202601.rar",
+                    content_hash="a" * 64,
+                    full_text="依銀行法第 1 條規定。",
+                    full_text_length=13,
+                ),
+                JudgmentDocument(
+                    jid="J-2",
+                    issue_month="202602",
+                    jdate="20260201",
+                    court="臺灣臺北地方法院",
+                    court_normalized="臺灣臺北地方法院",
+                    title="測試",
+                    source_archive="202602.rar",
+                    content_hash="b" * 64,
+                    full_text="依銀行法第 1 條規定。",
+                    full_text_length=13,
+                ),
+                JudgmentVectorIndex(
+                    jid="J-1",
+                    version_id=version.version_id,
+                    collection="judgments_v001",
+                    model=settings.embedding_model,
+                ),
+            ]
+        )
+        session.commit()
+        version_id = version.version_id
+
+    payload = _index_month_coverage_runtime(
+        settings,
+        session_factory,
+        {
+            "version_id": version_id,
+            "indexed": 1,
+            "total": 2,
+            "remaining": 1,
+            "collection": "judgments_v001",
+            "model": settings.embedding_model,
+            "alias": settings.judgment_vector_alias,
+            "latest_indexed_at": None,
+        },
+    )
+    assert payload is not None
+    assert payload["coverage_only"] is True
+    assert payload["run_status"] == "partial"
+    months = {item["month"]: item for item in payload["months"]}
+    assert months["202601"]["processed"] == 1
+    assert months["202601"]["status"] == "success"
+    assert months["202602"]["processed"] == 0
+    assert months["202602"]["status"] == "pending"
+
+
+def test_import_month_timeline_marks_imported_unimported_and_updates(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / "download_manifest.json").write_text(
+        json.dumps(
+            {
+                "months": [
+                    {
+                        "month": "2026-01",
+                        "year": 2026,
+                        "month_no": 1,
+                        "status": "green",
+                        "filename": "202601.rar",
+                        "local_filename": "202601.rar",
+                        "latest_fileset_id": 1,
+                        "local_fileset_id": 1,
+                    },
+                    {
+                        "month": "2026-02",
+                        "year": 2026,
+                        "month_no": 2,
+                        "status": "green",
+                        "filename": "202602.rar",
+                        "local_filename": "202602.rar",
+                        "latest_fileset_id": 2,
+                        "local_fileset_id": 2,
+                    },
+                    {
+                        "month": "2026-03",
+                        "year": 2026,
+                        "month_no": 3,
+                        "status": "green",
+                        "filename": "202603-new.rar",
+                        "local_filename": "202603-new.rar",
+                        "latest_fileset_id": 3,
+                        "local_fileset_id": 3,
+                    },
+                    {
+                        "month": "2026-05",
+                        "year": 2026,
+                        "month_no": 5,
+                        "status": "gray",
+                        "filename": "202605.rar",
+                        "local_filename": "202605-old.rar",
+                        "latest_fileset_id": 6,
+                        "local_fileset_id": 5,
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    local = {
+        "items": [
+            {"name": "202601.rar", "processed": True},
+            {"name": "202602.rar", "processed": False},
+            {"name": "202603-new.rar", "processed": False},
+            {"name": "202604.rar", "processed": True},
+            {"name": "202605-old.rar", "processed": True},
+        ],
+        "processed_names": [
+            "202601.rar",
+            "202603-old.rar",
+            "202604.rar",
+            "202605-old.rar",
+        ],
+    }
+    archives = {
+        "items": [
+            {"name": "202602.rar", "status": "running", "current_stage": "postgres"}
+        ]
+    }
+    timeline = _import_month_timeline(settings, local, archives)
+    months = {item["month"]: item for item in timeline["months"]}
+    assert months["202601"]["status"] == "green"
+    assert months["202602"]["status"] == "red"
+    assert months["202602"]["active"] is True
+    assert months["202603"]["status"] == "gray"
+    assert months["202603"]["unimported_files"] == ["202603-new.rar"]
+    assert months["202604"]["status"] == "green"
+    assert months["202605"]["status"] == "gray"
+    assert timeline["summary"] == {"green": 2, "red": 1, "gray": 2}
+    assert timeline["active_month"] == "202602"
 
 
 def test_processing_workflow_endpoint_starts_selected_workflow(

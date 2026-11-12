@@ -7,6 +7,7 @@ from judgment.embeddings import (
     _PRIMARY_COOLDOWNS,
     EmbeddingError,
     OllamaEmbedder,
+    probe_embedding_hosts,
 )
 
 
@@ -26,6 +27,98 @@ class FakeResponse:
 
     def json(self):
         return {"embeddings": self._embeddings}
+
+
+class TagsResponse:
+    def __init__(self, models):
+        self._models = models
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"models": [{"name": name} for name in self._models]}
+
+
+def test_probe_embedding_hosts_selects_fallback_with_model(monkeypatch) -> None:
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if "primary.test" in url:
+            return TagsResponse(["other-model"])
+        return TagsResponse(["bge-m3:latest"])
+
+    monkeypatch.setattr("judgment.embeddings.httpx.get", fake_get)
+    result = probe_embedding_hosts(
+        primary_url="http://primary.test:11434",
+        fallback_url="http://fallback.test:11435",
+        model="bge-m3",
+    )
+    assert result["status"] == "operational"
+    selected = result["selected"]
+    assert selected["role"] == "fallback"
+    assert selected["url"] == "http://fallback.test:11435"
+    assert selected["host"] == "fallback.test"
+    assert selected["port"] == 11435
+    assert selected["models"] == ["bge-m3:latest"]
+    assert [host["status"] for host in result["hosts"]] == [
+        "degraded",
+        "operational",
+    ]
+    assert calls == [
+        "http://primary.test:11434/api/tags",
+        "http://fallback.test:11435/api/tags",
+    ]
+
+
+def test_probe_embedding_hosts_reports_no_usable_host(monkeypatch) -> None:
+    def fake_get(url, **kwargs):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr("judgment.embeddings.httpx.get", fake_get)
+    result = probe_embedding_hosts(
+        primary_url="http://primary.test:11434",
+        fallback_url="",
+        model="bge-m3",
+    )
+    assert result["status"] == "failed"
+    assert result["selected"] is None
+    assert result["hosts"][0]["status"] == "unavailable"
+    assert result["error"]
+
+
+def test_embedding_records_call_metrics(monkeypatch) -> None:
+    class MetricsResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "embeddings": [[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]],
+                "prompt_eval_count": 12,
+                "total_duration": 1_500_000,
+                "load_duration": 400_000,
+                "eval_duration": 900_000,
+            }
+
+    monkeypatch.setattr(
+        "judgment.embeddings.httpx.post",
+        lambda url, **kwargs: MetricsResponse(),
+    )
+    embedder = OllamaEmbedder("http://localhost:11434", "bge-m3", timeout=10)
+    vectors = embedder.embed(["測試一", "測試二"])
+    assert len(vectors) == 2
+    call = embedder.last_call
+    assert call["model"] == "bge-m3"
+    assert call["batch"] == 2
+    assert call["prompt_eval_count"] == 12
+    assert call["dimensions"] == 4
+    assert call["total_duration_ms"] == 1.5
+    assert call["load_duration_ms"] == 0.4
+    assert call["eval_duration_ms"] == 0.9
+    assert call["fallback"] is False
+    assert call["active_base_url"] == "http://localhost:11434"
 
 
 def test_embedding_falls_back_to_local_ollama(monkeypatch) -> None:
@@ -52,6 +145,59 @@ def test_embedding_falls_back_to_local_ollama(monkeypatch) -> None:
         "http://primary.test/api/embed",
         "http://127.0.0.1:11434/api/embed",
     ]
+
+
+def test_embedding_falls_through_multiple_fallback_hosts(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if "primary.test" in url or "fallback-one.test" in url:
+            raise httpx.ConnectError("offline")
+        return FakeResponse([[0.1, 0.2, 0.3, 0.4]])
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=10,
+        fallback_base_url="http://fallback-one.test",
+        fallback_base_urls=("http://fallback-two.test",),
+    )
+    vectors = embedder.embed(["測試"])
+    assert len(vectors) == 1
+    assert len(vectors[0]) == 4
+    assert embedder.using_fallback is True
+    assert embedder.active_base_url == "http://fallback-two.test"
+    assert embedder.fallback_base_urls == (
+        "http://fallback-one.test",
+        "http://fallback-two.test",
+    )
+    assert calls == [
+        "http://primary.test/api/embed",
+        "http://fallback-one.test/api/embed",
+        "http://fallback-two.test/api/embed",
+    ]
+
+
+def test_embedding_reports_all_provider_failures(monkeypatch) -> None:
+    def fake_post(url, **kwargs):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=10,
+        fallback_base_url="http://fallback-one.test",
+        fallback_base_urls=("http://fallback-two.test",),
+    )
+    with pytest.raises(EmbeddingError) as exc_info:
+        embedder.embed(["測試"])
+    message = str(exc_info.value)
+    assert "primary failed" in message
+    assert "fallback 1 (http://fallback-one.test) failed" in message
+    assert "fallback 2 (http://fallback-two.test) failed" in message
 
 
 def test_embedding_reports_both_provider_failures(monkeypatch) -> None:

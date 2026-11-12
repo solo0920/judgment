@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select, update
@@ -18,6 +19,7 @@ from ..models import (
     LawDocument,
     LawSource,
 )
+from ..update_records import record_update
 from .types import (
     ApplyResult,
     FetchedArchive,
@@ -334,6 +336,48 @@ class LawRepository:
                     removed=removed,
                     unchanged=unchanged,
                 )
+
+    def record_download_result(
+        self,
+        *,
+        source: SourceSpec,
+        fetched: FetchedArchive,
+        version_id: Optional[int],
+        zip_path: str,
+        message: str,
+    ) -> None:
+        path = Path(zip_path)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = None
+        download_date = (
+            path.parent.name
+            if path.parent.name.isdigit() and len(path.parent.name) == 8
+            else _now().strftime("%Y%m%d")
+        )
+        try:
+            record_update(
+                self.session_factory,
+                source_type=source.source_type.value,
+                source_url=source.url,
+                status="up_to_date",
+                update_available=False,
+                remote_filename=f"{source.json_filename}.zip",
+                remote_content_length=size,
+                remote_update_date=fetched.update_date,
+                local_version_id=version_id,
+                local_update_date=fetched.update_date,
+                local_zip_sha256=fetched.zip_sha256,
+                download_path=str(path),
+                download_date=download_date,
+                message=message,
+            )
+        except Exception:
+            logger.warning(
+                "無法寫入 %s 的下載更新紀錄", source.source_type.value,
+                exc_info=True,
+            )
 
     def finish_run(
         self,

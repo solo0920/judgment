@@ -292,6 +292,13 @@ class FlowTrace:
             ),
             2,
         )
+        finish_offset = round(
+            float(segment.get("offset_ms") or 0)
+            + float(segment.get("duration_ms") or 0),
+            2,
+        )
+        segment["finished_at"] = datetime.now(timezone.utc).isoformat()
+        segment["end_offset_ms"] = finish_offset
         if error is not None:
             segment["status"] = "error"
             segment["error"] = f"{error.__class__.__name__}: {error}"[:1000]
@@ -529,9 +536,11 @@ def record_client_timing(
                     },
                     "param_names": ["render_ms", "route", "total_ms"],
                     "started_at": datetime.now(timezone.utc).isoformat(),
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
                     "offset_ms": max(
                         0, int(total_ms or 0) - int(render_ms or 0)
                     ),
+                    "end_offset_ms": max(0, int(total_ms or 0)),
                     "duration_ms": max(0, int(render_ms or 0)),
                     "status": "ok",
                     "error": None,
@@ -577,7 +586,9 @@ def _summary_flow(
         "params": safe_params,
         "param_names": sorted(str(key) for key in safe_params),
         "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
         "offset_ms": 0.0,
+        "end_offset_ms": float(max(0, int(duration_ms or 0))),
         "duration_ms": float(max(0, int(duration_ms or 0))),
         "status": "error"
         if str(status or "").lower() in {"failed", "error"}

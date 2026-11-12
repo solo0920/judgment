@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .models import AppSetting
 
 TEST_MODE_KEY = "test_mode"
+LLM_MODEL_PREFERENCE_KEY = "llm_model_preference"
 
 
 def get_app_setting(
@@ -61,6 +62,33 @@ def set_test_mode(
         TEST_MODE_KEY,
         {
             "enabled": bool(enabled),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+def get_llm_model_preference(
+    session_factory: sessionmaker[Session],
+) -> Dict[str, Any]:
+    return get_app_setting(
+        session_factory,
+        LLM_MODEL_PREFERENCE_KEY,
+        {},
+    )
+
+
+def set_llm_model_preference(
+    session_factory: sessionmaker[Session],
+    *,
+    model: str,
+    base_url: str,
+) -> Dict[str, Any]:
+    return set_app_setting(
+        session_factory,
+        LLM_MODEL_PREFERENCE_KEY,
+        {
+            "model": str(model or "").strip()[:200],
+            "base_url": str(base_url or "").rstrip("/")[:300],
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     )

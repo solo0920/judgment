@@ -30,6 +30,7 @@ class FetchedArchive:
     payload: Dict[str, Any]
     update_date: str
     http_status: int
+    filename: str = ""
 
 
 @dataclass

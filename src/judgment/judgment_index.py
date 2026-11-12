@@ -10,13 +10,18 @@ import sys
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import delete, exists, func, insert, or_, select
 
 from .config import Settings
 from .db import build_engine, build_session_factory, init_db
-from .embeddings import EmbeddingError, OllamaEmbedder
+from .embeddings import (
+    EmbeddingError,
+    OllamaEmbedder,
+    probe_embedding_hosts,
+)
 from .index_progress import IndexProgress
 from .index_versions import (
     activate_version,
@@ -36,6 +41,7 @@ from .index_versions import (
 )
 from .models import JudgmentDocument, JudgmentVectorIndex
 from .observability import record_performance
+from .ollama_hosts import runtime_settings
 from .processing_state import ProcessingStateStore, parent_run_id
 from .vector_store import QdrantError, QdrantStore
 
@@ -44,6 +50,7 @@ logger = logging.getLogger(__name__)
 _COLUMNS = (
     JudgmentDocument.id,
     JudgmentDocument.jid,
+    JudgmentDocument.issue_month,
     JudgmentDocument.court_normalized,
     JudgmentDocument.title,
     JudgmentDocument.jdate,
@@ -62,13 +69,96 @@ def vector_point_id(jid: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"judgment:{jid}"))
 
 
+def history_point_id(jid: str, version_id: int) -> str:
+    return str(uuid5(NAMESPACE_URL, f"judgment-history:{jid}:{int(version_id)}"))
+
+
+def _archive_history_points(
+    store,
+    *,
+    source_collection: str,
+    history_collection: str,
+    point_ids: Sequence[str],
+    previous_version_id: int,
+    version_id: int,
+) -> int:
+    if (
+        not source_collection
+        or not history_collection
+        or not point_ids
+        or source_collection == history_collection
+    ):
+        return 0
+    try:
+        points = store.retrieve_points(
+            source_collection,
+            list(point_ids),
+            with_payload=True,
+            with_vector=True,
+        )
+    except Exception:
+        logger.warning(
+            "無法讀取舊向量，history 略過（source=%s）",
+            source_collection,
+            exc_info=True,
+        )
+        return 0
+    history_points = []
+    for point in points or []:
+        payload = dict(point.get("payload") or {})
+        jid = str(payload.get("jid") or "")
+        vector = point.get("vector")
+        if not jid or not vector:
+            continue
+        payload.update(
+            {
+                "jid": jid,
+                "is_current": False,
+                "history_version_id": int(previous_version_id),
+                "valid_from_version_id": int(
+                    payload.get("valid_from_version_id") or previous_version_id
+                ),
+                "valid_to_version_id": int(version_id),
+                "superseded_by_version_id": int(version_id),
+            }
+        )
+        history_points.append(
+            {
+                "id": history_point_id(jid, int(previous_version_id)),
+                "vector": vector,
+                "payload": payload,
+            }
+        )
+    if not history_points:
+        return 0
+    try:
+        size = len(history_points[0]["vector"])
+        store.ensure_collection(history_collection, size=size)
+        for field in ("jid", "history_version_id", "valid_to_version_id"):
+            store.ensure_payload_index(history_collection, field, "keyword")
+        store.upsert(history_collection, history_points)
+    except Exception:
+        logger.warning(
+            "無法寫入 Qdrant history collection %s",
+            history_collection,
+            exc_info=True,
+        )
+        return 0
+    return len(history_points)
+
+
 def _hash_text(value: str) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
 
 
 def _payload_hash(payload: Dict[str, Any]) -> str:
+    stable = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"valid_from_version_id", "valid_to_version_id", "is_current"}
+    }
     return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        json.dumps(stable, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
 
@@ -134,7 +224,14 @@ def index_coverage(
             JudgmentVectorIndex.version_id == int(version_id)
         )
     with session_factory() as session:
-        total = int(session.scalar(select(func.count()).select_from(JudgmentDocument)) or 0)
+        total = int(
+            session.scalar(
+                select(func.count())
+                .select_from(JudgmentDocument)
+                .where(JudgmentDocument.is_current.is_(True))
+            )
+            or 0
+        )
         indexed = int(
             session.scalar(
                 select(func.count())
@@ -182,7 +279,11 @@ def _candidate_statement(
             JudgmentVectorIndex,
             index_join,
         )
-        .where(JudgmentDocument.id > last_id, JudgmentDocument.full_text != "")
+        .where(
+            JudgmentDocument.id > last_id,
+            JudgmentDocument.full_text != "",
+            JudgmentDocument.is_current.is_(True),
+        )
     )
     if stride > 1:
         statement = statement.where(JudgmentDocument.id % stride == 0)
@@ -200,6 +301,202 @@ def _candidate_statement(
     if jid:
         statement = statement.where(JudgmentDocument.jid == jid)
     return statement.order_by(JudgmentDocument.id).limit(batch_size)
+
+
+def _month_source_totals(session_factory) -> List[Dict[str, Any]]:
+    with session_factory() as session:
+        rows = session.execute(
+            select(
+                JudgmentDocument.issue_month,
+                JudgmentDocument.source_archive,
+                func.count(),
+            )
+            .where(JudgmentDocument.is_current.is_(True))
+            .group_by(
+                JudgmentDocument.issue_month,
+                JudgmentDocument.source_archive,
+            )
+            .order_by(
+                JudgmentDocument.issue_month.desc(),
+                JudgmentDocument.source_archive.asc(),
+            )
+        ).all()
+    return [
+        {
+            "month": str(row[0] or ""),
+            "archive": str(row[1] or ""),
+            "total": int(row[2] or 0),
+        }
+        for row in rows
+    ]
+
+
+def _indexed_month_counts(
+    session_factory,
+    *,
+    version_id: Optional[int],
+    collection: str = "",
+    model: str = "",
+) -> Dict[tuple[str, str], int]:
+    filters = [JudgmentDocument.is_current.is_(True)]
+    if version_id is not None:
+        filters.append(JudgmentVectorIndex.version_id == int(version_id))
+    else:
+        filters.extend(
+            [
+                JudgmentVectorIndex.collection == str(collection or ""),
+                JudgmentVectorIndex.model == str(model or ""),
+            ]
+        )
+    with session_factory() as session:
+        rows = session.execute(
+            select(
+                JudgmentDocument.issue_month,
+                JudgmentDocument.source_archive,
+                func.count(),
+            )
+            .select_from(JudgmentVectorIndex)
+            .join(
+                JudgmentDocument,
+                JudgmentDocument.jid == JudgmentVectorIndex.jid,
+            )
+            .where(*filters)
+            .group_by(
+                JudgmentDocument.issue_month,
+                JudgmentDocument.source_archive,
+            )
+        ).all()
+    return {
+        (str(row[0] or ""), str(row[1] or "")): int(row[2] or 0)
+        for row in rows
+    }
+
+
+def _month_runtime_rows(
+    session_factory,
+    *,
+    version_id: Optional[int],
+    collection: str = "",
+    model: str = "",
+) -> Dict[tuple[str, str], Dict[str, Any]]:
+    current = _indexed_month_counts(
+        session_factory,
+        version_id=version_id,
+        collection=collection,
+        model=model,
+    )
+    rows: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for item in _month_source_totals(session_factory):
+        month = item["month"]
+        key = (month, item["archive"])
+        total = int(item["total"])
+        processed = min(total, int(current.get(key) or 0))
+        rows[key] = {
+            "month": month,
+            "archive": item["archive"],
+            "total": total,
+            "processed": processed,
+            "reused": 0,
+            "embedded": 0,
+            "percent": round(100.0 * processed / total, 1) if total else None,
+            "status": "success" if total and processed >= total else "pending",
+        }
+    return rows
+
+
+def index_month_coverage(
+    session_factory,
+    *,
+    version_id: Optional[int],
+    collection: str,
+    model: str,
+) -> Dict[str, Any]:
+    """Return per-month index coverage for the active collection/version."""
+
+    rows = _month_runtime_rows(
+        session_factory,
+        version_id=version_id,
+        collection=collection,
+        model=model,
+    )
+    months = sorted(
+        rows.values(),
+        key=lambda item: (item["month"], item["archive"]),
+        reverse=True,
+    )
+    total = sum(int(item["total"]) for item in months)
+    processed = sum(int(item["processed"]) for item in months)
+    return {
+        "months": months,
+        "summary": {
+            "indexed": processed,
+            "total": total,
+        },
+    }
+
+
+def _endpoint_view(url: str, model: str) -> Dict[str, Any]:
+    parsed = urlparse(str(url or ""))
+    return {
+        "url": str(url or "").rstrip("/"),
+        "host": parsed.hostname or "",
+        "port": parsed.port or 11434,
+        "model": str(model or ""),
+    }
+
+
+def _provided_embedding_probe(embedder, model: str) -> Dict[str, Any]:
+    url = str(getattr(embedder, "base_url", "") or "").rstrip("/")
+    selected = _endpoint_view(url, model) if url else {
+        "url": "",
+        "host": "",
+        "port": None,
+        "model": model,
+    }
+    return {
+        "status": "provided",
+        "model": model,
+        "tested_at": datetime.now(timezone.utc).isoformat(),
+        "hosts": (
+            [{**selected, "role": "provided", "status": "provided"}]
+            if url
+            else []
+        ),
+        "selected": selected,
+        "error": "",
+    }
+
+
+def _active_embedding_view(embedder, model: str) -> Dict[str, Any]:
+    url = str(
+        getattr(embedder, "active_base_url", "")
+        or getattr(embedder, "base_url", "")
+        or ""
+    ).rstrip("/")
+    view = _endpoint_view(url, model)
+    view["using_fallback"] = bool(getattr(embedder, "using_fallback", False))
+    return view
+
+
+def _publish_index_runtime(
+    state: Optional[ProcessingStateStore],
+    state_run_id: Optional[str],
+    runtime: Optional[Dict[str, Any]],
+    *,
+    message: str = "",
+) -> None:
+    if (
+        state is None
+        or state_run_id is None
+        or runtime is None
+    ):
+        return
+    runtime["updated_at"] = datetime.now(timezone.utc).isoformat()
+    state.update_run(
+        state_run_id,
+        meta={"index_runtime": runtime},
+        message=message or None,
+    )
 
 
 def _batch_stats(durations: Sequence[float]) -> Dict[str, Any]:
@@ -277,6 +574,7 @@ def index_judgments(
         model,
         timeout=settings.embedding_timeout_seconds,
         fallback_base_url=settings.embedding_fallback_url,
+        fallback_base_urls=settings.embedding_failover_urls,
     )
     scan_all = bool(all_rows or recreate)
 
@@ -713,6 +1011,7 @@ def build_index_version(
     auto_activate: bool = False,
     resume: bool = True,
     run_label: str = "",
+    track_state: bool = False,
 ) -> Dict[str, Any]:
     """Build a complete blue-green index version.
 
@@ -728,18 +1027,108 @@ def build_index_version(
         api_key=settings.qdrant_api_key,
         timeout=120.0,
     )
-    embedder = embedder or OllamaEmbedder(
-        settings.embedding_url,
-        settings.embedding_model,
-        timeout=settings.embedding_timeout_seconds,
-        fallback_base_url=settings.embedding_fallback_url,
-    )
+    model = settings.embedding_model
+    if embedder is None:
+        host_probe = probe_embedding_hosts(
+            primary_url=settings.embedding_url,
+            fallback_url=settings.embedding_fallback_url,
+            fallback_urls=settings.embedding_failover_urls,
+            model=model,
+            timeout=min(3.0, settings.embedding_timeout_seconds),
+        )
+        selected = host_probe.get("selected")
+        if not selected:
+            detail = "；".join(
+                f"{host.get('role') or 'host'} {host.get('url') or '—'}: "
+                f"{host.get('detail') or host.get('status')}"
+                for host in host_probe.get("hosts") or []
+            )
+            message = (
+                f"{host_probe.get('error') or 'Ollama 連線測試失敗'}"
+                + (f"（{detail}）" if detail else "")
+            )
+            if track_state:
+                try:
+                    failed_state = ProcessingStateStore()
+                    failed_runtime = {
+                        "version_id": None,
+                        "collection": "",
+                        "alias": settings.judgment_vector_alias,
+                        "build_mode": "probe",
+                        "model": model,
+                        "batch_size": batch_size,
+                        "expected_count": 0,
+                        "embedding": host_probe,
+                        "months": [],
+                        "current": {},
+                        "summary": {
+                            "indexed": 0,
+                            "total": 0,
+                            "reused": 0,
+                            "embedded": 0,
+                            "points_upserted": 0,
+                        },
+                        "status": "failed",
+                        "error": message,
+                        "started_at": started_at.isoformat(),
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    failed_run_id = failed_state.start_run(
+                        branch="judgment",
+                        kind="index",
+                        title="Qdrant 向量索引版本",
+                        stages=["ollama", "qdrant", "validate"],
+                        meta={
+                            "index_runtime": failed_runtime,
+                            "parent_run_id": parent_run_id(),
+                        },
+                        message=message,
+                    )
+                    total_hosts = max(1, len(host_probe.get("hosts") or []))
+                    failed_state.start_stage(
+                        failed_run_id,
+                        "ollama",
+                        total=total_hosts,
+                        message="測試 Ollama 主機與 embedding 模型。",
+                    )
+                    failed_state.finish_stage(
+                        failed_run_id,
+                        "ollama",
+                        status="failed",
+                        current=0,
+                        total=total_hosts,
+                        message=message,
+                    )
+                    failed_state.finish_run(
+                        failed_run_id,
+                        status="failed",
+                        message=message,
+                    )
+                except Exception:
+                    logger.warning(
+                        "無法記錄 Ollama 測試失敗狀態", exc_info=True
+                    )
+            raise EmbeddingError(message)
+        fallback_urls = [
+            str(host.get("url") or "")
+            for host in host_probe.get("hosts") or []
+            if host.get("status") == "operational"
+            and host.get("url")
+            and host.get("url") != selected.get("url")
+        ]
+        embedder = OllamaEmbedder(
+            str(selected.get("url") or ""),
+            model,
+            timeout=settings.embedding_timeout_seconds,
+            fallback_base_url=fallback_urls[0] if fallback_urls else "",
+            fallback_base_urls=fallback_urls[1:],
+        )
+    else:
+        host_probe = _provided_embedding_probe(embedder, model)
     if not store.configured:
         raise QdrantError("QDRANT_URL 未設定")
     if not embedder.configured:
         raise EmbeddingError("EMBEDDING_URL 未設定")
-
-    model = settings.embedding_model
     recipe_version = (
         f"{settings.judgment_index_recipe_version}-{int(max_chars or settings.judgment_index_max_chars)}"
     )
@@ -825,6 +1214,11 @@ def build_index_version(
     embedded_count = 0
     points_upserted = 0
     deleted_points = 0
+    history_points = 0
+    history_collection = (
+        settings.judgment_vector_history_collection.strip()
+        or f"{collection}_history"
+    )
     scanned = 0
     batch_durations: List[float] = []
     embedding_durations: List[float] = []
@@ -833,7 +1227,104 @@ def build_index_version(
     progress_samples: List[Dict[str, Any]] = []
     last_progress_at = 0.0
 
+    state: Optional[ProcessingStateStore] = None
+    state_run_id: Optional[str] = None
+    month_runtime: Dict[tuple[str, str], Dict[str, Any]] = {}
+    runtime: Optional[Dict[str, Any]] = None
+    active_stage = "qdrant"
+    if track_state:
+        try:
+            state = ProcessingStateStore()
+            month_runtime = _month_runtime_rows(
+                session_factory, version_id=version_id
+            )
+            runtime = {
+                "version_id": version_id,
+                "collection": collection,
+                "alias": settings.judgment_vector_alias,
+                "build_mode": build_mode,
+                "model": model,
+                "batch_size": batch_size,
+                "expected_count": expected_count,
+                "embedding": {
+                    **host_probe,
+                    "active": _active_embedding_view(embedder, model),
+                },
+                "months": sorted(
+                    month_runtime.values(),
+                    key=lambda item: (item["month"], item["archive"]),
+                    reverse=True,
+                ),
+                "current": {},
+                "summary": {
+                    "indexed": indexed,
+                    "total": expected_count,
+                    "reused": reused_count,
+                    "embedded": embedded_count,
+                    "points_upserted": points_upserted,
+                },
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            state_run_id = state.start_run(
+                branch="judgment",
+                kind="index",
+                title="Qdrant 向量索引版本",
+                stages=["ollama", "qdrant", "validate"],
+                meta={
+                    "index_runtime": runtime,
+                    "parent_run_id": parent_run_id(),
+                    "version_id": version_id,
+                    "collection": collection,
+                },
+                message=f"準備建置索引版本 v{version_id:03d}。",
+            )
+            hosts = host_probe.get("hosts") or []
+            selected = host_probe.get("selected") or {}
+            state.start_stage(
+                state_run_id,
+                "ollama",
+                total=max(1, len(hosts)),
+                message="測試 Ollama 主機與 embedding 模型。",
+            )
+            state.finish_stage(
+                state_run_id,
+                "ollama",
+                status="success",
+                current=max(1, len(hosts)),
+                total=max(1, len(hosts)),
+                message=(
+                    f"選用 {selected.get('url') or '—'} · "
+                    f"{model} · port {selected.get('port') or '—'}"
+                ),
+            )
+        except Exception:
+            logger.warning("無法建立索引處理狀態", exc_info=True)
+            state = None
+            state_run_id = None
+            runtime = None
+    active_stage = "qdrant"
+
+    def on_copy_progress(copied: int, total: int) -> None:
+        progress.copy_update(copied, total)
+        if state is not None and state_run_id is not None:
+            state.update_stage(
+                state_run_id,
+                "qdrant",
+                current=copied,
+                total=total,
+                status="running",
+                message=f"複製可重用向量 {copied:,} / {total:,} points。",
+            )
+
     try:
+        if state is not None and state_run_id is not None:
+            state.start_stage(
+                state_run_id,
+                "qdrant",
+                total=expected_count,
+                message="準備逐批判決 embedding 並寫入 Qdrant。",
+            )
         if build_mode == "reuse" and previous and indexed == 0:
             source_collection = str(previous["physical_collection"])
             if store.collection_info(source_collection) is None:
@@ -847,7 +1338,7 @@ def build_index_version(
                 source_collection,
                 collection,
                 batch_size=256,
-                on_progress=progress.copy_update,
+                on_progress=on_copy_progress,
             )
             for field in ("jid", "court", "jdate", "source_archive"):
                 store.ensure_payload_index(collection, field, "keyword")
@@ -858,6 +1349,15 @@ def build_index_version(
                 last_indexed_id=0,
                 embedding_dimension=dimensions,
             )
+            if state is not None and state_run_id is not None:
+                state.update_stage(
+                    state_run_id,
+                    "qdrant",
+                    current=0,
+                    total=expected_count,
+                    status="running",
+                    message="舊 collection 複製完成，開始逐批判決索引。",
+                )
         if indexed == 0:
             last_id = 0
 
@@ -880,6 +1380,7 @@ def build_index_version(
                         JudgmentDocument.id
                         <= int(snapshot.get("max_judgment_id") or 0),
                         JudgmentDocument.full_text != "",
+                        JudgmentDocument.is_current.is_(True),
                     )
                     .order_by(JudgmentDocument.id)
                     .limit(current_limit)
@@ -920,6 +1421,9 @@ def build_index_version(
                     "embedding_version": settings.judgment_embedding_version,
                     "index_recipe_version": recipe_version,
                     "source_year": years[index],
+                    "valid_from_version_id": version_id,
+                    "valid_to_version_id": None,
+                    "is_current": True,
                 }
                 for index, row in enumerate(rows)
             ]
@@ -972,6 +1476,23 @@ def build_index_version(
                     changed_indices.append(index)
                 else:
                     reused_flags[index] = True
+
+            if changed_indices and previous:
+                previous_version_id = int(previous["version_id"])
+                old_point_ids = [
+                    vector_point_id(str(rows[index]["jid"]))
+                    for index in changed_indices
+                    if str(rows[index]["jid"]) in previous_rows
+                ]
+                if old_point_ids:
+                    history_points += _archive_history_points(
+                        store,
+                        source_collection=str(previous["physical_collection"]),
+                        history_collection=history_collection,
+                        point_ids=old_point_ids,
+                        previous_version_id=previous_version_id,
+                        version_id=version_id,
+                    )
 
             vectors: List[List[float]] = []
             if changed_indices:
@@ -1054,6 +1575,108 @@ def build_index_version(
                 last_indexed_id=last_id,
                 embedding_dimension=dimensions,
             )
+            if (
+                state is not None
+                and state_run_id is not None
+                and runtime is not None
+            ):
+                changed_set = set(changed_indices)
+                for index, row in enumerate(rows):
+                    month = str(row["issue_month"] or "")
+                    archive = str(row["source_archive"] or "")
+                    key = (month, archive)
+                    item = month_runtime.get(key)
+                    if item is None:
+                        item = {
+                            "month": month,
+                            "archive": archive,
+                            "total": 0,
+                            "processed": 0,
+                            "reused": 0,
+                            "embedded": 0,
+                            "percent": None,
+                            "status": "pending",
+                        }
+                        month_runtime[key] = item
+                    item["processed"] = int(item["processed"]) + 1
+                    item["total"] = max(
+                        int(item["total"]), int(item["processed"])
+                    )
+                    field = "embedded" if index in changed_set else "reused"
+                    item[field] = int(item[field]) + 1
+                    item["percent"] = (
+                        round(
+                            100.0
+                            * int(item["processed"])
+                            / int(item["total"]),
+                            1,
+                        )
+                        if int(item["total"])
+                        else None
+                    )
+                current_row = rows[-1]
+                current_key = (
+                    str(current_row["issue_month"] or ""),
+                    str(current_row["source_archive"] or ""),
+                )
+                for key, item in month_runtime.items():
+                    if key == current_key:
+                        item["status"] = "running"
+                    elif int(item["total"]) and int(item["processed"]) >= int(
+                        item["total"]
+                    ):
+                        item["status"] = "success"
+                    elif int(item["processed"]) > 0:
+                        item["status"] = "partial"
+                    else:
+                        item["status"] = "pending"
+                runtime["months"] = sorted(
+                    month_runtime.values(),
+                    key=lambda item: (item["month"], item["archive"]),
+                    reverse=True,
+                )
+                runtime["current"] = {
+                    "month": current_key[0],
+                    "archive": current_key[1],
+                    "jid": str(current_row["jid"] or ""),
+                    "first_jid": str(rows[0]["jid"] or ""),
+                    "last_jid": str(current_row["jid"] or ""),
+                    "title": str(current_row["title"] or ""),
+                    "court": str(current_row["court_normalized"] or ""),
+                    "jdate": str(current_row["jdate"] or ""),
+                    "batch_size": len(rows),
+                    "scanned": scanned,
+                    "indexed": indexed,
+                }
+                runtime["embedding"]["active"] = _active_embedding_view(
+                    embedder, model
+                )
+                runtime["summary"] = {
+                    "indexed": indexed,
+                    "total": expected_count,
+                    "reused": reused_count,
+                    "embedded": embedded_count,
+                    "points_upserted": points_upserted,
+                }
+                progress_message = (
+                    f"索引 {indexed:,}/{expected_count:,} · "
+                    f"{current_key[0] or '—'} {current_key[1] or '—'} · "
+                    f"{current_row['jid']}"
+                )
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message=progress_message,
+                )
+                state.update_stage(
+                    state_run_id,
+                    "qdrant",
+                    current=indexed,
+                    total=expected_count,
+                    status="running",
+                    message=progress_message,
+                )
             now = time.perf_counter()
             if not progress_samples or now - last_progress_at >= 60.0:
                 elapsed_s = max(0.001, now - started)
@@ -1086,6 +1709,7 @@ def build_index_version(
                                     JudgmentDocument.jid
                                     == JudgmentVectorIndex.jid,
                                     JudgmentDocument.full_text != "",
+                                    JudgmentDocument.is_current.is_(True),
                                     JudgmentDocument.id
                                     <= int(
                                         snapshot.get("max_judgment_id") or 0
@@ -1096,6 +1720,14 @@ def build_index_version(
                     ).all()
                 ]
             if stale_jids:
+                history_points += _archive_history_points(
+                    store,
+                    source_collection=str(previous["physical_collection"]),
+                    history_collection=history_collection,
+                    point_ids=[vector_point_id(jid) for jid in stale_jids],
+                    previous_version_id=previous_version_id,
+                    version_id=version_id,
+                )
                 deleted_points = store.delete_points(
                     collection,
                     [vector_point_id(jid) for jid in stale_jids],
@@ -1109,6 +1741,22 @@ def build_index_version(
             last_indexed_id=last_id,
             embedding_dimension=dimensions,
         )
+        if state is not None and state_run_id is not None:
+            state.finish_stage(
+                state_run_id,
+                "qdrant",
+                status="success",
+                current=indexed,
+                total=expected_count,
+                message=f"索引完成：{indexed:,} / {expected_count:,} 筆。",
+            )
+            state.start_stage(
+                state_run_id,
+                "validate",
+                total=expected_count,
+                message="驗證 collection 筆數、維度與 alias。",
+            )
+        active_stage = "validate"
         version_data = get_version(session_factory, version_id) or {}
         validation = validate_version(
             session_factory, store=store, version=version_data
@@ -1140,6 +1788,8 @@ def build_index_version(
             "embedded_count": embedded_count,
             "points_upserted": points_upserted,
             "deleted_points": deleted_points,
+            "history_collection": history_collection,
+            "history_points": history_points,
             "dimensions": dimensions,
             "duration_ms": duration_ms,
             "batch_count": len(batch_durations),
@@ -1147,7 +1797,58 @@ def build_index_version(
             "validation": validation,
             "activated": activated,
             "task": run_label,
+            "embedding_host": host_probe.get("selected"),
+            "host_tests": host_probe.get("hosts"),
         }
+        if state is not None and state_run_id is not None:
+            ready = validation_status == "ready"
+            if runtime is not None:
+                runtime["status"] = "success" if ready else "failed"
+                runtime["finished_at"] = datetime.now(timezone.utc).isoformat()
+                runtime["summary"] = {
+                    "indexed": indexed,
+                    "total": expected_count,
+                    "reused": reused_count,
+                    "embedded": embedded_count,
+                    "points_upserted": points_upserted,
+                }
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message="索引驗證完成。" if ready else "索引驗證失敗。",
+                )
+            state.finish_stage(
+                state_run_id,
+                "validate",
+                status="success" if ready else "failed",
+                current=indexed,
+                total=expected_count,
+                message=(
+                    f"驗證 {validation_status or 'failed'}；"
+                    + (
+                        f"alias 已切換到 v{int(activated.get('version_id') or 0):03d}。"
+                        if activated
+                        else "alias 未切換。"
+                    )
+                ),
+            )
+            state.finish_run(
+                state_run_id,
+                status="success" if ready else "failed",
+                message=(
+                    f"索引版本 v{version_id:03d} 完成："
+                    f"{indexed:,} 筆，驗證 {validation_status or 'failed'}。"
+                    if ready
+                    else f"索引版本 v{version_id:03d} 驗證失敗。"
+                ),
+                counts={
+                    "indexed_count": indexed,
+                    "reused_count": reused_count,
+                    "embedded_count": embedded_count,
+                    "points_upserted": points_upserted,
+                },
+            )
         record_performance(
             session_factory,
             process="判決向量索引版本",
@@ -1170,6 +1871,34 @@ def build_index_version(
         return summary
     except Exception as exc:
         progress.finish(indexed)
+        if state is not None and state_run_id is not None:
+            message = f"{exc.__class__.__name__}: {exc}"
+            try:
+                state.finish_stage(
+                    state_run_id,
+                    active_stage,
+                    status="failed",
+                    current=indexed,
+                    total=expected_count,
+                    message=message,
+                )
+            except Exception:
+                logger.warning("無法標記索引階段失敗", exc_info=True)
+            if runtime is not None:
+                runtime["status"] = "failed"
+                runtime["error"] = message
+                runtime["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message=f"索引失敗：{message}",
+                )
+            state.finish_run(
+                state_run_id,
+                status="failed",
+                message=f"索引版本 v{version_id:03d} 失敗：{message}",
+            )
         mark_version_failed(
             session_factory,
             version_id=version_id,
@@ -1222,6 +1951,12 @@ def _print_build_summary(summary: Dict[str, Any]) -> None:
     print("建置結果")
     print(f"  版本：v{int(summary.get('version_id') or 0):03d} · {summary.get('collection')}")
     print(f"  模式：{summary.get('build_mode')}")
+    host = summary.get("embedding_host") or {}
+    if host:
+        print(
+            f"  Ollama：{host.get('url') or '—'} · {host.get('model') or '—'}"
+            f" · port {host.get('port') or '—'}"
+        )
     print(
         f"  文件：{int(summary.get('indexed_count') or 0):,}"
         f" / {int(summary.get('document_count') or 0):,}"
@@ -1230,6 +1965,10 @@ def _print_build_summary(summary: Dict[str, Any]) -> None:
     print(f"  新 embedding：{int(summary.get('embedded_count') or 0):,}")
     print(f"  Qdrant points：{int(summary.get('points_upserted') or 0):,}")
     print(f"  刪除 points：{int(summary.get('deleted_points') or 0):,}")
+    print(
+        f"  History points：{int(summary.get('history_points') or 0):,}"
+        f"（{summary.get('history_collection') or '—'}）"
+    )
     print(f"  驗證：{validation.get('status') or '—'}")
     print(f"  耗時：{_format_elapsed(int(summary.get('duration_ms') or 0))}")
     if activated:
@@ -1350,6 +2089,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     engine = build_engine(settings.database_url)
     init_db(engine)
     session_factory = build_session_factory(engine)
+    if not args.embedding_url and not args.embedding_model:
+        settings = runtime_settings(settings, session_factory)
     store = QdrantStore(
         settings.qdrant_url,
         api_key=settings.qdrant_api_key,
@@ -1429,6 +2170,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 auto_activate=args.activate,
                 resume=not args.no_resume,
                 run_label=os.getenv("INDEX_TASK", "").strip(),
+                track_state=True,
             )
         else:
             store = None

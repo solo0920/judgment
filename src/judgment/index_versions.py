@@ -130,7 +130,10 @@ def capture_source_snapshot(
             session.scalar(
                 select(func.count())
                 .select_from(JudgmentDocument)
-                .where(JudgmentDocument.full_text != "")
+                .where(
+                    JudgmentDocument.full_text != "",
+                    JudgmentDocument.is_current.is_(True),
+                )
             )
             or 0
         )
@@ -187,7 +190,10 @@ def ensure_legacy_version(
             session.scalar(
                 select(func.count())
                 .select_from(JudgmentDocument)
-                .where(JudgmentDocument.full_text != "")
+                .where(
+                    JudgmentDocument.full_text != "",
+                    JudgmentDocument.is_current.is_(True),
+                )
             )
             or 0
         )

@@ -4,7 +4,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from judgment.court_normalize import normalize_judgment_courts
+from judgment.court_normalize import (
+    check_court_normalization,
+    normalize_judgment_courts,
+)
 from judgment.models import Base, JudgmentDocument, PerformanceRecord
 
 
@@ -86,4 +89,77 @@ def test_normalize_judgment_courts_backfills_and_records_performance() -> None:
     }
     assert performance
     assert performance[-1].process == "判決法院正規化"
+    engine.dispose()
+
+
+def test_check_court_normalization_reports_month_statuses() -> None:
+    engine, session_factory = _session_factory()
+    with session_factory() as session:
+        session.add_all(
+            [
+                JudgmentDocument(
+                    jid="A1",
+                    issue_month="202601",
+                    court="臺北",
+                    court_normalized="臺灣臺北地方法院",
+                ),
+                JudgmentDocument(
+                    jid="A2",
+                    issue_month="202601",
+                    court="未知",
+                    court_normalized="",
+                ),
+                JudgmentDocument(
+                    jid="B1",
+                    issue_month="202602",
+                    court="未知",
+                    court_normalized="",
+                ),
+                JudgmentDocument(
+                    jid="C1",
+                    issue_month="202603",
+                    court="臺北",
+                    court_normalized="臺灣臺北地方法院",
+                ),
+                JudgmentDocument(
+                    jid="C2",
+                    issue_month="202603",
+                    court="未知",
+                    court_normalized="不存在法院",
+                ),
+                JudgmentDocument(
+                    jid="D1",
+                    issue_month="202604",
+                    court="臺北",
+                    court_normalized="臺灣臺北地方法院",
+                ),
+                JudgmentDocument(
+                    jid="D2",
+                    issue_month="202604",
+                    court="高雄",
+                    court_normalized="臺灣高雄地方法院",
+                ),
+            ]
+        )
+        session.commit()
+
+    result = check_court_normalization(session_factory)
+    months = {item["month"]: item for item in result["months"]}
+    assert months["202601"]["status"] == "gray"
+    assert months["202601"]["unchecked"] == 1
+    assert months["202602"]["status"] == "red"
+    assert months["202602"]["checked"] == 0
+    assert months["202603"]["status"] == "gray"
+    assert months["202603"]["invalid"] == 1
+    assert months["202604"]["status"] == "green"
+    assert months["202604"]["valid"] == 2
+    assert result["summary"] == {"green": 1, "red": 1, "gray": 2}
+    assert result["totals"] == {
+        "total": 7,
+        "checked": 5,
+        "unchecked": 2,
+        "invalid": 1,
+        "needs_normalization": 3,
+        "valid": 4,
+    }
     engine.dispose()

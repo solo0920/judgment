@@ -405,6 +405,23 @@ export const api = {
     });
   },
 
+  reorderOllamaHosts(hostIds) {
+    return request("/api/ollama/hosts/reorder", {
+      method: "POST",
+      body: JSON.stringify({ host_ids: hostIds }),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  checkOllamaCapabilities() {
+    return request("/api/ollama/hosts/capabilities/test", {
+      method: "POST",
+      timeout: 180000,
+      trackClient: false,
+    });
+  },
+
   selectOllamaModel(hostId, payload) {
     return request(
       `/api/ollama/hosts/${encodeURIComponent(hostId)}/models/select`,
@@ -545,6 +562,15 @@ export const api = {
     });
   },
 
+  selectLlmModel(model, hostId = null) {
+    return request("/api/llm/model", {
+      method: "POST",
+      body: JSON.stringify({ model, host_id: hostId }),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
   setTestMode(enabled) {
     return request("/api/test-mode", {
       method: "POST",
@@ -605,6 +631,89 @@ export const api = {
   judgmentDownloadStatus() {
     return request("/api/judgment-download/status", {
       timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  versioningSummary() {
+    return request("/api/versioning/summary", { trackClient: false });
+  },
+
+  updatesStatus() {
+    return request("/api/updates/status", { trackClient: false });
+  },
+
+  checkCourts() {
+    return request("/api/courts/check", {
+      timeout: 60000,
+      trackClient: false,
+    });
+  },
+
+  checkLawVersions() {
+    return request("/api/law-versions/check", {
+      timeout: 60000,
+      trackClient: false,
+    });
+  },
+
+  checkUpdates(sourceTypes = []) {
+    const payload = Array.isArray(sourceTypes) && sourceTypes.length
+      ? { source_types: sourceTypes }
+      : {};
+    return request("/api/updates/check", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 120000,
+      trackClient: false,
+    });
+  },
+
+  versioningSnapshots(params = {}) {
+    const query = new URLSearchParams();
+    if (params.issue_month) query.set("issue_month", params.issue_month);
+    if (params.limit) query.set("limit", String(params.limit));
+    return request(`/api/versioning/judgments/snapshots?${query.toString()}`, {
+      trackClient: false,
+    });
+  },
+
+  versioningChanges(params = {}) {
+    const query = new URLSearchParams();
+    if (params.issue_month) query.set("issue_month", params.issue_month);
+    if (params.since_id) query.set("since_id", String(params.since_id));
+    if (params.limit) query.set("limit", String(params.limit));
+    return request(`/api/versioning/judgments/changes?${query.toString()}`, {
+      trackClient: false,
+    });
+  },
+
+  versioningJudgment(jid) {
+    return request(`/api/versioning/judgments/${encodeURIComponent(jid)}`, {
+      trackClient: false,
+    });
+  },
+
+  versioningVersion(versionId) {
+    return request(
+      `/api/versioning/judgments/versions/${encodeURIComponent(versionId)}`,
+      { trackClient: false },
+    );
+  },
+
+  versioningVector(jid, versionId) {
+    return request(
+      `/api/versioning/judgments/${encodeURIComponent(jid)}/vectors/${encodeURIComponent(versionId)}`,
+      { trackClient: false },
+    );
+  },
+
+  versioningAudit(params = {}) {
+    const query = new URLSearchParams();
+    if (params.issue_month) query.set("issue_month", params.issue_month);
+    if (params.since_id) query.set("since_id", String(params.since_id));
+    if (params.limit) query.set("limit", String(params.limit || 500));
+    return request(`/api/versioning/audit?${query.toString()}`, {
       trackClient: false,
     });
   },
@@ -1049,6 +1158,9 @@ export const api = {
       render_ms: 0,
       status: "success",
     });
+    if (result && typeof result === "object") {
+      result._client_request_id = requestId;
+    }
     return result;
   },
 };

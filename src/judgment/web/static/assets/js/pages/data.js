@@ -1,8 +1,10 @@
 import { api } from "../api.js";
 import {
+  addAuditEvents,
   addHistory,
   getSetting,
   isDegraded,
+  listAuditEvents,
   listHistory,
   listSettings,
   prettyValue,
@@ -1685,7 +1687,49 @@ async function runLocalQuery(db, state) {
   let columns = [];
   let distribution = [];
 
-  if (storeName === "settings") {
+  if (storeName === "audit_events") {
+    try {
+      const since = Number(await getSetting("audit.last_event_id", 0)) || 0;
+      const audit = await api.versioningAudit({ since_id: since, limit: 500 });
+      const events = Array.isArray(audit?.events) ? audit.events : [];
+      if (events.length) {
+        await addAuditEvents(
+          events.map((event) => ({ ...event, dataset: "judgment" })),
+        );
+      }
+      const latest = Number(audit?.latest_event_id || 0);
+      if (latest > since) await setSetting("audit.last_event_id", latest);
+    } catch (error) {
+      warnings.push(`版本 audit 同步失敗：${error.message || error}`);
+    }
+    const records = await listAuditEvents({ keyword, limit: MAX_LOCAL_ROWS });
+    rows = records.map((record) => ({
+      created_at: record.created_at,
+      dataset: record.dataset,
+      issue_month: record.issue_month,
+      change_type: record.change_type,
+      jid: record.jid,
+      detail: record.detail,
+    }));
+    columns = [
+      { key: "created_at", label: "時間", type: "datetime" },
+      { key: "dataset", label: "資料集", type: "text" },
+      { key: "issue_month", label: "月份", type: "mono" },
+      { key: "change_type", label: "變更", type: "status" },
+      { key: "jid", label: "案號", type: "mono" },
+      { key: "detail", label: "摘要", type: "longtext" },
+    ];
+    const counts = new Map();
+    rows.forEach((row) =>
+      counts.set(
+        row.change_type || "unknown",
+        (counts.get(row.change_type || "unknown") || 0) + 1,
+      ),
+    );
+    distribution = Array.from(counts.entries())
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+  } else if (storeName === "settings") {
     const records = await listSettings({ keyword });
     rows = records.map((record) => ({
       key: record.key,
@@ -2025,12 +2069,17 @@ export async function render(root, ctx) {
   const loadSchemaPreview = async (
     db,
     tableId,
-    { sort = null, columnFilters = {} } = {},
+    { sort = null, columnFilters = {}, quiet = false } = {},
   ) => {
     if (!tableId) return;
     blurSchemaSearch();
     const key = schemaPreviewKey(db, tableId);
     const seq = ++schemaSeq;
+    // Sorting or filtering an existing preview keeps the current rows
+    // visible until the new result arrives.
+    const keepCurrent = Boolean(
+      quiet && schemaPreview?.result && schemaPreview.key === key,
+    );
     schemaSelection = { tableId };
     schemaPreview = {
       key,
@@ -2041,14 +2090,18 @@ export async function render(root, ctx) {
       sort,
       columnFilters,
     };
-    schemaArea.innerHTML = renderSchemaPanel(
-      db,
-      getCategory(selectedCategory)?.label || selectedCategory,
-      tableId,
-    );
-    reportBox.innerHTML = renderSchemaPreviewLoading(
-      schemaTableLabel(db, tableId),
-    );
+    if (keepCurrent) {
+      reportBox.setAttribute("aria-busy", "true");
+    } else {
+      schemaArea.innerHTML = renderSchemaPanel(
+        db,
+        getCategory(selectedCategory)?.label || selectedCategory,
+        tableId,
+      );
+      reportBox.innerHTML = renderSchemaPreviewLoading(
+        schemaTableLabel(db, tableId),
+      );
+    }
     try {
       let result;
       if (db.id === "indexeddb") {
@@ -2097,6 +2150,7 @@ export async function render(root, ctx) {
         sort,
         columnFilters,
       };
+      reportBox.removeAttribute("aria-busy");
       if (sidebarView === "schema" && schemaSelection?.tableId === tableId) {
         schemaArea.innerHTML = renderSchemaPanel(
           db,
@@ -2123,6 +2177,7 @@ export async function render(root, ctx) {
         sort,
         columnFilters,
       };
+      reportBox.removeAttribute("aria-busy");
       if (sidebarView === "schema" && schemaSelection?.tableId === tableId) {
         reportBox.innerHTML = renderSchemaPreviewError(
           error,
@@ -2178,6 +2233,7 @@ export async function render(root, ctx) {
       loadSchemaPreview(context.db, context.tableId, {
         sort: context.sort,
         columnFilters: next,
+        quiet: true,
       });
       return;
     }
@@ -2190,6 +2246,13 @@ export async function render(root, ctx) {
   const schemaSuggestTimers = new Map();
 
   const hideSchemaSuggestions = () => {
+    if (
+      (!schemaSuggestPopover || schemaSuggestPopover.hidden) &&
+      !schemaSuggestItems.length &&
+      !schemaSuggestContext
+    ) {
+      return;
+    }
     schemaSuggestSeq += 1;
     schemaSuggestItems = [];
     schemaSuggestContext = null;
@@ -2481,7 +2544,7 @@ export async function render(root, ctx) {
     state.values = readFieldValues(form, db, state);
   };
 
-  const runQuery = async (page = null) => {
+  const runQuery = async (page = null, { quiet = false } = {}) => {
     const db = getDatabase(selectedId);
     if (!db) return;
     blurSchemaSearch();
@@ -2493,9 +2556,21 @@ export async function render(root, ctx) {
     const seq = ++querySeq;
     lawView = null;
     judgmentView = null;
-    reportBox.innerHTML = reportLoading(db);
+    const existingCard = reportBox.querySelector(".report-card");
+    const focusedPageSize = document.activeElement?.matches?.("[data-page-size]")
+      ? document.activeElement.value
+      : null;
+    // Never replace a visible report with a skeleton. Keep the current table
+    // visible until the new page, filter result, or error arrives.
+    const quietUpdate = Boolean(existingCard);
+    if (quietUpdate) {
+      reportBox.setAttribute("aria-busy", "true");
+    } else {
+      reportBox.removeAttribute("aria-busy");
+      reportBox.innerHTML = reportLoading(db);
+    }
     const submit = filterArea.querySelector("#run-query");
-    setBusy(submit, true, "查詢中…");
+    if (!quiet) setBusy(submit, true, "查詢中…");
 
     try {
       let result;
@@ -2520,7 +2595,15 @@ export async function render(root, ctx) {
       state.result = result;
       state.page = Number(result.page) || state.page;
       state.pageSize = Number(result.page_size) || state.pageSize;
+      reportBox.removeAttribute("aria-busy");
       reportBox.innerHTML = renderReport(result);
+      if (focusedPageSize !== null) {
+        const nextPageSize = reportBox.querySelector("[data-page-size]");
+        if (nextPageSize) {
+          nextPageSize.value = String(state.pageSize);
+          nextPageSize.focus({ preventScroll: true });
+        }
+      }
 
       const categoryLabel = getCategory(selectedCategory)?.label || selectedCategory;
       await addHistory({
@@ -2545,6 +2628,7 @@ export async function render(root, ctx) {
       });
     } catch (error) {
       if (disposed || seq !== querySeq) return;
+      reportBox.removeAttribute("aria-busy");
       reportBox.innerHTML = reportError(error, db);
       toast(error.message || "查詢失敗。", "danger");
     } finally {
@@ -2992,7 +3076,10 @@ export async function render(root, ctx) {
     hideSchemaSuggestions();
   };
   document.addEventListener("click", closeSchemaSuggestionsOnOutside);
-  window.addEventListener("scroll", hideSchemaSuggestions, true);
+  window.addEventListener("scroll", hideSchemaSuggestions, {
+    capture: true,
+    passive: true,
+  });
   window.addEventListener("resize", hideSchemaSuggestions);
 
   reportBox.addEventListener("keydown", (event) => {
@@ -3054,6 +3141,7 @@ export async function render(root, ctx) {
         loadSchemaPreview(db, schemaPreview.tableId, {
           sort: { key, direction },
           columnFilters: schemaPreview.columnFilters || {},
+          quiet: true,
         });
         return;
       }
@@ -3068,7 +3156,7 @@ export async function render(root, ctx) {
             ? "desc"
             : "asc";
       state.sort = { key, direction };
-      runQuery(1);
+      runQuery(1, { quiet: true });
       return;
     }
     if (action === "retry") {
@@ -3078,12 +3166,12 @@ export async function render(root, ctx) {
     if (!result) return;
 
     if (action === "prev-page") {
-      runQuery(Math.max(1, Number(result.page) - 1));
+      runQuery(Math.max(1, Number(result.page) - 1), { quiet: true });
       return;
     }
     if (action === "next-page") {
       const totalPages = Math.max(1, Math.ceil(Number(result.total) / Number(result.page_size)));
-      runQuery(Math.min(totalPages, Number(result.page) + 1));
+      runQuery(Math.min(totalPages, Number(result.page) + 1), { quiet: true });
       return;
     }
     if (action === "copy-query") {
@@ -3126,7 +3214,7 @@ export async function render(root, ctx) {
     state.pageSize = Number(event.target.value) || 25;
     state.page = 1;
     persistSetting("data.page_size", state.pageSize);
-    runQuery(1);
+    runQuery(1, { quiet: true });
   });
 
   refreshButton.addEventListener("click", () => {
@@ -3146,7 +3234,9 @@ export async function render(root, ctx) {
     schemaSuggestTimers.clear();
     hideSchemaSuggestions();
     document.removeEventListener("click", closeSchemaSuggestionsOnOutside);
-    window.removeEventListener("scroll", hideSchemaSuggestions, true);
+    window.removeEventListener("scroll", hideSchemaSuggestions, {
+      capture: true,
+    });
     window.removeEventListener("resize", hideSchemaSuggestions);
   };
 }

@@ -49,6 +49,13 @@ def _elapsed_ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
 
 
+def _ns_to_ms(value: Any) -> Optional[float]:
+    try:
+        return round(float(value) / 1_000_000, 2)
+    except (TypeError, ValueError):
+        return None
+
+
 @traced(
     "rag.preview_fallback",
     module=__name__,
@@ -154,7 +161,10 @@ def _fetch_documents(session_factory, jids: Sequence[str]) -> Dict[str, Judgment
     ):
         with session_factory() as session:
             records = session.scalars(
-                select(JudgmentDocument).where(JudgmentDocument.jid.in_(list(jids)))
+                select(JudgmentDocument).where(
+                    JudgmentDocument.jid.in_(list(jids)),
+                    JudgmentDocument.is_current.is_(True),
+                )
             ).all()
     return {record.jid: record for record in records}
 
@@ -187,8 +197,12 @@ def _search_hits(
             "model": settings.embedding_model,
             "question_length": len(question),
         },
-    ):
+    ) as embed_segment:
         vector = embedder.embed_query(question)
+        if embed_segment is not None:
+            embed_segment["metadata"].update(
+                dict(getattr(embedder, "last_call", {}) or {})
+            )
     started = time.perf_counter()
     with trace_segment(
         "rag.qdrant_search",
@@ -199,7 +213,7 @@ def _search_hits(
             "limit": settings.rag_top_k,
             "score_threshold": settings.rag_score_threshold,
         },
-    ):
+    ) as qdrant_segment:
         hits = store.search(
             collection,
             vector,
@@ -216,6 +230,25 @@ def _search_hits(
             continue
         seen.add(jid)
         deduped.append(hit)
+    if qdrant_segment is not None:
+        qdrant_segment["metadata"].update(
+            {
+                "collection": collection,
+                "filter": (
+                    {"score_threshold": settings.rag_score_threshold}
+                    if settings.rag_score_threshold
+                    else None
+                ),
+                "top_k": settings.rag_top_k,
+                "hits": len(hits),
+                "unique_judgments": len(deduped),
+                "top_score": (
+                    round(float(deduped[0].get("score") or 0), 4)
+                    if deduped
+                    else None
+                ),
+            }
+        )
     return deduped, {
         "status": "ok",
         "latency_ms": latency_ms,
@@ -433,6 +466,7 @@ def generate_answer_with_model(
         stream=streaming,
     )
     url = f"{settings.llm_url.rstrip('/')}/api/chat"
+    request_started = time.perf_counter()
     with trace_segment(
         "rag.llm_request",
         module=__name__,
@@ -447,15 +481,39 @@ def generate_answer_with_model(
             "keep_alive": settings.llm_keep_alive,
             "timeout": timeout,
             "prompt_chars": prompt_chars,
+            "strict": strict,
         },
-    ):
+    ) as llm_segment:
         if not streaming:
             response = httpx.post(url, json=request_payload, timeout=timeout)
             response.raise_for_status()
             payload = response.json()
             answer = str((payload.get("message") or {}).get("content") or "").strip()
+            if llm_segment is not None:
+                llm_segment["metadata"].update(
+                    {
+                        "model": model,
+                        "base_url": settings.llm_url.rstrip("/"),
+                        "stream": False,
+                        "strict": strict,
+                        "input_tokens": payload.get("prompt_eval_count"),
+                        "output_tokens": payload.get("eval_count"),
+                        "ttft_ms": None,
+                        "total_duration_ms": _ns_to_ms(
+                            payload.get("total_duration")
+                        ),
+                        "load_duration_ms": _ns_to_ms(
+                            payload.get("load_duration")
+                        ),
+                        "eval_duration_ms": _ns_to_ms(
+                            payload.get("eval_duration")
+                        ),
+                    }
+                )
         else:
             chunks: List[str] = []
+            first_token_at: Optional[float] = None
+            final_event: Dict[str, Any] = {}
             with httpx.stream(
                 "POST", url, json=request_payload, timeout=timeout
             ) as response:
@@ -467,17 +525,49 @@ def generate_answer_with_model(
                     error = event.get("error")
                     if error:
                         raise RuntimeError(f"LLM 串流失敗：{error}")
+                    if event.get("done"):
+                        final_event = event
                     content = str(
                         (event.get("message") or {}).get("content") or ""
                     )
                     if not content:
                         continue
+                    if first_token_at is None:
+                        first_token_at = time.perf_counter()
                     chunks.append(content)
                     try:
                         on_token(content)
                     except Exception:
                         logger.debug("LLM token callback failed", exc_info=True)
             answer = "".join(chunks).strip()
+            if llm_segment is not None:
+                llm_segment["metadata"].update(
+                    {
+                        "model": model,
+                        "base_url": settings.llm_url.rstrip("/"),
+                        "stream": True,
+                        "strict": strict,
+                        "input_tokens": final_event.get("prompt_eval_count"),
+                        "output_tokens": final_event.get("eval_count"),
+                        "ttft_ms": (
+                            round(
+                                (first_token_at - request_started) * 1000,
+                                2,
+                            )
+                            if first_token_at is not None
+                            else None
+                        ),
+                        "total_duration_ms": _ns_to_ms(
+                            final_event.get("total_duration")
+                        ),
+                        "load_duration_ms": _ns_to_ms(
+                            final_event.get("load_duration")
+                        ),
+                        "eval_duration_ms": _ns_to_ms(
+                            final_event.get("eval_duration")
+                        ),
+                    }
+                )
     if not answer:
         raise RuntimeError("LLM 回傳空回答")
     return answer
@@ -565,9 +655,27 @@ def answer_question(
     enable_law_retrieval: bool = True,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
-    question = str(question or "").strip()
-    if not question:
-        raise ValueError("問題不可為空")
+    raw_question = str(question or "")
+    with trace_segment(
+        "rag.parse_question",
+        module=__name__,
+        function="answer_question",
+        params={
+            "input_length": len(raw_question),
+            "normalized_length": len(raw_question.strip()),
+        },
+    ) as parse_segment:
+        question = raw_question.strip()
+        if not question:
+            raise ValueError("問題不可為空")
+        if parse_segment is not None:
+            parse_segment["metadata"].update(
+                {
+                    "input_length": len(raw_question),
+                    "normalized_length": len(question),
+                    "trimmed_chars": len(raw_question) - len(question),
+                }
+            )
 
     def emit_partial(payload: Dict[str, Any]) -> None:
         if on_partial is None:
@@ -620,6 +728,7 @@ def answer_question(
         query_timeout=settings.embedding_query_timeout_seconds,
         health_timeout=settings.embedding_health_timeout_seconds,
         fallback_base_url=settings.embedding_fallback_url,
+        fallback_base_urls=settings.embedding_failover_urls,
     )
     search_collection = collection
     if settings.qdrant_url:
@@ -859,23 +968,51 @@ def answer_question(
 
     citations: List[Dict[str, Any]] = []
     judgment_contexts: List[Dict[str, Any]] = []
+    context_segment = None
     if hits:
-        documents = _fetch_documents(
-            session_factory,
-            [str((hit.get("payload") or {}).get("jid") or "") for hit in hits],
-        )
-        hits = [
-            hit
-            for hit in hits
-            if str((hit.get("payload") or {}).get("jid") or "") in documents
-        ]
-        citations, judgment_contexts = _build_citations(
-            hits=hits,
-            documents=documents,
-            question=question,
-            max_context_chars=settings.rag_max_context_chars,
-            start_index=1,
-        )
+        with trace_segment(
+            "rag.context",
+            module=__name__,
+            function="_build_citations",
+            params={
+                "hit_count": len(hits),
+                "max_context_chars": settings.rag_max_context_chars,
+            },
+        ) as context_segment:
+            documents = _fetch_documents(
+                session_factory,
+                [
+                    str((hit.get("payload") or {}).get("jid") or "")
+                    for hit in hits
+                ],
+            )
+            hits = [
+                hit
+                for hit in hits
+                if str((hit.get("payload") or {}).get("jid") or "")
+                in documents
+            ]
+            citations, judgment_contexts = _build_citations(
+                hits=hits,
+                documents=documents,
+                question=question,
+                max_context_chars=settings.rag_max_context_chars,
+                start_index=1,
+            )
+            if context_segment is not None:
+                context_chars = sum(
+                    len(str(context.get("text") or ""))
+                    for context in judgment_contexts
+                )
+                context_segment["metadata"].update(
+                    {
+                        "documents": len(documents),
+                        "chunks": len(judgment_contexts),
+                        "citation_count": len(citations),
+                        "context_chars": context_chars,
+                        "token_estimate": max(1, context_chars // 3),
+                    }
+                )
 
     if not citations and not law_sources:
         if not qdrant_available:
@@ -935,6 +1072,20 @@ def answer_question(
     ]
     contexts = judgment_contexts + law_contexts
     citation_total = len(law_sources) + len(citations)
+    if context_segment is not None:
+        context_chars = sum(
+            len(str(context.get("text") or "")) for context in contexts
+        )
+        context_segment["metadata"].update(
+            {
+                "chunks": len(contexts),
+                "judgment_chunks": len(judgment_contexts),
+                "law_chunks": len(law_contexts),
+                "citation_count": citation_total,
+                "context_chars": context_chars,
+                "token_estimate": max(1, context_chars // 3),
+            }
+        )
     terms = [source["law_name"] for source in law_sources]
     if law_stats.get("entity") and law_stats["entity"] not in terms:
         terms.append(law_stats["entity"])

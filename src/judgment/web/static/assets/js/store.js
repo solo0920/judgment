@@ -1,14 +1,17 @@
 /* Browser-local persistence for query history and console settings. */
 
 const DB_NAME = "judgment-console";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const HISTORY_STORE = "query_history";
 const SETTINGS_STORE = "settings";
+const AUDIT_STORE = "audit_events";
 const MAX_HISTORY = 120;
+const MAX_AUDIT = 2000;
 
 const memory = {
   history: [],
   settings: new Map(),
+  audit: [],
   nextId: 1,
 };
 
@@ -60,6 +63,13 @@ function openDatabase() {
       }
       if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
         db.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains(AUDIT_STORE)) {
+        const audit = db.createObjectStore(AUDIT_STORE, { keyPath: "key" });
+        audit.createIndex("created_at", "created_at");
+        audit.createIndex("dataset", "dataset");
+        audit.createIndex("jid", "jid");
+        audit.createIndex("issue_month", "issue_month");
       }
     };
 
@@ -258,6 +268,146 @@ export async function clearHistory() {
     degraded = true;
   }
   memory.history = [];
+}
+
+function normalizeAuditEvent(entry) {
+  const eventId = Number(entry.id ?? entry.event_id ?? 0) || 0;
+  const dataset = String(entry.dataset || entry.kind || "judgment");
+  const key = String(
+    entry.key ||
+      `${dataset}:${eventId || `${Date.now()}:${Math.random().toString(36).slice(2)}`}`,
+  );
+  const jid = String(entry.jid || "");
+  const issueMonth = String(entry.issue_month || "");
+  const changeType = String(entry.change_type || "");
+  const detectedAt = String(
+    entry.detected_at || entry.created_at || new Date().toISOString(),
+  );
+  return {
+    key,
+    event_id: eventId,
+    dataset,
+    jid,
+    issue_month: issueMonth,
+    change_type: changeType,
+    title: String(entry.title || jid || issueMonth || "版本變更"),
+    detail: String(
+      entry.detail ||
+        [changeType, issueMonth, jid].filter(Boolean).join(" · "),
+    ),
+    created_at: detectedAt,
+    payload: entry,
+  };
+}
+
+async function pruneAudit() {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(AUDIT_STORE, "readwrite");
+    const store = transaction.objectStore(AUDIT_STORE);
+    const count = await requestToPromise(store.count());
+    if (count > MAX_AUDIT) {
+      let toDelete = count - MAX_AUDIT;
+      const cursorRequest = store.index("created_at").openCursor();
+      await new Promise((resolve, reject) => {
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor || toDelete <= 0) {
+            resolve();
+            return;
+          }
+          cursor.delete();
+          toDelete -= 1;
+          cursor.continue();
+        };
+        cursorRequest.onerror = () => reject(cursorRequest.error);
+      });
+    }
+    await transactionDone(transaction);
+  } catch (error) {
+    degraded = true;
+  }
+}
+
+export async function addAuditEvents(entries) {
+  const records = (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && typeof entry === "object")
+    .map(normalizeAuditEvent);
+  if (!records.length) return 0;
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(AUDIT_STORE, "readwrite");
+    const store = transaction.objectStore(AUDIT_STORE);
+    for (const record of records) {
+      await requestToPromise(store.put(record));
+    }
+    await transactionDone(transaction);
+    await pruneAudit();
+    return records.length;
+  } catch (error) {
+    degraded = true;
+    const byKey = new Map(memory.audit.map((record) => [record.key, record]));
+    for (const record of records) byKey.set(record.key, record);
+    memory.audit = Array.from(byKey.values())
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(0, MAX_AUDIT);
+    return records.length;
+  }
+}
+
+export async function listAuditEvents({ keyword = "", limit = 200 } = {}) {
+  const needle = keyword.trim().toLowerCase();
+  const matches = (record) => {
+    if (!needle) return true;
+    return `${record.dataset} ${record.jid} ${record.issue_month} ${record.change_type} ${record.detail}`
+      .toLowerCase()
+      .includes(needle);
+  };
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(AUDIT_STORE, "readonly");
+    const store = transaction.objectStore(AUDIT_STORE);
+    const records = await requestToPromise(store.getAll());
+    await transactionDone(transaction);
+    return records
+      .filter(matches)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(0, limit);
+  } catch (error) {
+    degraded = true;
+    return memory.audit
+      .filter(matches)
+      .slice()
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(0, limit);
+  }
+}
+
+export async function clearAuditEvents() {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(AUDIT_STORE, "readwrite");
+    transaction.objectStore(AUDIT_STORE).clear();
+    await transactionDone(transaction);
+  } catch (error) {
+    degraded = true;
+  }
+  memory.audit = [];
+}
+
+export async function auditEventCount() {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(AUDIT_STORE, "readonly");
+    const count = await requestToPromise(
+      transaction.objectStore(AUDIT_STORE).count(),
+    );
+    await transactionDone(transaction);
+    return count;
+  } catch (error) {
+    degraded = true;
+    return memory.audit.length;
+  }
 }
 
 export async function setSetting(key, value) {

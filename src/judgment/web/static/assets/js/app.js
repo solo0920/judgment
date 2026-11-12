@@ -1,4 +1,4 @@
-import { needsApiConfiguration } from "./api.js";
+import { api, needsApiConfiguration } from "./api.js";
 import { initThemePicker } from "./themes.js";
 import { escapeHtml, icon, toast } from "./utils.js";
 import * as ragPage from "./pages/rag.js";
@@ -23,18 +23,6 @@ const ROUTES = {
 const main = document.getElementById("app-main");
 let cleanup = null;
 let routeToken = 0;
-
-function loadingMarkup() {
-  return `<div class="page-loading" aria-live="polite">
-    <div class="skeleton skeleton-title"></div>
-    <div class="skeleton skeleton-subtitle"></div>
-    <div class="skeleton-grid">
-      <div class="skeleton skeleton-card"></div>
-      <div class="skeleton skeleton-card"></div>
-      <div class="skeleton skeleton-card"></div>
-    </div>
-  </div>`;
-}
 
 function parseRoute() {
   const raw = window.location.hash.replace(/^#\/?/, "").trim();
@@ -98,9 +86,6 @@ async function renderRoute() {
   }
 
   document.title = ROUTES[route].title;
-  main.innerHTML = loadingMarkup();
-  main.focus({ preventScroll: true });
-  window.scrollTo({ top: 0, behavior: "auto" });
 
   const context = {
     route,
@@ -113,7 +98,13 @@ async function renderRoute() {
   };
 
   try {
-    const result = await ROUTES[route].page.render(main, context);
+    // Each page replaces the previous page synchronously before its first
+    // await. Keep the old page visible until then instead of flashing a
+    // skeleton on every header navigation.
+    const resultPromise = ROUTES[route].page.render(main, context);
+    window.scrollTo({ top: 0, behavior: "auto" });
+    main.focus({ preventScroll: true });
+    const result = await resultPromise;
     if (token !== routeToken) {
       if (typeof result === "function") result();
       return;
@@ -149,9 +140,41 @@ function initGlobalShortcuts() {
   });
 }
 
+function initUpdateBadge() {
+  const link = document.querySelector('[data-route="processing"]');
+  if (!link) return;
+  let badge = link.querySelector(".nav-update-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-update-badge";
+    badge.hidden = true;
+    link.appendChild(badge);
+  }
+  const refresh = async () => {
+    try {
+      const data = await api.updatesStatus();
+      const count = Number(data.update_count) || 0;
+      if (count > 0) {
+        badge.textContent = String(count);
+        badge.title = `法規／命令／判決有 ${count} 項更新`;
+        badge.hidden = false;
+      } else {
+        badge.hidden = true;
+      }
+    } catch (error) {
+      badge.hidden = true;
+    }
+  };
+  refresh();
+  window.setInterval(refresh, 60000);
+  window.addEventListener("focus", refresh);
+  window.addEventListener("judgment:updates-changed", refresh);
+}
+
 function boot() {
   initThemePicker();
   initGlobalShortcuts();
+  initUpdateBadge();
   window.addEventListener("hashchange", renderRoute);
   renderRoute();
 

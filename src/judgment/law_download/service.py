@@ -194,6 +194,13 @@ class LawDownloadService:
                     article_count=int(latest.article_count),
                     content_sha256=latest.content_sha256,
                 )
+                self.repository.record_download_result(
+                    source=source,
+                    fetched=fetched,
+                    version_id=int(latest.id),
+                    zip_path=str(latest.zip_path or ""),
+                    message=f"{source.label}線上內容未變更。",
+                )
                 return RunResult(
                     source_type=source.source_type.value,
                     status="no_change",
@@ -246,6 +253,13 @@ class LawDownloadService:
                     law_count=int(latest.law_count),
                     article_count=int(latest.article_count),
                     content_sha256=latest.content_sha256,
+                )
+                self.repository.record_download_result(
+                    source=source,
+                    fetched=fetched,
+                    version_id=int(latest.id),
+                    zip_path=str(latest.zip_path or ""),
+                    message=f"{source.label}語意內容未變更。",
                 )
                 return RunResult(
                     source_type=source.source_type.value,
@@ -315,6 +329,13 @@ class LawDownloadService:
                     article_count=apply_result.article_count,
                     content_sha256=parsed.semantic_sha256,
                 )
+                self.repository.record_download_result(
+                    source=source,
+                    fetched=fetched,
+                    version_id=apply_result.version_id,
+                    zip_path=str(zip_path),
+                    message=f"{source.label}版本已由其他執行寫入。",
+                )
                 return RunResult(
                     source_type=source.source_type.value,
                     status="no_change",
@@ -360,6 +381,13 @@ class LawDownloadService:
                 law_count=apply_result.law_count,
                 article_count=apply_result.article_count,
                 content_sha256=parsed.semantic_sha256,
+            )
+            self.repository.record_download_result(
+                source=source,
+                fetched=fetched,
+                version_id=apply_result.version_id,
+                zip_path=str(zip_path),
+                message=f"{source.label}已下載並套用新版本。",
             )
             return RunResult(
                 source_type=source.source_type.value,

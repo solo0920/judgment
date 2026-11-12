@@ -100,11 +100,92 @@ def _ensure_performance_test_columns(engine: Engine) -> None:
                     )
 
 
+def _ensure_ollama_host_priority(engine: Engine) -> None:
+    """Add the embedding failover priority to older Ollama host tables."""
+
+    inspector = inspect(engine)
+    if "ollama_hosts" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"] for column in inspector.get_columns("ollama_hosts")
+    }
+    if "priority" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE ollama_hosts "
+                "ADD COLUMN priority INTEGER NOT NULL DEFAULT 100"
+            )
+        )
+        # Preserve the previously active host as the first priority while
+        # keeping the remaining hosts in their existing id order.
+        connection.execute(text("UPDATE ollama_hosts SET priority = id * 10"))
+        connection.execute(
+            text(
+                "UPDATE ollama_hosts SET priority = 0 "
+                "WHERE is_active = TRUE"
+            )
+        )
+
+
+def _ensure_judgment_versioning(engine: Engine) -> None:
+    """Add snapshot/version columns to pre-existing judgment tables."""
+
+    inspector = inspect(engine)
+    if "judgment_documents" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"] for column in inspector.get_columns("judgment_documents")
+    }
+    additions = []
+    if "issue_month" not in columns:
+        additions.append(
+            "ADD COLUMN issue_month VARCHAR(6) NOT NULL DEFAULT ''"
+        )
+    if "first_seen_snapshot_id" not in columns:
+        additions.append("ADD COLUMN first_seen_snapshot_id INTEGER")
+    if "content_first_seen_snapshot_id" not in columns:
+        additions.append(
+            "ADD COLUMN content_first_seen_snapshot_id INTEGER"
+        )
+    if "last_seen_snapshot_id" not in columns:
+        additions.append("ADD COLUMN last_seen_snapshot_id INTEGER")
+    if "removed_snapshot_id" not in columns:
+        additions.append("ADD COLUMN removed_snapshot_id INTEGER")
+    if "is_current" not in columns:
+        additions.append("ADD COLUMN is_current BOOLEAN NOT NULL DEFAULT TRUE")
+    if additions:
+        with engine.begin() as connection:
+            for addition in additions:
+                connection.execute(
+                    text("ALTER TABLE judgment_documents " + addition)
+                )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE judgment_documents "
+                "SET issue_month = substr(jdate, 1, 6) "
+                "WHERE (issue_month IS NULL OR issue_month = '') "
+                "AND jdate IS NOT NULL AND length(jdate) >= 6"
+            )
+        )
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS ix_judgment_documents_issue_month "
+            "ON judgment_documents (issue_month)",
+            "CREATE INDEX IF NOT EXISTS ix_judgment_documents_is_current "
+            "ON judgment_documents (is_current)",
+        ):
+            connection.execute(text(statement))
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_judgment_court_normalized(engine)
+    _ensure_judgment_versioning(engine)
     _ensure_performance_flow(engine)
     _ensure_performance_test_columns(engine)
+    _ensure_ollama_host_priority(engine)
     from .index_versions import ensure_index_version_schema
 
     ensure_index_version_schema(engine)

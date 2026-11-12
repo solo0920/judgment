@@ -6,11 +6,13 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import uvicorn
@@ -19,10 +21,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from .. import __version__
 from ..config import Settings
+from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
+from ..law_article_versions import check_law_version_status
 from ..observability import (
     clear_flow,
     current_flow,
@@ -32,6 +37,18 @@ from ..observability import (
     trace_segment,
 )
 from ..judgment_parquet import get_judgment_from_parquet
+from ..judgment_backup import list_delta_manifests, list_delta_rows
+from ..judgment_versioning import (
+    change_events,
+    judgment_history,
+    judgment_vector_versions,
+    list_snapshot_dicts,
+    version_detail,
+    versioning_summary,
+)
+from ..judgment_index import history_point_id
+from ..update_checks import check_all_sources
+from ..update_records import SOURCE_TYPES, update_status
 from ..judgment_download import (
     DownloadWindowClosed,
     JudgmentDownloadError,
@@ -80,7 +97,10 @@ from ..ollama_hosts import (
     clear_model,
     deactivate_hosts,
     delete_host,
+    find_host,
+    get_host,
     list_hosts,
+    reorder_hosts,
     runtime_settings,
     select_model,
     update_host,
@@ -96,7 +116,11 @@ from ..index_versions import (
     rollback_version,
     validate_version,
 )
-from ..runtime_settings import get_test_mode, set_test_mode
+from ..runtime_settings import (
+    get_test_mode,
+    set_llm_model_preference,
+    set_test_mode,
+)
 from .catalog import build_catalog
 from .performance import performance_options, query_performance
 from .power_agent import ensure_power_agent
@@ -119,6 +143,12 @@ from .system_usage import build_system_usage
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Manual judgment downloads stream a whole archive through the backend. Keep a
+# single active proxy download so opening several month links does not hammer
+# the official server; the batch workflow is already sequential.
+_JUDGMENT_DOWNLOAD_LOCK = threading.Lock()
+_UPDATE_CHECK_LOCK = threading.Lock()
 
 
 class QueryRequest(BaseModel):
@@ -166,6 +196,15 @@ class OllamaModelChoiceRequest(BaseModel):
     role: Literal["chat", "embedding"]
 
 
+class OllamaHostOrderRequest(BaseModel):
+    host_ids: List[int] = Field(default_factory=list)
+
+
+class LlmModelRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+    host_id: Optional[int] = Field(default=None, ge=1)
+
+
 class BenchmarkRunRequest(BaseModel):
     suite_id: int = Field(gt=0)
     config: Dict[str, Any] = Field(default_factory=dict)
@@ -180,6 +219,10 @@ class BenchmarkReviewRequest(BaseModel):
 
 class ProcessingUpdateRequest(BaseModel):
     index: bool = False
+
+
+class UpdateCheckRequest(BaseModel):
+    source_types: List[str] = Field(default_factory=list)
 
 
 def _client_started_ms(request: Request) -> Optional[float]:
@@ -209,6 +252,7 @@ PERFORMANCE_TARGETS = {
     "/api/law": ("法規明細", "judgment.web.query.get_law_detail"),
     "/api/judgment": ("判決原文", "judgment.web.query.get_judgment_detail"),
     "/api/rag/query": ("RAG 問答", "judgment.rag.answer_question"),
+    "/api/rag/query/stream": ("RAG 問答", "judgment.rag.answer_question"),
 }
 
 
@@ -216,6 +260,142 @@ def _performance_target(path: str) -> tuple[str, str]:
     if path in PERFORMANCE_TARGETS:
         return PERFORMANCE_TARGETS[path]
     return (path, f"http{path}")
+
+
+def _rag_response_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
+    judgments = result.get("judgments") or []
+    law_sources = result.get("law_sources") or []
+    status = str(result.get("status") or "")
+    return {
+        "status": status,
+        "answer_source": result.get("answer_source") or "",
+        "citation_count": len(judgments) + len(law_sources),
+        "judgment_citations": len(judgments),
+        "law_citations": len(law_sources),
+        "abstain": status not in {"operational"},
+        "duration_ms": result.get("duration_ms"),
+        "llm_model": result.get("llm_model"),
+        "embedding_model": result.get("embedding_model"),
+        "has_answer": bool(str(result.get("answer") or "").strip()),
+    }
+
+
+_RAG_PIPELINE_SEGMENTS = {
+    "rag.parse_question",
+    "rag.embed_query",
+    "rag.qdrant_search",
+    "rag.rerank",
+    "rag.context",
+    "rag.llm_request",
+    "rag.fetch_documents",
+    "rag.build_citations",
+}
+
+
+def _llm_provider_name(session_factory, base_url: str) -> str:
+    host = find_host(session_factory, base_url)
+    if host is not None:
+        name = str(host.get("name") or "").strip()
+        if name and "://" not in name:
+            return name
+    hostname = urlparse(str(base_url or "")).hostname or ""
+    return hostname or str(base_url or "") or "env"
+
+
+def _llm_models_payload(session_factory, settings: Settings) -> Dict[str, Any]:
+    state = model_capability_status(session_factory, settings)
+    base_url = str(state.get("base_url") or "").rstrip("/")
+    provider_name = _llm_provider_name(session_factory, base_url)
+    host = find_host(session_factory, base_url)
+    state["provider_name"] = provider_name
+    state["provider"] = {
+        "name": provider_name,
+        "base_url": base_url,
+        "host_id": host.get("id") if host else None,
+        "is_active": bool(host.get("is_active")) if host else False,
+    }
+    providers: List[Dict[str, Any]] = []
+    seen_urls = set()
+    for item in list_hosts(session_factory).get("hosts") or []:
+        item_url = str(item.get("base_url") or "").rstrip("/")
+        if not item_url:
+            continue
+        seen_urls.add(item_url)
+        providers.append(
+            {
+                "name": item.get("name") or item_url,
+                "base_url": item_url,
+                "host_id": item.get("id"),
+                "is_active": bool(item.get("is_active")),
+                "is_effective": item_url == base_url,
+                "status": item.get("status") or "",
+                "detail": item.get("detail") or "",
+                "chat_models": list(item.get("chat_models") or []),
+                "models": list(item.get("models") or []),
+            }
+        )
+    if base_url and base_url not in seen_urls:
+        providers.append(
+            {
+                "name": provider_name,
+                "base_url": base_url,
+                "host_id": host.get("id") if host else None,
+                "is_active": bool(host.get("is_active")) if host else False,
+                "is_effective": True,
+                "status": state.get("status") or "",
+                "detail": state.get("detail") or "",
+                "chat_models": list(state.get("chat_models") or []),
+                "models": list(state.get("models") or []),
+            }
+        )
+    state["providers"] = providers
+    return state
+
+
+def _rag_pipeline_snapshot(flow, session_factory=None) -> Dict[str, Any]:
+    """Return the compact flow snapshot embedded in RAG responses.
+
+    The full flow contains every nested function call; the RAG answer only
+    needs the canonical pipeline spans so the same waterfall renderer can be
+    used by the RAG page and the performance page.
+    """
+
+    snapshot = flow.to_dict()
+    snapshot["segments"] = [
+        segment
+        for segment in snapshot.get("segments") or []
+        if segment.get("name") in _RAG_PIPELINE_SEGMENTS
+    ]
+    if session_factory is not None:
+        for segment in snapshot["segments"]:
+            segment_metadata = segment.get("metadata")
+            if not isinstance(segment_metadata, dict):
+                segment_metadata = {}
+                segment["metadata"] = segment_metadata
+            base_url = str(
+                segment_metadata.get("active_base_url")
+                or segment_metadata.get("base_url")
+                or ""
+            ).strip()
+            if not base_url:
+                raw_url = str(
+                    (segment.get("params") or {}).get("url") or ""
+                ).strip()
+                if "/api/" in raw_url:
+                    base_url = raw_url.split("/api/", 1)[0]
+            if base_url:
+                segment_metadata["provider_name"] = _llm_provider_name(
+                    session_factory, base_url
+                )
+    metadata = snapshot.get("metadata") or {}
+    snapshot["metadata"] = {
+        key: metadata[key]
+        for key in ("rag_response", "rag_status")
+        if key in metadata
+    }
+    summary = snapshot.get("summary") or {}
+    snapshot["summary"] = {"models": summary.get("models") or []}
+    return snapshot
 
 
 def create_app(
@@ -459,6 +639,33 @@ def create_app(
         _sync_runtime_settings()
         return result
 
+    @app.post("/api/ollama/hosts/capabilities/test")
+    def ollama_host_capabilities_test() -> Dict[str, Any]:
+        refreshed_urls = set()
+        for host in list_hosts(app.state.session_factory).get("hosts") or []:
+            if host.get("status") != "operational":
+                continue
+            host_url = str(host.get("base_url") or "").rstrip("/")
+            if not host_url or host_url in refreshed_urls:
+                continue
+            refreshed_urls.add(host_url)
+            refresh_model_capabilities(
+                app.state.session_factory,
+                app.state.settings.with_overrides(llm_url=host_url),
+            )
+        return list_hosts(app.state.session_factory)
+
+    @app.post("/api/ollama/hosts/reorder")
+    def ollama_host_reorder(payload: OllamaHostOrderRequest) -> Dict[str, Any]:
+        try:
+            result = reorder_hosts(
+                app.state.session_factory, payload.host_ids
+            )
+            _sync_runtime_settings()
+            return result
+        except OllamaHostError as exc:
+            raise _ollama_host_error(exc) from exc
+
     @app.post("/api/ollama/hosts/{host_id}/models/select")
     def ollama_model_select(
         host_id: int, payload: OllamaModelChoiceRequest
@@ -620,21 +827,253 @@ def create_app(
 
     @app.get("/api/judgment-download/files/{fileset_id}")
     def judgment_download_file(fileset_id: int) -> StreamingResponse:
+        download_settings = app.state.settings
+        if not download_settings.judgment_download_allow_off_hours:
+            try:
+                ensure_window()
+            except DownloadWindowClosed as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if not _JUDGMENT_DOWNLOAD_LOCK.acquire(blocking=False):
+            raise HTTPException(
+                status_code=409,
+                detail="已有判決檔案下載中；請一次只下載一個檔案。",
+            )
+        released = threading.Event()
+
+        def release() -> None:
+            if released.is_set():
+                return
+            released.set()
+            _JUDGMENT_DOWNLOAD_LOCK.release()
+
         try:
-            ensure_window()
-        except DownloadWindowClosed as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        try:
-            headers = file_response_headers(app.state.settings, fileset_id)
+            headers = file_response_headers(download_settings, fileset_id)
         except FileNotFoundError as exc:
+            release()
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except JudgmentDownloadError as exc:
+            release()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception:
+            release()
+            raise
+
+        def stream() -> Iterator[bytes]:
+            try:
+                yield from iter_fileset(download_settings, fileset_id)
+            finally:
+                release()
+
         return StreamingResponse(
-            iter_fileset(app.state.settings, fileset_id),
+            stream(),
             media_type="application/octet-stream",
             headers=headers,
+            background=BackgroundTask(release),
         )
+
+    @app.get("/api/versioning/summary")
+    def versioning_snapshot_summary() -> Dict[str, Any]:
+        return versioning_summary(app.state.session_factory)
+
+    @app.get("/api/versioning/judgments/snapshots")
+    def versioning_judgment_snapshots(
+        issue_month: str = "",
+        limit: int = Query(50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        return {
+            "snapshots": list_snapshot_dicts(
+                app.state.session_factory,
+                issue_month=issue_month.strip(),
+                limit=limit,
+            )
+        }
+
+    @app.get("/api/versioning/judgments/changes")
+    def versioning_judgment_changes(
+        issue_month: str = "",
+        since_id: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=1000),
+    ) -> Dict[str, Any]:
+        return {
+            "events": change_events(
+                app.state.session_factory,
+                issue_month=issue_month.strip(),
+                since_id=since_id,
+                limit=limit,
+            )
+        }
+
+    @app.get("/api/versioning/judgments/versions/{version_id}")
+    def versioning_judgment_version(
+        version_id: int,
+    ) -> Dict[str, Any]:
+        payload = version_detail(
+            app.state.session_factory, version_id=version_id
+        )
+        if payload is None:
+            raise HTTPException(status_code=404, detail="找不到判決歷史版本。")
+        return payload
+
+    @app.get("/api/versioning/judgments/{jid}/vectors")
+    def versioning_judgment_vectors(
+        jid: str,
+        limit: int = Query(100, ge=1, le=1000),
+    ) -> Dict[str, Any]:
+        return {
+            "jid": jid,
+            "vectors": judgment_vector_versions(
+                app.state.session_factory, jid=jid.strip(), limit=limit
+            ),
+            "history_collection": app.state.settings.judgment_vector_history_collection,
+        }
+
+    @app.get("/api/versioning/judgments/{jid}/vectors/{version_id}")
+    def versioning_judgment_vector(
+        jid: str,
+        version_id: int,
+    ) -> Dict[str, Any]:
+        history_settings = app.state.settings
+        collection = history_settings.judgment_vector_history_collection
+        if not history_settings.qdrant_url:
+            return {
+                "status": "not_configured",
+                "detail": "QDRANT_URL 未設定。",
+                "jid": jid,
+                "version_id": version_id,
+            }
+        store = QdrantStore(
+            history_settings.qdrant_url,
+            api_key=history_settings.qdrant_api_key,
+        )
+        try:
+            points = store.retrieve_points(
+                collection,
+                [history_point_id(jid, version_id)],
+                with_payload=True,
+                with_vector=True,
+            )
+        except Exception as exc:
+            message = str(exc)
+            if "HTTP 404" in message or "doesn't exist" in message or "Not found" in message:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"找不到 Qdrant history collection：{collection}。"
+                        "建立新索引版本後才會有舊向量。"
+                    ),
+                ) from exc
+            raise HTTPException(
+                status_code=502,
+                detail=f"Qdrant history 查詢失敗：{exc}",
+            ) from exc
+        if not points:
+            raise HTTPException(
+                status_code=404, detail="找不到指定的歷史向量。"
+            )
+        return {
+            "status": "ok",
+            "jid": jid,
+            "version_id": version_id,
+            "collection": collection,
+            "point": points[0],
+        }
+
+    @app.get("/api/versioning/judgments/{jid}")
+    def versioning_judgment(jid: str) -> Dict[str, Any]:
+        payload = judgment_history(
+            app.state.session_factory, jid=jid.strip()
+        )
+        if payload.get("current") is None and not payload.get("versions"):
+            raise HTTPException(status_code=404, detail="找不到判決版本歷史。")
+        return payload
+
+    @app.get("/api/versioning/parquet/deltas")
+    def versioning_parquet_deltas(
+        issue_month: str = "",
+        limit: int = Query(50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        return {
+            "deltas": list_delta_manifests(
+                app.state.settings.judgment_data_dir,
+                issue_month=issue_month.strip(),
+                limit=limit,
+            )
+        }
+
+    @app.get("/api/versioning/parquet/changes")
+    def versioning_parquet_changes(
+        issue_month: str = Query("", min_length=6, max_length=6),
+        limit: int = Query(100, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        return {
+            "issue_month": issue_month,
+            "rows": list_delta_rows(
+                app.state.settings.judgment_data_dir,
+                issue_month=issue_month,
+                limit=limit,
+            ),
+        }
+
+    @app.get("/api/versioning/audit")
+    def versioning_audit(
+        since_id: int = Query(0, ge=0),
+        issue_month: str = "",
+        limit: int = Query(100, ge=1, le=1000),
+    ) -> Dict[str, Any]:
+        events = change_events(
+            app.state.session_factory,
+            issue_month=issue_month.strip(),
+            since_id=since_id,
+            limit=limit,
+            ascending=True,
+        )
+        latest_event_id = max(
+            [int(event["id"]) for event in events] or [int(since_id)]
+        )
+        return {
+            "latest_event_id": latest_event_id,
+            "events": events,
+            "snapshots": list_snapshot_dicts(
+                app.state.session_factory,
+                issue_month=issue_month.strip(),
+                limit=min(limit, 100),
+            ),
+            "deltas": list_delta_manifests(
+                app.state.settings.judgment_data_dir,
+                issue_month=issue_month.strip(),
+                limit=min(limit, 100),
+            ),
+        }
+
+    @app.get("/api/updates/status")
+    def updates_status() -> Dict[str, Any]:
+        return update_status(app.state.session_factory)
+
+    @app.post("/api/updates/check")
+    def updates_check(
+        payload: Optional[UpdateCheckRequest] = None,
+    ) -> Dict[str, Any]:
+        source_types = list(payload.source_types) if payload else []
+        invalid = sorted(set(source_types) - set(SOURCE_TYPES))
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"未知的更新來源：{', '.join(invalid)}",
+            )
+        if not _UPDATE_CHECK_LOCK.acquire(blocking=False):
+            return {
+                **update_status(app.state.session_factory),
+                "checking": True,
+            }
+        try:
+            check_all_sources(
+                settings=app.state.settings,
+                session_factory=app.state.session_factory,
+                source_types=source_types or None,
+            )
+            return update_status(app.state.session_factory)
+        finally:
+            _UPDATE_CHECK_LOCK.release()
 
     @app.post("/api/processing/workflows/{workflow_id}/run")
     def processing_workflow_run(workflow_id: str) -> Dict[str, Any]:
@@ -656,6 +1095,17 @@ def create_app(
             return app.state.processing_manager.stop_update()
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/courts/check")
+    def courts_check() -> Dict[str, Any]:
+        return check_court_normalization(app.state.session_factory)
+
+    @app.get("/api/law-versions/check")
+    def law_versions_check() -> Dict[str, Any]:
+        return check_law_version_status(
+            app.state.session_factory,
+            data_dir=app.state.settings.law_data_dir,
+        )
 
     @app.get("/api/quality")
     def quality_snapshot() -> Dict[str, Any]:
@@ -1067,15 +1517,94 @@ def create_app(
 
     @app.get("/api/llm/models")
     def llm_models() -> Dict[str, Any]:
-        return model_capability_status(
-            app.state.session_factory, settings
+        return _llm_models_payload(
+            app.state.session_factory,
+            runtime_settings(
+                app.state.settings, app.state.session_factory
+            ),
         )
 
     @app.post("/api/llm/models/test")
     def llm_models_test() -> Dict[str, Any]:
-        return refresh_model_capabilities(
-            app.state.session_factory, settings
+        runtime = runtime_settings(
+            app.state.settings, app.state.session_factory
         )
+        refreshed_urls = set()
+        for host in list_hosts(app.state.session_factory).get("hosts") or []:
+            if host.get("status") != "operational":
+                continue
+            host_url = str(host.get("base_url") or "").rstrip("/")
+            if not host_url or host_url in refreshed_urls:
+                continue
+            refreshed_urls.add(host_url)
+            refresh_model_capabilities(
+                app.state.session_factory,
+                app.state.settings.with_overrides(llm_url=host_url),
+            )
+        runtime_url = str(runtime.llm_url or "").rstrip("/")
+        if runtime_url and runtime_url not in refreshed_urls:
+            refresh_model_capabilities(
+                app.state.session_factory, runtime
+            )
+        return _llm_models_payload(
+            app.state.session_factory, runtime
+        )
+
+    @app.post("/api/llm/model")
+    def llm_model_select(payload: LlmModelRequest) -> Dict[str, Any]:
+        host = None
+        if payload.host_id is not None:
+            host = get_host(
+                app.state.session_factory, int(payload.host_id)
+            )
+            if host is None:
+                raise HTTPException(
+                    status_code=404, detail="找不到 Ollama 主機。"
+                )
+            provider_settings = app.state.settings.with_overrides(
+                llm_url=host["base_url"]
+            )
+            state = _llm_models_payload(
+                app.state.session_factory, provider_settings
+            )
+            base_url = str(host["base_url"]).rstrip("/")
+            provider_name = str(host.get("name") or state.get("provider_name") or "")
+        else:
+            runtime = runtime_settings(
+                app.state.settings, app.state.session_factory
+            )
+            state = _llm_models_payload(
+                app.state.session_factory, runtime
+            )
+            base_url = str(state.get("base_url") or "").rstrip("/")
+            provider_name = str(state.get("provider_name") or "")
+        model = payload.model.strip()
+        if model not in (state.get("chat_models") or []):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "此模型不是所選 provider 已確認支援 chat 的模型。",
+                    "errors": [
+                        f"{model} 不在 chat_models；請先執行 LLM 服務測試。"
+                    ],
+                },
+            )
+        set_llm_model_preference(
+            app.state.session_factory,
+            model=model,
+            base_url=base_url,
+        )
+        _sync_runtime_settings()
+        current = runtime_settings(
+            app.state.settings, app.state.session_factory
+        )
+        return {
+            "status": "ok",
+            "model": current.llm_model,
+            "base_url": current.llm_url,
+            "provider_name": provider_name,
+            "host": host,
+        }
 
     @app.get("/api/test-runs/current")
     def test_run_current() -> Dict[str, Any]:
@@ -1113,7 +1642,9 @@ def create_app(
                     page_size=request.page_size,
                     session_factory=app.state.session_factory,
                     data_dir=app.state.data_dir,
-                    settings=settings,
+                    settings=runtime_settings(
+                        app.state.settings, app.state.session_factory
+                    ),
                 )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1322,11 +1853,17 @@ def create_app(
                     flow.set_metadata("question", request.question)
                     flow.set_metadata("answer", result.get("answer") or "")
                     flow.set_metadata("rag_status", result.get("status") or "")
+                    flow.set_metadata(
+                        "rag_response", _rag_response_metadata(result)
+                    )
                     if isinstance(result.get("test_run"), dict):
                         flow.set_metadata(
                             "test_run_id",
                             result["test_run"].get("run_id"),
                         )
+                    result["pipeline_flow"] = _rag_pipeline_snapshot(
+                        flow, app.state.session_factory
+                    )
                 return result
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1388,6 +1925,9 @@ def create_app(
                 flow.set_metadata("question", request.question)
                 flow.set_metadata("answer", result.get("answer") or "")
                 flow.set_metadata("rag_status", result.get("status") or "")
+                flow.set_metadata(
+                    "rag_response", _rag_response_metadata(result)
+                )
                 if isinstance(result.get("test_run"), dict):
                     flow.set_metadata(
                         "test_run_id",
@@ -1424,6 +1964,9 @@ def create_app(
                     error_message=error_message,
                 )
                 if result is not None:
+                    result["pipeline_flow"] = _rag_pipeline_snapshot(
+                        flow, app.state.session_factory
+                    )
                     loop.call_soon_threadsafe(queue.put_nowait, ("result", result))
                 else:
                     loop.call_soon_threadsafe(

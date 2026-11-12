@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
+from judgment.db import init_db
 from judgment.judgment_import import (
     archive_uncompressed_bytes,
     build_citation_pattern,
@@ -22,10 +23,18 @@ from judgment.judgment_import import (
     load_law_list,
     parse_court,
 )
+from judgment.judgment_backup import apply_raw_deltas_backwards
+from judgment.judgment_versioning import (
+    judgment_history,
+    list_snapshot_dicts,
+)
 from judgment.models import (
     Base,
+    JudgmentChangeEvent,
     JudgmentDocument,
+    JudgmentDocumentVersion,
     JudgmentImportRun,
+    JudgmentSnapshot,
     PerformanceRecord,
 )
 from judgment.processing_state import ProcessingStateStore
@@ -57,6 +66,73 @@ def _write_archive(path: Path, judgments: list[dict]) -> None:
             info = tarfile.TarInfo(name=f"{judgment['JID']}.json")
             info.size = len(payload)
             archive.addfile(info, io.BytesIO(payload))
+
+
+def test_init_db_migrates_existing_judgment_columns(tmp_path: Path) -> None:
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'legacy.db'}",
+        future=True,
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE judgment_documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    jid VARCHAR(255) NOT NULL,
+                    jyear VARCHAR(16) NOT NULL DEFAULT '',
+                    jcase VARCHAR(64) NOT NULL DEFAULT '',
+                    jno VARCHAR(32) NOT NULL DEFAULT '',
+                    jdate VARCHAR(16) NOT NULL DEFAULT '',
+                    court TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    full_text TEXT NOT NULL DEFAULT '',
+                    pdf_url TEXT NOT NULL DEFAULT '',
+                    source_archive TEXT NOT NULL DEFAULT '',
+                    content_hash VARCHAR(64) NOT NULL DEFAULT '',
+                    matched_laws JSON,
+                    matched_laws_text TEXT NOT NULL DEFAULT '',
+                    citations JSON,
+                    citation_count INTEGER NOT NULL DEFAULT 0,
+                    full_text_length INTEGER NOT NULL DEFAULT 0,
+                    import_run_id INTEGER,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO judgment_documents "
+                "(jid, jdate, full_text, content_hash) "
+                "VALUES ('LEGACY-1', '20260110', 'legacy text', 'abc')"
+            )
+        )
+    init_db(engine)
+    columns = {
+        row[1]
+        for row in engine.connect().execute(
+            text("PRAGMA table_info(judgment_documents)")
+        )
+    }
+    assert {
+        "issue_month",
+        "first_seen_snapshot_id",
+        "content_first_seen_snapshot_id",
+        "last_seen_snapshot_id",
+        "removed_snapshot_id",
+        "is_current",
+    } <= columns
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT issue_month, is_current "
+                "FROM judgment_documents WHERE jid = 'LEGACY-1'"
+            )
+        ).one()
+    assert row[0] == "202601"
+    assert bool(row[1]) is True
 
 
 def test_load_law_list_strips_scope_notes(tmp_path: Path) -> None:
@@ -184,6 +260,201 @@ def test_import_filters_and_stores_only_matching_judgments(tmp_path: Path) -> No
 
 
 @pytest.mark.skipif(shutil.which("bsdtar") is None, reason="bsdtar not installed")
+def test_import_versions_preserve_old_content_and_delta(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("bsdtar") is None:
+        pytest.skip("bsdtar not installed")
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    first_archive = tmp_path / "202601--(20260101Update).rar"
+    second_archive = tmp_path / "202601--(20260201Update).rar"
+    _write_archive(
+        first_archive,
+        [
+            _judgment("A1", "臺灣臺北地方法院民事判決\n依銀行法第1條。"),
+            _judgment("A2", "臺灣臺北地方法院民事判決\n依銀行法第2條。"),
+            _judgment("A3", "臺灣臺北地方法院民事判決\n依銀行法第3條。"),
+        ],
+    )
+    _write_archive(
+        second_archive,
+        [
+            _judgment("A1", "臺灣臺北地方法院民事判決\n依銀行法第1條。"),
+            _judgment("A2", "臺灣臺北地方法院民事判決\n依銀行法第2條修正。"),
+            _judgment("A4", "臺灣臺北地方法院民事判決\n依銀行法第4條。"),
+        ],
+    )
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+
+    first = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[first_archive],
+        batch_size=2,
+        session_factory=session_factory,
+    )
+    first_raw = Path(first["raw_parquet_paths"][0])
+    assert first["version_added"] == 3
+    assert first["delta_count"] == 0
+
+    second = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[second_archive],
+        batch_size=2,
+        session_factory=session_factory,
+    )
+    assert second["version_added"] == 1
+    assert second["version_modified"] == 1
+    assert second["version_removed"] == 1
+    assert second["version_unchanged"] == 1
+    assert second["delta_count"] == 1
+
+    with session_factory() as session:
+        docs = {
+            row.jid: row
+            for row in session.scalars(select(JudgmentDocument)).all()
+        }
+        assert docs["A1"].is_current is True
+        assert docs["A2"].is_current is True
+        assert docs["A3"].is_current is False
+        assert docs["A3"].removed_snapshot_id is not None
+        assert docs["A4"].is_current is True
+        assert "修正" in docs["A2"].full_text
+        assert docs["A3"].full_text.endswith("第3條。")
+
+        versions = session.scalars(
+            select(JudgmentDocumentVersion).order_by(
+                JudgmentDocumentVersion.jid
+            )
+        ).all()
+        version_by_jid = {row.jid: row for row in versions}
+        assert set(version_by_jid) == {"A2", "A3"}
+        assert "第2條。" in version_by_jid["A2"].full_text
+        assert "第3條。" in version_by_jid["A3"].full_text
+        assert version_by_jid["A2"].valid_to_snapshot_id is not None
+        assert version_by_jid["A3"].valid_to_snapshot_id is not None
+
+        events = session.scalars(
+            select(JudgmentChangeEvent).order_by(JudgmentChangeEvent.id)
+        ).all()
+        assert {event.change_type for event in events} == {
+            "added",
+            "modified",
+            "removed",
+        }
+        modified = next(
+            event for event in events if event.change_type == "modified"
+        )
+        assert modified.jid == "A2"
+        assert modified.changed_fields
+        assert modified.from_version_id is not None
+
+        snapshots = session.scalars(
+            select(JudgmentSnapshot).order_by(JudgmentSnapshot.id)
+        ).all()
+        assert [item.is_current for item in snapshots] == [False, True]
+        assert snapshots[1].delta_parquet_path
+
+    history = judgment_history(session_factory, jid="A2")
+    assert history["current"]["is_current"] is True
+    assert len(history["versions"]) == 1
+    assert any(event["change_type"] == "modified" for event in history["events"])
+    snapshots = list_snapshot_dicts(session_factory)
+    assert len(snapshots) == 2
+    assert snapshots[0]["is_current"] is True
+
+    # The old full raw Parquet is pruned only after the delta is durable.
+    assert not first_raw.exists()
+    with session_factory() as session:
+        snapshot = session.scalars(
+            select(JudgmentSnapshot).where(
+                JudgmentSnapshot.is_current.is_(True)
+            )
+        ).first()
+        assert snapshot is not None
+        delta_path = Path(snapshot.delta_parquet_path)
+    assert delta_path.is_file()
+    new_raw = Path(second["raw_parquet_paths"][0])
+    reconstructed = apply_raw_deltas_backwards(new_raw, [delta_path])
+    assert "A2" in reconstructed
+    assert "第2條。" in reconstructed["A2"]
+    assert "A3" in reconstructed
+    assert "A4" not in reconstructed
+
+
+def test_dry_run_does_not_create_snapshots_or_versions(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("bsdtar") is None:
+        pytest.skip("bsdtar not installed")
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    archive = tmp_path / "202601--(20260101Update).rar"
+    _write_archive(
+        archive,
+        [_judgment("A1", "臺灣臺北地方法院民事判決\n依銀行法第1條。")],
+    )
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+    summary = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        dry_run=True,
+        session_factory=session_factory,
+    )
+    assert summary["status"] == "dry_run"
+    assert summary["delta_count"] == 0
+    with session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(JudgmentSnapshot)) == 0
+        assert session.scalar(select(func.count()).select_from(JudgmentDocument)) == 0
+        assert (
+            session.scalar(select(func.count()).select_from(JudgmentDocumentVersion))
+            == 0
+        )
+
+
 def test_import_tracks_archive_progress_state(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv(
         "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")

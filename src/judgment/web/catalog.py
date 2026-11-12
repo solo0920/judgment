@@ -252,6 +252,7 @@ def _distinct_judgment_courts(
                 .where(
                     JudgmentDocument.court_normalized.is_not(None),
                     JudgmentDocument.court_normalized != "",
+                    JudgmentDocument.is_current.is_(True),
                 )
                 .distinct()
                 .order_by(JudgmentDocument.court_normalized)
@@ -563,6 +564,7 @@ def _indexeddb_fields() -> List[Dict[str, Any]]:
             "options": [
                 _option("query_history", "查詢歷史"),
                 _option("settings", "本機設定"),
+                _option("audit_events", "版本 Audit"),
             ],
             "help": "IndexedDB 僅存在於瀏覽器，不會上傳到伺服器。",
         },
@@ -599,7 +601,12 @@ def _judgment_count(session_factory: sessionmaker[Session]) -> int:
     try:
         with session_factory() as session:
             return int(
-                session.scalar(select(func.count()).select_from(JudgmentDocument)) or 0
+                session.scalar(
+                    select(func.count())
+                    .select_from(JudgmentDocument)
+                    .where(JudgmentDocument.is_current.is_(True))
+                )
+                or 0
             )
     except Exception:
         return 0
@@ -724,6 +731,7 @@ def build_catalog(
             "tables": [
                 {"id": "query_history", "label": "query_history", "description": "提問與查詢歷史"},
                 {"id": "settings", "label": "settings", "description": "瀏覽器本機設定"},
+                {"id": "audit_events", "label": "audit_events", "description": "判決版本變更 audit 快取"},
             ],
         },
     ]
@@ -795,6 +803,7 @@ def build_catalog(
             "tables": [
                 {"id": "query_history", "label": "query_history", "description": "提問與查詢歷史"},
                 {"id": "settings", "label": "settings", "description": "瀏覽器本機設定"},
+                {"id": "audit_events", "label": "audit_events", "description": "判決版本變更 audit 快取"},
             ],
         },
     ]

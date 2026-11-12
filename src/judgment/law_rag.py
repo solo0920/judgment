@@ -994,14 +994,20 @@ def judgment_law_stats(
     with session_factory() as session:
         rows = session.execute(
             select(JudgmentDocument.citations, JudgmentDocument.jid)
-            .where(JudgmentDocument.matched_laws_text.contains(entity))
+            .where(
+                JudgmentDocument.matched_laws_text.contains(entity),
+                JudgmentDocument.is_current.is_(True),
+            )
             .limit(limit_rows)
         ).all()
         matched_by = "matched_laws"
         if not rows:
             rows = session.execute(
                 select(JudgmentDocument.citations, JudgmentDocument.jid)
-                .where(JudgmentDocument.full_text.contains(entity))
+                .where(
+                    JudgmentDocument.full_text.contains(entity),
+                    JudgmentDocument.is_current.is_(True),
+                )
                 .limit(limit_rows)
             ).all()
             matched_by = "full_text"

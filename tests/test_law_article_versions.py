@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from judgment.law_article_versions import (
     backfill_article_versions,
     build_article_rows,
+    check_law_version_status,
     persist_article_rows,
 )
 from judgment.models import (
@@ -150,6 +151,103 @@ def test_persist_article_rows_detects_modified_added_removed() -> None:
         assert removed.article_no == "第2條"
         assert removed.before_content == "removed"
         assert removed.after_content is None
+    engine.dispose()
+
+
+def test_check_law_version_status_reports_month_backfill(
+    tmp_path: Path, monkeypatch
+) -> None:
+    engine, factory = _session_factory()
+    with factory() as session:
+        law_current = _version("law")
+        law_current.content_sha256 = "1" * 64
+        order_current = _version("order")
+        order_current.content_sha256 = "2" * 64
+        law_previous = _version("law")
+        law_previous.content_sha256 = "3" * 64
+        law_previous.update_date = "2026/09/30"
+        law_previous.is_current = False
+        order_missing = _version("order")
+        order_missing.content_sha256 = "4" * 64
+        order_missing.update_date = "2026/08/31"
+        order_missing.is_current = False
+        session.add_all(
+            [law_current, order_current, law_previous, order_missing]
+        )
+        session.flush()
+        order_current_id = int(order_current.id)
+        document = LawDocument(
+            source_type="law",
+            law_key="L0001",
+            law_name="測試法",
+            content_hash="d" * 64,
+            first_seen_version_id=law_current.id,
+            last_seen_version_id=law_current.id,
+        )
+        session.add(document)
+        session.flush()
+        for version in (law_current, law_previous):
+            rows = build_article_rows(
+                law_id=document.id,
+                law_key=document.law_key,
+                law_version_id=version.id,
+                articles=[
+                    {
+                        "article_type": "A",
+                        "article_no": "第1條",
+                        "article_content": f"content-{version.id}",
+                    }
+                ],
+            )
+            persist_article_rows(
+                session,
+                version_id=version.id,
+                law_rows=[(document, rows)],
+                previous_version_id=None,
+            )
+        session.commit()
+
+    def fake_find_raw_parquet(data_dir, version):
+        if int(version.id) == order_current_id:
+            return tmp_path / "raw.parquet"
+        return None
+
+    monkeypatch.setattr(
+        "judgment.law_article_versions._find_raw_parquet",
+        fake_find_raw_parquet,
+    )
+    result = check_law_version_status(factory, data_dir=tmp_path)
+    months = {item["month"]: item for item in result["months"]}
+    assert months["202610"]["status"] == "gray"
+    assert months["202610"]["backfilled_count"] == 1
+    assert months["202610"]["missing_count"] == 1
+    assert months["202610"]["needs_backfill_count"] == 1
+    assert months["202610"]["backfillable_count"] == 1
+    assert months["202610"]["blocked_count"] == 0
+    assert months["202610"]["current"] is True
+    assert months["202610"]["law_versions"] == 1
+    assert months["202610"]["order_versions"] == 1
+    assert months["202609"]["status"] == "green"
+    assert months["202608"]["status"] == "red"
+    assert months["202608"]["blocked_count"] == 1
+    assert result["summary"] == {"green": 1, "red": 1, "gray": 1}
+    assert result["totals"]["versions"] == 4
+    assert result["totals"]["backfilled_versions"] == 2
+    assert result["totals"]["missing_versions"] == 2
+    assert result["totals"]["needs_backfill_versions"] == 2
+    assert result["totals"]["backfillable_versions"] == 1
+    assert result["totals"]["blocked_versions"] == 1
+    assert result["totals"]["article_rows"] == 2
+    need_versions = [
+        version
+        for month in result["months"]
+        for version in month["versions"]
+        if version["needs_backfill"]
+    ]
+    assert {version["version_id"]: version["backfillable"] for version in need_versions}[
+        order_current_id
+    ] is True
+    assert any(version["blocked"] for version in need_versions)
     engine.dispose()
 
 

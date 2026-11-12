@@ -85,7 +85,7 @@ CASE 在目前的技術棧上**技術可行**，但它不是目前 RAG Console �
 
 - `judgment_documents`：JID、法院、日期、案由、全文、PDF、命中法規、引用。
 - 原始 `raw.parquet`：不可變的原始 JSON 與查詢欄位。
-- `judgment_vector_index` 與 Qdrant `judgment_documents` collection。
+- `judgment_vector_index`、`judgment_index_versions` 與 Qdrant `judgments_current` alias（版本化 `judgments_vNNN`；legacy `judgment_documents`）。
 - Phase 3 的 DuckDB 資料品質統計，可作為 CASE 取用判決前的品質 gate。
 
 限制：
@@ -147,7 +147,7 @@ CASE 涉及案件私有文件、交易資訊、個資與商業機密，但目前
 
 ### 4.3 Case-private Vector Isolation
 
-目前 Qdrant 的 `judgment_documents` 是公開判決索引。
+目前 Qdrant 的公開判決索引使用 `judgments_current` alias（版本化 `judgments_vNNN`；legacy `judgment_documents`）。
 
 CASE 需要：
 

@@ -216,11 +216,43 @@ class JudgmentImportRun(Base):
     )
 
 
+class JudgmentSnapshot(Base):
+    """One imported archive snapshot for a judgment issue month.
+
+    Snapshots are immutable.  The latest snapshot for an issue month is the
+    current one; older snapshots remain queryable for audit.
+    """
+
+    __tablename__ = "judgment_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_month = Column(String(6), nullable=False, index=True)
+    source_archive = Column(Text, nullable=False)
+    archive_sha256 = Column(String(64), nullable=False)
+    source_update_date = Column(String(8), nullable=False, default="")
+    raw_parquet_path = Column(Text, nullable=False, default="")
+    delta_parquet_path = Column(Text, nullable=False, default="")
+    raw_row_count = Column(Integer, nullable=False, default=0)
+    matched_count = Column(Integer, nullable=False, default=0)
+    is_current = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "issue_month",
+            "archive_sha256",
+            name="uq_judgment_snapshot_month_sha",
+        ),
+        Index("ix_judgment_snapshots_month_current", "issue_month", "is_current"),
+    )
+
+
 class JudgmentDocument(Base):
     __tablename__ = "judgment_documents"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     jid = Column(String(255), nullable=False, unique=True, index=True)
+    issue_month = Column(String(6), nullable=False, default="", index=True)
     jyear = Column(String(16), nullable=False, default="")
     jcase = Column(String(64), nullable=False, default="")
     jno = Column(String(32), nullable=False, default="")
@@ -240,6 +272,19 @@ class JudgmentDocument(Base):
     import_run_id = Column(
         Integer, ForeignKey("judgment_import_runs.id"), nullable=True, index=True
     )
+    first_seen_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    content_first_seen_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    last_seen_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    removed_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    is_current = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
@@ -249,6 +294,103 @@ class JudgmentDocument(Base):
         Index("ix_judgment_documents_court", "court"),
         Index("ix_judgment_documents_court_normalized", "court_normalized"),
         Index("ix_judgment_documents_date", "jdate"),
+    )
+
+
+class JudgmentDocumentVersion(Base):
+    """Immutable historical content for a judgment that was superseded.
+
+    The current content lives in ``judgment_documents``.  A version row is
+    created lazily when the current row is changed or removed, so new records
+    are not duplicated just to establish their first version.
+    """
+
+    __tablename__ = "judgment_document_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    jid = Column(String(255), nullable=False, index=True)
+    issue_month = Column(String(6), nullable=False, default="", index=True)
+    snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=False, index=True
+    )
+    content_hash = Column(String(64), nullable=False, default="")
+    normalized_hash = Column(String(64), nullable=False, default="")
+    jyear = Column(String(16), nullable=False, default="")
+    jcase = Column(String(64), nullable=False, default="")
+    jno = Column(String(32), nullable=False, default="")
+    jdate = Column(String(16), nullable=False, default="")
+    court = Column(Text, nullable=False, default="")
+    court_normalized = Column(Text, nullable=False, default="")
+    title = Column(Text, nullable=False, default="")
+    full_text = Column(Text, nullable=False, default="")
+    pdf_url = Column(Text, nullable=False, default="")
+    source_archive = Column(Text, nullable=False, default="")
+    matched_laws = Column(JSON, nullable=False, default=list)
+    matched_laws_text = Column(Text, nullable=False, default="")
+    citations = Column(JSON, nullable=False, default=list)
+    citation_count = Column(Integer, nullable=False, default=0)
+    full_text_length = Column(Integer, nullable=False, default=0)
+    valid_from_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    valid_to_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "jid", "snapshot_id", name="uq_judgment_version_jid_snapshot"
+        ),
+        Index(
+            "ix_judgment_versions_jid_validity",
+            "jid",
+            "valid_from_snapshot_id",
+            "valid_to_snapshot_id",
+        ),
+    )
+
+
+class JudgmentChangeEvent(Base):
+    """Audit event for a judgment added, changed, removed, or restored."""
+
+    __tablename__ = "judgment_change_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    jid = Column(String(255), nullable=False, index=True)
+    issue_month = Column(String(6), nullable=False, default="", index=True)
+    from_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=True
+    )
+    to_snapshot_id = Column(
+        Integer, ForeignKey("judgment_snapshots.id"), nullable=False, index=True
+    )
+    from_version_id = Column(
+        Integer, ForeignKey("judgment_document_versions.id"), nullable=True
+    )
+    to_version_id = Column(
+        Integer, ForeignKey("judgment_document_versions.id"), nullable=True
+    )
+    change_type = Column(String(16), nullable=False)
+    changed_fields = Column(JSON, nullable=True)
+    before_json = Column(JSON, nullable=True)
+    after_json = Column(JSON, nullable=True)
+    is_formatting_only = Column(Boolean, nullable=False, default=False)
+    detected_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "jid",
+            "to_snapshot_id",
+            "change_type",
+            name="uq_judgment_change_event",
+        ),
+        Index(
+            "ix_judgment_change_events_snapshot",
+            "to_snapshot_id",
+            "change_type",
+        ),
+        Index("ix_judgment_change_events_jid_time", "jid", "detected_at"),
     )
 
 
@@ -433,6 +575,7 @@ class OllamaHost(Base):
     base_url = Column(String(300), nullable=False, unique=True, index=True)
     port = Column(Integer, nullable=False, default=11434)
     is_active = Column(Boolean, nullable=False, default=False, index=True)
+    priority = Column(Integer, nullable=False, default=100, index=True)
     chat_model = Column(String(200), nullable=False, default="")
     embedding_model = Column(String(200), nullable=False, default="")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
@@ -467,6 +610,46 @@ class DownloadRun(Base):
     __table_args__ = (
         Index("ix_download_runs_source_started", "source_type", "started_at"),
         Index("ix_download_runs_status", "status"),
+    )
+
+
+class DownloadUpdateRecord(Base):
+    """One online update check or completed download for a source."""
+
+    __tablename__ = "download_update_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_type = Column(String(16), nullable=False, index=True)
+    source_url = Column(Text, nullable=False, default="")
+    status = Column(String(24), nullable=False, default="unknown")
+    update_available = Column(Boolean, nullable=False, default=False)
+    checked_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    remote_filename = Column(Text, nullable=False, default="")
+    remote_content_length = Column(Integer, nullable=True)
+    remote_update_date = Column(String(64), nullable=False, default="")
+    remote_etag = Column(Text, nullable=False, default="")
+    remote_last_modified = Column(Text, nullable=False, default="")
+    local_version_id = Column(Integer, nullable=True)
+    local_update_date = Column(String(64), nullable=False, default="")
+    local_zip_sha256 = Column(String(64), nullable=False, default="")
+    download_path = Column(Text, nullable=False, default="")
+    download_date = Column(String(8), nullable=False, default="")
+    message = Column(Text, nullable=False, default="")
+    details = Column(JSON, nullable=False, default=dict)
+    is_current = Column(Boolean, nullable=False, default=True, index=True)
+
+    __table_args__ = (
+        Index(
+            "ix_download_update_source_current",
+            "source_type",
+            "is_current",
+        ),
+        Index(
+            "ix_download_update_checked",
+            "checked_at",
+        ),
     )
 
 

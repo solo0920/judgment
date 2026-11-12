@@ -52,7 +52,7 @@ const STATUS_TABS = [
     icon: "terminal",
   },
   { id: "resources", label: "系統資料使用", hint: "CPU、RAM、Docker、硬碟", icon: "cpu" },
-  { id: "local-model", label: "Local Model", hint: "Ollama 主機與模型", icon: "server" },
+  { id: "local-model", label: "Model Provider", hint: "Ollama 主機與模型", icon: "server" },
   { id: "architecture", label: "前後端架構", hint: "Client → Data → AI", icon: "layers" },
   { id: "data", label: "資料版本", hint: "Parquet 與 PostgreSQL", icon: "database" },
   { id: "api", label: "API 端點", hint: "REST 與 OpenAPI", icon: "terminal" },
@@ -1010,6 +1010,39 @@ function renderLocalModelHost(host, editingId) {
           const modified = model.modified_at
             ? formatDateTime(model.modified_at)
             : "";
+          const capabilities = new Set(
+            (model.capabilities || []).map((value) =>
+              String(value || "").toLowerCase(),
+            ),
+          );
+          const capabilityBadges = [];
+          if (model.supports_chat === true) {
+            capabilityBadges.push(["Chat", "badge-ok"]);
+          }
+          if (capabilities.has("embedding")) {
+            capabilityBadges.push(["Embedding", "badge-info"]);
+          }
+          if (capabilities.has("vision")) {
+            capabilityBadges.push(["Vision", "badge-neutral"]);
+          }
+          if (capabilities.has("tools")) {
+            capabilityBadges.push(["Tools", "badge-neutral"]);
+          }
+          if (capabilities.has("thinking")) {
+            capabilityBadges.push(["Thinking", "badge-neutral"]);
+          }
+          if (capabilities.has("speech")) {
+            capabilityBadges.push(["Speech", "badge-warn"]);
+          }
+          if (model.is_reranker) {
+            capabilityBadges.push(["Reranker", "badge-neutral"]);
+          }
+          if (!capabilityBadges.length) {
+            capabilityBadges.push([
+              model.capability_status === "untested" ? "未測試" : "無 chat 能力",
+              "badge-neutral",
+            ]);
+          }
           return `<div class="ollama-model-row">
             <div class="ollama-model-main">
               <strong>${escapeHtml(name)}</strong>
@@ -1017,6 +1050,12 @@ function renderLocalModelHost(host, editingId) {
                 .filter(Boolean)
                 .map((value) => escapeHtml(value))
                 .join(" · ") || "—"}</span>
+              <div class="ollama-model-capabilities">${capabilityBadges
+                .map(
+                  ([label, badge]) =>
+                    `<span class="badge ${badge}">${escapeHtml(label)}</span>`,
+                )
+                .join("")}</div>
             </div>
             <div class="ollama-model-roles">
               ${isChat ? `<span class="badge badge-ok">聊天</span>` : ""}
@@ -1064,7 +1103,7 @@ function renderLocalModel(hosts, loading, error, editingId) {
     return `<div class="report-card">
       ${notice({
         tone: "danger",
-        title: "Local Model 讀取失敗",
+        title: "Model Provider 讀取失敗",
         text: escapeHtml(error.message || "請確認後端服務是否啟動。"),
       })}
       <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
@@ -1087,11 +1126,14 @@ function renderLocalModel(hosts, loading, error, editingId) {
   return `<div class="report-card ollama-card">
     <div class="report-head">
       <div class="report-title-group">
-        <div class="report-kicker">LOCAL MODEL</div>
+        <div class="report-kicker">MODEL PROVIDER</div>
         <div class="report-title">Ollama 主機與模型</div>
-        <div class="report-sub">管理可用的 Ollama 連線、目前使用的主機，以及主機上的聊天／嵌入模型。每次開啟此頁都會重新取得主機與模型列表。</div>
+        <div class="report-sub">管理可用的 Ollama 連線、目前使用的主機，以及主機上的聊天／嵌入模型。每次開啟此頁都會重新取得主機與模型列表；embedding 主機的優先順序可到「資料處理」的執行資訊卡片拖移調整。</div>
       </div>
-      <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="refresh-hosts">${icon("refresh", 14)}<span>重新整理</span></button>
+      <div class="qb-actions">
+        <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="check-capabilities">${icon("shield", 14)}<span>檢查模型能力</span></button>
+        <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="refresh-hosts">${icon("refresh", 14)}<span>重新整理</span></button>
+      </div>
     </div>
     <div class="report-section">
       <form class="ollama-host-form" data-ollama-form="host">
@@ -1270,6 +1312,8 @@ export async function render(root, ctx) {
   let testsMounting = false;
   let testsCleanup = null;
   let testsMountToken = 0;
+  let lastNavMarkup = "";
+  let lastContentMarkup = "";
 
   root.innerHTML = `<section class="page status-page">
     <div class="page-header">
@@ -1277,7 +1321,7 @@ export async function render(root, ctx) {
         <div class="eyebrow">OBSERVABILITY</div>
         <h1 class="page-title">系統架構與服務狀態</h1>
         <p class="page-subtitle">檢視前端、FastAPI、PostgreSQL、Parquet 與 AI 元件的即時健康狀態，
-          並從左側分類切換服務總覽、系統測試、Local Model、系統資料使用、架構、資料版本與最近下載紀錄。</p>
+          並從左側分類切換服務總覽、系統測試、Model Provider、系統資料使用、架構、資料版本與最近下載紀錄。</p>
       </div>
       <div class="page-actions">
         <label class="auto-refresh">
@@ -1330,6 +1374,7 @@ export async function render(root, ctx) {
   const mountTests = async () => {
     const token = ++testsMountToken;
     testsMounting = true;
+    lastContentMarkup = "";
     content.innerHTML = "";
     try {
       const cleanup = await testsPage.render(
@@ -1354,13 +1399,17 @@ export async function render(root, ctx) {
 
   const paint = () => {
     if (!latest) return;
-    nav.innerHTML = renderStatusSidebar(latest, activeTab, usage);
+    const navMarkup = renderStatusSidebar(latest, activeTab, usage);
+    if (navMarkup !== lastNavMarkup) {
+      nav.innerHTML = navMarkup;
+      lastNavMarkup = navMarkup;
+    }
     if (activeTab === "tests") {
       if (!testsMounted && !testsMounting) mountTests();
       return;
     }
     unmountTests();
-    content.innerHTML = renderStatusTab(
+    const contentMarkup = renderStatusTab(
       activeTab,
       latest,
       usage,
@@ -1373,13 +1422,19 @@ export async function render(root, ctx) {
         editingId: ollamaEditingId,
       },
     );
+    if (contentMarkup !== lastContentMarkup) {
+      content.innerHTML = contentMarkup;
+      lastContentMarkup = contentMarkup;
+    }
   };
 
   const loadUsage = async ({ quiet = false } = {}) => {
     if (usageLoading) return;
     usageLoading = true;
     usageError = null;
-    if (activeTab === "resources") paint();
+    // Keep the current report visible while refreshing; only show a loading
+    // state when there is no data to display yet.
+    if (activeTab === "resources" && !usage) paint();
     try {
       const data = await api.systemUsage();
       if (disposed) return;
@@ -1400,7 +1455,9 @@ export async function render(root, ctx) {
     if (ollamaHostsLoading) return;
     ollamaHostsLoading = true;
     ollamaHostsError = null;
-    if (activeTab === "local-model") paint();
+    // Keep the current host list visible while refreshing; only show a
+    // loading state when there is no data to display yet.
+    if (activeTab === "local-model" && !ollamaHosts) paint();
     try {
       const data = await api.ollamaHosts();
       if (disposed) return;
@@ -1435,7 +1492,10 @@ export async function render(root, ctx) {
       if (!quiet) toast("服務狀態已更新。", "ok", 2200);
     } catch (error) {
       if (disposed) return;
-      if (activeTab !== "tests") content.innerHTML = renderError(error);
+      if (activeTab !== "tests") {
+        lastContentMarkup = "";
+        content.innerHTML = renderError(error);
+      }
       if (!quiet) toast(error.message || "無法取得服務狀態。", "danger");
     } finally {
       if (!disposed) {
@@ -1530,6 +1590,23 @@ export async function render(root, ctx) {
         await reloadOllamaHosts();
       } catch (error) {
         toast(error.message || "停用主機失敗。", "danger");
+      }
+      return;
+    }
+    if (action === "check-capabilities") {
+      setBusy(button, true, "檢查中…");
+      try {
+        await api.checkOllamaCapabilities();
+        toast("已更新所有主機的模型能力。", "ok", 4000);
+        await reloadOllamaHosts();
+      } catch (error) {
+        toast(
+          error.message || "無法檢查模型能力。",
+          "danger",
+          7000,
+        );
+      } finally {
+        setBusy(button, false);
       }
       return;
     }

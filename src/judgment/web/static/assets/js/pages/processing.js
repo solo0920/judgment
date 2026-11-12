@@ -13,10 +13,18 @@ import {
 } from "../utils.js";
 
 const POLL_INTERVAL_MS = 2000;
+const OLLAMA_CHECK_INTERVAL_MS = 30000;
+const OLLAMA_PRIORITY_WORKFLOWS = new Set([
+  "full_update",
+  "judgment_import",
+  "index_versions",
+]);
 
 const STATUS_META = {
   running: { label: "執行中", tone: "info" },
   success: { label: "完成", tone: "ok" },
+  partial: { label: "部分完成", tone: "warn" },
+  update: { label: "更新", tone: "warn" },
   failed: { label: "失敗", tone: "danger" },
   interrupted: { label: "已中止", tone: "warn" },
   stale: { label: "狀態失效", tone: "warn" },
@@ -30,6 +38,7 @@ const STATUS_META = {
   missing: { label: "尚無紀錄", tone: "idle" },
   error: { label: "讀取失敗", tone: "danger" },
   ok: { label: "正常", tone: "ok" },
+  provided: { label: "外部提供", tone: "info" },
 };
 
 const TONE_CLASS = {
@@ -68,6 +77,8 @@ const STAGE_ICONS = {
   filter: "filter",
   postgres: "database",
   qdrant: "brain",
+  ollama: "cloud",
+  validate: "shield",
   download: "download",
   parse: "sliders",
 };
@@ -75,6 +86,42 @@ const STAGE_ICONS = {
 const STAGE_FLOW_LABELS = {
   raw_parquet: "原始 Parquet",
   postgres: "PostgreSQL",
+};
+
+const DOWNLOAD_WORKFLOW_SOURCES = {
+  law_download: "law",
+  order_download: "order",
+  judgment_download: "judgment",
+};
+
+const DOWNLOAD_WORKFLOW_LABELS = {
+  law_download: "法規下載",
+  order_download: "命令下載",
+  judgment_download: "判決下載",
+};
+
+const DOWNLOAD_FORCE_CONFIRMATIONS = {
+  law_download:
+    "仍要強制重新下載並比對嗎？下載後會寫入原始 Parquet；若內容有變更才更新 PostgreSQL。",
+  order_download:
+    "仍要強制重新下載並比對嗎？下載後會寫入原始 Parquet；若內容有變更才更新 PostgreSQL。",
+  judgment_download:
+    "仍要強制重新下載判決 RAR 嗎？（不會自動匯入 PostgreSQL 或建立 Qdrant 索引）",
+};
+
+const WORKFLOW_SCOPE_NOTES = {
+  law_download:
+    "流程範圍：下載 ZIP → 原始 Parquet；內容有變更才解析條文並更新 PostgreSQL。法規 RAG 直接查詢 PostgreSQL，不寫入 Qdrant；IndexedDB 只保存瀏覽器提問紀錄。",
+  order_download:
+    "流程範圍：下載 ZIP → 原始 Parquet；內容有變更才解析條文並更新 PostgreSQL。命令 RAG 直接查詢 PostgreSQL，不寫入 Qdrant；IndexedDB 只保存瀏覽器提問紀錄。",
+  judgment_download:
+    "流程範圍：只下載判決 RAR。PostgreSQL／Parquet 匯入與 Qdrant 索引需另執行「判決匯入」或完整資料更新；IndexedDB 不參與資料管線。",
+  judgment_import:
+    "流程範圍：RAR → 原始 Parquet → 金融法規篩選 → PostgreSQL。Qdrant 索引需另執行；IndexedDB 不參與資料管線。",
+  judgment_parquet:
+    "流程範圍：從 PostgreSQL 匯出查詢用 Parquet 快照；不寫入 Qdrant／IndexedDB。",
+  index_versions:
+    "流程範圍：建立並驗證新的 Qdrant collection，完成後原子切換 alias；IndexedDB 不參與。",
 };
 
 function statusInfo(status) {
@@ -132,6 +179,9 @@ function stageCounts(stage) {
   const unit = stage.unit === "bytes" ? "" : stage.unit || "筆";
   const current = stage.current;
   const total = stage.total;
+  if (["skipped", "pending", "idle"].includes(stage.status)) {
+    return "—";
+  }
   if (current === null || current === undefined) {
     return stage.status === "running" ? "進行中" : "—";
   }
@@ -849,6 +899,23 @@ const WORKFLOW_ICONS = {
 
 function workflowItems(snapshot) {
   const workflows = Array.isArray(snapshot.workflows) ? snapshot.workflows : [];
+  const mapped = workflows.map((workflow) => {
+    const activeRun = workflow.active_run || null;
+    const lastRun = activeRun || workflow.last_run || null;
+    return {
+      ...workflow,
+      activeRun,
+      lastRun,
+      status: activeRun
+        ? activeRun.status || "running"
+        : workflow.update_available
+          ? "update"
+          : lastRun?.status || "idle",
+    };
+  });
+  // Keep the optional export action at the bottom of the sidebar without
+  // changing the backend workflow catalog or execution order.
+  const parquet = mapped.find((item) => item.id === "judgment_parquet");
   return [
     {
       id: "overview",
@@ -858,16 +925,8 @@ function workflowItems(snapshot) {
       activeRun: null,
       lastRun: null,
     },
-    ...workflows.map((workflow) => {
-      const activeRun = workflow.active_run || null;
-      const lastRun = activeRun || workflow.last_run || null;
-      return {
-        ...workflow,
-        activeRun,
-        lastRun,
-        status: lastRun?.status || "idle",
-      };
-    }),
+    ...mapped.filter((item) => item.id !== "judgment_parquet"),
+    ...(parquet ? [parquet] : []),
   ];
 }
 
@@ -882,7 +941,11 @@ function workflowNavMarkup(snapshot, activeWorkflowId) {
         .map((item) => {
           const active = item.id === activeWorkflowId;
           const iconName = WORKFLOW_ICONS[item.id] || "terminal";
-          return `<button class="status-tab${active ? " is-active" : ""}" type="button"
+          const divider =
+            item.id === "normalize_courts"
+              ? '<div class="status-tab-divider" role="separator" aria-hidden="true"></div>'
+              : "";
+          return `${divider}<button class="status-tab${active ? " is-active" : ""}" type="button"
             data-processing-workflow="${escapeHtml(item.id)}"
             ${active ? 'aria-current="page"' : ""}>
             <span class="status-tab-icon">${icon(iconName, 15)}</span>
@@ -945,7 +1008,7 @@ function judgmentMonthDownloadMarkup(item) {
   const month = judgmentMonthKey(item);
   return `<a class="judgment-month-download" href="${escapeHtml(
     apiUrl(item.download_url),
-  )}" target="_blank" rel="noreferrer" title="下載 ${month} 判決（API 00:00–06:00）" aria-label="下載 ${month} 判決">${icon("download", 11)}</a>`;
+  )}" target="_blank" rel="noreferrer" title="下載 ${month} 判決" aria-label="下載 ${month} 判決">${icon("download", 11)}</a>`;
 }
 
 function judgmentMonthCellMarkup(item) {
@@ -953,6 +1016,101 @@ function judgmentMonthCellMarkup(item) {
   return `<td class="judgment-month is-${escapeHtml(status)}" data-judgment-month-key="${escapeHtml(
     judgmentMonthKey(item),
   )}" title="${escapeHtml(judgmentMonthTitle(item))}"><span>${item.month_no}</span>${judgmentMonthDownloadMarkup(item)}</td>`;
+}
+
+function judgmentOffHoursEnabled(state) {
+  return state?.off_hours_enabled === true;
+}
+
+function judgmentHintText(state) {
+  const downloadHint = judgmentOffHoursEnabled(state)
+    ? "非 API 時段也可下載，建議一次只下載一個檔案"
+    : "下載連結僅在 00:00–06:00 API 時段可用";
+  return `綠色：最新版已下載到 raw_rar；灰色：本機仍是舊版，執行判決下載會更新；紅色：該月份缺少判決資料。滑鼠移到月份可開啟下載連結（${downloadHint}）。待補齊月份會優先下載，全部補齊後才由最新月份往回驗證既有檔案；中斷的下載會保留 .part，伺服器支援 Range 時續傳，否則從零重新下載。首次完整同步可能需下載數百個月份，預設非時段也可續傳；嚴格模式會在 00:00–06:00 以外停止。`;
+}
+
+const JUDGMENT_STOP_REASON_LABELS = {
+  completed: "完成",
+  window_closed: "API 時段結束",
+  deadline: "接近 06:00，保留待下載月份",
+  verification_window_closed: "API 時段結束，驗證進度已保留",
+  verification_deadline: "接近 06:00，驗證進度已保留",
+  errors: "部分月份下載失敗，下次重試",
+  pending: "仍有待下載月份",
+  check_only: "僅檢查，未下載",
+  incremental: "增量檢查完成",
+  status_only: "僅更新月份狀態",
+  running: "執行中",
+};
+
+function judgmentBackfillSummary(state) {
+  const backfill = state?.backfill || {};
+  const verification = backfill.verification || {};
+  const lastRun = backfill.last_run || {};
+  const pending = Number(backfill.pending_count) || 0;
+  const failures = Number(backfill.failure_count) || 0;
+  const resume = String(backfill.resume_from_month || "");
+  let verificationText = "驗證：未開始";
+  if (verification.status === "completed") {
+    verificationText = "驗證完成";
+  } else if (verification.next_month) {
+    verificationText = `驗證續傳 ${verification.next_month}`;
+  } else if (verification.status === "in_progress") {
+    verificationText = "驗證進行中";
+  }
+  const stopReason = String(lastRun.stop_reason || "");
+  const lastText = stopReason
+    ? `上次停止：${JUDGMENT_STOP_REASON_LABELS[stopReason] || stopReason}`
+    : "";
+  return { pending, failures, resume, verificationText, lastText };
+}
+
+function judgmentBackfillMarkup(state) {
+  const info = judgmentBackfillSummary(state);
+  const pendingText =
+    info.pending > 0
+      ? `待補齊 ${formatNumber(info.pending)} 個月${
+          info.failures > 0 ? `（${formatNumber(info.failures)} 個失敗）` : ""
+        }`
+      : "待補齊 0 個月";
+  return `<div class="judgment-backfill" data-judgment-backfill>
+    <span class="badge ${info.pending > 0 ? "badge-danger" : "badge-ok"}" data-judgment-backfill-pending>${pendingText}</span>
+    <span class="badge badge-neutral" data-judgment-backfill-resume ${info.resume && info.pending > 0 ? "" : "hidden"}>從 ${escapeHtml(info.resume)} 續傳</span>
+    <span class="badge badge-info" data-judgment-backfill-verification>${escapeHtml(info.verificationText)}</span>
+    <span class="muted" data-judgment-backfill-last ${info.lastText ? "" : "hidden"}>${escapeHtml(info.lastText)}</span>
+  </div>`;
+}
+
+function updateJudgmentBackfill(container, state) {
+  const info = judgmentBackfillSummary(state);
+  const pending = container.querySelector("[data-judgment-backfill-pending]");
+  if (pending) {
+    pending.textContent =
+      info.pending > 0
+        ? `待補齊 ${formatNumber(info.pending)} 個月${
+            info.failures > 0
+              ? `（${formatNumber(info.failures)} 個失敗）`
+              : ""
+          }`
+        : "待補齊 0 個月";
+    pending.classList.toggle("badge-danger", info.pending > 0);
+    pending.classList.toggle("badge-ok", info.pending === 0);
+  }
+  const resume = container.querySelector("[data-judgment-backfill-resume]");
+  if (resume) {
+    const visible = Boolean(info.resume) && info.pending > 0;
+    resume.hidden = !visible;
+    resume.textContent = visible ? `從 ${info.resume} 續傳` : "";
+  }
+  const verification = container.querySelector(
+    "[data-judgment-backfill-verification]",
+  );
+  if (verification) verification.textContent = info.verificationText;
+  const last = container.querySelector("[data-judgment-backfill-last]");
+  if (last) {
+    last.hidden = !info.lastText;
+    last.textContent = info.lastText;
+  }
 }
 
 function judgmentMonthsLoadingMarkup() {
@@ -1000,6 +1158,7 @@ function renderJudgmentMonthTable(state) {
       <span class="badge badge-danger" data-judgment-summary="red">缺失 ${formatNumber(summary.red || 0)}</span>
       <span class="muted" data-judgment-total>共 ${formatNumber(state.total_months || months.length)} 個月</span>
     </div>
+    ${judgmentBackfillMarkup(state)}
     <div class="judgment-months-scroll">
       <table class="judgment-months-table">
         <thead><tr><th scope="col">年份</th>${Array.from(
@@ -1009,7 +1168,7 @@ function renderJudgmentMonthTable(state) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">綠色：最新版已下載到 raw_rar；灰色：本機仍是舊版，執行判決下載會更新；紅色：該月份缺少判決資料。滑鼠移到月份可開啟下載連結（需 00:00–06:00 API 時段）。首次完整同步可能需下載數百個月份，會跨多個 00:00–06:00 時段續傳。</p>
+    <p class="judgment-months-hint" data-judgment-hint>${escapeHtml(judgmentHintText(state))}</p>
   </div>`;
 }
 
@@ -1024,6 +1183,12 @@ function updateJudgmentMonthTable(container, state) {
   const total = container.querySelector("[data-judgment-total]");
   if (total) {
     total.textContent = `共 ${formatNumber(state.total_months || months.length)} 個月`;
+  }
+  updateJudgmentBackfill(container, state);
+  const hint = container.querySelector("[data-judgment-hint]");
+  if (hint) {
+    const text = judgmentHintText(state);
+    if (hint.textContent !== text) hint.textContent = text;
   }
   for (const item of months) {
     const key = judgmentMonthKey(item);
@@ -1052,7 +1217,1254 @@ function updateJudgmentMonthTable(container, state) {
   }
 }
 
-function workflowPanelMarkup(workflow) {
+function workflowRunHistoryMarkup(runs) {
+  const items = Array.isArray(runs) ? runs : [];
+  if (!items.length) {
+    return `<div class="processing-workflow-empty">尚無執行紀錄。</div>`;
+  }
+  return `<div class="processing-workflow-history">
+    ${items
+      .map(
+        (run) => `<div class="processing-workflow-history-row">
+          <span class="processing-workflow-history-status">${statusBadge(
+            run.status || "idle",
+          )}</span>
+          <span class="mono">${escapeHtml(formatDateTime(run.started_at))}</span>
+          <span class="mono">${escapeHtml(formatDuration(run.duration_ms || 0))}</span>
+          <span class="processing-workflow-history-message">${escapeHtml(
+            run.message || "—",
+          )}</span>
+        </div>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function updateHistoryMarkup(workflow) {
+  const items = Array.isArray(workflow.update_history)
+    ? workflow.update_history
+    : [];
+  if (!items.length) {
+    return `<div class="processing-workflow-empty">尚無版本檢查紀錄。</div>`;
+  }
+  const labels = {
+    up_to_date: ["已是最新", "badge-ok"],
+    update_available: ["有更新", "badge-warn"],
+    error: ["檢查失敗", "badge-danger"],
+  };
+  return `<div class="processing-workflow-history">
+    ${items
+      .map((item) => {
+        const [label, tone] = labels[item.status] || [
+          item.status || "未知",
+          "badge-neutral",
+        ];
+        const remoteSize =
+          item.remote_content_length != null
+            ? formatBytes(item.remote_content_length)
+            : "—";
+        const localVersion = item.local_version_id
+          ? `v${item.local_version_id}`
+          : "—";
+        return `<div class="processing-workflow-history-row">
+          <span class="badge ${tone}">${escapeHtml(label)}</span>
+          <span class="mono">${escapeHtml(formatDateTime(item.checked_at))}</span>
+          <span class="mono">遠端 ${escapeHtml(remoteSize)}</span>
+          <span class="mono">本地 ${escapeHtml(localVersion)}</span>
+          <span class="processing-workflow-history-message">${escapeHtml(
+            item.message || "—",
+          )}</span>
+        </div>`;
+      })
+      .join("")}
+  </div>`;
+}
+
+function stageHoverAttributes(stage) {
+  const key = String(stage.key || "");
+  const meta = statusInfo(stage.status);
+  return [
+    `data-stage-key="${escapeHtml(key)}"`,
+    `data-stage-label="${escapeHtml(stage.label || key)}"`,
+    `data-stage-color="${escapeHtml(barColor(stage))}"`,
+    `data-stage-status-key="${escapeHtml(stage.status || "idle")}"`,
+    `data-stage-status="${escapeHtml(meta.label)}"`,
+    `data-stage-percent="${escapeHtml(percentText(stage.percent))}"`,
+    `data-stage-counts="${escapeHtml(stageCounts(stage))}"`,
+    `data-stage-duration="${escapeHtml(formatDuration(stage.duration_ms || 0))}"`,
+    `data-stage-contribution="${escapeHtml(
+      percentText(stage.contribution_percent),
+    )}"`,
+    `data-stage-message="${escapeHtml(stage.message || "")}"`,
+  ].join(" ");
+}
+
+function workflowStageMarkup(stage) {
+  const status = String(stage.status || "idle");
+  return `<div class="processing-workflow-stage${
+    status === "running" ? " is-running" : ""
+  }" style="--stage-color:${escapeHtml(barColor(stage))}" ${stageHoverAttributes(
+    stage,
+  )}>
+    <div class="processing-workflow-stage-head">
+      <span class="processing-workflow-stage-swatch"></span>
+      <span class="processing-workflow-stage-label">${escapeHtml(
+        stage.label || stage.key || "階段",
+      )}</span>
+      ${statusBadge(status)}
+      <span class="processing-workflow-stage-percent mono">${percentText(
+        stage.percent,
+      )}</span>
+    </div>
+    ${progressBar(stage)}
+    <div class="processing-workflow-stage-meta">
+      <span>${escapeHtml(stageCounts(stage))}</span>
+      <span class="mono">${formatDuration(stage.duration_ms || 0)}</span>
+      <span class="processing-workflow-stage-message">${escapeHtml(
+        stage.message || "—",
+      )}</span>
+    </div>
+  </div>`;
+}
+
+function workflowProgressMarkup(workflow) {
+  const progress = workflow.progress || {};
+  const stages = Array.isArray(progress.stages) ? progress.stages : [];
+  if (!stages.length) {
+    return `<section class="report-card processing-card processing-workflow-progress-card" data-workflow-progress>
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("activity", 14)}流程進度</span>
+        <span class="badge badge-neutral">尚無</span>
+      </div>
+      <div class="processing-workflow-empty">執行此流程後，會在這裡顯示各階段與整體進度。</div>
+    </section>`;
+  }
+  const overall = progress.overall_percent;
+  const participants = stages.filter((stage) => stage.status !== "skipped");
+  const segments = participants
+    .filter((stage) => Number(stage.contribution_percent) > 0)
+    .map(
+      (stage) => `<span class="processing-workflow-progress-segment" style="width:${
+        Number(stage.contribution_percent) || 0
+      }%;background:${escapeHtml(barColor(stage))}" ${stageHoverAttributes(
+        stage,
+      )}></span>`,
+    )
+    .join("");
+  const legend = stages
+    .map(
+      (stage) => `<div class="processing-workflow-progress-legend-item${
+        stage.status === "skipped" ? " is-skipped" : ""
+      }" ${stageHoverAttributes(stage)}>
+        <span class="processing-workflow-progress-swatch" style="background:${escapeHtml(
+          barColor(stage),
+        )}"></span>
+        <span class="processing-workflow-progress-legend-label">${escapeHtml(
+          stage.label || stage.key || "階段",
+        )}</span>
+        <span class="mono">${percentText(stage.percent)}</span>
+      </div>`,
+    )
+    .join("");
+  const completed = Number(progress.completed_stages) || 0;
+  const total = Number(progress.total_stages) || 0;
+  const skipped = stages.filter((stage) => stage.status === "skipped").length;
+  const stageCountLabel = skipped
+    ? `完成 ${completed} · 略過 ${skipped}`
+    : `${completed} / ${total} 階段`;
+  const scopeNote = WORKFLOW_SCOPE_NOTES[workflow.id] || "";
+  return `<section class="report-card processing-card processing-workflow-progress-card" data-workflow-progress>
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("activity", 14)}流程進度</span>
+      <span class="badge ${
+        progress.run_status === "running" ? "badge-info" : "badge-neutral"
+      }">${stageCountLabel}</span>
+    </div>
+    <div class="processing-workflow-stage-list">${stages
+      .map(workflowStageMarkup)
+      .join("")}</div>
+    <div class="processing-workflow-overall">
+      <div class="processing-workflow-overall-head">
+        <span>整體進度</span>
+        <span class="mono">${percentText(overall)}</span>
+      </div>
+      <div class="processing-workflow-progress-stack" role="img" aria-label="各階段進度加總">${
+        segments ||
+        '<span class="processing-workflow-progress-empty">尚無可計算進度</span>'
+      }</div>
+      <div class="processing-workflow-progress-legend">${legend}</div>
+      <div class="processing-workflow-progress-hint">將滑鼠移到任一階段或色塊，只會保留該項目並顯示說明；略過階段不列入整體進度。</div>
+    </div>
+    ${
+      scopeNote
+        ? `<p class="processing-workflow-scope-note">${icon(
+            "info",
+            12,
+          )}<span>${escapeHtml(scopeNote)}</span></p>`
+        : ""
+    }
+  </section>`;
+}
+
+function indexMonthLabel(month) {
+  const text = String(month || "");
+  return text.length === 6 ? `${text.slice(0, 4)}-${text.slice(4)}` : text || "—";
+}
+
+function indexHostMarkup(host, selectedUrl) {
+  const roleLabels = { primary: "主要", fallback: "備援", provided: "外部" };
+  const models = Array.isArray(host.models) ? host.models : [];
+  const modelText = models.length ? models.join("、") : "—";
+  return `<div class="index-host-row${
+    host.url && host.url === selectedUrl ? " is-selected" : ""
+  }">
+    <div class="index-host-head">
+      <span class="badge badge-neutral">${escapeHtml(
+        roleLabels[host.role] || host.role || "主機",
+      )}</span>
+      <strong class="mono">${escapeHtml(host.host || "—")}:${escapeHtml(
+        host.port ?? "—",
+      )}</strong>
+      ${statusBadge(host.status || "unavailable")}
+      <span class="index-host-model">${escapeHtml(
+        host.model || "—",
+      )}</span>
+    </div>
+    <div class="index-host-url mono">${escapeHtml(host.url || "—")}</div>
+    <div class="index-host-models" title="${escapeHtml(modelText)}">模型：${escapeHtml(
+      modelText,
+    )}</div>
+    ${
+      host.detail
+        ? `<div class="index-host-detail">${escapeHtml(host.detail)}</div>`
+        : ""
+    }
+  </div>`;
+}
+
+function indexMonthGridMarkup(runtime) {
+  const months = Array.isArray(runtime.months) ? runtime.months : [];
+  const current = runtime.current || {};
+  const groups = new Map();
+  for (const item of months) {
+    const key = String(item.month || "");
+    if (!/^\d{6}$/.test(key)) continue;
+    const monthNo = Number(key.slice(4, 6));
+    if (monthNo < 1 || monthNo > 12) continue;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        year: key.slice(0, 4),
+        monthNo,
+        total: 0,
+        processed: 0,
+        reused: 0,
+        embedded: 0,
+        archives: [],
+        current: false,
+        jid: "",
+      };
+      groups.set(key, group);
+    }
+    group.total += Number(item.total) || 0;
+    group.processed += Number(item.processed) || 0;
+    group.reused += Number(item.reused) || 0;
+    group.embedded += Number(item.embedded) || 0;
+    if (item.archive) group.archives.push(String(item.archive));
+    if (
+      current.month === key &&
+      (!current.archive || current.archive === item.archive)
+    ) {
+      group.current = true;
+      group.jid = String(current.jid || "");
+    }
+  }
+  if (!groups.size) {
+    return '<div class="processing-workflow-empty">尚無可顯示的索引月份；開始索引後會依時間列出月份狀態。</div>';
+  }
+  const counts = { green: 0, red: 0, gray: 0 };
+  for (const group of groups.values()) {
+    if (group.total > 0 && group.processed >= group.total) {
+      group.status = "green";
+      counts.green += 1;
+    } else if (group.processed > 0) {
+      group.status = "red";
+      counts.red += 1;
+    } else {
+      group.status = "gray";
+      counts.gray += 1;
+    }
+  }
+  const years = [...new Set([...groups.values()].map((item) => item.year))].sort(
+    (left, right) => right.localeCompare(left),
+  );
+  const rows = years
+    .map((year) => {
+      const cells = Array.from({ length: 12 }, (_, index) => {
+        const monthNo = index + 1;
+        const key = `${year}${String(monthNo).padStart(2, "0")}`;
+        const group = groups.get(key);
+        if (!group) {
+          return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
+        }
+        const percent = group.total
+          ? `${Math.min(
+              100,
+              Math.round((group.processed / group.total) * 1000) / 10,
+            )}%`
+          : "—";
+        const active = group.current && runtime.run_status === "running";
+        const title = [
+          `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
+          group.archives.join("、") || "—",
+          `已處理 ${formatNumber(group.processed)} / ${formatNumber(
+            group.total,
+          )}（${percent}）`,
+          `重用 ${formatNumber(group.reused)} · 新 embedding ${formatNumber(
+            group.embedded,
+          )}`,
+          group.current
+            ? `${active ? "目前索引" : "最後索引"}${
+                group.jid ? ` · ${group.jid}` : ""
+              }`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<td class="judgment-month index-month is-${group.status}${
+          active ? " is-active" : ""
+        }" title="${escapeHtml(title)}"${
+          active ? ' aria-current="true"' : ""
+        }><span>${monthNo}</span></td>`;
+      }).join("");
+      return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
+    })
+    .join("");
+  return `<div class="judgment-months index-months">
+    <div class="judgment-months-meta">
+      <span class="badge badge-ok">完成 ${formatNumber(counts.green)}</span>
+      <span class="badge badge-danger">未完成 ${formatNumber(counts.red)}</span>
+      <span class="badge badge-neutral">待索引 ${formatNumber(counts.gray)}</span>
+      <span class="muted">共 ${formatNumber(groups.size)} 個月</span>
+    </div>
+    <div class="judgment-months-scroll">
+      <table class="judgment-months-table index-months-table">
+        <thead><tr><th scope="col">年份</th>${Array.from(
+          { length: 12 },
+          (_, index) => `<th scope="col">${index + 1}</th>`,
+        ).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="judgment-months-hint">綠色：索引完成；灰色：新檔／尚未索引；紅色：已開始但未完成；空白：沒有該月份資料。滑鼠移到月份可查看來源檔案、已處理筆數與目前案號。</p>
+  </div>`;
+}
+
+function importTimelineMarkup(workflow) {
+  const timeline = workflow.import_timeline || {};
+  const months = Array.isArray(timeline.months) ? timeline.months : [];
+  if (!months.length) {
+    return `<section class="report-card processing-card import-files-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("table", 14)}匯入檔案時間表</span>
+        <span class="badge badge-neutral">尚無</span>
+      </div>
+      <div class="processing-workflow-empty">尚未取得判決下載 manifest 或本機壓縮檔；執行判決下載後會顯示月份狀態。</div>
+    </section>`;
+  }
+  const byKey = new Map(months.map((item) => [String(item.month), item]));
+  const years = [...new Set(months.map((item) => item.year))].sort(
+    (left, right) => right - left,
+  );
+  const statusLabels = {
+    green: "已匯入",
+    red: "未匯入",
+    gray: "有更新",
+  };
+  const active = months.find((item) => item.active);
+  const rows = years
+    .map((year) => {
+      const cells = Array.from({ length: 12 }, (_, index) => {
+        const monthNo = index + 1;
+        const key = `${year}${String(monthNo).padStart(2, "0")}`;
+        const item = byKey.get(key);
+        if (!item) {
+          return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
+        }
+        const status = statusLabels[item.status] ? item.status : "red";
+        const title = [
+          `${year}-${String(monthNo).padStart(2, "0")}`,
+          statusLabels[status],
+          `本機 ${item.local_files?.join("、") || "—"}`,
+          `已匯入 ${item.imported_files?.join("、") || "—"}`,
+          item.unimported_files?.length
+            ? `待匯入 ${item.unimported_files.join("、")}`
+            : "",
+          item.manifest_status === "gray" ? "遠端有新版本" : "",
+          item.active
+            ? `目前匯入${item.active_archive ? ` · ${item.active_archive}` : ""}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<td class="judgment-month import-month is-${status}${
+          item.active ? " is-active" : ""
+        }" title="${escapeHtml(title)}"${
+          item.active ? ' aria-current="true"' : ""
+        }><span>${monthNo}</span></td>`;
+      }).join("");
+      return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
+    })
+    .join("");
+  const summary = timeline.summary || {};
+  const activeLine = active
+    ? `<div class="index-current-row">
+        <span class="badge badge-info">${icon("activity", 11)}目前匯入</span>
+        <strong class="mono">${escapeHtml(
+          `${String(active.year)}-${String(active.month_no).padStart(2, "0")}`,
+        )}</strong>
+        <span class="mono">${escapeHtml(active.active_archive || "—")}</span>
+      </div>`
+    : "";
+  return `<section class="report-card processing-card import-files-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("table", 14)}匯入檔案時間表</span>
+      <span class="badge badge-neutral">${formatNumber(
+        timeline.total_months || months.length,
+      )} 個月</span>
+    </div>
+    <div class="judgment-months index-months">
+      <div class="judgment-months-meta">
+        <span class="badge badge-ok">已匯入 ${formatNumber(
+          summary.green || 0,
+        )}</span>
+        <span class="badge badge-danger">未匯入 ${formatNumber(
+          summary.red || 0,
+        )}</span>
+        <span class="badge badge-neutral">有更新 ${formatNumber(
+          summary.gray || 0,
+        )}</span>
+        <span class="muted">共 ${formatNumber(
+          timeline.total_months || months.length,
+        )} 個月</span>
+      </div>
+      ${activeLine}
+      <div class="judgment-months-scroll">
+        <table class="judgment-months-table import-months-table">
+          <thead><tr><th scope="col">年份</th>${Array.from(
+            { length: 12 },
+            (_, index) => `<th scope="col">${index + 1}</th>`,
+          ).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="judgment-months-hint">綠色：已匯入 PostgreSQL；灰色：有新檔或遠端新版本待匯入；紅色：尚未匯入；空白：沒有該月份資料。滑鼠移到月份可查看本機檔案與已匯入檔案。</p>
+    </div>
+  </section>`;
+}
+
+function indexRuntimeMarkup(workflow) {
+  const runtime = workflow.index_runtime || {};
+  if (!runtime.available) {
+    return `<section class="report-card processing-card index-runtime-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("cloud", 14)}Ollama 連線測試</span>
+        <span class="badge badge-neutral">尚無</span>
+      </div>
+      <div class="processing-workflow-empty">執行 Qdrant 版本建置後，會在這裡顯示測試的主機、模型與選用結果。</div>
+    </section>`;
+  }
+  const coverageOnly = Boolean(runtime.coverage_only);
+  const embedding = runtime.embedding || {};
+  const hosts = Array.isArray(embedding.hosts) ? embedding.hosts : [];
+  const selected = embedding.selected || {};
+  const active = embedding.active || {};
+  const current = runtime.current || {};
+  const summary = runtime.summary || {};
+  const selectedUrl = selected.url || "";
+  const activeUrl = active.url || "";
+  const hostRows = hosts
+    .map((host) => indexHostMarkup(host, selectedUrl))
+    .join("");
+  const currentLabel =
+    runtime.run_status === "running" ? "目前處理" : "最後處理";
+  const currentLine = current.jid
+    ? `<div class="index-current-row">
+        <span class="badge badge-info">${icon("activity", 11)}${currentLabel}</span>
+        <strong class="mono">${escapeHtml(
+          indexMonthLabel(current.month),
+        )}</strong>
+        <span class="mono">${escapeHtml(current.archive || "—")}</span>
+        <span class="mono">${escapeHtml(current.jid || "—")}</span>
+        <span class="index-current-copy">${escapeHtml(
+          [current.court, current.title].filter(Boolean).join(" · ") || "—",
+        )}</span>
+        <span class="faint">批次 ${formatNumber(current.batch_size)} 筆</span>
+      </div>`
+    : "";
+  return `<section class="report-card processing-card index-runtime-card"${
+    coverageOnly ? " hidden" : ""
+  }>
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("cloud", 14)}Ollama 連線測試</span>
+      ${statusBadge(embedding.status || "idle")}
+    </div>
+    ${
+      runtime.error
+        ? `<div class="processing-update-notice index-runtime-error">${icon(
+            "alert",
+            13,
+          )}<span>${escapeHtml(runtime.error)}</span></div>`
+        : ""
+    }
+    <div class="index-selected-host">
+      <span class="faint">最後選用</span>
+      <strong class="mono">${escapeHtml(selected.url || "—")}</strong>
+      <span>${escapeHtml(selected.model || embedding.model || "—")}</span>
+      <span class="mono">port ${escapeHtml(selected.port ?? "—")}</span>
+      ${
+        activeUrl && activeUrl !== selectedUrl
+          ? `<span class="badge badge-warn">目前使用 ${escapeHtml(
+              activeUrl,
+            )}</span>`
+          : ""
+      }
+      ${
+        active.using_fallback
+          ? '<span class="badge badge-warn">已切換備援</span>'
+          : ""
+      }
+    </div>
+    <div class="index-host-list">${hostRows || '<div class="processing-workflow-empty">沒有可顯示的主機測試結果。</div>'}</div>
+    ${
+      embedding.tested_at
+        ? `<div class="index-runtime-foot">測試時間 ${escapeHtml(
+            formatDateTime(embedding.tested_at),
+          )}</div>`
+        : ""
+    }
+  </section>
+  <section class="report-card processing-card index-files-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("table", 14)}索引檔案時間表</span>
+      <span class="badge badge-neutral">${formatNumber(
+        summary.indexed,
+      )} / ${formatNumber(summary.total)} 筆</span>
+    </div>
+    <div class="index-runtime-summary">
+      <span>版本 <strong class="mono">v${escapeHtml(
+        runtime.version_id ?? "—",
+      )}</strong></span>
+      <span>Collection <code>${escapeHtml(runtime.collection || "—")}</code></span>
+      <span>模式 <strong>${escapeHtml(runtime.build_mode || "—")}</strong></span>
+      ${
+        coverageOnly
+          ? ""
+          : `<span>重用 <strong class="mono">${formatNumber(
+              summary.reused,
+            )}</strong></span>
+            <span>新 embedding <strong class="mono">${formatNumber(
+              summary.embedded,
+            )}</strong></span>`
+      }
+    </div>
+    ${currentLine}
+    ${indexMonthGridMarkup(runtime)}
+    ${
+      coverageOnly
+        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant 版本建置後會顯示本次 Ollama 測試與即時進度。</p>'
+        : ""
+    }
+  </section>`;
+}
+
+function indexStorageMarkup(context = {}) {
+  const { storage, loading, error } = context;
+  if (error) {
+    return `<section class="report-card processing-card index-storage-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("database", 14)}Qdrant 儲存位置</span>
+        <button class="btn btn-ghost btn-sm" type="button" data-processing-action="refresh-index-storage">${icon("refresh", 12)}<span>重新整理</span></button>
+      </div>
+      <div class="processing-workflow-empty">${escapeHtml(error)}</div>
+    </section>`;
+  }
+  if (!storage) {
+    return `<section class="report-card processing-card index-storage-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("database", 14)}Qdrant 儲存位置</span>
+        <span class="badge badge-neutral">${loading ? "讀取中" : "尚無"}</span>
+      </div>
+      <div class="processing-workflow-empty">${loading ? "正在取得 Docker 容器與 volume 資訊…" : "切換到此流程後會讀取 Qdrant 容器與 volume 資訊。"}</div>
+    </section>`;
+  }
+  const qdrant = storage.qdrant_storage || {};
+  const databases = Array.isArray(storage.databases) ? storage.databases : [];
+  const qdrantDb = databases.find((item) => item.id === "qdrant") || {};
+  const volumeBytes =
+    qdrant.volume_bytes ?? qdrantDb.volume_bytes ?? null;
+  const points = qdrant.points_count ?? qdrantDb.points_count;
+  const segments = qdrant.segments_count ?? qdrantDb.segments_count;
+  return `<section class="report-card processing-card index-storage-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("database", 14)}Qdrant 儲存位置</span>
+      <button class="btn btn-ghost btn-sm" type="button" data-processing-action="refresh-index-storage">${icon("refresh", 12)}<span>重新整理</span></button>
+    </div>
+    <div class="index-storage-grid">
+      <span>Docker 主機</span><strong>${escapeHtml(
+        qdrant.host || "—",
+      )} <span class="faint">(${escapeHtml(
+        qdrant.docker_context || "default",
+      )})</span></strong>
+      <span>Container</span><strong class="mono">${escapeHtml(
+        qdrant.container || "judgment-qdrant",
+      )} · ${escapeHtml(qdrant.container_state || "unknown")}</strong>
+      <span>Image</span><strong class="mono">${escapeHtml(
+        qdrant.image || "—",
+      )}</strong>
+      <span>容器內路徑</span><strong class="mono">${escapeHtml(
+        qdrant.container_path || "—",
+      )}</strong>
+      <span>Docker volume</span><strong class="mono">${escapeHtml(
+        qdrant.volume_name || "—",
+      )}</strong>
+      <span>Volume 容量</span><strong class="mono">${formatBytes(
+        volumeBytes,
+      )}${qdrant.volume_size ? ` · ${escapeHtml(qdrant.volume_size)}` : ""}</strong>
+      <span>Volume 來源路徑</span><strong class="mono index-storage-path">${escapeHtml(
+        qdrant.host_path || "—",
+      )}</strong>
+      <span>Collection</span><strong class="mono">${escapeHtml(
+        qdrant.collection || qdrantDb.collection || "—",
+      )}</strong>
+      <span>Alias</span><strong class="mono">${escapeHtml(
+        qdrant.alias || "—",
+      )}</strong>
+      <span>Points／Segments</span><strong class="mono">${formatNumber(
+        points,
+      )} / ${formatNumber(segments)}</strong>
+    </div>
+    <div class="index-runtime-foot">資料時間 ${escapeHtml(
+      formatDateTime(storage.checked_at),
+    )}</div>
+  </section>`;
+}
+
+function workflowHelpMarkup({ badge = "", lead = "", rows = [], note = "" }) {
+  return `<section class="report-card processing-card parquet-help-card workflow-help-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("info", 14)}功能說明</span>
+      ${
+        badge
+          ? `<span class="badge badge-neutral">${escapeHtml(badge)}</span>`
+          : ""
+      }
+    </div>
+    <div class="parquet-help-body">
+      <p class="parquet-help-lead">${lead}</p>
+      <div class="parquet-help-grid">${rows
+        .map(
+          ([label, value]) =>
+            `<span>${escapeHtml(label)}</span><strong>${value}</strong>`,
+        )
+        .join("")}</div>
+      ${note ? `<p class="parquet-help-note">${note}</p>` : ""}
+    </div>
+  </section>`;
+}
+
+function judgmentParquetHelpMarkup() {
+  return workflowHelpMarkup({
+    badge: "唯讀匯出",
+    lead:
+      "將 PostgreSQL 目前有效的判決（<code>judgment_documents.is_current = true</code>）匯出成獨立的 Parquet 快照，供離線分析、資料交換或保存。",
+    rows: [
+      [
+        "來源",
+        "PostgreSQL <code>judgment_documents</code>，只含目前有效且已命中金融法規清單的判決。",
+      ],
+      [
+        "輸出",
+        '<span class="mono">JUDGMENT_DATA_DIR/parquet/judgments/YYYYMMDD/HHMMSS-xxxxxxxx/judgments.parquet</span>',
+      ],
+      [
+        "附帶檔",
+        '<span class="mono">同目錄 manifest.json（筆數、檔案大小、欄位、產生時間）</span>',
+      ],
+      [
+        "內容",
+        "案號、法院、案由、全文、命中法規、引用、來源壓縮檔與時間欄位；<code>citations</code> 以 JSON 字串保存。",
+      ],
+      [
+        "與原始 Parquet",
+        "資料頁與 <code>source=parquet</code> 使用 <code>parquet/raw_judgments/.../raw.parquet</code>；本流程的 <code>parquet/judgments/...</code> 是另一個正規化快照。",
+      ],
+      [
+        "不會",
+        "不寫回 PostgreSQL、不更新 Qdrant、不同步 IndexedDB、不刪除舊快照；只匯出 current 資料，不含歷史版本。",
+      ],
+      [
+        "中斷",
+        "每次執行建立新的完整快照；中斷後重新執行不會續寫同一個 Parquet 檔。",
+      ],
+    ],
+    note:
+      "適合 DuckDB、pandas、Spark 等離線分析，或需要固定時間點的可重現資料快照。日常 RAG 查詢與資料頁瀏覽不需要執行此流程。",
+  });
+}
+
+function normalizeCourtsHelpMarkup() {
+  return workflowHelpMarkup({
+    badge: "PostgreSQL 回填",
+    lead:
+      "將判決的 <code>court</code> 轉成標準法院名稱並寫入 <code>court_normalized</code>；原始 <code>court</code> 會保留供追溯。",
+    rows: [
+      [
+        "處理範圍",
+        "預設只處理 <code>court_normalized</code> 為空的資料；已正規化資料會跳過，可用 <code>--all</code> 重新計算全部。",
+      ],
+      [
+        "解析順序",
+        "原始法院值開頭符合標準名稱 → 判決全文前 8,000 字最早出現的法院 → 原始法院值任意位置的標準名稱 → JID 官方法院代碼。",
+      ],
+      [
+        "輸出",
+        "寫入 <code>judgment_documents.court_normalized</code>；不修改原始 <code>court</code>、全文或其他判決欄位。",
+      ],
+      [
+        "未解析",
+        "無法判斷時保留空值，不猜測；摘要會列出未解析筆數與常見樣本。",
+      ],
+      [
+        "影響",
+        "資料頁的法院下拉、精確篩選、排序、結果欄位與判決原文使用正規化名稱；API 仍回傳 <code>court_raw</code>。",
+      ],
+      [
+        "不會",
+        "不重新匯入判決、不改全文、不更新 Qdrant、不同步 IndexedDB、不刪除資料。",
+      ],
+      [
+        "重跑",
+        "預設可重複執行；規則更新後可用 <code>--all</code> 重算，或先用 <code>--dry-run</code> 統計。",
+      ],
+    ],
+    note:
+      "適合在判決匯入後、法院名稱規則更新後，或資料頁法院選項出現缺漏時執行。結果也會寫入效能紀錄。",
+  });
+}
+
+function backfillLawArticlesHelpMarkup() {
+  return workflowHelpMarkup({
+    badge: "條文歷史建檔",
+    lead:
+      "為既有法規／命令版本建立 <code>law_article_versions</code> 歷史條文快照與 <code>law_article_change_events</code> 變更紀錄，讓資料頁能切換歷史版本並查看條文差異。",
+    rows: [
+      [
+        "來源",
+        "PostgreSQL 法規版本，以及 <code>LAW_DATA_DIR/raw_parquet</code> 內對應的原始法規 Parquet 快照。",
+      ],
+      [
+        "匹配方式",
+        "以 raw Parquet manifest 的 <code>zip_sha256</code>／<code>raw_json_sha256</code> 對應法規版本，不猜測內容。",
+      ],
+      [
+        "產生內容",
+        "<code>article_key</code>（條文類型＋條號）、<code>content_hash</code>、條文全文與生效日；與前一版本比較後記錄 <code>added</code>／<code>modified</code>／<code>removed</code>。",
+      ],
+      [
+        "檢查是否需建立",
+        "分頁上方的唯讀檢查會讀取 <code>law_article_versions</code> 與原始 Parquet，判斷版本是否需要建立歷史；檢查本身不會修改資料庫。",
+      ],
+      [
+        "可建立",
+        "找到對應原始 Parquet 的版本，可直接執行此流程建立條文歷史。",
+      ],
+      [
+        "缺原始檔",
+        "找不到原始 Parquet 的版本會標示無法建立，需先補下載或備份；此流程會跳過並列在 <code>missing_versions</code>。",
+      ],
+      [
+        "檢查結果",
+        "年份×月份表顯示已建立／未建立／部分建立；下方列出需建立歷史的版本、法規／命令、版本日期與可建立狀態。目前狀態以上方「檢查是否需建立」卡片即時顯示。",
+      ],
+      [
+        "跳過條件",
+        "已有條文快照的版本會跳過；找不到可讀原始 Parquet 的版本會列入 <code>missing_versions</code>，不建立虛構條文。",
+      ],
+      [
+        "不會",
+        "不下載法規／命令、不解析新 ZIP、不修改 <code>law_documents</code> 或目前版本、不更新 Qdrant／IndexedDB。",
+      ],
+      [
+        "輸出摘要",
+        "版本數、跳過版本數、缺少快照版本、寫入條文數與條文變更事件數。",
+      ],
+      [
+        "重跑",
+        "可重複執行；已建立歷史的版本不會重複插入。",
+      ],
+    ],
+    note:
+      "適合從舊版 schema 升級、既有法規版本缺少歷史條文，或資料頁歷史條文版本與變更紀錄不完整時執行。執行前可先用上方「檢查是否需建立」確認哪些版本可建立、哪些缺原始檔。",
+  });
+}
+
+function courtCheckMarkup(context = {}) {
+  const data = context.courtCheck;
+  const loading = Boolean(context.courtCheckLoading);
+  const error = context.courtCheckError;
+  const button = `<button class="btn btn-ghost btn-sm" type="button" data-processing-action="refresh-court-check"${
+    loading ? " disabled" : ""
+  }>${icon("refresh", 12)}<span>${loading ? "檢查中…" : "檢查法院名稱"}</span></button>`;
+  if (error) {
+    return `<section class="report-card processing-card court-check-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("search", 14)}檢查法院名稱</span>
+        ${button}
+      </div>
+      <div class="processing-workflow-empty">${escapeHtml(error)}</div>
+    </section>`;
+  }
+  if (!data) {
+    return `<section class="report-card processing-card court-check-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("search", 14)}檢查法院名稱</span>
+        ${button}
+      </div>
+      <div class="processing-workflow-empty">${
+        loading
+          ? '<span class="spinner" aria-hidden="true"></span> 正在檢查各月份法院名稱…'
+          : "進入此分頁後會自動檢查；也可按「檢查法院名稱」重新讀取。"
+      }</div>
+    </section>`;
+  }
+  const months = Array.isArray(data.months) ? data.months : [];
+  const summary = data.summary || {};
+  const totals = data.totals || {};
+  if (!months.length) {
+    return `<section class="report-card processing-card court-check-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("search", 14)}檢查法院名稱</span>
+        ${button}
+      </div>
+      <div class="processing-workflow-empty">目前沒有可檢查的判決資料。</div>
+    </section>`;
+  }
+  const labels = { green: "已檢查", red: "未檢查", gray: "需正規化" };
+  const byKey = new Map(months.map((item) => [String(item.month), item]));
+  const years = [...new Set(months.map((item) => item.year))].sort(
+    (left, right) => right - left,
+  );
+  const rows = years
+    .map((year) => {
+      const cells = Array.from({ length: 12 }, (_, index) => {
+        const monthNo = index + 1;
+        const key = `${year}${String(monthNo).padStart(2, "0")}`;
+        const item = byKey.get(key);
+        if (!item) {
+          return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
+        }
+        const status = labels[item.status] ? item.status : "red";
+        const title = [
+          `${year}-${String(monthNo).padStart(2, "0")}`,
+          labels[status],
+          `總 ${formatNumber(item.total)} 筆`,
+          `已檢查 ${formatNumber(item.checked)} 筆`,
+          `未檢查 ${formatNumber(item.unchecked)} 筆`,
+          item.invalid ? `無效值 ${formatNumber(item.invalid)} 筆` : "",
+          `有效 ${percentText(item.percent)}`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<td class="judgment-month court-check-month is-${status}" title="${escapeHtml(
+          title,
+        )}"><span>${monthNo}</span></td>`;
+      }).join("");
+      return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
+    })
+    .join("");
+  return `<section class="report-card processing-card court-check-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("search", 14)}檢查法院名稱</span>
+      ${button}
+    </div>
+    <div class="judgment-months">
+      <div class="judgment-months-meta">
+        <span class="badge badge-ok">已檢查 ${formatNumber(
+          summary.green || 0,
+        )}</span>
+        <span class="badge badge-danger">未檢查 ${formatNumber(
+          summary.red || 0,
+        )}</span>
+        <span class="badge badge-neutral">需正規化 ${formatNumber(
+          summary.gray || 0,
+        )}</span>
+        <span class="muted">共 ${formatNumber(months.length)} 個月</span>
+      </div>
+      <div class="index-runtime-summary">
+        <span>判決總數 <strong class="mono">${formatNumber(
+          totals.total,
+        )}</strong></span>
+        <span>已檢查 <strong class="mono">${formatNumber(
+          totals.checked,
+        )}</strong></span>
+        <span>未檢查 <strong class="mono">${formatNumber(
+          totals.unchecked,
+        )}</strong></span>
+        <span>無效值 <strong class="mono">${formatNumber(
+          totals.invalid,
+        )}</strong></span>
+        <span>有效 <strong class="mono">${formatNumber(
+          totals.valid,
+        )}</strong></span>
+      </div>
+      <div class="judgment-months-scroll">
+        <table class="judgment-months-table court-check-months-table">
+          <thead><tr><th scope="col">年份</th>${Array.from(
+            { length: 12 },
+            (_, index) => `<th scope="col">${index + 1}</th>`,
+          ).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="judgment-months-hint">綠色：全部已正規化；紅色：完全未檢查；灰色：部分未正規化或有無效值；空白：沒有該月份資料。滑鼠移到月份可查看筆數與有效比例。</p>
+      <div class="index-runtime-foot">檢查時間 ${escapeHtml(
+        formatDateTime(data.checked_at),
+      )} · 標準法院名稱 ${formatNumber(data.canonical_count)} 個</div>
+    </div>
+  </section>`;
+}
+
+function lawVersionCheckMarkup(context = {}) {
+  const data = context.lawVersionCheck;
+  const loading = Boolean(context.lawVersionCheckLoading);
+  const error = context.lawVersionCheckError;
+  const button = `<button class="btn btn-ghost btn-sm" type="button" data-processing-action="refresh-law-version-check"${
+    loading ? " disabled" : ""
+  }>${icon("refresh", 12)}<span>${loading ? "檢查中…" : "檢查是否需建立"}</span></button>`;
+  if (error) {
+    return `<section class="report-card processing-card law-version-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("database", 14)}檢查條文歷史</span>
+        ${button}
+      </div>
+      <div class="processing-workflow-empty">${escapeHtml(error)}</div>
+    </section>`;
+  }
+  if (!data) {
+    return `<section class="report-card processing-card law-version-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("database", 14)}檢查條文歷史</span>
+        ${button}
+      </div>
+      <div class="processing-workflow-empty">${
+        loading
+          ? '<span class="spinner" aria-hidden="true"></span> 正在檢查版本與歷史條文…'
+          : "進入此分頁後會自動檢查；也可按「檢查是否需建立」重新讀取。"
+      }</div>
+    </section>`;
+  }
+  const months = Array.isArray(data.months) ? data.months : [];
+  const summary = data.summary || {};
+  const totals = data.totals || {};
+  if (!months.length) {
+    return `<section class="report-card processing-card law-version-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("database", 14)}檢查條文歷史</span>
+        ${button}
+      </div>
+      <div class="processing-workflow-empty">資料庫目前沒有法規／命令版本資料。</div>
+    </section>`;
+  }
+  const labels = { green: "已建立", red: "未建立", gray: "部分建立" };
+  const byKey = new Map(months.map((item) => [String(item.month), item]));
+  const years = [...new Set(months.map((item) => item.year))].sort(
+    (left, right) => right - left,
+  );
+  const rows = years
+    .map((year) => {
+      const cells = Array.from({ length: 12 }, (_, index) => {
+        const monthNo = index + 1;
+        const key = `${year}${String(monthNo).padStart(2, "0")}`;
+        const item = byKey.get(key);
+        if (!item) {
+          return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
+        }
+        const status = labels[item.status] ? item.status : "red";
+        const title = [
+          `${year}-${String(monthNo).padStart(2, "0")}`,
+          labels[status],
+          `版本 ${formatNumber(item.version_count)}（法規 ${formatNumber(
+            item.law_versions,
+          )}／命令 ${formatNumber(item.order_versions)}）`,
+          `已建立 ${formatNumber(item.backfilled_count)}`,
+          `未建立 ${formatNumber(item.missing_count)}`,
+          `需建立 ${formatNumber(item.needs_backfill_count)}（可建立 ${formatNumber(
+            item.backfillable_count,
+          )}／缺原始檔 ${formatNumber(item.blocked_count)}）`,
+          `條文列 ${formatNumber(item.article_rows)} / 預期 ${formatNumber(
+            item.article_count,
+          )}`,
+          item.current ? "目前版本" : "",
+          item.versions?.length
+            ? `版本 ${item.versions
+                .map((version) => `#${version.version_id}`)
+                .join("、")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<td class="judgment-month law-version-month is-${status}${
+          item.current ? " is-current" : ""
+        }" title="${escapeHtml(title)}"><span>${monthNo}</span></td>`;
+      }).join("");
+      return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
+    })
+    .join("");
+  const sourceLabels = { law: "法規", order: "命令" };
+  const neededVersions = months
+    .flatMap((month) =>
+      (month.versions || [])
+        .filter((version) => version.needs_backfill)
+        .map((version) => ({ ...version, month: month.month })),
+    )
+    .sort((left, right) => right.version_id - left.version_id);
+  const shownNeeded = neededVersions.slice(0, 20);
+  const neededRows = shownNeeded
+    .map((version) => {
+      const tone = version.backfillable
+        ? "badge-info"
+        : version.blocked
+          ? "badge-danger"
+          : "badge-neutral";
+      const label = version.backfillable
+        ? "可建立"
+        : version.blocked
+          ? "缺原始檔"
+          : "待檢查";
+      return `<div class="law-backfill-needed-row">
+        <strong class="mono">#${version.version_id}</strong>
+        <span class="badge ${tone}">${label}</span>
+        <span>${escapeHtml(sourceLabels[version.source_type] || version.source_type || "—")}</span>
+        <span class="mono">${escapeHtml(
+          version.update_date || version.month || "—",
+        )}</span>
+        <span class="law-backfill-needed-reason">${escapeHtml(
+          version.reason || "—",
+        )}</span>
+      </div>`;
+    })
+    .join("");
+  const neededMarkup = neededVersions.length
+    ? `<div class="law-backfill-needed">
+        <div class="law-backfill-needed-head">需建立歷史的版本 <span class="badge badge-warn">${formatNumber(
+          neededVersions.length,
+        )}</span></div>
+        <div class="law-backfill-needed-list">${neededRows}</div>
+        ${
+          neededVersions.length > shownNeeded.length
+            ? `<div class="law-backfill-needed-more">另有 ${formatNumber(
+                neededVersions.length - shownNeeded.length,
+              )} 個版本未列出</div>`
+            : ""
+        }
+      </div>`
+    : '<div class="law-backfill-needed is-clear">目前沒有需要建立歷史的版本。</div>';
+  const needsBackfill = Number(totals.needs_backfill_versions) || 0;
+  const backfillable = Number(totals.backfillable_versions) || 0;
+  const blocked = Number(totals.blocked_versions) || 0;
+  const backfilled = Number(totals.backfilled_versions) || 0;
+  const totalVersions = Number(totals.versions) || 0;
+  const statusTone =
+    needsBackfill <= 0 ? "ok" : blocked > 0 ? "danger" : "warn";
+  const statusTitle =
+    needsBackfill <= 0 ? "不需要建立" : "需要建立";
+  const statusDetail =
+    needsBackfill > 0
+      ? `需要建立 ${formatNumber(needsBackfill)} 個版本的條文歷史：可建立 ${formatNumber(
+          backfillable,
+        )}、缺原始檔 ${formatNumber(blocked)}。已有歷史條文 ${formatNumber(
+          backfilled,
+        )} 個版本${blocked > 0 ? "；缺原始檔需先補下載或備份" : ""}。`
+      : `目前 ${formatNumber(totalVersions)} 個版本都已有歷史條文，不需要建立。`;
+  return `<section class="report-card processing-card law-version-card">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("database", 14)}檢查條文歷史</span>
+      ${button}
+    </div>
+    <div class="law-version-check-status is-${statusTone}" role="status" aria-live="polite">
+      <span class="badge badge-${statusTone}">${statusTitle}</span>
+      <span>${escapeHtml(statusDetail)}</span>
+    </div>
+    <div class="judgment-months">
+      <div class="judgment-months-meta">
+        <span class="badge badge-ok">已建立 ${formatNumber(
+          summary.green || 0,
+        )}</span>
+        <span class="badge badge-danger">未建立 ${formatNumber(
+          summary.red || 0,
+        )}</span>
+        <span class="badge badge-neutral">部分建立 ${formatNumber(
+          summary.gray || 0,
+        )}</span>
+        <span class="muted">共 ${formatNumber(months.length)} 個月</span>
+      </div>
+      <div class="index-runtime-summary">
+        <span>版本數 <strong class="mono">${formatNumber(
+          totals.versions,
+        )}</strong></span>
+        <span>已建立版本 <strong class="mono">${formatNumber(
+          totals.backfilled_versions,
+        )}</strong></span>
+        <span>未建立版本 <strong class="mono">${formatNumber(
+          totals.missing_versions,
+        )}</strong></span>
+        <span>需建立版本 <strong class="mono">${formatNumber(
+          totals.needs_backfill_versions,
+        )}</strong></span>
+        <span>可建立 <strong class="mono">${formatNumber(
+          totals.backfillable_versions,
+        )}</strong></span>
+        <span>缺原始檔 <strong class="mono">${formatNumber(
+          totals.blocked_versions,
+        )}</strong></span>
+        <span>條文列 <strong class="mono">${formatNumber(
+          totals.article_rows,
+        )}</strong></span>
+        <span>預期條文 <strong class="mono">${formatNumber(
+          totals.article_count,
+        )}</strong></span>
+        <span>法規筆數 <strong class="mono">${formatNumber(
+          totals.law_count,
+        )}</strong></span>
+      </div>
+      <div class="judgment-months-scroll">
+        <table class="judgment-months-table law-version-months-table">
+          <thead><tr><th scope="col">年份</th>${Array.from(
+            { length: 12 },
+            (_, index) => `<th scope="col">${index + 1}</th>`,
+          ).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="judgment-months-hint">綠色：該月份所有版本都有歷史條文；紅色：完全未建立；灰色：部分版本已建立；外框：目前版本；空白：沒有該月份版本。滑鼠移到月份可查看版本數、法規／命令數與條文列。</p>
+      ${neededMarkup}
+      <div class="index-runtime-foot">檢查時間 ${escapeHtml(
+        formatDateTime(data.checked_at),
+      )}</div>
+    </div>
+  </section>`;
+}
+
+function ollamaPriorityLoadingMarkup() {
+  return `<div class="processing-ollama-loading">
+    <span class="spinner" aria-hidden="true"></span>
+    <span>正在檢查 Ollama 主機與模型…</span>
+  </div>`;
+}
+
+function ollamaPriorityMarkup(hostsData, loading, error) {
+  const hosts = Array.isArray(hostsData?.hosts) ? hostsData.hosts : [];
+  if (error && !hosts.length) {
+    return `${notice({
+      tone: "danger",
+      title: "Ollama 主機讀取失敗",
+      text: escapeHtml(error.message || "請確認後端服務是否啟動。"),
+    })}
+    <div class="processing-ollama-empty">
+      <button class="btn btn-secondary btn-sm" type="button" data-processing-action="refresh-ollama">
+        ${icon("refresh", 13)}<span>重新檢查</span>
+      </button>
+    </div>`;
+  }
+  if (!hosts.length) {
+    return loading
+      ? ollamaPriorityLoadingMarkup()
+      : `<div class="processing-ollama-empty">尚未設定 Ollama 主機；請到「系統狀態 → Model Provider」新增並連接模型。</div>`;
+  }
+  const rows = hosts
+    .map((host, index) => {
+      const online = host.status === "operational";
+      const models = Array.isArray(host.models) ? host.models : [];
+      const modelChips = models.length
+        ? models
+            .map(
+              (model) =>
+                `<span class="processing-ollama-model ${
+                  online ? "is-online" : "is-offline"
+                }">${escapeHtml(model.name || "")}</span>`,
+            )
+            .join("")
+        : `<span class="processing-ollama-model is-offline">沒有可用模型</span>`;
+      const roles = [
+        host.embedding_model
+          ? `<span class="processing-ollama-role ${
+              online ? "is-online" : "is-offline"
+            }">嵌入 · ${escapeHtml(host.embedding_model)}</span>`
+          : `<span class="processing-ollama-role is-offline">未設定嵌入模型</span>`,
+        host.chat_model
+          ? `<span class="processing-ollama-role is-offline">聊天 · ${escapeHtml(
+              host.chat_model,
+            )}</span>`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("");
+      return `<article class="processing-ollama-host ${
+        online ? "is-online" : "is-offline"
+      }" data-ollama-host data-host-id="${Number(host.id)}">
+        <span class="processing-ollama-handle" aria-hidden="true">${icon("grid", 14)}</span>
+        <span class="processing-ollama-rank">${index + 1}</span>
+        <div class="processing-ollama-main">
+          <div class="processing-ollama-title">
+            <strong>${escapeHtml(host.name || host.base_url || `主機 #${host.id}`)}</strong>
+            <span class="processing-ollama-status">${
+              online ? "可用" : "無法連線"
+            }</span>
+          </div>
+          <span class="processing-ollama-url mono">${escapeHtml(
+            host.base_url || "—",
+          )}</span>
+          <div class="processing-ollama-models">${modelChips}</div>
+          <div class="processing-ollama-meta">${roles}${
+            host.detail
+              ? `<span class="processing-ollama-detail">${escapeHtml(
+                  host.detail,
+                )}</span>`
+              : ""
+          }</div>
+        </div>
+        <div class="processing-ollama-order">
+          <button class="btn btn-ghost btn-sm" type="button"
+            data-processing-action="move-ollama-host" data-direction="up"
+            data-host-id="${Number(host.id)}"
+            title="上移優先順序" aria-label="上移 ${escapeHtml(
+              host.name || host.base_url || `主機 #${host.id}`,
+            )}" ${index === 0 ? "disabled" : ""}>↑</button>
+          <button class="btn btn-ghost btn-sm" type="button"
+            data-processing-action="move-ollama-host" data-direction="down"
+            data-host-id="${Number(host.id)}"
+            title="下移優先順序" aria-label="下移 ${escapeHtml(
+              host.name || host.base_url || `主機 #${host.id}`,
+            )}" ${index === hosts.length - 1 ? "disabled" : ""}>↓</button>
+        </div>
+      </article>`;
+    })
+    .join("");
+  const activeName =
+    hosts.find((host) => Number(host.id) === Number(hostsData?.active_host_id))
+      ?.name || hosts[0]?.name || hosts[0]?.base_url || "—";
+  return `<div class="processing-ollama-summary">
+      <span>共 ${formatNumber(hosts.length)} 台主機</span>
+      <span>第一優先：<strong>${escapeHtml(activeName)}</strong></span>
+      <span class="muted">${loading ? "重新檢查中…" : "每 30 秒自動檢查"}</span>
+    </div>
+    <div class="processing-ollama-list" data-ollama-list>${rows}</div>
+    <p class="processing-ollama-hint">拖移或使用箭頭調整 embedding 優先順序；目前主機無法使用時，會依序自動改用下一台（各台需具備相同的 embedding 模型），直到有主機回傳向量。</p>`;
+}
+
+function workflowPanelMarkup(workflow, workflowContext = {}) {
   const activeRun = workflow.active_run || null;
   const lastRun = activeRun || workflow.last_run || null;
   const busy = Boolean(activeRun);
@@ -1065,6 +2477,28 @@ function workflowPanelMarkup(workflow) {
       title: workflow.label,
       text: workflow.description || "",
     })}
+    ${
+      workflow.update_available
+        ? `<div class="processing-update-notice" role="status">
+            ${icon("refresh", 13)}
+            <span>${escapeHtml(
+              (workflow.update_status && workflow.update_status.message) ||
+                "線上偵測到新版",
+            )}</span>
+            <span class="badge badge-warn">更新</span>
+          </div>`
+        : ""
+    }
+    ${
+      workflow.id === "normalize_courts"
+        ? courtCheckMarkup(workflowContext)
+        : ""
+    }
+    ${
+      workflow.id === "backfill_law_articles"
+        ? lawVersionCheckMarkup(workflowContext)
+        : ""
+    }
     <section class="report-card processing-card">
       <div class="side-card-head">
         <span class="side-card-title">${icon(WORKFLOW_ICONS[workflow.id] || "terminal", 14)}執行資訊</span>
@@ -1082,6 +2516,17 @@ function workflowPanelMarkup(workflow) {
           ${canRun ? "" : "disabled"}>
           ${icon("play", 14)}<span>${busy ? "執行中" : isFullUpdate ? "執行資料更新" : "執行此流程"}</span>
         </button>
+        ${
+          ["law_download", "order_download", "judgment_download"].includes(
+            workflow.id,
+          )
+            ? `<button class="btn btn-secondary btn-sm" type="button"
+                data-processing-action="check-updates"
+                data-workflow-id="${escapeHtml(workflow.id)}">
+                ${icon("refresh", 14)}<span>檢查更新</span>
+              </button>`
+            : ""
+        }
         ${
           activeRun
             ? `<button class="btn btn-secondary btn-sm processing-stop" type="button"
@@ -1108,10 +2553,45 @@ function workflowPanelMarkup(workflow) {
             : ""
         }
       </div>
+      ${
+        OLLAMA_PRIORITY_WORKFLOWS.has(workflow.id)
+          ? `<div class="processing-ollama-block">
+              <div class="processing-ollama-head">
+                <span class="side-card-title">${icon("server", 14)}Ollama 主機／模型</span>
+                <button class="btn btn-ghost btn-sm" type="button" data-processing-action="refresh-ollama">
+                  ${icon("refresh", 13)}<span>重新檢查</span>
+                </button>
+              </div>
+              <div class="processing-ollama-subtitle">依優先順序自動選用 embedding 主機；第一台同時設為目前主機，無法連線的主機會顯示為灰色。</div>
+              <div data-processing-ollama>${ollamaPriorityLoadingMarkup()}</div>
+            </div>`
+          : ""
+      }
       <div class="side-card-foot">
         ${isFullUpdate ? "會依序執行法規／命令下載、判決匯入與可選的 Qdrant 索引。" : "執行結果會寫入共用處理狀態檔，可從處理總覽查看。"}
       </div>
     </section>
+    ${workflowProgressMarkup(workflow)}
+    ${
+      workflow.id === "judgment_parquet" ? judgmentParquetHelpMarkup() : ""
+    }
+    ${
+      workflow.id === "normalize_courts" ? normalizeCourtsHelpMarkup() : ""
+    }
+    ${
+      workflow.id === "backfill_law_articles"
+        ? backfillLawArticlesHelpMarkup()
+        : ""
+    }
+    ${
+      workflow.id === "judgment_import" ? importTimelineMarkup(workflow) : ""
+    }
+    ${
+      workflow.id === "index_versions" ? indexRuntimeMarkup(workflow) : ""
+    }
+    ${
+      workflow.id === "index_versions" ? indexStorageMarkup(workflowContext) : ""
+    }
     ${
       workflow.id === "judgment_download"
         ? `<section class="report-card processing-card">
@@ -1130,16 +2610,42 @@ function workflowPanelMarkup(workflow) {
       </div>
       ${runMetaMarkup(lastRun)}
     </section>
+    <section class="report-card processing-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("history", 14)}執行紀錄</span>
+        <span class="badge badge-neutral">最近 ${formatNumber(
+          (workflow.recent_runs || []).length,
+        )} 筆</span>
+      </div>
+      ${workflowRunHistoryMarkup(workflow.recent_runs)}
+    </section>
+    ${
+      ["law_download", "order_download", "judgment_download"].includes(
+        workflow.id,
+      )
+        ? `<section class="report-card processing-card">
+            <div class="side-card-head">
+              <span class="side-card-title">${icon("search", 14)}版本檢查紀錄</span>
+              <span class="badge badge-neutral">最近 ${formatNumber(
+                (workflow.update_history || []).length,
+              )} 筆</span>
+            </div>
+            ${updateHistoryMarkup(workflow)}
+          </section>`
+        : ""
+    }
   </div>`;
 }
 
-function panelMarkup(snapshot, activeWorkflowId) {
+function panelMarkup(snapshot, activeWorkflowId, workflowContext = {}) {
   if (activeWorkflowId === "overview") {
     return contentMarkup(snapshot);
   }
   const workflows = Array.isArray(snapshot.workflows) ? snapshot.workflows : [];
   const workflow = workflows.find((item) => item.id === activeWorkflowId);
-  return workflow ? workflowPanelMarkup(workflow) : contentMarkup(snapshot);
+  return workflow
+    ? workflowPanelMarkup(workflow, workflowContext)
+    : contentMarkup(snapshot);
 }
 
 export async function render(root) {
@@ -1197,6 +2703,10 @@ export async function render(root) {
   const stopButton = root.querySelector("#processing-stop");
   const refreshButton = root.querySelector("#processing-refresh");
   const indexToggle = root.querySelector("#processing-index-toggle");
+  const stageTooltip = document.createElement("div");
+  stageTooltip.className = "processing-stage-tooltip";
+  stageTooltip.hidden = true;
+  page.appendChild(stageTooltip);
 
   let disposed = false;
   let refreshing = false;
@@ -1208,7 +2718,40 @@ export async function render(root) {
   let judgmentStatus = null;
   let judgmentStatusLoading = false;
   let judgmentStatusError = null;
+  let indexStorage = null;
+  let indexStorageLoading = false;
+  let indexStorageError = null;
+  let indexStorageLoadedAt = 0;
+  let courtCheck = null;
+  let courtCheckLoading = false;
+  let courtCheckError = null;
+  let courtCheckLoadedAt = 0;
+  let lawVersionCheck = null;
+  let lawVersionCheckLoading = false;
+  let lawVersionCheckError = null;
+  let lawVersionCheckLoadedAt = 0;
+  let ollamaHosts = null;
+  let ollamaHostsLoading = false;
+  let ollamaHostsError = null;
+  let ollamaCheckedAt = 0;
+  let ollamaDragHostId = 0;
+  let ollamaDragChanged = false;
+  let ollamaPointerDrag = null;
+  let ollamaReorderBusy = false;
+  let hoveredStageKey = "";
   let timer = null;
+
+  const workflowContext = () => ({
+    storage: indexStorage,
+    loading: indexStorageLoading,
+    error: indexStorageError,
+    courtCheck,
+    courtCheckLoading,
+    courtCheckError,
+    lawVersionCheck,
+    lawVersionCheckLoading,
+    lawVersionCheckError,
+  });
 
   const syncJudgmentProgress = () => {
     if (activeWorkflowId !== "judgment_download") return;
@@ -1380,6 +2923,247 @@ export async function render(root) {
     syncJudgmentProgress();
   };
 
+  const ollamaHostsSignature = () => {
+    const hosts = Array.isArray(ollamaHosts?.hosts) ? ollamaHosts.hosts : [];
+    return JSON.stringify({
+      loading: !hosts.length && ollamaHostsLoading,
+      error:
+        !hosts.length && ollamaHostsError
+          ? ollamaHostsError.message || String(ollamaHostsError)
+          : "",
+      active: ollamaHosts?.active_host_id ?? null,
+      hosts: hosts.map((host) => ({
+        id: host.id,
+        name: host.name,
+        url: host.base_url,
+        status: host.status,
+        detail: host.detail,
+        embedding: host.embedding_model,
+        chat: host.chat_model,
+        models: (host.models || []).map((model) => model.name),
+      })),
+    });
+  };
+
+  const syncOllamaDom = () => {
+    const slot = content.querySelector("[data-processing-ollama]");
+    if (!slot || ollamaDragHostId) return;
+    const signature = ollamaHostsSignature();
+    if (slot.dataset.ollamaSignature === signature) return;
+    slot.dataset.ollamaSignature = signature;
+    slot.innerHTML = ollamaPriorityMarkup(
+      ollamaHosts,
+      ollamaHostsLoading,
+      ollamaHosts ? null : ollamaHostsError,
+    );
+  };
+
+  const loadOllamaHosts = async ({ quiet = false, button = null } = {}) => {
+    if (disposed || ollamaHostsLoading) return;
+    ollamaHostsLoading = true;
+    ollamaHostsError = null;
+    if (!ollamaHosts) syncOllamaDom();
+    if (button) setBusy(button, true, "檢查中…");
+    try {
+      const data = await api.ollamaHosts();
+      if (disposed) return;
+      ollamaHosts = data;
+    } catch (error) {
+      if (disposed) return;
+      ollamaHostsError = error;
+      if (!quiet) {
+        toast(error.message || "無法檢查 Ollama 主機。", "danger", 6000);
+      }
+    } finally {
+      if (!disposed) {
+        ollamaHostsLoading = false;
+        ollamaCheckedAt = Date.now();
+        if (button) setBusy(button, false);
+        syncOllamaDom();
+      }
+    }
+  };
+
+  const persistOllamaOrder = async (hostIds) => {
+    if (ollamaReorderBusy) return;
+    const currentIds = (ollamaHosts?.hosts || []).map((host) =>
+      Number(host.id),
+    );
+    const nextIds = hostIds.map((id) => Number(id));
+    if (
+      !nextIds.length ||
+      nextIds.length !== currentIds.length ||
+      nextIds.every((id, index) => id === currentIds[index])
+    ) {
+      syncOllamaDom();
+      return;
+    }
+    ollamaReorderBusy = true;
+    const byId = new Map(
+      (ollamaHosts?.hosts || []).map((host) => [Number(host.id), host]),
+    );
+    const reordered = nextIds.map((id) => byId.get(id)).filter(Boolean);
+    if (ollamaHosts && reordered.length === currentIds.length) {
+      ollamaHosts = {
+        ...ollamaHosts,
+        hosts: reordered,
+        active_host_id: nextIds[0],
+      };
+      const slot = content.querySelector("[data-processing-ollama]");
+      if (slot) slot.dataset.ollamaSignature = "";
+      syncOllamaDom();
+    }
+    try {
+      await api.reorderOllamaHosts(nextIds);
+      toast("已更新 Ollama 主機優先順序。", "ok", 3500);
+    } catch (error) {
+      toast(
+        error.message || "無法更新 Ollama 主機優先順序。",
+        "danger",
+        6000,
+      );
+      ollamaCheckedAt = 0;
+      await loadOllamaHosts({ quiet: true });
+    } finally {
+      ollamaReorderBusy = false;
+    }
+  };
+
+  const restoreOllamaOrder = () => {
+    const slot = content.querySelector("[data-processing-ollama]");
+    if (slot) slot.dataset.ollamaSignature = "";
+    syncOllamaDom();
+  };
+
+  const cleanupOllamaPointerDrag = () => {
+    const drag = ollamaPointerDrag;
+    if (!drag) return;
+    const row = content.querySelector(
+      `[data-ollama-host][data-host-id="${drag.hostId}"]`,
+    );
+    row?.classList.remove("is-dragging");
+    if (drag.captureTarget?.hasPointerCapture?.(drag.pointerId)) {
+      try {
+        drag.captureTarget.releasePointerCapture(drag.pointerId);
+      } catch (error) {
+        /* the pointer may already be released by the browser */
+      }
+    }
+    document.documentElement.classList.remove("processing-ollama-dragging");
+    window.removeEventListener("pointermove", onOllamaPointerMove);
+    window.removeEventListener("pointerup", onOllamaPointerUp);
+    window.removeEventListener("pointercancel", onOllamaPointerCancel);
+    ollamaPointerDrag = null;
+    ollamaDragHostId = 0;
+  };
+
+  const onOllamaPointerMove = (event) => {
+    const drag = ollamaPointerDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!drag.dragging) {
+      const distance = Math.hypot(
+        event.clientX - drag.startX,
+        event.clientY - drag.startY,
+      );
+      if (distance < 5) return;
+      drag.dragging = true;
+      ollamaDragHostId = drag.hostId;
+      ollamaDragChanged = false;
+      content
+        .querySelector(
+          `[data-ollama-host][data-host-id="${drag.hostId}"]`,
+        )
+        ?.classList.add("is-dragging");
+      document.documentElement.classList.add("processing-ollama-dragging");
+    }
+    event.preventDefault();
+    const edge = 64;
+    if (event.clientY < edge) {
+      window.scrollBy(0, -12);
+    } else if (event.clientY > window.innerHeight - edge) {
+      window.scrollBy(0, 12);
+    }
+    const list = content.querySelector("[data-ollama-list]");
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest?.("[data-ollama-host]");
+    if (!list || !target || !list.contains(target)) return;
+    const dragged = list.querySelector(
+      `[data-ollama-host][data-host-id="${drag.hostId}"]`,
+    );
+    if (!dragged || dragged === target) return;
+    const rect = target.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    list.insertBefore(dragged, after ? target.nextSibling : target);
+    ollamaDragChanged = true;
+  };
+
+  const onOllamaPointerUp = (event) => {
+    const drag = ollamaPointerDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const wasDragging = drag.dragging;
+    const changed = ollamaDragChanged;
+    const list = content.querySelector("[data-ollama-list]");
+    const hostIds =
+      wasDragging && list
+        ? [...list.querySelectorAll("[data-ollama-host]")].map((element) =>
+            Number(element.dataset.hostId),
+          )
+        : [];
+    cleanupOllamaPointerDrag();
+    if (wasDragging && changed && hostIds.length) {
+      void persistOllamaOrder(hostIds);
+    }
+  };
+
+  const onOllamaPointerCancel = () => {
+    const wasDragging = Boolean(ollamaPointerDrag?.dragging);
+    cleanupOllamaPointerDrag();
+    if (wasDragging) restoreOllamaOrder();
+  };
+
+  const onOllamaPointerDown = (event) => {
+    if (
+      event.button !== 0 ||
+      (event.pointerType === "mouse" && event.buttons !== 1)
+    ) {
+      return;
+    }
+    if (ollamaReorderBusy || ollamaPointerDrag) return;
+    const row = event.target.closest("[data-ollama-host]");
+    if (!row || !content.contains(row) || event.target.closest("button")) {
+      return;
+    }
+    if (
+      event.pointerType === "touch" &&
+      !event.target.closest(".processing-ollama-handle")
+    ) {
+      return;
+    }
+    const hostId = Number(row.dataset.hostId) || 0;
+    if (!hostId) return;
+    event.preventDefault();
+    ollamaDragHostId = hostId;
+    ollamaPointerDrag = {
+      hostId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      captureTarget: row,
+    };
+    try {
+      row.setPointerCapture(event.pointerId);
+    } catch (error) {
+      /* pointer capture is an enhancement, not required for dragging */
+    }
+    window.addEventListener("pointermove", onOllamaPointerMove, {
+      passive: false,
+    });
+    window.addEventListener("pointerup", onOllamaPointerUp);
+    window.addEventListener("pointercancel", onOllamaPointerCancel);
+  };
+
   const loadJudgmentStatus = async ({ quiet = false } = {}) => {
     if (judgmentStatusLoading) return;
     judgmentStatusLoading = true;
@@ -1400,6 +3184,201 @@ export async function render(root) {
         syncJudgmentDom();
       }
     }
+  };
+
+  const loadIndexStorage = async ({ quiet = true, force = false } = {}) => {
+    if (indexStorageLoading) return;
+    if (
+      !force &&
+      indexStorage &&
+      Date.now() - indexStorageLoadedAt < 30000
+    ) {
+      return;
+    }
+    indexStorageLoading = true;
+    try {
+      indexStorage = await api.systemUsage();
+      indexStorageError = null;
+      indexStorageLoadedAt = Date.now();
+    } catch (error) {
+      indexStorageError = error.message || "無法取得 Qdrant 容器與 volume 資訊。";
+      if (!quiet) {
+        toast(indexStorageError, "danger", 7000);
+      }
+    } finally {
+      indexStorageLoading = false;
+    }
+  };
+
+  const loadCourtCheck = async ({ quiet = true, force = false } = {}) => {
+    if (courtCheckLoading) return;
+    if (
+      !force &&
+      courtCheck &&
+      Date.now() - courtCheckLoadedAt < 60000
+    ) {
+      return;
+    }
+    courtCheckLoading = true;
+    try {
+      courtCheck = await api.checkCourts();
+      courtCheckError = null;
+      courtCheckLoadedAt = Date.now();
+    } catch (error) {
+      courtCheckError = error.message || "無法檢查法院名稱。";
+      if (!quiet) {
+        toast(courtCheckError, "danger", 7000);
+      }
+    } finally {
+      courtCheckLoading = false;
+    }
+  };
+
+  const loadLawVersionCheck = async ({
+    quiet = true,
+    force = false,
+    button = null,
+  } = {}) => {
+    if (lawVersionCheckLoading) return;
+    if (
+      !force &&
+      lawVersionCheck &&
+      Date.now() - lawVersionCheckLoadedAt < 60000
+    ) {
+      return;
+    }
+    lawVersionCheckLoading = true;
+    if (button) setBusy(button, true, "檢查中…");
+    try {
+      lawVersionCheck = await api.checkLawVersions();
+      lawVersionCheckError = null;
+      lawVersionCheckLoadedAt = Date.now();
+      if (!quiet) {
+        const totals = lawVersionCheck.totals || {};
+        const needed = Number(totals.needs_backfill_versions) || 0;
+        const backfillable = Number(totals.backfillable_versions) || 0;
+        const blocked = Number(totals.blocked_versions) || 0;
+        if (needed > 0) {
+          toast(
+            `檢查完成：需要建立 ${needed} 個版本的條文歷史` +
+              `（可建立 ${backfillable}、缺原始檔 ${blocked}）。`,
+            blocked > 0 ? "danger" : "warn",
+            7000,
+          );
+        } else {
+          toast(
+            `檢查完成：目前 ${Number(totals.versions) || 0} 個版本都已有歷史條文，不需要建立。`,
+            "ok",
+            5000,
+          );
+        }
+      }
+    } catch (error) {
+      lawVersionCheckError =
+        error.message || "無法檢查條文歷史狀態。";
+      if (!quiet) {
+        toast(lawVersionCheckError, "danger", 7000);
+      }
+    } finally {
+      lawVersionCheckLoading = false;
+      if (button) setBusy(button, false);
+    }
+  };
+
+  const findStageElement = (key) =>
+    Array.from(content.querySelectorAll("[data-stage-key]")).find(
+      (element) => element.dataset.stageKey === key,
+    ) || null;
+
+  const clearStageHover = () => {
+    if (!hoveredStageKey) return;
+    hoveredStageKey = "";
+    stageTooltip.hidden = true;
+    content.querySelectorAll("[data-workflow-progress]").forEach((card) => {
+      card.classList.remove("is-stage-hovering");
+    });
+    content.querySelectorAll("[data-stage-key]").forEach((element) => {
+      element.classList.remove("is-stage-hovered");
+    });
+  };
+
+  const showStageTooltip = (target) => {
+    const key = target.dataset.stageKey || "";
+    if (!key) return;
+    hoveredStageKey = key;
+    const card = target.closest("[data-workflow-progress]");
+    content.querySelectorAll("[data-workflow-progress]").forEach((item) => {
+      item.classList.toggle("is-stage-hovering", item === card);
+    });
+    content.querySelectorAll("[data-stage-key]").forEach((element) => {
+      element.classList.toggle("is-stage-hovered", element.dataset.stageKey === key);
+    });
+
+    const statusKey = target.dataset.stageStatusKey || "idle";
+    const statusLabel = target.dataset.stageStatus || statusInfo(statusKey).label;
+    const color = target.dataset.stageColor || "var(--accent)";
+    stageTooltip.innerHTML = `<div class="processing-stage-tooltip-head">
+      <span class="processing-stage-tooltip-swatch" style="background:${escapeHtml(
+        color,
+      )}"></span>
+      <strong>${escapeHtml(target.dataset.stageLabel || key)}</strong>
+      ${statusBadge(statusKey, statusLabel)}
+    </div>
+    <div class="processing-stage-tooltip-meta">
+      <span>階段進度 <strong>${escapeHtml(
+        target.dataset.stagePercent || "—",
+      )}</strong></span>
+      <span>整體占比 <strong>${escapeHtml(
+        target.dataset.stageContribution || "—",
+      )}</strong></span>
+      <span class="mono">${escapeHtml(
+        target.dataset.stageDuration || "—",
+      )}</span>
+    </div>
+    <div class="processing-stage-tooltip-counts">${escapeHtml(
+      target.dataset.stageCounts || "—",
+    )}</div>
+    ${
+      target.dataset.stageMessage
+        ? `<div class="processing-stage-tooltip-message">${escapeHtml(
+            target.dataset.stageMessage,
+          )}</div>`
+        : ""
+    }`;
+    stageTooltip.hidden = false;
+    const width = Math.min(300, Math.max(220, window.innerWidth - 24));
+    stageTooltip.style.width = `${width}px`;
+    const rect = target.getBoundingClientRect();
+    const left = Math.min(
+      window.innerWidth - width - 12,
+      Math.max(12, rect.left),
+    );
+    const above = rect.top - stageTooltip.offsetHeight - 10;
+    const top =
+      above >= 12
+        ? above
+        : Math.min(
+            window.innerHeight - stageTooltip.offsetHeight - 12,
+            rect.bottom + 10,
+          );
+    stageTooltip.style.left = `${left}px`;
+    stageTooltip.style.top = `${Math.max(12, top)}px`;
+  };
+
+  const onStagePointerOver = (event) => {
+    const target = event.target.closest("[data-stage-key]");
+    if (!target || !content.contains(target)) return;
+    if (target.contains(event.relatedTarget)) return;
+    showStageTooltip(target);
+  };
+
+  const onStagePointerOut = (event) => {
+    const target = event.target.closest("[data-stage-key]");
+    if (!target || !content.contains(target)) return;
+    if (target.contains(event.relatedTarget)) return;
+    const next = event.relatedTarget?.closest?.("[data-stage-key]");
+    if (next && next.dataset.stageKey === target.dataset.stageKey) return;
+    clearStageHover();
   };
 
   const syncControls = (snapshot) => {
@@ -1440,12 +3419,29 @@ export async function render(root) {
         workflowNav.innerHTML = navMarkup;
         lastNavMarkup = navMarkup;
       }
-      const markup = panelMarkup(snapshot, activeWorkflowId);
+      const markup = panelMarkup(
+        snapshot,
+        activeWorkflowId,
+        workflowContext(),
+      );
       if (markup !== lastMarkup) {
         content.innerHTML = markup;
         lastMarkup = markup;
       }
       syncJudgmentDom();
+      syncOllamaDom();
+      if (
+        OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId) &&
+        !ollamaHostsLoading &&
+        Date.now() - ollamaCheckedAt >= OLLAMA_CHECK_INTERVAL_MS
+      ) {
+        loadOllamaHosts({ quiet: true });
+      }
+      if (hoveredStageKey) {
+        const next = findStageElement(hoveredStageKey);
+        if (next) showStageTooltip(next);
+        else clearStageHover();
+      }
       const updatedAt = content.querySelector("[data-processing-updated-at]");
       if (updatedAt) {
         const nextUpdatedAt = formatDateTime(snapshot.generated_at);
@@ -1456,6 +3452,15 @@ export async function render(root) {
       syncControls(snapshot);
       if (activeWorkflowId === "judgment_download") {
         loadJudgmentStatus({ quiet: true });
+      }
+      if (activeWorkflowId === "index_versions") {
+        loadIndexStorage({ quiet: true });
+      }
+      if (activeWorkflowId === "normalize_courts") {
+        loadCourtCheck({ quiet: true });
+      }
+      if (activeWorkflowId === "backfill_law_articles") {
+        loadLawVersionCheck({ quiet: true });
       }
     } catch (error) {
       if (disposed) return;
@@ -1483,6 +3488,7 @@ export async function render(root) {
       if (result && result.run_id) {
         console.info("processing update started", result);
       }
+      window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
       await refresh({ silent: true });
     } catch (error) {
       toast(error.message || "無法啟動資料更新。", "danger", 7000);
@@ -1493,16 +3499,110 @@ export async function render(root) {
     }
   };
 
+  const checkUpdates = async (button, workflowId = "") => {
+    if (actionBusy) return;
+    actionBusy = true;
+    setBusy(button, true, "檢查中…");
+    const source = DOWNLOAD_WORKFLOW_SOURCES[workflowId] || "";
+    try {
+      const result = await api.checkUpdates(source ? [source] : []);
+      if (result && result.checking) {
+        toast("已有更新檢查正在進行，請稍後重新整理。", "info", 6000);
+      } else if (source) {
+        const record = (result.sources || {})[source] || {};
+        const label = DOWNLOAD_WORKFLOW_LABELS[workflowId] || "資料";
+        if (record.status === "error") {
+          toast(`${label}版本檢查失敗：${record.message || "無法取得線上版本"}`, "danger", 7000);
+        } else {
+          toast(
+            record.update_available
+              ? `${label}線上已有更新版本。`
+              : `${label}線上已是最新版本。`,
+            record.update_available ? "warn" : "ok",
+            6000,
+          );
+        }
+      } else {
+        const count = Number(result.update_count) || 0;
+        toast(
+          count > 0
+            ? `更新檢查完成：${count} 項有更新。`
+            : "更新檢查完成：目前皆為最新。",
+          count > 0 ? "warn" : "ok",
+          6000,
+        );
+      }
+      window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
+      await refresh({ silent: true });
+    } catch (error) {
+      toast(error.message || "更新檢查失敗。", "danger", 7000);
+    } finally {
+      actionBusy = false;
+      setBusy(button, false);
+      if (lastSnapshot) syncControls(lastSnapshot);
+    }
+  };
+
+  const precheckDownloadWorkflow = async (button, workflowId) => {
+    const source = DOWNLOAD_WORKFLOW_SOURCES[workflowId] || "";
+    if (!source) return true;
+    setBusy(button, true, "檢查版本…");
+    let result = null;
+    try {
+      result = await api.checkUpdates([source]);
+    } catch (error) {
+      toast(
+        `無法完成版本檢查（${error.message || "網路錯誤"}），將直接執行下載。`,
+        "warn",
+        7000,
+      );
+      return true;
+    } finally {
+      setBusy(button, false);
+    }
+    if (!result || result.checking) {
+      if (result && result.checking) {
+        toast("已有更新檢查正在進行，將直接執行下載。", "info", 6000);
+      }
+      return true;
+    }
+    const record = (result.sources || {})[source];
+    if (!record) return true;
+    window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
+    if (record.status === "up_to_date" && !record.update_available) {
+      const label = DOWNLOAD_WORKFLOW_LABELS[workflowId] || "資料";
+      const checkedAt = record.checked_at
+        ? `（${formatDateTime(record.checked_at)} 檢查）`
+        : "";
+      const detail =
+        DOWNLOAD_FORCE_CONFIRMATIONS[workflowId] ||
+        "仍要強制重新下載嗎？";
+      return window.confirm(
+        `${label}線上檢查為最新版本${checkedAt}。\n\n${detail}`,
+      );
+    }
+    if (record.status === "error") {
+      toast("版本檢查失敗，將直接執行下載。", "warn", 6000);
+    }
+    return true;
+  };
+
   const startWorkflow = async (button, workflowId) => {
     if (actionBusy) return;
     actionBusy = true;
-    setBusy(button, true, "啟動中…");
     try {
+      const proceed = await precheckDownloadWorkflow(button, workflowId);
+      if (!proceed) {
+        await refresh({ silent: true });
+        return;
+      }
+      setBusy(button, true, "啟動中…");
       const result = await api.startProcessingWorkflow(workflowId);
       toast("已啟動工作流程。", "ok", 6000);
       if (result && result.run_id) {
         console.info("processing workflow started", result);
       }
+      window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
       await refresh({ silent: true });
     } catch (error) {
       toast(error.message || "無法啟動工作流程。", "danger", 7000);
@@ -1537,7 +3637,32 @@ export async function render(root) {
     if (action === "refresh") refresh({ silent: false });
     else if (action === "refresh-judgment-months") {
       loadJudgmentStatus({ quiet: false });
+    } else if (action === "refresh-index-storage") {
+      loadIndexStorage({ quiet: false, force: true });
+    } else if (action === "refresh-court-check") {
+      loadCourtCheck({ quiet: false, force: true });
+    } else if (action === "refresh-law-version-check") {
+      loadLawVersionCheck({ quiet: false, force: true, button });
+    } else if (action === "refresh-ollama") {
+      loadOllamaHosts({ quiet: false, button });
+    } else if (action === "move-ollama-host") {
+      const hosts = ollamaHosts?.hosts || [];
+      const index = hosts.findIndex(
+        (host) => Number(host.id) === Number(button.dataset.hostId),
+      );
+      const direction = button.dataset.direction;
+      const target =
+        direction === "up" ? index - 1 : direction === "down" ? index + 1 : -1;
+      if (index < 0 || target < 0 || target >= hosts.length) return;
+      const hostIds = hosts.map((host) => Number(host.id));
+      [hostIds[index], hostIds[target]] = [
+        hostIds[target],
+        hostIds[index],
+      ];
+      void persistOllamaOrder(hostIds);
     } else if (action === "update") startUpdate(button);
+    else if (action === "check-updates")
+      checkUpdates(button, button.dataset.workflowId || "");
     else if (action === "run-workflow") {
       const workflowId = button.dataset.workflowId || "";
       if (workflowId === "full_update") startUpdate(button);
@@ -1559,18 +3684,51 @@ export async function render(root) {
       const navMarkup = workflowNavMarkup(lastSnapshot, activeWorkflowId);
       workflowNav.innerHTML = navMarkup;
       lastNavMarkup = navMarkup;
-      const markup = panelMarkup(lastSnapshot, activeWorkflowId);
+      const markup = panelMarkup(
+        lastSnapshot,
+        activeWorkflowId,
+        workflowContext(),
+      );
       content.innerHTML = markup;
       lastMarkup = markup;
       syncJudgmentDom();
+      syncOllamaDom();
+      if (
+        OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId) &&
+        !ollamaHostsLoading &&
+        Date.now() - ollamaCheckedAt >= OLLAMA_CHECK_INTERVAL_MS
+      ) {
+        loadOllamaHosts({ quiet: true });
+      }
+      if (hoveredStageKey) {
+        const next = findStageElement(hoveredStageKey);
+        if (next) showStageTooltip(next);
+        else clearStageHover();
+      }
     }
     if (activeWorkflowId === "judgment_download") {
       loadJudgmentStatus({ quiet: true });
+    }
+    if (activeWorkflowId === "index_versions") {
+      loadIndexStorage({ quiet: true });
+    }
+    if (activeWorkflowId === "normalize_courts") {
+      loadCourtCheck({ quiet: true });
+    }
+    if (activeWorkflowId === "backfill_law_articles") {
+      loadLawVersionCheck({ quiet: true });
     }
   };
 
   page.addEventListener("click", onClick);
   workflowNav.addEventListener("click", onWorkflowClick);
+  content.addEventListener("pointerover", onStagePointerOver);
+  content.addEventListener("pointerout", onStagePointerOut);
+  content.addEventListener("pointerdown", onOllamaPointerDown);
+  window.addEventListener("scroll", clearStageHover, {
+    capture: true,
+    passive: true,
+  });
   if (indexToggle) indexToggle.addEventListener("change", onChange);
 
   await refresh({ silent: false });
@@ -1584,6 +3742,13 @@ export async function render(root) {
     if (timer !== null) window.clearInterval(timer);
     page.removeEventListener("click", onClick);
     workflowNav.removeEventListener("click", onWorkflowClick);
+    cleanupOllamaPointerDrag();
+    content.removeEventListener("pointerover", onStagePointerOver);
+    content.removeEventListener("pointerout", onStagePointerOut);
+    content.removeEventListener("pointerdown", onOllamaPointerDown);
+    window.removeEventListener("scroll", clearStageHover, {
+      capture: true,
+    });
     if (indexToggle) indexToggle.removeEventListener("change", onChange);
   };
 }

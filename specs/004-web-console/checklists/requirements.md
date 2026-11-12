@@ -32,9 +32,9 @@
 ## Notes
 
 - The requirement to use vanilla JavaScript and the ten `getdesign.md` style references are user constraints, not implementation choices introduced by this specification. They are recorded in the Input and reflected in FR-018–FR-020.
-- FR-001–FR-007 cover the RAG preview and the “no fabricated answers” constraint; FR-008–FR-017 cover the database page, dynamic filters, reports and local persistence; FR-018–FR-020 cover the theme selector; FR-021–FR-028 cover status, architecture, read-only behavior, validation and responsive layout.
+- FR-001–FR-007 cover the RAG flow and the “no fabricated answers” constraint; FR-008–FR-017 cover the database page, dynamic filters, reports and local persistence; FR-018–FR-020 cover the theme selector; FR-021–FR-028 cover status, architecture, query-page read-only behavior, validation and responsive layout.
 - Success criteria are expressed as user-observable outcomes (navigation, visible states, measurable counts and browser checks), not as internal implementation details.
-- Scope boundaries are documented in Assumptions and Out of Scope: judgments, complete RAG generation, Qdrant embeddings, authentication and write operations are excluded from this feature.
+- Scope boundaries: this specification includes judgments, Qdrant judgment vectors, complete RAG with law/order sources, the read-only query console, and separate write-capable admin surfaces for processing, question-bank and benchmark management. Account management, authentication, permissions and cross-device sync remain out of scope.
 - This feature builds on `001-judgment-rag-search`, `002-judgment-data-storage` and `003-law-cited-judgment-filter`; it does not replace their data-processing requirements.
 - The feature branch was not created because no `before_specify` hook is configured (`.specify/extensions.yml` does not exist); the spec directory is `specs/004-web-console`.
 - The deployment addendum (User Story 6, FR-029–FR-038, SC-013–SC-016) records the user constraints that the same static frontend must open from `file://` and deploy to Cloudflare Pages while calling a local backend through cloudflared HTTPS.

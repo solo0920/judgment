@@ -7,15 +7,23 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import pytest
+
 from judgment.config import Settings
+from judgment.embeddings import EmbeddingError
 from judgment.index_versions import activate_version, recipe_version, rollback_version
-from judgment.judgment_index import build_index_version, vector_point_id
+from judgment.judgment_index import (
+    build_index_version,
+    history_point_id,
+    vector_point_id,
+)
 from judgment.models import (
     Base,
     JudgmentDocument,
     JudgmentIndexVersion,
     JudgmentVectorIndex,
 )
+from judgment.processing_state import ProcessingStateStore
 
 
 class FakeVersionStore:
@@ -293,6 +301,173 @@ def test_build_version_reuses_unchanged_and_embeds_new(tmp_path: Path) -> None:
     )
     assert reactivated["version_id"] == 2
     assert store.aliases[settings.judgment_vector_alias] == "judgments_v002"
+
+
+def test_build_version_records_processing_state_and_month_progress(
+    tmp_path: Path, monkeypatch
+) -> None:
+    state_path = tmp_path / "processing_state.json"
+    monkeypatch.setenv("JUDGMENT_PROCESSING_STATE", str(state_path))
+    session_factory = _session_factory()
+    settings = _settings(tmp_path)
+    _seed_legacy_version(session_factory, settings)
+    store = FakeVersionStore()
+    store.collections["judgments_v001"] = {
+        "size": 4,
+        "points": {
+            vector_point_id("J-1"): {
+                "id": vector_point_id("J-1"),
+                "vector": [0.1, 0.2, 0.3, 0.4],
+                "payload": {"jid": "J-1", "model": settings.embedding_model},
+            }
+        },
+    }
+    store.aliases[settings.judgment_vector_alias] = "judgments_v001"
+    with session_factory() as session:
+        first = session.scalars(
+            select(JudgmentDocument).where(JudgmentDocument.jid == "J-1")
+        ).one()
+        second = session.scalars(
+            select(JudgmentDocument).where(JudgmentDocument.jid == "J-2")
+        ).one()
+        first.issue_month = "202601"
+        second.issue_month = "202602"
+        session.commit()
+
+    summary = build_index_version(
+        session_factory=session_factory,
+        settings=settings,
+        store=store,
+        embedder=FakeEmbedder(),
+        batch_size=2,
+        auto_activate=True,
+        track_state=True,
+    )
+
+    assert summary["status"] == "success"
+    payload = ProcessingStateStore().read()
+    run = payload["runs"][0]
+    assert run["kind"] == "index"
+    assert run["status"] == "success"
+    assert list(run["stages"]) == ["ollama", "qdrant", "validate"]
+    assert run["stages"]["ollama"]["status"] == "success"
+    assert run["stages"]["qdrant"]["status"] == "success"
+    assert run["stages"]["validate"]["status"] == "success"
+    runtime = run["meta"]["index_runtime"]
+    assert runtime["summary"]["indexed"] == 2
+    assert runtime["embedding"]["selected"]["model"] == settings.embedding_model
+    assert [item["month"] for item in runtime["months"]] == [
+        "202602",
+        "202601",
+    ]
+    assert sum(item["processed"] for item in runtime["months"]) == 2
+    assert runtime["current"]["jid"]
+
+
+def test_build_version_records_failed_ollama_probe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    state_path = tmp_path / "processing_state.json"
+    monkeypatch.setenv("JUDGMENT_PROCESSING_STATE", str(state_path))
+    session_factory = _session_factory()
+    settings = _settings(tmp_path)
+    probe = {
+        "status": "failed",
+        "model": settings.embedding_model,
+        "tested_at": "2026-11-12T00:00:00+00:00",
+        "hosts": [
+            {
+                "role": "primary",
+                "url": "http://x570:11434",
+                "host": "x570",
+                "port": 11434,
+                "model": settings.embedding_model,
+                "status": "unavailable",
+                "health": "unavailable",
+                "model_available": False,
+                "models": [],
+                "detail": "ConnectTimeout",
+            }
+        ],
+        "selected": None,
+        "error": "找不到可用的 Ollama 主機",
+    }
+    monkeypatch.setattr(
+        "judgment.judgment_index.probe_embedding_hosts",
+        lambda **kwargs: probe,
+    )
+    with pytest.raises(EmbeddingError, match="Ollama"):
+        build_index_version(
+            session_factory=session_factory,
+            settings=settings,
+            store=FakeVersionStore(),
+            track_state=True,
+        )
+
+    run = ProcessingStateStore().read()["runs"][0]
+    assert run["status"] == "failed"
+    assert run["stages"]["ollama"]["status"] == "failed"
+    assert run["meta"]["index_runtime"]["embedding"]["hosts"][0][
+        "status"
+    ] == "unavailable"
+    assert run["meta"]["index_runtime"]["status"] == "failed"
+
+
+def test_build_version_archives_changed_vector_to_history(
+    tmp_path: Path,
+) -> None:
+    session_factory = _session_factory()
+    settings = _settings(tmp_path)
+    _seed_legacy_version(session_factory, settings)
+    store = FakeVersionStore()
+    store.collections["judgments_v001"] = {
+        "size": 4,
+        "points": {
+            vector_point_id("J-1"): {
+                "id": vector_point_id("J-1"),
+                "vector": [0.1, 0.2, 0.3, 0.4],
+                "payload": {
+                    "jid": "J-1",
+                    "model": settings.embedding_model,
+                    "content_hash": "a" * 64,
+                },
+            }
+        },
+    }
+    store.aliases[settings.judgment_vector_alias] = "judgments_v001"
+
+    with session_factory() as session:
+        document = session.scalars(
+            select(JudgmentDocument).where(JudgmentDocument.jid == "J-1")
+        ).one()
+        document.full_text = "原告依消費借貸法律關係請求返還借款，並追加利息。"
+        document.content_hash = "c" * 64
+        document.updated_at = datetime.now(timezone.utc)
+        session.commit()
+
+    summary = build_index_version(
+        session_factory=session_factory,
+        settings=settings,
+        store=store,
+        embedder=FakeEmbedder(),
+        batch_size=2,
+        auto_activate=True,
+    )
+
+    assert summary["status"] == "success"
+    assert summary["history_points"] == 1
+    history = store.collections[settings.judgment_vector_history_collection]
+    history_id = history_point_id("J-1", 1)
+    assert history_id in history["points"]
+    payload = history["points"][history_id]["payload"]
+    assert payload["is_current"] is False
+    assert payload["valid_to_version_id"] == summary["version_id"]
+    assert payload["jid"] == "J-1"
+    current = store.collections["judgments_v002"]["points"][
+        vector_point_id("J-1")
+    ]
+    assert current["payload"]["is_current"] is True
+    assert current["payload"]["valid_from_version_id"] == summary["version_id"]
 
 
 def test_build_version_does_not_switch_on_validation_failure(

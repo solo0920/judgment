@@ -10,6 +10,8 @@ from pathlib import Path
 from .processing_state import ProcessingStateStore, default_state_path
 from .workflows import workflow_definition
 
+PARTIAL_EXIT_CODE = 3
+
 
 def _finish(
     store: ProcessingStateStore,
@@ -127,6 +129,19 @@ def run_workflow(*, workflow_id: str, run_id: str) -> int:
             started,
             status="success",
             message=f"{definition.label}完成。",
+        )
+        return 0
+    if code == PARTIAL_EXIT_CODE:
+        _finish(
+            store,
+            run_id,
+            definition.stage,
+            started,
+            status="partial",
+            message=(
+                f"{definition.label}部分完成；進度已保留，"
+                "下次執行會續傳。"
+            ),
         )
         return 0
     _finish(

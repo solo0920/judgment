@@ -9,7 +9,12 @@ import {
   storageMode,
   updateHistoryEntry,
 } from "../store.js";
-import { renderTestFlowPanel } from "./performance.js";
+import {
+  buildFlowWaterfallStages,
+  renderRagPipelineWaterfall,
+  renderTestFlowPanel,
+  renderWaterfallStages,
+} from "./performance.js";
 import {
   copyText,
   emptyState,
@@ -54,6 +59,50 @@ function turnMarkup(question, answerHtml) {
   </div>`;
 }
 
+function lookupWithTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(
+        () => reject(new Error("pipeline lookup timed out")),
+        timeoutMs,
+      );
+    }),
+  ]);
+}
+
+async function hydratePipelineFlow(payload) {
+  if (!payload || payload.pipeline_flow) return payload;
+  const requestId = String(
+    payload._client_request_id || payload.request_id || "",
+  ).trim();
+  if (!requestId) return payload;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await lookupWithTimeout(
+        api.performance({ keyword: requestId }, 1, 5),
+        1800,
+      );
+      const row = (Array.isArray(response.rows) ? response.rows : []).find(
+        (item) =>
+          String(item.request_id || "") === requestId &&
+          item.flow &&
+          typeof item.flow === "object",
+      );
+      if (row) {
+        payload.pipeline_flow = row.flow;
+        return payload;
+      }
+    } catch (error) {
+      /* performance lookup is a fallback; the answer must still render */
+    }
+    if (attempt < 2) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  }
+  return payload;
+}
+
 function compactAnswerPayload(payload) {
   return {
     status: payload.status,
@@ -72,6 +121,7 @@ function compactAnswerPayload(payload) {
     embedding_model: payload.embedding_model,
     duration_ms: payload.duration_ms,
     show_sources: payload.show_sources,
+    pipeline_flow: payload.pipeline_flow || null,
     test_run: payload.test_run || null,
     partial: false,
     streaming: false,
@@ -167,6 +217,7 @@ function createProcessController(answerCard) {
   const summary = panel?.querySelector("#rag-process-summary");
   const started = performance.now();
   const items = new Map();
+  const collectedSegments = new Map();
 
   const updateText = (element, selector, text) => {
     const target = element.querySelector(selector);
@@ -241,6 +292,10 @@ function createProcessController(answerCard) {
   const step = (payload) => {
     const segment = payload?.segment;
     if (!segment) return;
+    collectedSegments.set(
+      String(segment.seq ?? segment.name ?? collectedSegments.size),
+      { ...segment },
+    );
     const item = ensureItem(segment);
     if (!item) return;
     if (payload.type === "segment_start") {
@@ -282,6 +337,29 @@ function createProcessController(answerCard) {
       summary.textContent = ok
         ? `完成 · ${stepCount} 步 · ${elapsed}`
         : `失敗 · ${stepCount} 步`;
+    }
+    const segments = [...collectedSegments.values()]
+      .filter((segment) => segment?.name)
+      .sort(
+        (left, right) =>
+          Number(left.offset_ms || 0) - Number(right.offset_ms || 0),
+      );
+    if (list && segments.length) {
+      const total = Math.max(
+        1,
+        ...segments.map(
+          (segment) =>
+            Number(segment.end_offset_ms) ||
+            (Number(segment.offset_ms) || 0) +
+              (Number(segment.duration_ms) || 0),
+        ),
+      );
+      list.classList.add("is-waterfall");
+      list.innerHTML = renderWaterfallStages(
+        buildFlowWaterfallStages(segments),
+        total,
+        "後端 Flow 使用與 RAG Pipeline 相同的 waterfall；每個 span 以絕對 offset 定位，點選可查看參數、module／function、開始／結束時間與錯誤。",
+      );
     }
     panel.classList.add("is-complete");
     setProcessExpanded(panel, false);
@@ -596,6 +674,115 @@ function matchedChipsMarkup(matched, lawSources) {
       .join("")}</div>`;
 }
 
+function renderRagModeCard({
+  tone,
+  title,
+  text,
+  models,
+  currentModel,
+  currentProviderName,
+  baseUrl,
+  modelState,
+  untestedProviders = [],
+  busy,
+  refreshing,
+}) {
+  const toneClass = tone === "ok" ? "is-ok" : tone === "warn" ? "is-warn" : "is-info";
+  const iconName = tone === "ok" ? "check" : tone === "warn" ? "alert" : "info";
+  const badgeClass =
+    tone === "ok" ? "badge-ok" : tone === "warn" ? "badge-warn" : "badge-info";
+  const options = Array.isArray(models) ? models : [];
+  const providerNames = [
+    ...new Set(options.map((item) => item.providerName).filter(Boolean)),
+  ];
+  const currentLabel =
+    currentModel && currentProviderName
+      ? `${currentProviderName}:${currentModel}`
+      : currentModel;
+  const buttons = options
+    .map((option) => {
+      const active =
+        option.model === currentModel &&
+        (!currentProviderName ||
+          option.providerName === currentProviderName);
+      const label = option.providerName
+        ? `${option.providerName}:${option.model}`
+        : option.model;
+      return `<button class="rag-model-button${
+        active ? " is-active" : ""
+      }" type="button" data-rag-model="${escapeHtml(option.model)}"
+        data-rag-provider="${escapeHtml(
+          option.hostId === null || option.hostId === undefined
+            ? ""
+            : String(option.hostId),
+        )}"
+        title="${escapeHtml(label)}"
+        aria-pressed="${active}" ${busy || refreshing ? "disabled" : ""}>
+        <span class="rag-model-state" aria-hidden="true"></span>
+        <span>${escapeHtml(label)}</span>
+        ${active ? `<span class="rag-model-current">使用中</span>` : ""}
+      </button>`;
+    })
+    .join("");
+  const untested = (modelState?.models || []).filter(
+    (item) => item.status === "untested",
+  ).length;
+  const emptyCopy = modelState
+    ? untested
+      ? `尚有 ${formatNumber(untested)} 個模型未測試 chat 能力；按「檢查模型」後即可切換。`
+      : "目前 provider 沒有可用的 chat 模型。"
+    : "無法取得模型清單；請確認 Ollama 服務是否啟動。";
+  return `<section class="rag-mode-card ${toneClass}">
+    <div class="rag-mode-head">
+      <span class="rag-mode-icon" aria-hidden="true">${icon(iconName, 14)}</span>
+      <div class="rag-mode-copy">
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(text)}</p>
+      </div>
+      <span class="badge ${badgeClass}">${formatNumber(
+        options.length,
+      )} 個 chat model${
+        providerNames.length ? ` · ${providerNames.length} 台主機` : ""
+      }</span>
+    </div>
+    <div class="rag-model-strip">
+      <div class="rag-model-strip-head">
+        <span class="rag-model-strip-title">${icon("brain", 13)} Chat models</span>
+        ${
+          baseUrl
+            ? `<span class="rag-model-strip-base mono">${escapeHtml(
+                baseUrl,
+              )}</span>`
+            : ""
+        }
+        <span class="rag-model-strip-current">${
+          currentLabel
+            ? `目前：<strong>${escapeHtml(currentLabel)}</strong>`
+            : "尚未選擇"
+        }</span>
+        <button class="btn btn-ghost btn-sm rag-model-refresh" type="button"
+          data-rag-action="refresh-chat-models"
+          ${busy || refreshing ? "disabled" : ""}>
+          ${icon("refresh", 12)}<span>${refreshing ? "檢查中…" : "檢查模型"}</span>
+        </button>
+      </div>
+      ${
+        buttons
+          ? `<div class="rag-model-buttons">${buttons}</div>
+             <p class="rag-model-hint">點選模型切換；切換後套用下一次提問，不影響已完成的回答。</p>`
+          : `<p class="rag-model-empty">${escapeHtml(emptyCopy)}</p>`
+      }
+      ${
+        untestedProviders.length
+          ? `<p class="rag-model-hint rag-model-untested-hint">${escapeHtml(
+              untestedProviders.join("、"),
+            )} 尚有模型尚未檢查 chat 能力；請按「檢查模型」。</p>`
+          : ""
+      }
+    </div>
+  </section>`;
+}
+
 function renderAnswerBody(payload) {
   const citations = Array.isArray(payload.citations) ? payload.citations : [];
   const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
@@ -758,6 +945,18 @@ function renderAnswerBody(payload) {
       </div>`
     : "";
 
+  const pipelineFlow =
+    payload.pipeline_flow && typeof payload.pipeline_flow === "object"
+      ? payload.pipeline_flow
+      : null;
+  const pipelineSection =
+    !partial && pipelineFlow
+      ? renderRagPipelineWaterfall(pipelineFlow, {
+          serverDurationMs: Number(payload.duration_ms) || 0,
+          embedded: true,
+        })
+      : "";
+
   const answerText = String(payload.answer || "").trim();
   const answerContent =
     answerText ||
@@ -804,7 +1003,8 @@ function renderAnswerBody(payload) {
       }
       ${testRunBlock}
       ${matchedChips}
-      ${citationSection}`;
+      ${citationSection}
+      ${pipelineSection}`;
 }
 
 function renderAnswer(question, payload, processHtml = "") {
@@ -984,6 +1184,11 @@ export async function render(root) {
   let conversationActive = false;
   let testMode = false;
   let testModels = { embedding: [], llm: [] };
+  let modeStatus = null;
+  let modeModelState = null;
+  let modeError = null;
+  let modeModelBusy = false;
+  let modeModelRefreshing = false;
 
   root.innerHTML = `<section class="page rag-page">
     <div class="rag-layout">
@@ -1119,6 +1324,7 @@ export async function render(root) {
   lawDialog?.addEventListener("close", syncDialogScrollLock);
   let flowPollTimer = null;
   let activeTestFlow = null;
+  let lastTestFlowSignature;
   let openHistoryMenuId = null;
   let openHistoryMenuTrigger = null;
 
@@ -1689,55 +1895,206 @@ export async function render(root) {
     await refreshHistory();
   };
 
+  const modeLlmService = () =>
+    (modeStatus?.services || []).find((item) => item.id === "llm") || null;
+
+  const paintModeNotice = () => {
+    const heroNotice = root.querySelector("#rag-mode-notice");
+    if (!heroNotice) return;
+    const providers = Array.isArray(modeModelState?.providers)
+      ? modeModelState.providers
+      : [];
+    const models = [];
+    for (const provider of providers) {
+      if (!provider || !Array.isArray(provider.chat_models)) continue;
+      for (const model of provider.chat_models) {
+        models.push({
+          model,
+          providerName: String(provider.name || "").trim(),
+          hostId:
+            provider.host_id === null || provider.host_id === undefined
+              ? null
+              : Number(provider.host_id),
+        });
+      }
+    }
+    if (!models.length && Array.isArray(modeModelState?.chat_models)) {
+      const fallbackProvider = String(
+        modeModelState?.provider_name || "",
+      ).trim();
+      const fallbackHostId = modeModelState?.provider?.host_id;
+      for (const model of modeModelState.chat_models) {
+        models.push({
+          model,
+          providerName: fallbackProvider,
+          hostId:
+            fallbackHostId === null || fallbackHostId === undefined
+              ? null
+              : Number(fallbackHostId),
+        });
+      }
+    }
+    const untestedProviders = providers
+      .filter(
+        (provider) =>
+          Array.isArray(provider?.models) &&
+          provider.models.length > 0 &&
+          (!Array.isArray(provider.chat_models) ||
+            provider.chat_models.length === 0),
+      )
+      .map((provider) => String(provider.name || "").trim())
+      .filter(Boolean);
+    const currentModel = String(modeLlmService()?.model || "").trim();
+    const baseUrl = String(modeModelState?.base_url || "").trim();
+    const currentProviderName = String(
+      modeModelState?.provider_name || "",
+    ).trim();
+    if (!modeStatus) {
+      if (!modeError) return;
+      heroNotice.innerHTML = renderRagModeCard({
+        tone: "warn",
+        title: "無法取得 RAG 服務狀態",
+        text:
+          modeError.message || "請稍後再試，或前往系統狀態頁查看。",
+        models,
+        currentModel,
+        currentProviderName,
+        baseUrl,
+        modelState: modeModelState,
+        untestedProviders,
+        busy: modeModelBusy,
+        refreshing: modeModelRefreshing,
+      });
+      return;
+    }
+    const data = modeStatus.data || {};
+    const rag = (modeStatus.services || []).find((item) => item.id === "rag");
+    const indexed = Number(data.judgment_indexed_count || 0);
+    const totalJudgments = Number(data.judgment_count || 0);
+    if (rag?.status === "operational") {
+      heroNotice.innerHTML = renderRagModeCard({
+        tone: "ok",
+        title: "檢索與回答就緒",
+        text: `Qdrant、Embedding 與 LLM 均可使用；目前索引涵蓋 ${formatNumber(
+          indexed,
+        )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
+        models,
+        currentModel,
+        currentProviderName,
+        baseUrl,
+        modelState: modeModelState,
+        untestedProviders,
+        busy: modeModelBusy,
+        refreshing: modeModelRefreshing,
+      });
+    } else if (rag?.status === "degraded") {
+      heroNotice.innerHTML = renderRagModeCard({
+        tone: "warn",
+        title: "部分 AI 元件未就緒",
+        text: rag.detail || "RAG 會降級為只顯示檢索結果。",
+        models,
+        currentModel,
+        currentProviderName,
+        baseUrl,
+        modelState: modeModelState,
+        untestedProviders,
+        busy: modeModelBusy,
+        refreshing: modeModelRefreshing,
+      });
+    } else {
+      heroNotice.innerHTML = renderRagModeCard({
+        tone: "info",
+        title: "向量索引尚未就緒 · 不是法律意見",
+        text:
+          rag?.detail ||
+          "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
+        models,
+        currentModel,
+        currentProviderName,
+        baseUrl,
+        modelState: modeModelState,
+        untestedProviders,
+        busy: modeModelBusy,
+        refreshing: modeModelRefreshing,
+      });
+    }
+  };
+
   const loadModeNotice = async () => {
+    const [statusResult, modelsResult] = await Promise.allSettled([
+      api.status(),
+      api.llmModels(),
+    ]);
+    if (disposed) return;
+    modeStatus =
+      statusResult.status === "fulfilled" ? statusResult.value : null;
+    modeModelState =
+      modelsResult.status === "fulfilled" ? modelsResult.value : null;
+    modeError =
+      statusResult.status === "rejected" ? statusResult.reason : null;
+    paintModeNotice();
+  };
+
+  const chooseChatModel = async (model, hostId = null) => {
+    if (!model || modeModelBusy || modeModelRefreshing) return;
+    const currentModel = String(modeLlmService()?.model || "").trim();
+    const currentProviderName = String(
+      modeModelState?.provider_name || "",
+    ).trim();
+    const targetProvider = (modeModelState?.providers || []).find(
+      (provider) =>
+        hostId !== null &&
+        provider?.host_id !== null &&
+        provider?.host_id !== undefined &&
+        Number(provider.host_id) === Number(hostId),
+    );
+    const targetProviderName = String(
+      targetProvider?.name || (hostId === null ? currentProviderName : ""),
+    ).trim();
+    if (
+      model === currentModel &&
+      (!hostId ||
+        !targetProviderName ||
+        targetProviderName === currentProviderName)
+    ) {
+      return;
+    }
+    const label = targetProviderName
+      ? `${targetProviderName}:${model}`
+      : model;
+    modeModelBusy = true;
+    paintModeNotice();
     try {
-      const status = await api.status();
-      if (disposed) return;
-      const data = status.data || {};
-      const services = new Map(
-        (status.services || []).map((item) => [item.id, item]),
-      );
-      const rag = services.get("rag");
-      const indexed = Number(data.judgment_indexed_count || 0);
-      const totalJudgments = Number(data.judgment_count || 0);
-      const heroNotice = root.querySelector("#rag-mode-notice");
-      if (!heroNotice) return;
-      if (rag?.status === "operational") {
-        heroNotice.innerHTML = notice({
-          tone: "ok",
-          title: "檢索與回答就緒",
-          text: `Qdrant、Embedding 與 LLM 均可使用；目前索引涵蓋 ${formatNumber(
-            indexed,
-          )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
-        });
-      } else if (rag?.status === "degraded") {
-        heroNotice.innerHTML = notice({
-          tone: "warn",
-          title: "部分 AI 元件未就緒",
-          text: escapeHtml(rag.detail || "RAG 會降級為只顯示檢索結果。"),
-        });
-      } else {
-        heroNotice.innerHTML = notice({
-          tone: "info",
-          title: "向量索引尚未就緒 · 不是法律意見",
-          text: escapeHtml(
-            rag?.detail ||
-              "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
-          ),
-        });
-      }
+      await api.selectLlmModel(model, hostId);
+      toast(`已切換 chat model：${label}`, "ok", 3500);
     } catch (error) {
-      if (disposed) return;
-      const heroNotice = root.querySelector("#rag-mode-notice");
-      if (heroNotice) {
-        heroNotice.innerHTML = notice({
-          tone: "warn",
-          title: "無法取得 RAG 服務狀態",
-          text: escapeHtml(
-            error.message || "請稍後再試，或前往系統狀態頁查看。",
-          ),
-        });
-      }
+      toast(
+        error.message || "無法切換 chat model。",
+        "danger",
+        6000,
+      );
+    } finally {
+      modeModelBusy = false;
+      if (!disposed) await loadModeNotice();
+    }
+  };
+
+  const refreshChatModels = async () => {
+    if (modeModelRefreshing || modeModelBusy) return;
+    modeModelRefreshing = true;
+    paintModeNotice();
+    try {
+      await api.testLlmModels();
+      toast("已更新 chat model 清單。", "ok", 3500);
+    } catch (error) {
+      toast(
+        error.message || "無法檢查 chat model。",
+        "danger",
+        6000,
+      );
+    } finally {
+      modeModelRefreshing = false;
+      if (!disposed) await loadModeNotice();
     }
   };
 
@@ -1782,6 +2139,27 @@ export async function render(root) {
   const paintTestFlow = (run) => {
     if (!testFlowBox) return;
     activeTestFlow = run || null;
+    // Polling replaces this panel every 1.5s while a test runs. Compare the
+    // meaningful fields first so identical polls do not rebuild the DOM or
+    // restart the stage pulse animations.
+    const signature = JSON.stringify(
+      run
+        ? {
+            run_id: run.run_id,
+            status: run.status,
+            progress: run.progress,
+            total_ms: run.total_ms,
+            stage: run.stage,
+            answer: run.answer || "",
+            steps: (run.steps || []).map(
+              (step) =>
+                `${step.stage}:${step.model}:${step.status}:${step.progress}:${step.duration_ms}`,
+            ),
+          }
+        : null,
+    );
+    if (signature === lastTestFlowSignature) return;
+    lastTestFlowSignature = signature;
     testFlowBox.innerHTML = run
       ? renderTestFlowPanel(run, [], "", { showHistory: false })
       : "";
@@ -2299,6 +2677,18 @@ export async function render(root) {
       stopFlowPoll();
       const processHtml = processController?.finish(true) || "";
       answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
+      if (!payload.pipeline_flow) {
+        void hydratePipelineFlow(payload).then(() => {
+          if (isStale() || !payload.pipeline_flow) return;
+          const body = answerElement.querySelector(".answer-body");
+          if (!body || body.querySelector(".rag-wf-card")) return;
+          const waterfall = renderRagPipelineWaterfall(payload.pipeline_flow, {
+            serverDurationMs: Number(payload.duration_ms) || 0,
+            embedded: true,
+          });
+          if (waterfall) body.insertAdjacentHTML("beforeend", waterfall);
+        });
+      }
       if (payload.test_run?.run_id) {
         await loadExactTestFlow(payload.test_run.run_id);
       } else {
@@ -2355,6 +2745,23 @@ export async function render(root) {
     input.value = button.dataset.question;
     resizeInput();
     form.requestSubmit();
+  });
+
+  root.addEventListener("click", async (event) => {
+    const modelButton = event.target.closest("[data-rag-model]");
+    if (modelButton) {
+      const hostId = modelButton.dataset.ragProvider
+        ? Number(modelButton.dataset.ragProvider)
+        : null;
+      await chooseChatModel(
+        modelButton.dataset.ragModel || "",
+        Number.isFinite(hostId) ? hostId : null,
+      );
+      return;
+    }
+    if (event.target.closest('[data-rag-action="refresh-chat-models"]')) {
+      await refreshChatModels();
+    }
   });
 
   library.addEventListener("click", async (event) => {
@@ -2424,7 +2831,10 @@ export async function render(root) {
   historyMenu.addEventListener("click", handleHistoryMenuClick);
   document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onDocumentKeydown);
-  window.addEventListener("scroll", onWindowScroll, true);
+  window.addEventListener("scroll", onWindowScroll, {
+    capture: true,
+    passive: true,
+  });
   window.addEventListener("resize", closeHistoryMenu);
 
   clearButton.addEventListener("click", async () => {
@@ -2453,7 +2863,9 @@ export async function render(root) {
     closeHistoryMenu();
     document.removeEventListener("click", onDocumentClick);
     document.removeEventListener("keydown", onDocumentKeydown);
-    window.removeEventListener("scroll", onWindowScroll, true);
+    window.removeEventListener("scroll", onWindowScroll, {
+      capture: true,
+    });
     window.removeEventListener("resize", closeHistoryMenu);
     document.documentElement.classList.remove("dialog-open");
     window.removeEventListener("judgment:test-mode", onTestModeChange);

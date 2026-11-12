@@ -127,18 +127,27 @@ class LawStorage:
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
 
     def save_zip(self, fetched: FetchedArchive) -> Tuple[Path, bool]:
-        partition = _partition(fetched.update_date)
-        destination = (
+        download_date = datetime.now().astimezone().strftime("%Y%m%d")
+        filename = Path(
+            fetched.filename or f"{fetched.source.json_filename}.zip"
+        ).name
+        base_dir = (
             self.data_dir
             / "raw"
             / fetched.source.source_type.value
-            / partition
-            / f"{fetched.zip_sha256[:16]}.zip"
+            / download_date
         )
+        destination = base_dir / filename
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         if destination.exists() and sha256_file(destination) == fetched.zip_sha256:
             return destination, False
+        if destination.exists():
+            stem = Path(filename).stem
+            suffix = Path(filename).suffix or ".zip"
+            destination = base_dir / f"{stem}.{fetched.zip_sha256[:8]}{suffix}"
+            if destination.exists() and sha256_file(destination) == fetched.zip_sha256:
+                return destination, False
 
         tmp_path = self._tmp_path("zip")
         try:

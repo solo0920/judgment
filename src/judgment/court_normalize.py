@@ -9,10 +9,10 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, case, func, select, text
 
 from .config import Settings
-from .courts import canonical_court_prefix, normalize_court
+from .courts import CANONICAL_COURTS, canonical_court_prefix, normalize_court
 from .db import build_engine, build_session_factory, init_db
 from .models import JudgmentDocument
 from .observability import record_performance
@@ -160,6 +160,104 @@ def normalize_judgment_courts(
         },
     )
     return summary
+
+
+def check_court_normalization(session_factory) -> Dict[str, Any]:
+    """Read-only per-month coverage check for court normalization."""
+
+    canonical = tuple(CANONICAL_COURTS)
+    with session_factory() as session:
+        rows = session.execute(
+            select(
+                JudgmentDocument.issue_month,
+                func.count(),
+                func.sum(
+                    case(
+                        (JudgmentDocument.court_normalized != "", 1),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (JudgmentDocument.court_normalized == "", 1),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                JudgmentDocument.court_normalized != "",
+                                JudgmentDocument.court_normalized.notin_(canonical),
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+            )
+            .where(JudgmentDocument.is_current.is_(True))
+            .group_by(JudgmentDocument.issue_month)
+            .order_by(JudgmentDocument.issue_month.desc())
+        ).all()
+
+    months: List[Dict[str, Any]] = []
+    summary = {"green": 0, "red": 0, "gray": 0}
+    total_count = checked_count = unchecked_count = invalid_count = 0
+    for month_key, total, checked, unchecked, invalid in rows:
+        key = str(month_key or "")
+        if len(key) != 6 or not key.isdigit():
+            continue
+        total_value = int(total or 0)
+        checked_value = int(checked or 0)
+        unchecked_value = int(unchecked or 0)
+        invalid_value = int(invalid or 0)
+        needs_value = unchecked_value + invalid_value
+        attempted = total_value - unchecked_value
+        if total_value and needs_value == 0:
+            status = "green"
+        elif attempted <= 0:
+            status = "red"
+        else:
+            status = "gray"
+        summary[status] += 1
+        total_count += total_value
+        checked_count += checked_value
+        unchecked_count += unchecked_value
+        invalid_count += invalid_value
+        months.append(
+            {
+                "month": key,
+                "year": int(key[:4]),
+                "month_no": int(key[4:6]),
+                "total": total_value,
+                "checked": checked_value,
+                "unchecked": unchecked_value,
+                "invalid": invalid_value,
+                "needs_normalization": needs_value,
+                "valid": total_value - needs_value,
+                "percent": round(
+                    100.0 * (total_value - needs_value) / total_value, 1
+                )
+                if total_value
+                else None,
+                "status": status,
+            }
+        )
+    return {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "canonical_count": len(CANONICAL_COURTS),
+        "months": months,
+        "summary": summary,
+        "totals": {
+            "total": total_count,
+            "checked": checked_count,
+            "unchecked": unchecked_count,
+            "invalid": invalid_count,
+            "needs_normalization": unchecked_count + invalid_count,
+            "valid": total_count - unchecked_count - invalid_count,
+        },
+    }
 
 
 def configure_logging(level: str) -> None:

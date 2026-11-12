@@ -180,6 +180,17 @@ else
   fi
 fi
 
+if [[ "${JUDGMENT_SKIP_UPDATE_CHECK:-0}" == "1" ]]; then
+  echo "略過線上更新檢查（JUDGMENT_SKIP_UPDATE_CHECK=1）。"
+else
+  echo -n "檢查法規／命令／判決線上更新"
+  if curl -fsS --max-time 120 -X POST "http://${HOST}:${PORT}/api/updates/check" >/dev/null 2>&1; then
+    echo " OK"
+  else
+    echo " 警告：更新檢查失敗，不影響服務啟動。"
+  fi
+fi
+
 if [[ "${JUDGMENT_POWER_AGENT:-1}" == "0" ]]; then
   echo "略過電源控制器（JUDGMENT_POWER_AGENT=0）。"
 else

@@ -116,8 +116,9 @@ function flowSignature(run, runs, selectedRunId) {
           run_id: run.run_id,
           status: run.status,
           progress: run.progress,
+          total_ms: run.total_ms,
           steps: (run.steps || []).map(
-            (step) => `${step.stage}:${step.model}:${step.status}:${step.progress}`,
+            (step) => `${step.stage}:${step.model}:${step.status}:${step.progress}:${step.duration_ms}`,
           ),
         }
       : null,

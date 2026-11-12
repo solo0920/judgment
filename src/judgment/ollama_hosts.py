@@ -10,7 +10,7 @@ import httpx
 from sqlalchemy import select
 
 from .config import Settings
-from .models import OllamaHost
+from .models import OllamaHost, OllamaModelCapability
 
 MODEL_ROLES = ("chat", "embedding")
 
@@ -27,6 +27,12 @@ def _now() -> datetime:
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
     return value.isoformat() if value else None
+
+
+def _clear_llm_preference(session_factory) -> None:
+    from .runtime_settings import set_llm_model_preference
+
+    set_llm_model_preference(session_factory, model="", base_url="")
 
 
 def normalize_host_url(url: str, port: int) -> Tuple[str, int]:
@@ -55,6 +61,7 @@ def _serialize_host(host: OllamaHost) -> Dict[str, Any]:
         "base_url": host.base_url,
         "port": host.port,
         "is_active": bool(host.is_active),
+        "priority": int(host.priority or 0),
         "chat_model": host.chat_model or "",
         "embedding_model": host.embedding_model or "",
         "created_at": _iso(host.created_at),
@@ -94,6 +101,59 @@ def _probe_host(base_url: str, timeout: float) -> Dict[str, Any]:
     }
 
 
+def _load_capability_index(
+    session_factory,
+    base_urls: List[str],
+) -> Dict[Tuple[str, str], OllamaModelCapability]:
+    urls = [str(url or "").rstrip("/") for url in base_urls if url]
+    if not urls:
+        return {}
+    with session_factory() as session:
+        rows = session.scalars(
+            select(OllamaModelCapability).where(
+                OllamaModelCapability.base_url.in_(urls)
+            )
+        ).all()
+    return {
+        (str(row.base_url or "").rstrip("/"), str(row.model or "")): row
+        for row in rows
+    }
+
+
+def _merge_model_capabilities(
+    hosts: List[Dict[str, Any]],
+    capabilities: Dict[Tuple[str, str], OllamaModelCapability],
+) -> None:
+    for host in hosts:
+        base_url = str(host.get("base_url") or "").rstrip("/")
+        models = host.get("models")
+        models = models if isinstance(models, list) else []
+        for model in models:
+            name = str(model.get("name") or "")
+            record = capabilities.get((base_url, name))
+            if record is None:
+                model["capabilities"] = []
+                model["supports_chat"] = None
+                model["capability_status"] = "untested"
+                model["capability_detail"] = (
+                    "尚未測試；可使用「檢查模型能力」更新。"
+                )
+            else:
+                model["capabilities"] = list(record.capabilities or [])
+                model["supports_chat"] = bool(record.supports_chat)
+                model["capability_status"] = "tested"
+                model["capability_detail"] = record.detail or ""
+            lowered = name.lower()
+            model["is_reranker"] = any(
+                hint in lowered for hint in ("rerank", "reranker")
+            )
+        host["chat_models"] = [
+            str(model.get("name") or "")
+            for model in models
+            if model.get("supports_chat") is True
+        ]
+
+
 def list_hosts(
     session_factory,
     *,
@@ -101,7 +161,11 @@ def list_hosts(
 ) -> Dict[str, Any]:
     with session_factory() as session:
         rows = list(
-            session.scalars(select(OllamaHost).order_by(OllamaHost.id.asc())).all()
+            session.scalars(
+                select(OllamaHost).order_by(
+                    OllamaHost.priority.asc(), OllamaHost.id.asc()
+                )
+            ).all()
         )
         hosts = [_serialize_host(row) for row in rows]
     if not hosts:
@@ -115,6 +179,10 @@ def list_hosts(
         )
     for host, probe in zip(hosts, probes):
         host.update(probe)
+    capabilities = _load_capability_index(
+        session_factory, [str(host["base_url"]) for host in hosts]
+    )
+    _merge_model_capabilities(hosts, capabilities)
     active = next((host["id"] for host in hosts if host["is_active"]), None)
     return {"hosts": hosts, "active_host_id": active}
 
@@ -133,11 +201,16 @@ def add_host(
         ).first()
         if existing is not None:
             raise OllamaHostError(f"主機已存在：{base_url}")
+        rows = list(session.scalars(select(OllamaHost)).all())
+        next_priority = (
+            max((int(row.priority or 0) for row in rows), default=-10) + 10
+        )
         host = OllamaHost(
             name=str(name or "").strip()[:120],
             base_url=base_url,
             port=chosen_port,
             is_active=False,
+            priority=next_priority,
         )
         session.add(host)
         session.commit()
@@ -171,6 +244,7 @@ def update_host(
         host.port = chosen_port
         session.commit()
         session.refresh(host)
+        _clear_llm_preference(session_factory)
         return _serialize_host(host)
 
 
@@ -181,6 +255,7 @@ def delete_host(session_factory, host_id: int) -> bool:
             return False
         session.delete(host)
         session.commit()
+        _clear_llm_preference(session_factory)
         return True
 
 
@@ -189,11 +264,57 @@ def activate_host(session_factory, host_id: int) -> Dict[str, Any]:
         host = session.get(OllamaHost, int(host_id))
         if host is None:
             raise OllamaHostError("找不到 Ollama 主機。")
-        for row in session.scalars(select(OllamaHost)).all():
+        rows = list(
+            session.scalars(
+                select(OllamaHost).order_by(
+                    OllamaHost.priority.asc(), OllamaHost.id.asc()
+                )
+            ).all()
+        )
+        ordered = [host] + [row for row in rows if row.id != host.id]
+        for index, row in enumerate(ordered):
+            row.priority = index * 10
             row.is_active = row.id == host.id
         session.commit()
         session.refresh(host)
+        _clear_llm_preference(session_factory)
         return _serialize_host(host)
+
+
+def reorder_hosts(session_factory, host_ids: List[int]) -> Dict[str, Any]:
+    """Persist the embedding/LLM host priority order.
+
+    The first host becomes the preferred host; the remaining hosts are tried
+    in the submitted order when the preferred embedding host is unavailable.
+    """
+
+    ordered_ids: List[int] = []
+    for value in host_ids or []:
+        try:
+            host_id = int(value)
+        except (TypeError, ValueError) as exc:
+            raise OllamaHostError("主機順序包含無效的 id。") from exc
+        if host_id in ordered_ids:
+            raise OllamaHostError("主機順序不可包含重複項目。")
+        ordered_ids.append(host_id)
+    if not ordered_ids:
+        raise OllamaHostError("主機順序不可為空。")
+    with session_factory() as session:
+        rows = list(session.scalars(select(OllamaHost)).all())
+        by_id = {row.id: row for row in rows}
+        if set(ordered_ids) != set(by_id):
+            raise OllamaHostError("主機順序必須包含目前所有 Ollama 主機。")
+        for index, host_id in enumerate(ordered_ids):
+            row = by_id[host_id]
+            row.priority = index * 10
+            row.is_active = index == 0
+        session.commit()
+    _clear_llm_preference(session_factory)
+    return {
+        "status": "ok",
+        "host_ids": ordered_ids,
+        "active_host_id": ordered_ids[0],
+    }
 
 
 def deactivate_hosts(session_factory) -> Dict[str, Any]:
@@ -202,6 +323,7 @@ def deactivate_hosts(session_factory) -> Dict[str, Any]:
         for row in rows:
             row.is_active = False
         session.commit()
+        _clear_llm_preference(session_factory)
         return {"status": "ok"}
 
 
@@ -227,6 +349,8 @@ def select_model(
             host.embedding_model = name[:200]
         session.commit()
         session.refresh(host)
+        if role == "chat":
+            _clear_llm_preference(session_factory)
         return _serialize_host(host)
 
 
@@ -250,6 +374,8 @@ def clear_model(
             host.embedding_model = ""
         session.commit()
         session.refresh(host)
+        if role == "chat":
+            _clear_llm_preference(session_factory)
         return _serialize_host(host)
 
 
@@ -260,18 +386,72 @@ def active_host(session_factory) -> Optional[OllamaHost]:
         ).first()
 
 
+def find_host(session_factory, base_url: str) -> Optional[Dict[str, Any]]:
+    target = str(base_url or "").rstrip("/")
+    if not target:
+        return None
+    with session_factory() as session:
+        row = session.scalars(
+            select(OllamaHost).where(OllamaHost.base_url == target)
+        ).first()
+        return _serialize_host(row) if row is not None else None
+
+
+def get_host(session_factory, host_id: int) -> Optional[Dict[str, Any]]:
+    with session_factory() as session:
+        row = session.get(OllamaHost, int(host_id))
+        return _serialize_host(row) if row is not None else None
+
+
 def runtime_settings(settings: Settings, session_factory) -> Settings:
     if session_factory is None:
         return settings
-    host = active_host(session_factory)
-    if host is None:
-        return settings
-    changes: Dict[str, Any] = {
-        "llm_url": host.base_url,
-        "embedding_url": host.base_url,
-    }
-    if host.chat_model:
-        changes["llm_model"] = host.chat_model
-    if host.embedding_model:
-        changes["embedding_model"] = host.embedding_model
-    return replace(settings, **changes)
+    with session_factory() as session:
+        rows = list(
+            session.scalars(
+                select(OllamaHost).order_by(
+                    OllamaHost.priority.asc(), OllamaHost.id.asc()
+                )
+            ).all()
+        )
+    host = next((row for row in rows if row.is_active), None)
+    changes: Dict[str, Any] = {}
+    if host is not None:
+        ordered = [host] + [row for row in rows if row.id != host.id]
+        failover_urls: List[str] = []
+        seen = {host.base_url}
+        for row in ordered[1:]:
+            url = str(row.base_url or "").rstrip("/")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            failover_urls.append(url)
+        changes.update(
+            {
+                "embedding_url": host.base_url,
+                "embedding_fallback_url": (
+                    failover_urls[0] if failover_urls else ""
+                ),
+                "embedding_failover_urls": tuple(failover_urls),
+            }
+        )
+        # Only override the LLM endpoint when the active host has an
+        # explicitly selected chat model. Otherwise a host used primarily
+        # for embeddings would silently redirect LLM traffic to a model it
+        # does not have.
+        if host.chat_model:
+            changes["llm_url"] = host.base_url
+            changes["llm_model"] = host.chat_model
+        if host.embedding_model:
+            changes["embedding_model"] = host.embedding_model
+
+    from .runtime_settings import get_llm_model_preference
+
+    preference = get_llm_model_preference(session_factory)
+    preferred_model = str(preference.get("model") or "").strip()
+    preferred_url = str(preference.get("base_url") or "").rstrip("/")
+    if preferred_model and preferred_url:
+        changes["llm_url"] = preferred_url
+        changes["llm_model"] = preferred_model
+
+    return replace(settings, **changes) if changes else settings

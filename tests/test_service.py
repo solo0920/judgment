@@ -14,6 +14,7 @@ from judgment.law_download.storage import LawStorage
 from judgment.models import (
     Base,
     DownloadRun,
+    DownloadUpdateRecord,
     LawArticleChangeEvent,
     LawArticleVersion,
     LawChangeEvent,
@@ -100,6 +101,53 @@ def test_first_run_writes_parquet_and_metadata(env) -> None:
         assert version.is_current is True
         assert version.law_count == 2
         assert version.article_count == 2
+        assert Path(version.zip_path).name == "ChLaw.json.zip"
+        assert len(Path(version.zip_path).parent.name) == 8
+        updates = session.scalars(select(DownloadUpdateRecord)).all()
+        assert len(updates) == 1
+        assert updates[0].update_available is False
+        assert updates[0].download_path == version.zip_path
+
+
+def test_same_filename_uses_download_date_and_hash_suffix(env) -> None:
+    from judgment.law_download.types import FetchedArchive
+
+    storage = env["storage"]
+    src = source()
+    first_path = env["tmp_path"] / "first.zip"
+    second_path = env["tmp_path"] / "second.zip"
+    first_path.write_bytes(b"first")
+    second_path.write_bytes(b"second")
+    first = FetchedArchive(
+        source=src,
+        temp_zip_path=first_path,
+        zip_sha256="a" * 64,
+        raw_json_sha256="b" * 64,
+        payload={},
+        update_date="2026/10/30",
+        http_status=200,
+        filename="ChLaw.json.zip",
+    )
+    second = FetchedArchive(
+        source=src,
+        temp_zip_path=second_path,
+        zip_sha256="c" * 64,
+        raw_json_sha256="d" * 64,
+        payload={},
+        update_date="2026/11/06",
+        http_status=200,
+        filename="ChLaw.json.zip",
+    )
+    first_saved, first_created = storage.save_zip(first)
+    second_saved, second_created = storage.save_zip(second)
+    assert first_created is True
+    assert second_created is True
+    assert first_saved.parent == second_saved.parent
+    assert len(first_saved.parent.name) == 8
+    assert first_saved.name == "ChLaw.json.zip"
+    assert second_saved.name == "ChLaw.json.cccccccc.zip"
+    assert first_saved.is_file()
+    assert second_saved.is_file()
 
 
 def test_same_payload_is_detected_as_no_change(env) -> None:

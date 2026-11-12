@@ -84,7 +84,11 @@ def _coverage(
     try:
         with session_factory() as session:
             postgres_judgments = _int(
-                session.scalar(select(func.count()).select_from(JudgmentDocument))
+                session.scalar(
+                    select(func.count())
+                    .select_from(JudgmentDocument)
+                    .where(JudgmentDocument.is_current.is_(True))
+                )
             )
         active_index = active_version(
             session_factory, alias_name=settings.judgment_vector_alias

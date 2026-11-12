@@ -33,6 +33,8 @@ STAGE_CATALOG: Dict[str, Dict[str, str]] = {
         "unit": "筆",
     },
     "qdrant": {"label": "Qdrant 索引", "color": "#06b6d4", "unit": "筆"},
+    "ollama": {"label": "Ollama 連線測試", "color": "#22c55e", "unit": "台"},
+    "validate": {"label": "索引驗證／切換", "color": "#eab308", "unit": "筆"},
     "download": {"label": "線上比對／下載", "color": "#f97316", "unit": "bytes"},
     "parse": {"label": "資料解析", "color": "#8b5cf6", "unit": "筆"},
 }
@@ -52,7 +54,14 @@ BRANCH_STAGES: Dict[str, List[str]] = {
     "system": ["download", "postgres", "qdrant"],
 }
 
-TERMINAL_RUN_STATUSES = {"success", "failed", "interrupted", "no_change", "stale"}
+TERMINAL_RUN_STATUSES = {
+    "success",
+    "partial",
+    "failed",
+    "interrupted",
+    "no_change",
+    "stale",
+}
 
 
 class ProcessingStateError(RuntimeError):
@@ -160,7 +169,15 @@ def _apply_stage_update(stage: Dict[str, Any], fields: Dict[str, Any]) -> None:
         stage["message"] = str(fields["message"])
     if status:
         stage["status"] = str(status)
-        if status in {"success", "failed", "interrupted", "no_change", "skipped", "stale"}:
+        if status in {
+            "success",
+            "partial",
+            "failed",
+            "interrupted",
+            "no_change",
+            "skipped",
+            "stale",
+        }:
             stage["finished_at"] = now_iso()
             if stage.get("started_at") and not stage.get("duration_ms"):
                 stage["duration_ms"] = elapsed_ms(

@@ -18,15 +18,26 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Tuple
 
-from sqlalchemy import delete, insert
+from sqlalchemy import delete
 
 from .config import Settings
 from .courts import normalize_court
 from .db import build_engine, build_session_factory, init_db
 from .judgment_duckdb import candidate_count, iter_candidate_batches
+from .judgment_backup import (
+    find_previous_raw_parquet,
+    prune_raw_parquet,
+    write_raw_delta,
+)
 from .judgment_raw_parquet import (
     find_reusable_raw_parquet,
     write_archive_raw_parquet,
+)
+from .judgment_versioning import (
+    apply_versioned_batch,
+    archive_snapshot_info,
+    create_snapshot,
+    finalize_snapshot,
 )
 from .models import JudgmentDocument, JudgmentImportRun
 from .observability import record_performance
@@ -429,15 +440,22 @@ def _row_from_duckdb_candidate(
     }
 
 
-def _flush_batch(session_factory, rows: List[Dict[str, Any]]) -> int:
+def _flush_batch(
+    session_factory,
+    rows: List[Dict[str, Any]],
+    *,
+    snapshot_id: int,
+    issue_month: str,
+) -> Tuple[int, Dict[str, int]]:
     if not rows:
-        return 0
-    jids = [row["jid"] for row in rows]
-    with session_factory() as session:
-        session.execute(delete(JudgmentDocument).where(JudgmentDocument.jid.in_(jids)))
-        session.execute(insert(JudgmentDocument), rows)
-        session.commit()
-    return len(rows)
+        return 0, {}
+    counts = apply_versioned_batch(
+        session_factory,
+        rows=rows,
+        snapshot_id=snapshot_id,
+        issue_month=issue_month,
+    )
+    return len(rows), counts
 
 
 def import_judgments(
@@ -518,6 +536,11 @@ def import_judgments(
     raw_total_rows = 0
     raw_total_bytes = 0
     raw_reused = 0
+    version_added = 0
+    version_modified = 0
+    version_removed = 0
+    version_unchanged = 0
+    delta_count = 0
     extract_total_ms = 0
     raw_total_ms = 0
     raw_results: Dict[Path, Dict[str, Any]] = {}
@@ -904,6 +927,95 @@ def import_judgments(
                 "citation_count": 0,
                 "duration_ms": duration_ms,
             }
+        snapshots: Dict[Path, Dict[str, Any]] = {}
+        for archive in archive_paths:
+            if dry_run:
+                snapshots[archive] = {
+                    "id": 0,
+                    "issue_month": "",
+                    "is_current": True,
+                    "delta": {},
+                    "previous_raw": None,
+                }
+                continue
+            issue_month, update_date = archive_snapshot_info(archive)
+            if not issue_month and archive.stem[:6].isdigit():
+                issue_month = archive.stem[:6]
+            raw_path = Path(str(raw_results[archive]["path"]))
+            previous_raw = (
+                find_previous_raw_parquet(
+                    artifact_dir,
+                    issue_month=issue_month,
+                    current_path=raw_path,
+                )
+                if issue_month
+                else None
+            )
+            from_archive = ""
+            if previous_raw is not None:
+                previous_manifest = previous_raw.parent / "manifest.json"
+                try:
+                    previous_payload = json.loads(
+                        previous_manifest.read_text(encoding="utf-8")
+                    )
+                    from_archive = str(
+                        previous_payload.get("archive_name") or ""
+                    )
+                except (OSError, ValueError):
+                    from_archive = ""
+            delta: Dict[str, Any] = {
+                "path": "",
+                "added": 0,
+                "modified": 0,
+                "removed": 0,
+            }
+            if issue_month:
+                try:
+                    delta = write_raw_delta(
+                        data_dir=artifact_dir,
+                        issue_month=issue_month,
+                        from_archive=from_archive,
+                        to_archive=archive.name,
+                        old_raw_path=previous_raw,
+                        new_raw_path=raw_path,
+                    )
+                except Exception:
+                    logger.exception(
+                        "無法建立 %s 的 raw Parquet delta；保留舊 full snapshot",
+                        archive.name,
+                    )
+            if delta.get("path"):
+                delta_count += 1
+            snapshot_id = 0
+            snapshot_current = True
+            if issue_month:
+                with session_factory() as session:
+                    snapshot = create_snapshot(
+                        session,
+                        issue_month=issue_month,
+                        archive=archive,
+                        source_update_date=update_date,
+                        raw_parquet_path=str(raw_path),
+                        delta_parquet_path=str(delta.get("path") or ""),
+                        raw_row_count=int(raw_results[archive]["rows"]),
+                        matched_count=0,
+                    )
+                    session.commit()
+                    snapshot_id = int(snapshot.id)
+                    snapshot_current = bool(snapshot.is_current)
+            snapshots[archive] = {
+                "id": snapshot_id,
+                "issue_month": issue_month,
+                "is_current": snapshot_current,
+                "delta": delta,
+                "previous_raw": previous_raw,
+            }
+            if not snapshot_current:
+                logger.info(
+                    "略過較舊的 %s snapshot（issue_month=%s）",
+                    archive.name,
+                    issue_month,
+                )
         candidate_totals: Dict[Path, int] = {}
         for archive in archive_paths:
             raw_path = Path(str(raw_results[archive]["path"]))
@@ -932,6 +1044,19 @@ def import_judgments(
         current_phase = "filter"
         for archive_index, archive in enumerate(archive_paths):
             current_archive = archive
+            snapshot_info = snapshots.get(archive) or {}
+            snapshot_id = int(snapshot_info.get("id") or 0)
+            issue_month = str(snapshot_info.get("issue_month") or "")
+            if not dry_run and (
+                not snapshot_id or not snapshot_info.get("is_current")
+            ):
+                logger.info(
+                    "skip historical snapshot %s (issue_month=%s)",
+                    archive.name,
+                    issue_month,
+                )
+                continue
+            archive_seen_jids: set[str] = set()
             raw_result = raw_results[archive]
             raw_path = Path(str(raw_result["path"]))
             archive_raw_rows = int(raw_result["rows"])
@@ -1020,6 +1145,7 @@ def import_judgments(
                     continue
                 matched += 1
                 archive_matched += 1
+                archive_seen_jids.add(str(row["jid"]))
                 citation_total += row["citation_count"]
                 if dry_run:
                     if scanned % 10000 == 0:
@@ -1033,8 +1159,24 @@ def import_judgments(
                 batch_jids.add(row["jid"])
                 if len(batch) >= batch_size:
                     db_started = time.perf_counter()
-                    stored += _flush_batch(session_factory, batch)
-                    archive_stored += len(batch)
+                    flushed, version_counts = _flush_batch(
+                        session_factory,
+                        batch,
+                        snapshot_id=snapshot_id,
+                        issue_month=issue_month,
+                    )
+                    stored += flushed
+                    archive_stored += flushed
+                    version_added += int(version_counts.get("added") or 0)
+                    version_modified += int(
+                        version_counts.get("modified") or 0
+                    )
+                    version_removed += int(
+                        version_counts.get("removed") or 0
+                    )
+                    version_unchanged += int(
+                        version_counts.get("unchanged") or 0
+                    )
                     db_elapsed = time.perf_counter() - db_started
                     db_total_s += db_elapsed
                     archive_db_s += db_elapsed
@@ -1078,9 +1220,18 @@ def import_judgments(
                     )
             if not dry_run and batch:
                 db_started = time.perf_counter()
-                flushed = _flush_batch(session_factory, batch)
+                flushed, version_counts = _flush_batch(
+                    session_factory,
+                    batch,
+                    snapshot_id=snapshot_id,
+                    issue_month=issue_month,
+                )
                 stored += flushed
                 archive_stored += flushed
+                version_added += int(version_counts.get("added") or 0)
+                version_modified += int(version_counts.get("modified") or 0)
+                version_removed += int(version_counts.get("removed") or 0)
+                version_unchanged += int(version_counts.get("unchanged") or 0)
                 db_elapsed = time.perf_counter() - db_started
                 db_total_s += db_elapsed
                 archive_db_s += db_elapsed
@@ -1150,6 +1301,33 @@ def import_judgments(
                     duration_ms=int(db_total_s * 1000),
                     message=f"已寫入 {stored:,} 筆。",
                 )
+            if not dry_run and snapshot_id:
+                try:
+                    version_removed += finalize_snapshot(
+                        session_factory,
+                        snapshot_id=snapshot_id,
+                        issue_month=issue_month,
+                        seen_jids=archive_seen_jids,
+                        allow_removals=(
+                            limit is None and not stopped_early
+                        ),
+                    )
+                    delta_path = str(
+                        (snapshot_info.get("delta") or {}).get("path") or ""
+                    )
+                    previous_raw = snapshot_info.get("previous_raw")
+                    if (
+                        delta_path
+                        and previous_raw
+                        and not settings.judgment_raw_parquet_keep_versions
+                        and not stopped_early
+                    ):
+                        prune_raw_parquet(previous_raw)
+                except Exception:
+                    logger.exception(
+                        "無法完成 %s 的版本收尾；保留舊 raw snapshot",
+                        archive.name,
+                    )
             if stopped_early:
                 break
 
@@ -1186,6 +1364,11 @@ def import_judgments(
                     "stored_count": stored,
                     "failed_count": failed,
                     "archive_count": len(archive_paths),
+                    "version_added": version_added,
+                    "version_modified": version_modified,
+                    "version_removed": version_removed,
+                    "version_unchanged": version_unchanged,
+                    "delta_count": delta_count,
                 },
             )
 
@@ -1235,6 +1418,11 @@ def import_judgments(
                         "stored_count": stored,
                         "failed_count": failed,
                         "citation_count": citation_total,
+                        "version_added": version_added,
+                        "version_modified": version_modified,
+                        "version_removed": version_removed,
+                        "version_unchanged": version_unchanged,
+                        "delta_count": delta_count,
                     },
                 )
     except KeyboardInterrupt:
@@ -1421,6 +1609,11 @@ def import_judgments(
         "stored_count": stored,
         "failed_count": failed,
         "citation_count": citation_total,
+        "version_added": version_added,
+        "version_modified": version_modified,
+        "version_removed": version_removed,
+        "version_unchanged": version_unchanged,
+        "delta_count": delta_count,
         "duration_ms": duration_ms,
         "replace": replace,
         "limited": stopped_early,

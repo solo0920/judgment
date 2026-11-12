@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,16 +16,23 @@ from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
 from judgment.models import (
+    AppSetting,
     Base,
     DownloadRun,
+    DownloadUpdateRecord,
+    JudgmentChangeEvent,
     JudgmentDocument,
+    JudgmentDocumentVersion,
     JudgmentImportRun,
+    JudgmentSnapshot,
     LawArticleChangeEvent,
     LawArticleVersion,
     LawDatasetVersion,
     LawDocument,
+    OllamaHost,
 )
 from judgment.observability import record_performance, trace_segment
+from judgment.processing_state import ProcessingStateStore
 from judgment.web.app import create_app
 
 
@@ -505,6 +513,25 @@ def test_index_versions_endpoint_returns_alias(web_client) -> None:
     assert payload["versions"] == []
 
 
+def test_courts_check_endpoint_returns_month_summary(web_client) -> None:
+    response = web_client.get("/api/courts/check")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "months" in payload
+    assert "summary" in payload
+    assert "totals" in payload
+    assert payload["canonical_count"] > 0
+
+
+def test_law_versions_check_endpoint_returns_month_summary(web_client) -> None:
+    response = web_client.get("/api/law-versions/check")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "months" in payload
+    assert "summary" in payload
+    assert "totals" in payload
+
+
 def test_system_usage_endpoint_returns_resources(web_client, monkeypatch) -> None:
     import importlib
 
@@ -580,6 +607,261 @@ def test_quality_endpoint_reports_raw_parquet(web_client) -> None:
     assert payload["coverage"]["postgres_diff"] == 0
     assert payload["status"] == "operational"
     assert any("v2" in warning for warning in payload["warnings"])
+
+
+def test_versioning_endpoints_expose_new_and_old_data(web_client) -> None:
+    session_factory = web_client.app.state.session_factory
+    jid = "TPDV,115,金訴,1,20260110,1"
+    with session_factory() as session:
+        old_snapshot = JudgmentSnapshot(
+            issue_month="202601",
+            source_archive="202601--(20260101Update).rar",
+            archive_sha256="a" * 64,
+            source_update_date="20260101",
+            raw_row_count=10,
+            matched_count=2,
+            is_current=False,
+        )
+        new_snapshot = JudgmentSnapshot(
+            issue_month="202601",
+            source_archive="202601--(20260201Update).rar",
+            archive_sha256="b" * 64,
+            source_update_date="20260201",
+            raw_row_count=11,
+            matched_count=2,
+            is_current=True,
+        )
+        session.add_all([old_snapshot, new_snapshot])
+        session.flush()
+        version = JudgmentDocumentVersion(
+            jid=jid,
+            issue_month="202601",
+            snapshot_id=old_snapshot.id,
+            content_hash="old" * 21,
+            normalized_hash="norm" * 16,
+            jyear="115",
+            jcase="金訴",
+            jno="1",
+            jdate="20260110",
+            court="臺灣臺北地方法院民事",
+            court_normalized="臺灣臺北地方法院",
+            title="返還借款",
+            full_text="舊版判決全文",
+            source_archive="202601--(20260101Update).rar",
+            matched_laws=["民法"],
+            matched_laws_text="\n民法\n",
+            citations=[],
+            citation_count=0,
+            full_text_length=6,
+            valid_from_snapshot_id=old_snapshot.id,
+            valid_to_snapshot_id=new_snapshot.id,
+        )
+        session.add(version)
+        session.flush()
+        session.add(
+            JudgmentChangeEvent(
+                jid=jid,
+                issue_month="202601",
+                from_snapshot_id=old_snapshot.id,
+                to_snapshot_id=new_snapshot.id,
+                from_version_id=version.id,
+                change_type="modified",
+                changed_fields=["content_hash"],
+                before_json={"content_hash": "old"},
+                after_json={"content_hash": "new"},
+            )
+        )
+        session.commit()
+        version_id = int(version.id)
+
+    summary = web_client.get("/api/versioning/summary")
+    assert summary.status_code == 200
+    assert summary.json()["historical_versions"] >= 1
+    snapshots = web_client.get(
+        "/api/versioning/judgments/snapshots",
+        params={"issue_month": "202601"},
+    )
+    assert snapshots.status_code == 200
+    assert [item["is_current"] for item in snapshots.json()["snapshots"]] == [
+        True,
+        False,
+    ]
+    history = web_client.get(
+        f"/api/versioning/judgments/{jid}"
+    )
+    assert history.status_code == 200
+    body = history.json()
+    assert body["current"]["jid"] == jid
+    assert body["versions"][0]["id"] == version_id
+    assert body["events"][0]["change_type"] == "modified"
+    detail = web_client.get(
+        f"/api/versioning/judgments/versions/{version_id}"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["full_text"] == "舊版判決全文"
+    audit = web_client.get(
+        "/api/versioning/audit", params={"since_id": 0, "limit": 10}
+    )
+    assert audit.status_code == 200
+    assert audit.json()["events"][0]["jid"] == jid
+    assert audit.json()["latest_event_id"] >= 1
+    vector = web_client.get(
+        f"/api/versioning/judgments/{jid}/vectors/1"
+    )
+    assert vector.status_code == 200
+    assert vector.json()["status"] == "not_configured"
+
+
+def test_judgment_queries_exclude_historical_rows(web_client) -> None:
+    session_factory = web_client.app.state.session_factory
+    with session_factory() as session:
+        document = session.scalars(
+            select(JudgmentDocument).where(
+                JudgmentDocument.jid == "TPDV,115,金訴,1,20260110,1"
+            )
+        ).one()
+        document.is_current = False
+        session.commit()
+
+    response = web_client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "judgment_documents"},
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+    history = web_client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {
+                "table": "judgment_documents",
+                "column_filters": {"is_current": "false"},
+            },
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert history.status_code == 200
+    assert history.json()["total"] == 1
+    assert history.json()["rows"][0]["jid"] == "TPDV,115,金訴,1,20260110,1"
+
+
+def test_updates_status_and_processing_flags(web_client) -> None:
+    session_factory = web_client.app.state.session_factory
+    with session_factory() as session:
+        session.add(
+            DownloadUpdateRecord(
+                source_type="law",
+                source_url="https://example.test/law",
+                status="update_available",
+                update_available=True,
+                remote_filename="ChLaw.json.zip",
+                remote_content_length=123,
+                message="法規遠端 ZIP 大小變更",
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    status = web_client.get("/api/updates/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["update_count"] == 1
+    assert body["sources"]["law"]["update_available"] is True
+    assert body["sources"]["order"]["update_available"] is False
+
+    state = ProcessingStateStore()
+    run_id = state.start_run(
+        branch="law",
+        kind="download",
+        title="法規資料下載",
+        stages=["download", "raw_parquet", "parse", "postgres"],
+        pid=os.getpid(),
+    )
+    state.start_stage(run_id, "download", total=100)
+    state.finish_stage(
+        run_id, "download", status="success", current=100, total=100
+    )
+    state.start_stage(run_id, "raw_parquet", total=10)
+    state.finish_stage(
+        run_id, "raw_parquet", status="success", current=10, total=10
+    )
+    state.finish_stage(
+        run_id, "parse", status="skipped", message="raw JSON unchanged"
+    )
+    state.finish_stage(
+        run_id, "postgres", status="skipped", message="raw JSON unchanged"
+    )
+    state.finish_run(
+        run_id, status="no_change", message="raw JSON unchanged"
+    )
+
+    processing = web_client.get("/api/processing")
+    assert processing.status_code == 200
+    workflows = {
+        item["id"]: item for item in processing.json()["workflows"]
+    }
+    assert workflows["law_download"]["update_available"] is True
+    assert workflows["order_download"]["update_available"] is False
+    assert workflows["judgment_download"]["update_available"] is False
+    assert (
+        workflows["law_download"]["recent_runs"][0]["status"]
+        == "no_change"
+    )
+    assert (
+        workflows["law_download"]["update_history"][0]["status"]
+        == "update_available"
+    )
+    progress = workflows["law_download"]["progress"]
+    assert progress["available"] is True
+    assert progress["overall_percent"] == 100.0
+    assert progress["completed_stages"] == 2
+    assert progress["total_stages"] == 2
+    assert [stage["key"] for stage in progress["stages"]] == [
+        "download",
+        "raw_parquet",
+        "parse",
+        "postgres",
+    ]
+    assert [
+        stage["status"] for stage in progress["stages"]
+    ] == ["success", "success", "skipped", "skipped"]
+    assert [
+        stage["contribution_percent"] for stage in progress["stages"]
+    ] == [50.0, 50.0, 0.0, 0.0]
+
+
+def test_updates_check_can_filter_sources(web_client, monkeypatch) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    captured = {}
+
+    def fake_check(**kwargs):
+        captured.update(kwargs)
+        return {"sources": []}
+
+    monkeypatch.setattr(app_module, "check_all_sources", fake_check)
+    response = web_client.post(
+        "/api/updates/check", json={"source_types": ["law"]}
+    )
+    assert response.status_code == 200
+    assert captured["source_types"] == ["law"]
+
+    no_body = web_client.post("/api/updates/check")
+    assert no_body.status_code == 200
+    assert captured["source_types"] is None
+
+    invalid = web_client.post(
+        "/api/updates/check", json={"source_types": ["unknown"]}
+    )
+    assert invalid.status_code == 400
 
 
 def test_catalog_exposes_law_and_judgment_categories(web_client) -> None:
@@ -811,6 +1093,12 @@ def test_rag_flow_records_nested_segments_and_models(web_client) -> None:
     )
     assert response.status_code == 200
 
+    pipeline = response.json()["pipeline_flow"]
+    assert pipeline["metadata"]["rag_response"]["status"]
+    assert "rag.parse_question" in [
+        segment["name"] for segment in pipeline["segments"]
+    ]
+
     payload = web_client.get(
         "/api/performance",
         params={"process": "RAG 問答", "page_size": 1},
@@ -820,10 +1108,18 @@ def test_rag_flow_records_nested_segments_and_models(web_client) -> None:
     assert flow["metadata"]["answer"]
     names = [segment["name"] for segment in flow["segments"]]
     assert "rag.answer_question" in names
+    assert "rag.parse_question" in names
     assert "rag.coverage" in names
     assert "rag.law_lookup" in names
     assert "rag.law_content" in names
     assert "bge-m3" in flow["summary"]["models"]
+    for segment in flow["segments"]:
+        assert segment["finished_at"]
+        assert segment["end_offset_ms"] >= segment["offset_ms"]
+    response = flow["metadata"]["rag_response"]
+    assert response["citation_count"] >= 0
+    assert response["status"]
+    assert "abstain" in response
     law_lookup = next(
         segment for segment in flow["segments"] if segment["name"] == "rag.law_lookup"
     )
@@ -905,6 +1201,7 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
     assert "法規結果先顯示" in body
     assert "測試回答" in body
     assert "event: result" in body
+    assert '"pipeline_flow"' in body
     assert body.index("event: partial") < body.index("event: result")
     assert body.index("event: token") < body.index("event: result")
 
@@ -1642,6 +1939,111 @@ def test_cors_honors_explicit_origin_configuration(web_client) -> None:
         assert "access-control-allow-origin" not in denied.headers
 
 
+def test_ollama_host_priority_reorder_api(web_client) -> None:
+    first = web_client.post(
+        "/api/ollama/hosts",
+        json={"name": "First", "url": "http://first.test", "port": 11434},
+    )
+    second = web_client.post(
+        "/api/ollama/hosts",
+        json={"name": "Second", "url": "http://second.test", "port": 11434},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_id = first.json()["id"]
+    second_id = second.json()["id"]
+
+    response = web_client.post(
+        "/api/ollama/hosts/reorder",
+        json={"host_ids": [second_id, first_id]},
+    )
+    assert response.status_code == 200
+    assert response.json()["host_ids"] == [second_id, first_id]
+    assert response.json()["active_host_id"] == second_id
+
+    with web_client.app.state.session_factory() as session:
+        rows = list(
+            session.scalars(
+                select(OllamaHost).order_by(
+                    OllamaHost.priority.asc(), OllamaHost.id.asc()
+                )
+            ).all()
+        )
+        assert [row.id for row in rows] == [second_id, first_id]
+        assert rows[0].is_active is True
+        assert rows[1].is_active is False
+
+    invalid = web_client.post(
+        "/api/ollama/hosts/reorder",
+        json={"host_ids": [first_id, first_id]},
+    )
+    assert invalid.status_code == 422
+
+
+def test_llm_model_select_persists_env_provider_preference(
+    web_client, monkeypatch
+) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    monkeypatch.setattr(
+        app_module,
+        "model_capability_status",
+        lambda session_factory, settings: {
+            "base_url": "http://env-llm:11434",
+            "chat_models": ["gemma3:27b"],
+        },
+    )
+    response = web_client.post(
+        "/api/llm/model", json={"model": "gemma3:27b"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["provider_name"] == "env-llm"
+    with web_client.app.state.session_factory() as session:
+        setting = session.get(AppSetting, "llm_model_preference")
+        assert setting is not None
+        assert setting.value["model"] == "gemma3:27b"
+        assert setting.value["base_url"] == "http://env-llm:11434"
+
+    rejected = web_client.post(
+        "/api/llm/model", json={"model": "not-a-chat-model"}
+    )
+    assert rejected.status_code == 422
+
+
+def test_console_assets_avoid_flicker_prone_effects() -> None:
+    root = Path(__file__).resolve().parents[1]
+    static_assets = root / "src" / "judgment" / "web" / "static" / "assets"
+    source_css = (static_assets / "styles.css").read_text(encoding="utf-8")
+    bundle_css = (root / "frontend" / "assets" / "styles.css").read_text(
+        encoding="utf-8"
+    )
+    for css in (source_css, bundle_css):
+        assert "backdrop-filter" not in css
+        assert "background-attachment: fixed" not in css
+        assert "animation: page-in" not in css
+        assert "@keyframes page-in" not in css
+        assert "@keyframes shimmer" not in css
+        assert "bar-grow" not in css
+        assert ".report-card.is-refreshing" not in css
+
+    app_js = (static_assets / "js" / "app.js").read_text(encoding="utf-8")
+    data_js = (static_assets / "js" / "pages" / "data.js").read_text(
+        encoding="utf-8"
+    )
+    performance_js = (
+        static_assets / "js" / "pages" / "performance.js"
+    ).read_text(encoding="utf-8")
+    bundle_js = (root / "frontend" / "assets" / "js" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    assert "loadingMarkup" not in app_js
+    for script in (app_js, data_js, performance_js, bundle_js):
+        assert "is-refreshing" not in script
+        assert "is-quiet" not in script
+
+
 def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     frontend = Path(__file__).resolve().parents[1] / "frontend"
     index = (frontend / "index.html").read_text(encoding="utf-8")
@@ -1685,6 +2087,10 @@ def test_judgment_download_file_proxy(web_client, monkeypatch) -> None:
     import importlib
 
     web_app = importlib.import_module("judgment.web.app")
+    web_client.app.state.settings = replace(
+        web_client.app.state.settings,
+        judgment_download_allow_off_hours=False,
+    )
 
     monkeypatch.setattr(web_app, "ensure_window", lambda: None)
     monkeypatch.setattr(
@@ -1713,6 +2119,66 @@ def test_judgment_download_file_proxy(web_client, monkeypatch) -> None:
     )
     blocked = web_client.get("/api/judgment-download/files/72011")
     assert blocked.status_code == 403
+
+
+def test_judgment_download_file_proxy_allows_off_hours(
+    web_client, monkeypatch
+) -> None:
+    import importlib
+
+    web_app = importlib.import_module("judgment.web.app")
+    web_client.app.state.settings = replace(
+        web_client.app.state.settings,
+        judgment_download_allow_off_hours=True,
+    )
+    monkeypatch.setattr(
+        web_app,
+        "ensure_window",
+        lambda: (_ for _ in ()).throw(
+            web_app.DownloadWindowClosed("時段未開放")
+        ),
+    )
+    monkeypatch.setattr(
+        web_app,
+        "file_response_headers",
+        lambda settings, fileset_id: {
+            "Content-Disposition": "attachment; filename=test.rar"
+        },
+    )
+    monkeypatch.setattr(
+        web_app,
+        "iter_fileset",
+        lambda settings, fileset_id: iter([b"hello"]),
+    )
+
+    response = web_client.get("/api/judgment-download/files/72011")
+    assert response.status_code == 200
+    assert response.content == b"hello"
+
+
+def test_judgment_download_file_proxy_allows_one_at_a_time(
+    web_client, monkeypatch
+) -> None:
+    import importlib
+
+    web_app = importlib.import_module("judgment.web.app")
+    monkeypatch.setattr(
+        web_app,
+        "file_response_headers",
+        lambda settings, fileset_id: {},
+    )
+    monkeypatch.setattr(
+        web_app,
+        "iter_fileset",
+        lambda settings, fileset_id: iter([b"hello"]),
+    )
+    assert web_app._JUDGMENT_DOWNLOAD_LOCK.acquire(blocking=False)
+    try:
+        response = web_client.get("/api/judgment-download/files/72011")
+        assert response.status_code == 409
+        assert "一次只下載一個" in response.json()["detail"]
+    finally:
+        web_app._JUDGMENT_DOWNLOAD_LOCK.release()
 
 
 def test_data_fuzzy_suggestions_and_multi_keyword_query(web_client) -> None:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
 from judgment import judgment_download
@@ -69,6 +71,36 @@ def _resources() -> list[dict]:
             ],
         },
     ]
+
+
+def _month_resources(months: list[tuple[int, str]]) -> list[dict]:
+    return [
+        {
+            "datasetId": index + 1,
+            "title": f"{key}裁判書--(20261016Update)",
+            "filesets": [
+                {
+                    "fileSetId": fileset_id,
+                    "resourceFormat": "RAR",
+                    "resourceDescription": f"{key}--(20261016Update)",
+                }
+            ],
+        }
+        for index, (fileset_id, key) in enumerate(months)
+    ]
+
+
+def _month_metadata(months: list[tuple[int, str]], fileset_id: int):
+    for index, (candidate_id, key) in enumerate(months):
+        if candidate_id != fileset_id:
+            continue
+        return {
+            "content_length": 100 + index * 50,
+            "last_modified": f"Wed, 15 Oct 2026 08:08:{index:02d} GMT",
+            "etag": f"etag-{candidate_id}",
+            "filename": f"{key}--(20261016Update).rar",
+        }
+    return None
 
 
 class FakeClient:
@@ -157,6 +189,29 @@ def test_archive_entries_filter_non_judgment_resources() -> None:
     assert [entry["fileset_id"] for entry in entries] == [72010, 72011]
     assert entries[0]["filename"] == "202607--(20261016Update).rar"
     assert entries[1]["format"] == "RAR"
+
+
+def test_cli_exit_codes_distinguish_resumable_partial(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        judgment_download.Settings,
+        "from_env",
+        classmethod(lambda cls: _settings(tmp_path)),
+    )
+    results = iter(
+        [
+            {"status": "success", "errors": 0},
+            {"status": "partial", "errors": 0},
+            {"status": "partial", "errors": 1},
+        ]
+    )
+    monkeypatch.setattr(
+        judgment_download, "run_download", lambda **kwargs: next(results)
+    )
+    assert judgment_download.main([]) == 0
+    assert judgment_download.main([]) == judgment_download.EXIT_PARTIAL
+    assert judgment_download.main([]) == 1
 
 
 def test_run_download_skips_unchanged_and_probes_next(
@@ -355,6 +410,35 @@ def test_run_download_fills_missing_months(tmp_path: Path, fake_client) -> None:
     assert by_month["2026-08"]["status"] == "green"
 
 
+def test_run_download_allows_off_hours(tmp_path: Path, fake_client) -> None:
+    settings = _settings(tmp_path)
+    result = judgment_download.run_download(
+        settings=settings,
+        now=datetime(2026, 11, 11, 10, 0, tzinfo=judgment_download.TAIPEI_TZ),
+        allow_off_hours=True,
+    )
+    assert result["status"] == "success"
+    assert result["off_hours_enabled"] is True
+    assert result["downloaded"] == 2
+    status = judgment_download.download_status(settings)
+    assert status["off_hours_enabled"] is True
+
+
+def test_run_download_strict_mode_blocks_off_hours(
+    tmp_path: Path,
+) -> None:
+    settings = replace(
+        _settings(tmp_path), judgment_download_allow_off_hours=False
+    )
+    with pytest.raises(judgment_download.DownloadWindowClosed):
+        judgment_download.run_download(
+            settings=settings,
+            now=datetime(
+                2026, 11, 11, 10, 0, tzinfo=judgment_download.TAIPEI_TZ
+            ),
+        )
+
+
 def test_run_download_replaces_changed_file(tmp_path: Path, fake_client) -> None:
     settings = _settings(tmp_path)
     raw_dir = settings.judgment_data_dir / "raw_rar"
@@ -389,7 +473,467 @@ def test_run_download_replaces_changed_file(tmp_path: Path, fake_client) -> None
     assert manifest["files"]["72011"]["size_bytes"] == 200
 
 
-def test_run_download_prunes_old_same_month_version(
+def test_backfill_resumes_only_pending_months(
+    tmp_path: Path, monkeypatch
+) -> None:
+    months = [(72009, "202606"), (72010, "202607"), (72011, "202608")]
+    clock_state = {
+        "now": datetime(
+            2026, 11, 11, 5, 45, tzinfo=judgment_download.TAIPEI_TZ
+        )
+    }
+
+    class ClockClient(FakeClient):
+        def resources(self, category: str) -> list[dict]:
+            return _month_resources(months)
+
+        def metadata(self, fileset_id: int):
+            return _month_metadata(months, fileset_id)
+
+        def download(
+            self,
+            *,
+            fileset_id: int,
+            destination: Path,
+            expected_size,
+            progress=None,
+        ):
+            result = super().download(
+                fileset_id=fileset_id,
+                destination=destination,
+                expected_size=expected_size,
+                progress=progress,
+            )
+            clock_state["now"] += timedelta(minutes=20)
+            return result
+
+    ClockClient.instances.clear()
+    monkeypatch.setattr(
+        judgment_download, "JudicialOpenDataClient", ClockClient
+    )
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+
+    first = judgment_download.run_download(
+        settings=settings,
+        clock=lambda: clock_state["now"],
+        allow_off_hours=False,
+    )
+    assert first["status"] == "partial"
+    assert first["stop_reason"] == "window_closed"
+    assert first["downloaded"] == 1
+    assert first["pending_before"] == 3
+    assert first["pending_after"] == 2
+    assert ClockClient.instances[0].downloads == [72009]
+    assert (raw_dir / "202606--(20261016Update).rar").is_file()
+    assert not (raw_dir / "202607--(20261016Update).rar").exists()
+
+    manifest = judgment_download._load_manifest(
+        raw_dir / judgment_download.MANIFEST_NAME
+    )
+    backfill = manifest["backfill"]
+    assert backfill["pending_months"] == ["2026-07", "2026-08"]
+    assert backfill["pending_count"] == 2
+    assert backfill["resume_from_month"] == "2026-07"
+    assert backfill["resume_from_fileset_id"] == 72010
+    assert backfill["complete"] is False
+    assert backfill["last_run"]["stop_reason"] == "window_closed"
+
+    clock_state["now"] = datetime(
+        2026, 11, 12, 1, 0, tzinfo=judgment_download.TAIPEI_TZ
+    )
+    second = judgment_download.run_download(
+        settings=settings,
+        clock=lambda: clock_state["now"],
+        allow_off_hours=False,
+    )
+    assert second["status"] == "success"
+    assert second["downloaded"] == 2
+    assert second["pending_after"] == 0
+    assert ClockClient.instances[1].downloads == [72010, 72011]
+
+    manifest = judgment_download._load_manifest(
+        raw_dir / judgment_download.MANIFEST_NAME
+    )
+    backfill = manifest["backfill"]
+    assert backfill["pending_months"] == []
+    assert backfill["pending_count"] == 0
+    assert backfill["resume_from_month"] == ""
+    assert backfill["resume_from_fileset_id"] is None
+    assert backfill["complete"] is True
+    assert backfill["last_run"]["stop_reason"] == "completed"
+    assert backfill["verification"]["status"] == "completed"
+    assert backfill["verification"]["next_fileset_id"] is None
+    assert backfill["verification"]["verified_count"] == 3
+
+    status = judgment_download.download_status(settings)
+    assert status["backfill"]["pending_count"] == 0
+    assert status["backfill"]["complete"] is True
+
+
+def test_failed_month_stays_pending_and_is_retried(
+    tmp_path: Path, monkeypatch
+) -> None:
+    months = [(72009, "202606"), (72010, "202607"), (72011, "202608")]
+
+    class FlakyClient(FakeClient):
+        fail_ids: set[int] = set()
+
+        def resources(self, category: str) -> list[dict]:
+            return _month_resources(months)
+
+        def metadata(self, fileset_id: int):
+            return _month_metadata(months, fileset_id)
+
+        def download(
+            self,
+            *,
+            fileset_id: int,
+            destination: Path,
+            expected_size,
+            progress=None,
+        ):
+            if fileset_id in FlakyClient.fail_ids:
+                raise judgment_download.JudgmentDownloadError("boom")
+            return super().download(
+                fileset_id=fileset_id,
+                destination=destination,
+                expected_size=expected_size,
+                progress=progress,
+            )
+
+    FlakyClient.instances.clear()
+    monkeypatch.setattr(
+        judgment_download, "JudicialOpenDataClient", FlakyClient
+    )
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+    FlakyClient.fail_ids = {72010}
+
+    first = judgment_download.run_download(
+        settings=settings,
+        now=datetime(2026, 11, 11, 1, 0, tzinfo=judgment_download.TAIPEI_TZ),
+        max_file_attempts=1,
+    )
+    assert first["status"] == "partial"
+    assert first["errors"] == 1
+    assert first["downloaded"] == 2
+    assert first["pending_after"] == 1
+    assert FlakyClient.instances[0].downloads == [72009, 72011]
+    manifest = judgment_download._load_manifest(
+        raw_dir / judgment_download.MANIFEST_NAME
+    )
+    assert manifest["backfill"]["pending_months"] == ["2026-07"]
+    failure = manifest["backfill"]["failures"]["2026-07"]
+    assert failure["fileset_id"] == 72010
+    assert failure["attempts"] == 1
+
+    FlakyClient.fail_ids = set()
+    second = judgment_download.run_download(
+        settings=settings,
+        now=datetime(2026, 11, 12, 1, 0, tzinfo=judgment_download.TAIPEI_TZ),
+        max_file_attempts=1,
+    )
+    assert second["status"] == "success"
+    assert second["downloaded"] == 1
+    assert FlakyClient.instances[1].downloads == [72010]
+    manifest = judgment_download._load_manifest(
+        raw_dir / judgment_download.MANIFEST_NAME
+    )
+    assert manifest["backfill"]["failures"] == {}
+    assert manifest["backfill"]["pending_count"] == 0
+
+
+def test_verification_resumes_and_skips_same_day_completion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    months = [(72009, "202606"), (72010, "202607"), (72011, "202608")]
+    clock_state = {
+        "now": datetime(
+            2026, 11, 11, 5, 50, tzinfo=judgment_download.TAIPEI_TZ
+        )
+    }
+
+    class VerifyClient(FakeClient):
+        advance_minutes = 0
+        month_metadata_calls = 0
+
+        def resources(self, category: str) -> list[dict]:
+            return _month_resources(months)
+
+        def metadata(self, fileset_id: int):
+            payload = _month_metadata(months, fileset_id)
+            if payload is not None:
+                VerifyClient.month_metadata_calls += 1
+                if VerifyClient.advance_minutes:
+                    clock_state["now"] += timedelta(
+                        minutes=VerifyClient.advance_minutes
+                    )
+            return payload
+
+    VerifyClient.instances.clear()
+    monkeypatch.setattr(
+        judgment_download, "JudicialOpenDataClient", VerifyClient
+    )
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+    raw_dir.mkdir(parents=True)
+    for fileset_id, key in months:
+        metadata = _month_metadata(months, fileset_id)
+        filename = str(metadata["filename"])
+        (raw_dir / filename).write_bytes(
+            b"x" * int(metadata["content_length"])
+        )
+
+    VerifyClient.advance_minutes = 10
+    first = judgment_download.run_download(
+        settings=settings,
+        clock=lambda: clock_state["now"],
+        allow_off_hours=False,
+    )
+    assert first["status"] == "partial"
+    assert first["stop_reason"] == "verification_window_closed"
+    assert first["pending_after"] == 0
+    assert first["verification_complete"] is False
+    manifest = judgment_download._load_manifest(
+        raw_dir / judgment_download.MANIFEST_NAME
+    )
+    verification = manifest["backfill"]["verification"]
+    assert verification["status"] == "in_progress"
+    assert verification["next_fileset_id"] == 72010
+    assert verification["next_month"] == "2026-07"
+    assert verification["verified_count"] == 1
+
+    VerifyClient.advance_minutes = 0
+    clock_state["now"] = datetime(
+        2026, 11, 12, 1, 0, tzinfo=judgment_download.TAIPEI_TZ
+    )
+    second = judgment_download.run_download(
+        settings=settings,
+        clock=lambda: clock_state["now"],
+        allow_off_hours=False,
+    )
+    assert second["status"] == "success"
+    assert second["downloaded"] == 0
+    manifest = judgment_download._load_manifest(
+        raw_dir / judgment_download.MANIFEST_NAME
+    )
+    verification = manifest["backfill"]["verification"]
+    assert verification["status"] == "completed"
+    assert verification["next_fileset_id"] is None
+    assert verification["verified_count"] == 3
+
+    VerifyClient.month_metadata_calls = 0
+    clock_state["now"] = datetime(
+        2026, 11, 12, 2, 0, tzinfo=judgment_download.TAIPEI_TZ
+    )
+    third = judgment_download.run_download(
+        settings=settings,
+        clock=lambda: clock_state["now"],
+        allow_off_hours=False,
+    )
+    assert third["status"] == "success"
+    assert third["stop_reason"] == "completed"
+    assert VerifyClient.month_metadata_calls == 0
+
+
+def test_deadline_stops_file_that_cannot_finish_before_0600() -> None:
+    current = datetime(
+        2026, 11, 11, 5, 50, tzinfo=judgment_download.TAIPEI_TZ
+    )
+    samples = [(10_000_000, 10.0)]  # 1 MB/s
+    assert (
+        judgment_download._deadline_reached(
+            current,
+            remaining_bytes=400_000_000,
+            samples=samples,
+            buffer_seconds=300,
+        )
+        is True
+    )
+    assert (
+        judgment_download._deadline_reached(
+            current,
+            remaining_bytes=1_000_000,
+            samples=samples,
+            buffer_seconds=300,
+        )
+        is False
+    )
+    near_close = current.replace(minute=58)
+    assert (
+        judgment_download._deadline_reached(
+            near_close,
+            remaining_bytes=1,
+            samples=[],
+            buffer_seconds=300,
+        )
+        is True
+    )
+
+
+def _download_client(settings: Settings) -> judgment_download.JudicialOpenDataClient:
+    client = judgment_download.JudicialOpenDataClient(settings)
+    client.client.close()
+    client.token = "token"
+    return client
+
+
+def test_download_resumes_part_with_range(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    destination = tmp_path / "202607--(20261016Update).rar"
+    part = judgment_download._part_path(destination)
+    part.write_bytes(b"aaaaa")
+    judgment_download._write_part_meta(
+        destination,
+        {
+            "fileset_id": 72010,
+            "etag": '"v1"',
+            "last_modified": "",
+            "content_length": 10,
+        },
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            206,
+            headers={
+                "Content-Range": "bytes 5-9/10",
+                "Content-Length": "5",
+                "ETag": '"v1"',
+            },
+            content=b"bbbbb",
+        )
+
+    client = _download_client(settings)
+    client.client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        written, _ = client.download(
+            fileset_id=72010, destination=destination, expected_size=10
+        )
+    finally:
+        client.close()
+    assert written == 10
+    assert destination.read_bytes() == b"aaaaabbbbb"
+    assert not part.exists()
+    assert not judgment_download._part_meta_path(destination).exists()
+    assert requests[0].headers["range"] == "bytes=5-"
+    assert requests[0].headers["if-range"] == '"v1"'
+
+
+def test_part_resume_offset_discards_changed_validator(tmp_path: Path) -> None:
+    destination = tmp_path / "202607--(20261016Update).rar"
+    part = judgment_download._part_path(destination)
+    part.write_bytes(b"aaaaa")
+    judgment_download._write_part_meta(
+        destination,
+        {
+            "fileset_id": 72010,
+            "etag": '"v1"',
+            "last_modified": "",
+            "content_length": 10,
+        },
+    )
+    assert (
+        judgment_download._part_resume_offset(
+            destination,
+            72010,
+            {"etag": '"v2"', "last_modified": "", "content_length": 10},
+        )
+        == 0
+    )
+    assert not part.exists()
+    assert not judgment_download._part_meta_path(destination).exists()
+
+
+def test_download_restarts_when_server_returns_200(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    destination = tmp_path / "202607--(20261016Update).rar"
+    part = judgment_download._part_path(destination)
+    part.write_bytes(b"aaaaa")
+    judgment_download._write_part_meta(
+        destination,
+        {
+            "fileset_id": 72010,
+            "etag": '"old"',
+            "last_modified": "",
+            "content_length": 10,
+        },
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Length": "10", "ETag": '"new"'},
+            content=b"0123456789",
+        )
+
+    client = _download_client(settings)
+    client.client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        written, _ = client.download(
+            fileset_id=72010, destination=destination, expected_size=10
+        )
+    finally:
+        client.close()
+    assert written == 10
+    assert destination.read_bytes() == b"0123456789"
+    assert not part.exists()
+
+
+def test_download_preserves_part_on_interruption(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    destination = tmp_path / "202607--(20261016Update).rar"
+    part = judgment_download._part_path(destination)
+    mode = {"resume": False}
+
+    class BrokenStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"abc"
+            raise httpx.ReadError("boom")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not mode["resume"]:
+            return httpx.Response(
+                200,
+                headers={"Content-Length": "10", "ETag": '"v1"'},
+                stream=BrokenStream(),
+            )
+        assert request.headers["range"] == "bytes=3-"
+        assert request.headers["if-range"] == '"v1"'
+        return httpx.Response(
+            206,
+            headers={
+                "Content-Range": "bytes 3-9/10",
+                "Content-Length": "7",
+                "ETag": '"v1"',
+            },
+            content=b"defghij",
+        )
+
+    client = _download_client(settings)
+    client.client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(httpx.ReadError):
+            client.download(
+                fileset_id=72010, destination=destination, expected_size=10
+            )
+        assert part.read_bytes() == b"abc"
+        assert judgment_download._part_meta_path(destination).is_file()
+        mode["resume"] = True
+        written, _ = client.download(
+            fileset_id=72010, destination=destination, expected_size=10
+        )
+    finally:
+        client.close()
+    assert written == 10
+    assert destination.read_bytes() == b"abcdefghij"
+    assert not part.exists()
+
+
+def test_run_download_archives_old_same_month_version(
     tmp_path: Path, monkeypatch
 ) -> None:
     class VersionedClient(FakeClient):
@@ -472,7 +1016,14 @@ def test_run_download_prunes_old_same_month_version(
     )
     assert result["downloaded"] == 1
     assert not old_path.exists()
+    history_path = raw_dir / "history" / old_path.name
+    assert history_path.is_file()
+    assert history_path.read_bytes() == b"x" * 200
     assert (raw_dir / "202608--(20261115Update).rar").exists()
     manifest = judgment_download._load_manifest(manifest_path)
     assert "72011" not in manifest["files"]
     assert manifest["files"]["72020"]["size_bytes"] == 250
+    assert (
+        manifest["history_files"]["72011"]["archived_path"]
+        == f"history/{old_path.name}"
+    )

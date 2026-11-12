@@ -276,7 +276,9 @@ def export_judgments_to_parquet(
         with session_factory() as session:
             total = int(
                 session.scalar(
-                    select(func.count()).select_from(JudgmentDocument)
+                    select(func.count())
+                    .select_from(JudgmentDocument)
+                    .where(JudgmentDocument.is_current.is_(True))
                 )
                 or 0
             )
@@ -335,6 +337,7 @@ def export_judgments_to_parquet(
             output_root.mkdir(parents=True, exist_ok=True)
             statement = (
                 select(JudgmentDocument)
+                .where(JudgmentDocument.is_current.is_(True))
                 .order_by(JudgmentDocument.jid.asc())
                 .execution_options(stream_results=True)
             )

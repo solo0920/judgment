@@ -62,6 +62,7 @@ class Settings:
     judgment_point_id_version: str = "jid-uuid5-v1"
     embedding_url: str = ""
     embedding_fallback_url: str = ""
+    embedding_failover_urls: tuple[str, ...] = ()
     embedding_model: str = "bge-m3"
     embedding_timeout_seconds: float = 120.0
     embedding_query_timeout_seconds: float = 2.0
@@ -81,6 +82,10 @@ class Settings:
     judgment_download_category: str = "051"
     judgment_download_start_id: int = 71644
     judgment_download_known_latest_id: int = 72011
+    judgment_download_allow_off_hours: bool = True
+    judgment_raw_rar_keep_versions: bool = True
+    judgment_raw_parquet_keep_versions: bool = False
+    judgment_vector_history_collection: str = "judgment_documents_history"
     test_embedding_models: tuple[str, ...] = ()
     test_llm_models: tuple[str, ...] = ()
 
@@ -149,6 +154,11 @@ class Settings:
             embedding_fallback_url=os.getenv(
                 "EMBEDDING_FALLBACK_URL", ""
             ).rstrip("/"),
+            embedding_failover_urls=tuple(
+                url.rstrip("/")
+                for url in _env_csv("EMBEDDING_FAILOVER_URLS", ())
+                if url.rstrip("/")
+            ),
             embedding_model=os.getenv("EMBEDDING_MODEL", "bge-m3").strip()
             or "bge-m3",
             embedding_timeout_seconds=_env_float("EMBEDDING_TIMEOUT_SECONDS", 120.0),
@@ -184,6 +194,20 @@ class Settings:
             judgment_download_known_latest_id=_env_int(
                 "JUDGMENT_DOWNLOAD_KNOWN_LATEST_ID", 72011
             ),
+            judgment_download_allow_off_hours=_env_bool(
+                "JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS", True
+            ),
+            judgment_raw_rar_keep_versions=_env_bool(
+                "JUDGMENT_RAW_RAR_KEEP_VERSIONS", True
+            ),
+            judgment_raw_parquet_keep_versions=_env_bool(
+                "JUDGMENT_RAW_PARQUET_KEEP_VERSIONS", False
+            ),
+            judgment_vector_history_collection=os.getenv(
+                "JUDGMENT_VECTOR_HISTORY_COLLECTION",
+                "judgment_documents_history",
+            ).strip()
+            or "judgment_documents_history",
             test_embedding_models=_env_csv("TEST_EMBEDDING_MODELS", ()),
             test_llm_models=_env_csv("TEST_LLM_MODELS", ()),
         )

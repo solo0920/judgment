@@ -196,7 +196,7 @@
 - 只有至少命中一項清單法規的判決會寫入 `judgment_documents`；未命中者不進資料庫，原始 `.rar` 不刪除。
 - 每次匯入寫入 `judgment_import_runs`，包含掃描數、命中數、寫入數、引用數、耗時與錯誤。
 - 支援 `--dry-run`、`--limit`、`--archive`、`--batch-size` 與 `--replace`。
-- 尚未實作：人工複核佇列、法規別名維護、試跑／正式索引原子切換、Qdrant 判決索引與完整篩選效能紀錄。
+- 尚未實作：人工複核佇列、法規別名維護、試跑模式、正式 UI 管理介面、自動 retention 與完整篩選效能紀錄。Qdrant 判決索引、版本化 collection 與 alias 原子切換已於 2026-11-09 完成，見下節。
 
 ## Implementation Note (2026-11-09): 版本化索引與 Alias
 

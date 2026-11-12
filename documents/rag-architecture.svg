@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1720" height="1240" viewBox="0 0 1720 1240" role="img" aria-labelledby="diagram-title diagram-desc">
   <title id="diagram-title">Judgment RAG 引擎架構：從使用者提問到前端引用</title>
-  <desc id="diagram-desc">使用者在前端輸入問題，FastAPI 驗證後交由 RAG 管線；RAG 先比對 PostgreSQL law_documents 與法規 Parquet 中的法規／命令名稱、簡稱、條文與沿革，並可依 metadata 或判決引用統計直接回答；判決端再讀取索引覆蓋率、檢查 Qdrant、以 Ollama bge-m3 產生查詢向量、從 Qdrant 檢索 top_k=4、從 PostgreSQL 取回判決全文並擷取片段，最後由 Ollama gemma3:4b 產生回答，經引用編號驗證後回傳前端顯示判決與法規／命令引用卡片。離線索引流程另行建立 Qdrant points 與 judgment_vector_index。</desc>
+  <desc id="diagram-desc">使用者在前端輸入問題，FastAPI 驗證後交由 RAG 管線；RAG 先比對 PostgreSQL law_documents 與法規 Parquet 中的法規／命令名稱、簡稱、條文與沿革，並可依 metadata 或判決引用統計直接回答；判決端再讀取 active 版本覆蓋率、檢查 Qdrant alias、以 Ollama embedding 模型產生查詢向量、從 Qdrant 檢索 top_k=4、從 PostgreSQL 取回判決全文並擷取片段，最後由設定的 Ollama LLM 產生回答，經引用編號驗證後回傳前端顯示判決與法規／命令引用卡片。離線索引流程另行建立版本化 Qdrant collection 與 judgment_vector_index。</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -49,7 +49,7 @@
   <text x="42" y="48" class="title">Judgment RAG 引擎架構</text>
   <text x="42" y="76" class="subtitle">目前實作 · 使用者提問 → 法規／命令比對 → Qdrant 判決檢索 → PostgreSQL 取全文 → Ollama 生成 → 前端引用卡片</text>
   <text x="1678" y="48" class="lbl" text-anchor="end">實線：提問請求路徑　·　虛線：降級／離線索引</text>
-  <text x="1678" y="68" class="lbl" text-anchor="end">資料狀態：2026-11-07 · 10,372 / 244,330 筆（4.2%）</text>
+  <text x="1678" y="68" class="lbl" text-anchor="end">資料狀態：2026-11-11 · 738,743 / 738,743 筆（100%，active v002）</text>
 
   <!-- Lanes -->
   <rect x="36" y="104" width="330" height="956" rx="14" fill="#f7faf1" stroke="#d9e6c5"/>
@@ -83,9 +83,9 @@
   <g>
     <rect class="card" x="56" y="282" width="290" height="84" rx="10" stroke="#c3da9d"/>
     <rect x="56" y="282" width="5" height="84" rx="2.5" fill="#76b900"/>
-    <text x="74" y="306" class="box-title"><tspan fill="#4d7c0f">02</tspan>　api.rag(question)</text>
-    <text x="74" y="328" class="mono">POST /api/rag/query</text>
-    <text x="74" y="348" class="box-sub2">AbortController timeout 300s</text>
+    <text x="74" y="306" class="box-title"><tspan fill="#4d7c0f">02</tspan>　api.ragStream(question)</text>
+    <text x="74" y="328" class="mono">POST /api/rag/query/stream</text>
+    <text x="74" y="348" class="box-sub2">SSE；一般模式 timeout 300s</text>
   </g>
   <g>
     <rect class="card" x="56" y="500" width="290" height="100" rx="10" stroke="#c3da9d"/>
@@ -122,15 +122,15 @@
     <rect class="card" x="416" y="166" width="240" height="84" rx="10" stroke="#bcd0f1"/>
     <rect x="416" y="166" width="5" height="84" rx="2.5" fill="#3b82f6"/>
     <text x="434" y="190" class="box-title"><tspan fill="#2563eb">03</tspan>　FastAPI 端點</text>
-    <text x="434" y="212" class="mono">POST /api/rag/query</text>
-    <text x="434" y="232" class="box-sub2">app.py · rag_query()</text>
+    <text x="434" y="212" class="mono">POST /api/rag/query/stream</text>
+    <text x="434" y="232" class="box-sub2">app.py · rag_query_stream()</text>
   </g>
   <g>
     <rect class="card" x="416" y="282" width="240" height="84" rx="10" stroke="#bcd0f1"/>
     <rect x="416" y="282" width="5" height="84" rx="2.5" fill="#3b82f6"/>
     <text x="434" y="306" class="box-title">RagRequest 驗證</text>
-    <text x="434" y="328" class="box-sub">question：1–500 字</text>
-    <text x="434" y="348" class="box-sub2">空白 → ValueError → HTTP 400</text>
+    <text x="434" y="328" class="box-sub">question：1–500 字（Pydantic）</text>
+    <text x="434" y="348" class="box-sub2">空白 → 422；純空白 → 400</text>
   </g>
   <g>
     <rect class="card" x="416" y="392" width="240" height="84" rx="10" stroke="#bcd0f1"/>
@@ -153,14 +153,14 @@
     <rect class="card" x="726" y="166" width="430" height="62" rx="10" stroke="#d4c2f0"/>
     <rect x="726" y="166" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
     <text x="744" y="190" class="box-title"><tspan fill="#7c3aed">05</tspan>　index_coverage()</text>
-    <text x="744" y="212" class="box-sub">PostgreSQL 索引統計：total / indexed / latest_indexed_at</text>
+    <text x="744" y="212" class="box-sub">PostgreSQL 索引統計：active version total / indexed</text>
   </g>
   <g>
     <rect class="card" x="726" y="252" width="430" height="62" rx="10" stroke="#d4c2f0"/>
     <rect x="726" y="252" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
     <text x="744" y="276" class="box-title"><tspan fill="#7c3aed">06</tspan>　Qdrant 前置檢查</text>
     <text x="744" y="298" class="box-sub">QDRANT_URL → collection_info() → collection 存在？</text>
-    <text x="1090" y="298" class="lbl" fill="#d97706">失敗 → preview</text>
+    <text x="1040" y="322" class="lbl" fill="#d97706">無 law_sources → preview</text>
   </g>
   <g>
     <rect class="card" x="726" y="338" width="430" height="62" rx="10" stroke="#d4c2f0"/>
@@ -172,14 +172,14 @@
     <rect class="card" x="726" y="424" width="430" height="70" rx="10" stroke="#d4c2f0"/>
     <rect x="726" y="424" width="5" height="70" rx="2.5" fill="#8b5cf6"/>
     <text x="744" y="448" class="box-title"><tspan fill="#7c3aed">08</tspan>　Qdrant 向量檢索</text>
-    <text x="744" y="470" class="box-sub">collection judgment_documents · top_k = 4 · score ≥ 0.35</text>
+    <text x="744" y="470" class="box-sub">alias judgments_current（v002）· top_k = 4 · score ≥ 0.35</text>
     <text x="744" y="486" class="box-sub2">Cosine 相似度；payload 取 jid / court / title / jdate / matched_laws</text>
   </g>
   <g>
     <rect x="726" y="512" width="430" height="62" rx="10" fill="#fff8e8" stroke="#ecc46f"/>
     <rect x="726" y="512" width="5" height="62" rx="2.5" fill="#d97706"/>
     <text x="744" y="536" class="box-title"><tspan fill="#b45309">09</tspan>　有命中？</text>
-    <text x="744" y="558" class="box-sub">0 hits → retrieval_only：不呼叫 LLM，直接回傳無結果說明</text>
+    <text x="744" y="558" class="box-sub">0 hits 且有法規來源 → 用 law_sources；皆無 → retrieval_only</text>
   </g>
   <g>
     <rect class="card" x="726" y="600" width="430" height="62" rx="10" stroke="#d4c2f0"/>
@@ -192,26 +192,26 @@
     <rect x="726" y="688" width="5" height="70" rx="2.5" fill="#8b5cf6"/>
     <text x="744" y="712" class="box-title"><tspan fill="#7c3aed">11</tspan>　片段與引用組裝</text>
     <text x="744" y="734" class="box-sub">extract_excerpt：以問題詞彙挑選段落（每筆上限 1,000–1,600 字）</text>
-    <text x="744" y="752" class="box-sub2">建立 contexts [1]–[6] 與前端 citation metadata</text>
+    <text x="744" y="752" class="box-sub2">建立 contexts [1]–[N]；判決與法規共用編號</text>
   </g>
   <g>
     <rect class="card" x="726" y="784" width="430" height="70" rx="10" stroke="#d4c2f0"/>
     <rect x="726" y="784" width="5" height="70" rx="2.5" fill="#8b5cf6"/>
     <text x="744" y="808" class="box-title"><tspan fill="#7c3aed">12</tspan>　LLM 生成</text>
-    <text x="744" y="830" class="box-sub">Ollama gemma3:4b · temperature 0.1 · num_ctx 4,096</text>
-    <text x="744" y="848" class="box-sub2">系統提示：只能依片段回答，每個結論標註 [n]</text>
+    <text x="744" y="830" class="box-sub">Ollama LLM_MODEL（本機 gemma3:4b）· temperature 0.1</text>
+    <text x="744" y="848" class="box-sub2">系統提示：只能依來源回答，每個結論標註 [n]</text>
   </g>
   <g>
     <rect x="726" y="876" width="430" height="62" rx="10" fill="#fff8e8" stroke="#ecc46f"/>
     <rect x="726" y="876" width="5" height="62" rx="2.5" fill="#d97706"/>
     <text x="744" y="900" class="box-title"><tspan fill="#b45309">13</tspan>　引用驗證</text>
-    <text x="744" y="922" class="box-sub">[n] 必須在 1..N；拒答不得含虛構案號；失敗 → retrieval_only</text>
+    <text x="744" y="922" class="box-sub">[n] 必須在 1..N；失敗先 strict 重試一次，再 retrieval_only</text>
   </g>
   <g>
     <rect class="card" x="726" y="962" width="430" height="62" rx="10" stroke="#d4c2f0"/>
     <rect x="726" y="962" width="5" height="62" rx="2.5" fill="#8b5cf6"/>
     <text x="744" y="986" class="box-title"><tspan fill="#7c3aed">16</tspan>　組裝回應 JSON</text>
-    <text x="744" y="1008" class="box-sub">status · answer · notice · judgments · retrieval · coverage · duration_ms</text>
+    <text x="744" y="1008" class="box-sub">status · answer · judgments · law_sources · law_answer · retrieval · coverage</text>
   </g>
 
   <!-- Service cards -->
@@ -219,47 +219,47 @@
     <rect class="card" x="1206" y="150" width="460" height="95" rx="10" stroke="#edcf9f"/>
     <rect x="1206" y="150" width="5" height="95" rx="2.5" fill="#d97706"/>
     <text x="1224" y="174" class="box-title">PostgreSQL · judgment_vector_index</text>
-    <text x="1224" y="196" class="box-sub">索引追蹤：jid · collection · model · content_hash · dimensions</text>
-    <text x="1224" y="216" class="box-sub2">10,372 筆已索引 · latest_indexed_at 2026-11-07T02:56Z</text>
+    <text x="1224" y="196" class="box-sub">索引追蹤：jid · version_id · collection · hash · dims</text>
+    <text x="1224" y="216" class="box-sub2">active v002：738,743 筆 · indexed 2026-11-09</text>
     <text x="1224" y="233" class="lbl" fill="#64748b">RAG 每次提問都會先讀取此表計算 coverage</text>
   </g>
   <g>
     <rect class="card" x="1206" y="240" width="460" height="85" rx="10" stroke="#edcf9f"/>
     <rect x="1206" y="240" width="5" height="85" rx="2.5" fill="#d97706"/>
-    <text x="1224" y="264" class="box-title">Qdrant · judgment_documents ①</text>
-    <text x="1224" y="286" class="box-sub">collection_info()：存在性、points_count、向量維度</text>
-    <text x="1224" y="306" class="box-sub2">未設定／離線／collection 不存在 → preview fallback</text>
+    <text x="1224" y="264" class="box-title">Qdrant · judgments_current alias ①</text>
+    <text x="1224" y="286" class="box-sub">collection_info()：alias → v002、points_count、維度</text>
+    <text x="1224" y="306" class="box-sub2">未設定／離線且無法規來源 → preview</text>
   </g>
   <g>
     <rect class="card" x="1206" y="325" width="460" height="90" rx="10" stroke="#edcf9f"/>
     <rect x="1206" y="325" width="5" height="90" rx="2.5" fill="#d97706"/>
-    <text x="1224" y="349" class="box-title">Ollama · bge-m3</text>
+    <text x="1224" y="349" class="box-title">Ollama · EMBEDDING_MODEL</text>
     <text x="1224" y="371" class="mono">POST /api/embed</text>
-    <text x="1224" y="391" class="box-sub2">1,024 維 · 與索引使用相同 embedding 模型</text>
-    <text x="1224" y="407" class="box-sub2">EMBEDDING_URL · EMBEDDING_TIMEOUT_SECONDS=120</text>
+    <text x="1224" y="391" class="box-sub2">本機 bge-m3 · 1,024 維 · 與索引相同模型</text>
+    <text x="1224" y="407" class="box-sub2">EMBEDDING_URL · fallback／health timeout</text>
   </g>
   <g>
     <rect class="card" x="1206" y="415" width="460" height="90" rx="10" stroke="#edcf9f"/>
     <rect x="1206" y="415" width="5" height="90" rx="2.5" fill="#d97706"/>
-    <text x="1224" y="439" class="box-title">Qdrant · judgment_documents ②</text>
-    <text x="1224" y="461" class="mono">POST /collections/judgment_documents/points/search</text>
-    <text x="1224" y="481" class="box-sub2">10,372 points · cosine · 只回傳 score ≥ 0.35 的結果</text>
+    <text x="1224" y="439" class="box-title">Qdrant · judgments_current ②</text>
+    <text x="1224" y="461" class="mono">POST /collections/judgments_current/points/search</text>
+    <text x="1224" y="481" class="box-sub2">738,743 points · cosine · score ≥ 0.35</text>
     <text x="1224" y="497" class="box-sub2">payload.snippet 為索引視窗預覽，不是 RAG 引用片段</text>
   </g>
   <g>
     <rect class="card" x="1206" y="585" width="460" height="95" rx="10" stroke="#edcf9f"/>
     <rect x="1206" y="585" width="5" height="95" rx="2.5" fill="#d97706"/>
     <text x="1224" y="609" class="box-title">PostgreSQL · judgment_documents</text>
-    <text x="1224" y="631" class="box-sub">244,330 筆金融法規判決全文（full_text）</text>
+    <text x="1224" y="631" class="box-sub">738,743 筆金融法規判決全文（full_text）</text>
     <text x="1224" y="651" class="box-sub2">RAG 以 jid 取回全文，再依問題詞彙挑選段落</text>
     <text x="1224" y="668" class="box-sub2">court_normalized · matched_laws · citations · pdf_url</text>
   </g>
   <g>
     <rect class="card" x="1206" y="770" width="460" height="95" rx="10" stroke="#edcf9f"/>
     <rect x="1206" y="770" width="5" height="95" rx="2.5" fill="#d97706"/>
-    <text x="1224" y="794" class="box-title">Ollama · gemma3:4b</text>
+    <text x="1224" y="794" class="box-title">Ollama · LLM_MODEL</text>
     <text x="1224" y="816" class="mono">POST /api/chat</text>
-    <text x="1224" y="836" class="box-sub2">temperature 0.1 · num_ctx 4,096 · num_predict 384</text>
+    <text x="1224" y="836" class="box-sub2">本機 gemma3:4b · temperature 0.1 · num_ctx 4,096</text>
     <text x="1224" y="853" class="box-sub2">LLM_URL／LLM_MODEL 未設定 → retrieval_only</text>
   </g>
   <g>
@@ -270,9 +270,9 @@
     <circle cx="1230" cy="956" r="4" class="dot-warn"/>
     <text x="1242" y="960" class="box-sub"><tspan class="mono">retrieval_only</tspan>：0 hits／LLM 未設定／驗證失敗</text>
     <circle cx="1230" cy="978" r="4" class="dot-preview"/>
-    <text x="1242" y="982" class="box-sub"><tspan class="mono">preview</tspan>：Qdrant 未設定、離線、collection 不存在</text>
+    <text x="1242" y="982" class="box-sub"><tspan class="mono">preview</tspan>：無法規來源且 Qdrant 不可用</text>
     <circle cx="1230" cy="1000" r="4" class="dot-idle"/>
-    <text x="1242" y="1004" class="box-sub2">retrieval.status：not_configured／unavailable／not_indexed／degraded</text>
+    <text x="1242" y="1004" class="box-sub2">retrieval.status：not_configured／unavailable／not_indexed…</text>
   </g>
 
   <!-- Flow: frontend -> API -->
@@ -331,7 +331,7 @@
   <g>
     <rect x="56" y="1122" width="430" height="60" rx="8" fill="#ffffff" stroke="#d7dee8"/>
     <text x="72" y="1144" class="box-title">01　建置指令</text>
-    <text x="72" y="1166" class="mono">uv run judgment-index-vectors --stride 24 --batch-size 16</text>
+    <text x="72" y="1166" class="mono">uv run judgment-index-vectors --build-version --activate</text>
   </g>
   <path class="offline" d="M 486 1152 H 526"/>
   <g>
@@ -343,7 +343,7 @@
   <g>
     <rect x="1086" y="1122" width="580" height="60" rx="8" fill="#ffffff" stroke="#d7dee8"/>
     <text x="1102" y="1144" class="box-title">03　寫入索引</text>
-    <text x="1102" y="1166" class="box-sub">Qdrant upsert（point id = UUID5(jid)）＋ PostgreSQL judgment_vector_index</text>
+    <text x="1102" y="1166" class="box-sub">Qdrant upsert（judgments_vNNN；UUID5(jid)）＋ judgment_vector_index</text>
   </g>
-  <text x="56" y="1200" class="box-sub2">目前 10,372 / 244,330 筆（4.2%）· 本批 10,172 筆耗時 23.4 分鐘（7.2 筆／秒）· 重跑時 content_hash 未變更會跳過，可中斷續跑</text>
+  <text x="56" y="1200" class="box-sub2">目前 738,743 / 738,743 筆（100%，active v002）· 版本化建置重用相容向量，只 embedding 差異資料</text>
 </svg>

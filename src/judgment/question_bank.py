@@ -343,7 +343,10 @@ def validate_payload(
             exists = session.scalar(
                 select(func.count())
                 .select_from(JudgmentDocument)
-                .where(JudgmentDocument.jid == ref["jid"])
+                .where(
+                    JudgmentDocument.jid == ref["jid"],
+                    JudgmentDocument.is_current.is_(True),
+                )
             )
             if not exists:
                 errors.append(f"找不到判決：{ref['jid']}")

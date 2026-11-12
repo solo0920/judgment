@@ -1094,6 +1094,20 @@ export function createQuestionBankController(
 
   const panel = (name) => root.querySelector(`#quality-panel-${panelNames[name]}`);
 
+  // Keep an already rendered bank panel visible while it reloads. Only the
+  // first load shows a spinner; later loads update once the response arrives.
+  const beginPanelLoad = (target, label) => {
+    if (!target) return;
+    if (!target.childElementCount) {
+      target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>${label}</span></div></section>`;
+    } else {
+      target.setAttribute("aria-busy", "true");
+    }
+  };
+  const finishPanelLoad = (target) => {
+    target?.removeAttribute("aria-busy");
+  };
+
   let tagSearchRequest = 0;
   let tagSearchTimer = null;
 
@@ -1306,7 +1320,7 @@ export function createQuestionBankController(
       window.clearTimeout(tagSearchTimer);
       tagSearchTimer = null;
     }
-    target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取題庫中…</span></div></section>`;
+    beginPanelLoad(target, "讀取題庫中…");
     try {
       const result = await api.questionBankItems(
         {
@@ -1321,9 +1335,11 @@ export function createQuestionBankController(
       state.items = result.items || [];
       state.total = Number(result.total || 0);
       state.stats = result.stats || state.stats;
+      finishPanelLoad(target);
       target.innerHTML = manageMarkup(state);
       notifyStats();
     } catch (error) {
+      finishPanelLoad(target);
       target.innerHTML = `<section class="report-card qb-card">${notice({
         tone: "danger",
         title: "題庫讀取失敗",
@@ -1335,7 +1351,7 @@ export function createQuestionBankController(
   const loadSuites = async ({ refreshAnswers = false } = {}) => {
     const target = panel("suite");
     if (!target) return;
-    target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取 benchmark 題庫中…</span></div></section>`;
+    beginPanelLoad(target, "讀取 benchmark 題庫中…");
     try {
       const [suitesResult, readyResult] = await Promise.all([
         api.benchmarkSuites(),
@@ -1357,8 +1373,10 @@ export function createQuestionBankController(
           state.suiteAnswersError = error.message || "請稍後再試。";
         }
       }
+      finishPanelLoad(target);
       target.innerHTML = suiteMarkup(state);
     } catch (error) {
+      finishPanelLoad(target);
       target.innerHTML = `<section class="report-card qb-card">${notice({
         tone: "danger",
         title: "Benchmark 題庫讀取失敗",
@@ -1398,7 +1416,7 @@ export function createQuestionBankController(
   const loadReview = async () => {
     const target = panel("review");
     if (!target) return;
-    target.innerHTML = `<section class="report-card qb-card"><div class="qb-empty"><span class="spinner"></span><span>讀取驗收題目中…</span></div></section>`;
+    beginPanelLoad(target, "讀取驗收題目中…");
     const filter = state.reviewFilter || "queue";
     const statuses =
       filter === "queue"
@@ -1424,9 +1442,11 @@ export function createQuestionBankController(
       state.reviewDetail = selectedId
         ? await api.questionBankItem(selectedId)
         : null;
+      finishPanelLoad(target);
       renderReview();
       notifyStats();
     } catch (error) {
+      finishPanelLoad(target);
       target.innerHTML = `<section class="report-card qb-card">${notice({
         tone: "danger",
         title: "驗收題目讀取失敗",

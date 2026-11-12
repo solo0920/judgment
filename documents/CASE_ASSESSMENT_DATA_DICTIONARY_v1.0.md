@@ -394,7 +394,7 @@ PK：`(case_id, user_id)`。所有案件 API 必須 server-side 檢查，不可�
 
 索引：`(case_id, law_id)`、`(law_version_id, article_key)`。
 
-> 目前 `law_articles` 存在於法規 Parquet／JSON；尚未有 PostgreSQL 條文版本表。`article_key` 的穩定性需與 `law_article_versions` 或 Parquet snapshot 方案一起確認。
+> 目前 `law_articles` 存在於法規 Parquet／JSON；PostgreSQL 已有 `law_article_versions` 條文版本快照與 `law_article_change_events`。`article_key` 由 `article_type` 與去空白後的 `article_no` 組成（例如 `A:第19條`），CASE 仍需自行決定判決當時適用版本的對應規則。
 
 ### 7.4 `case_issue_facts`
 

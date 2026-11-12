@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -16,10 +17,12 @@ from judgment.models import (
     LawDocument,
     PerformanceRecord,
 )
+from judgment.observability import clear_flow, start_flow
 from judgment.rag import (
     _valid_citation_markers,
     answer_question,
     extract_excerpt,
+    generate_answer_with_model,
 )
 from judgment.law_rag import (
     _article_ref_key,
@@ -966,3 +969,78 @@ def test_answer_question_rejects_empty_question() -> None:
             question="   ",
             settings=_settings(),
         )
+
+
+def test_llm_flow_records_tokens_ttft_and_finish_times(monkeypatch) -> None:
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield json.dumps({"message": {"content": "測試回答 [1]"}})
+            yield json.dumps(
+                {
+                    "done": True,
+                    "prompt_eval_count": 20,
+                    "eval_count": 6,
+                    "total_duration": 2_000_000,
+                    "load_duration": 500_000,
+                    "eval_duration": 1_200_000,
+                }
+            )
+
+    monkeypatch.setattr(
+        "judgment.rag.httpx.stream",
+        lambda *args, **kwargs: FakeStream(),
+    )
+    flow = start_flow(
+        request_id="test-rag-llm",
+        entrypoint="/api/rag/query/stream",
+        method="POST",
+        path="/api/rag/query/stream",
+    )
+    try:
+        answer = generate_answer_with_model(
+            settings=_settings(
+                llm_url="http://llm.test:11434",
+                llm_model="test-model",
+            ),
+            model="test-model",
+            question="測試問題",
+            contexts=[
+                {
+                    "index": 1,
+                    "jid": "TEST,114,訴,1,20260101,1",
+                    "court": "測試法院",
+                    "jdate": "20260101",
+                    "title": "測試案由",
+                    "matched_laws": ["銀行法"],
+                    "text": "測試內容",
+                }
+            ],
+            timeout=10,
+            on_token=lambda token: None,
+        )
+        flow.finish()
+    finally:
+        clear_flow()
+    assert answer == "測試回答 [1]"
+    segment = next(
+        item for item in flow.segments if item["name"] == "rag.llm_request"
+    )
+    assert segment["metadata"]["model"] == "test-model"
+    assert segment["metadata"]["base_url"] == "http://llm.test:11434"
+    assert segment["metadata"]["input_tokens"] == 20
+    assert segment["metadata"]["output_tokens"] == 6
+    assert segment["metadata"]["ttft_ms"] is not None
+    assert segment["metadata"]["total_duration_ms"] == 2.0
+    assert segment["metadata"]["load_duration_ms"] == 0.5
+    assert segment["metadata"]["eval_duration_ms"] == 1.2
+    assert segment["finished_at"]
+    assert segment["end_offset_ms"] >= segment["offset_ms"]

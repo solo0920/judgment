@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ from ..processing_state import (
     stage_seconds,
     state_file_status,
 )
+from ..update_records import update_history, update_status
 from ..workflows import workflow_catalog, workflow_definition
 
 logger = logging.getLogger(__name__)
@@ -132,6 +134,8 @@ def _normalized_runs(state: Dict[str, Any], now: datetime) -> List[Dict[str, Any
 def _public_run(run: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if run is None:
         return None
+    meta = deepcopy(run.get("meta") or {})
+    meta.pop("index_runtime", None)
     return {
         "id": run.get("id"),
         "branch": run.get("branch"),
@@ -148,7 +152,7 @@ def _public_run(run: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "current_stage": run.get("current_stage") or "",
         "message": run.get("message") or "",
         "counts": deepcopy(run.get("counts") or {}),
-        "meta": deepcopy(run.get("meta") or {}),
+        "meta": meta,
         "archive_count": len(run.get("archives") or {}),
     }
 
@@ -458,6 +462,189 @@ def _idle_node(
     }
 
 
+def _workflow_progress(
+    run: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Return per-stage progress and its equal-weight contribution.
+
+    The combined percentage treats every participating stage equally. Stages
+    skipped by a no-change run are excluded, so a completed "no change" run
+    still reaches 100% without pretending skipped work was executed.
+    """
+
+    if run is None:
+        return {
+            "available": False,
+            "run_id": None,
+            "run_status": None,
+            "overall_percent": None,
+            "completed_stages": 0,
+            "total_stages": 0,
+            "active_stage": "",
+            "stages": [],
+        }
+    stages: List[Dict[str, Any]] = []
+    for key, raw_stage in (run.get("stages") or {}).items():
+        if not isinstance(raw_stage, dict):
+            continue
+        stage = _stage_view({**raw_stage, "key": raw_stage.get("key") or key}, run)
+        status = str(stage.get("status") or "")
+        if status in {"success", "no_change"}:
+            stage["percent"] = 100.0
+        elif status == "skipped":
+            stage["percent"] = 0.0
+        elif stage.get("percent") is None and status != "running":
+            stage["percent"] = 0.0
+        stages.append(stage)
+
+    participants = [stage for stage in stages if stage.get("status") != "skipped"]
+    weight = 100.0 / len(participants) if participants else 0.0
+    overall = 0.0
+    for stage in stages:
+        if stage.get("status") == "skipped":
+            contribution = 0.0
+        else:
+            percent = stage.get("percent")
+            value = float(percent) if percent is not None else 0.0
+            contribution = round(weight * value / 100.0, 2)
+            overall += contribution
+        stage["contribution_percent"] = contribution
+
+    active_stage = next(
+        (
+            str(stage.get("key") or "")
+            for stage in stages
+            if stage.get("status") == "running"
+        ),
+        "",
+    )
+    return {
+        "available": bool(stages),
+        "run_id": run.get("id"),
+        "run_status": run.get("status"),
+        "overall_percent": (
+            round(min(100.0, overall), 1) if participants else None
+        ),
+        "completed_stages": sum(
+            1
+            for stage in stages
+            if stage.get("status") in {"success", "no_change"}
+        ),
+        "total_stages": len(participants),
+        "active_stage": active_stage,
+        "stages": stages,
+    }
+
+
+def _index_runtime_view(
+    run: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if run is None:
+        return {"available": False}
+    runtime = (run.get("meta") or {}).get("index_runtime")
+    if not isinstance(runtime, dict) or not runtime:
+        return {"available": False}
+    payload = deepcopy(runtime)
+    payload.update(
+        {
+            "available": True,
+            "run_id": run.get("id"),
+            "run_status": run.get("status"),
+            "run_message": run.get("message") or "",
+            "started_at": runtime.get("started_at") or run.get("started_at"),
+            "finished_at": runtime.get("finished_at")
+            or run.get("finished_at"),
+        }
+    )
+    return payload
+
+
+_INDEX_MONTH_CACHE: Dict[str, Any] = {
+    "key": None,
+    "expires_at": 0.0,
+    "payload": None,
+}
+_INDEX_MONTH_CACHE_LOCK = threading.Lock()
+
+
+def _index_month_coverage_runtime(
+    settings: Settings,
+    session_factory,
+    index: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Fallback coverage view when no run-specific index_runtime exists."""
+
+    if session_factory is None:
+        return None
+    key = (
+        id(session_factory),
+        index.get("version_id"),
+        index.get("indexed"),
+        index.get("collection"),
+        index.get("model"),
+    )
+    now = time.monotonic()
+    with _INDEX_MONTH_CACHE_LOCK:
+        if (
+            _INDEX_MONTH_CACHE.get("key") == key
+            and now < float(_INDEX_MONTH_CACHE.get("expires_at") or 0)
+        ):
+            return deepcopy(_INDEX_MONTH_CACHE.get("payload"))
+    try:
+        from ..judgment_index import index_month_coverage
+
+        coverage = index_month_coverage(
+            session_factory,
+            version_id=index.get("version_id"),
+            collection=str(index.get("collection") or ""),
+            model=str(index.get("model") or ""),
+        )
+    except Exception:
+        logger.warning("無法查詢索引月份覆蓋", exc_info=True)
+        return None
+    months = coverage.get("months") or []
+    if not months:
+        return None
+    remaining = int(index.get("remaining") or 0)
+    payload = {
+        "available": True,
+        "coverage_only": True,
+        "run_id": None,
+        "run_status": "success" if remaining <= 0 else "partial",
+        "run_message": "目前 active collection 的索引覆蓋",
+        "version_id": index.get("version_id"),
+        "collection": index.get("collection"),
+        "alias": index.get("alias") or settings.judgment_vector_alias,
+        "build_mode": "active",
+        "model": index.get("model"),
+        "batch_size": None,
+        "expected_count": index.get("total"),
+        "embedding": {
+            "status": "unknown",
+            "hosts": [],
+            "selected": {},
+            "active": {},
+        },
+        "months": months,
+        "current": {},
+        "summary": {
+            "indexed": index.get("indexed"),
+            "total": index.get("total"),
+            "reused": None,
+            "embedded": None,
+            "points_upserted": None,
+        },
+        "status": "success" if remaining <= 0 else "partial",
+        "started_at": None,
+        "finished_at": index.get("latest_indexed_at"),
+    }
+    with _INDEX_MONTH_CACHE_LOCK:
+        _INDEX_MONTH_CACHE.update(
+            {"key": key, "expires_at": now + 60.0, "payload": deepcopy(payload)}
+        )
+    return payload
+
+
 def _database_metrics(session_factory) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "status": "unavailable",
@@ -475,7 +662,12 @@ def _database_metrics(session_factory) -> Dict[str, Any]:
     try:
         with session_factory() as session:
             result["judgment_count"] = int(
-                session.scalar(select(func.count()).select_from(JudgmentDocument)) or 0
+                session.scalar(
+                    select(func.count())
+                    .select_from(JudgmentDocument)
+                    .where(JudgmentDocument.is_current.is_(True))
+                )
+                or 0
             )
             grouped = session.execute(
                 select(
@@ -666,7 +858,10 @@ def _processed_archive_names(session_factory, runs: Sequence[Dict[str, Any]]) ->
         with session_factory() as session:
             values = session.scalars(
                 select(JudgmentDocument.source_archive)
-                .where(JudgmentDocument.source_archive != "")
+                .where(
+                    JudgmentDocument.source_archive != "",
+                    JudgmentDocument.is_current.is_(True),
+                )
                 .distinct()
             ).all()
         names.update(str(value) for value in values if value)
@@ -724,6 +919,7 @@ def _scan_local_archives(
         "data_dir": str(data_dir),
         "error": "",
         "items": items,
+        "processed_names": sorted(processed_names),
         "total": len(items),
         "processed": len(items) - len(unprocessed),
         "unprocessed": len(unprocessed),
@@ -1048,6 +1244,159 @@ def _local_archive_view(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+_JUDGMENT_MANIFEST_CACHE: Dict[str, Any] = {
+    "path": "",
+    "mtime": 0.0,
+    "payload": {},
+}
+
+
+def _judgment_download_manifest(settings: Settings) -> Dict[str, Any]:
+    path = (
+        Path(settings.judgment_data_dir).expanduser().resolve()
+        / "raw_rar"
+        / "download_manifest.json"
+    )
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    if (
+        _JUDGMENT_MANIFEST_CACHE.get("path") == str(path)
+        and float(_JUDGMENT_MANIFEST_CACHE.get("mtime") or 0) == mtime
+    ):
+        return _JUDGMENT_MANIFEST_CACHE.get("payload") or {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    _JUDGMENT_MANIFEST_CACHE.update(
+        {"path": str(path), "mtime": mtime, "payload": payload}
+    )
+    return payload
+
+
+def _archive_month(name: Any) -> str:
+    match = re.match(r"(\d{4})[-_]?(\d{2})", Path(str(name or "")).name)
+    if not match:
+        return ""
+    year, month = match.groups()
+    if not 1 <= int(month) <= 12:
+        return ""
+    return f"{year}{month}"
+
+
+def _import_month_timeline(
+    settings: Settings,
+    local: Dict[str, Any],
+    archives: Dict[str, Any],
+) -> Dict[str, Any]:
+    manifest = _judgment_download_manifest(settings)
+    manifest_months = [
+        item for item in (manifest.get("months") or []) if isinstance(item, dict)
+    ]
+    processed_names = set(local.get("processed_names") or [])
+    local_by_month: Dict[str, List[Dict[str, Any]]] = {}
+    for item in local.get("items") or []:
+        key = _archive_month(item.get("name"))
+        if key:
+            local_by_month.setdefault(key, []).append(item)
+    imported_by_month: Dict[str, List[str]] = {}
+    for name in processed_names:
+        key = _archive_month(name)
+        if key:
+            imported_by_month.setdefault(key, []).append(name)
+    active_month = ""
+    active_archive = ""
+    for item in archives.get("items") or []:
+        if item.get("status") == "running" or item.get("current_stage"):
+            active_month = _archive_month(item.get("name"))
+            active_archive = str(item.get("name") or "")
+            if active_month:
+                break
+
+    months: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def build_month(
+        key: str,
+        *,
+        manifest_item: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        locals_for_month = local_by_month.get(key) or []
+        local_names = [str(item.get("name") or "") for item in locals_for_month]
+        imported_names = sorted(imported_by_month.get(key) or [])
+        new_local = sorted(
+            name for name in local_names if name and name not in processed_names
+        )
+        manifest_status = str((manifest_item or {}).get("status") or "")
+        has_update = bool(imported_names) and bool(
+            new_local or manifest_status == "gray"
+        )
+        if has_update:
+            status = "gray"
+        elif imported_names:
+            status = "green"
+        else:
+            status = "red"
+        return {
+            "month": key,
+            "year": int(key[:4]),
+            "month_no": int(key[4:6]),
+            "status": status,
+            "imported": bool(imported_names),
+            "has_update": has_update,
+            "local_files": local_names,
+            "imported_files": imported_names,
+            "unimported_files": new_local,
+            "manifest_status": manifest_status,
+            "latest_filename": str((manifest_item or {}).get("filename") or ""),
+            "local_filename": str(
+                (manifest_item or {}).get("local_filename") or ""
+            ),
+            "latest_fileset_id": (manifest_item or {}).get("latest_fileset_id"),
+            "local_fileset_id": (manifest_item or {}).get("local_fileset_id"),
+            "active": bool(active_month and key == active_month),
+            "active_archive": active_archive if active_month == key else "",
+        }
+
+    for item in manifest_months:
+        key = str(item.get("month") or "").replace("-", "")
+        if len(key) != 6 or not key.isdigit() or key in seen:
+            continue
+        seen.add(key)
+        months.append(build_month(key, manifest_item=item))
+    for key in local_by_month:
+        if key in seen:
+            continue
+        seen.add(key)
+        months.append(build_month(key))
+    for key in imported_by_month:
+        if key in seen:
+            continue
+        seen.add(key)
+        months.append(build_month(key))
+    months.sort(
+        key=lambda item: (int(item.get("year") or 0), int(item.get("month_no") or 0)),
+        reverse=True,
+    )
+    summary = {"green": 0, "red": 0, "gray": 0}
+    for item in months:
+        status = str(item.get("status") or "")
+        if status in summary:
+            summary[status] += 1
+    return {
+        "months": months,
+        "summary": summary,
+        "total_months": len(months),
+        "active_month": active_month,
+        "active_archive": active_archive,
+        "manifest_available": bool(manifest_months),
+    }
+
+
 def _archives_for_snapshot(
     runs: Sequence[Dict[str, Any]],
     local: Dict[str, Any],
@@ -1152,6 +1501,7 @@ def build_processing_snapshot(
     runs, external_processes = _attach_external_runs(runs, index=index, now=now)
     local = _scan_local_archives(settings, session_factory, state_runs)
     archives = _archives_for_snapshot(runs, local)
+    import_timeline = _import_month_timeline(settings, local, archives)
 
     if database.get("status") != "operational":
         notices.append(
@@ -1249,17 +1599,105 @@ def build_processing_snapshot(
             }
         )
 
+    try:
+        update_state = update_status(session_factory)
+    except Exception:
+        logger.warning("無法讀取更新檢查狀態", exc_info=True)
+        update_state = {"sources": {}}
+    update_history_map: Dict[str, List[Dict[str, Any]]] = {}
+    for source_key in ("law", "order", "judgment"):
+        try:
+            update_history_map[source_key] = update_history(
+                session_factory, source_type=source_key, limit=20
+            )
+        except Exception:
+            logger.warning(
+                "無法讀取 %s 更新紀錄", source_key, exc_info=True
+            )
+            update_history_map[source_key] = []
+    service_run_map = {
+        "law_download": ("law", "download"),
+        "order_download": ("order", "download"),
+        "judgment_import": ("judgment", "import"),
+        "judgment_parquet": ("judgment", "parquet"),
+        "index_versions": ("judgment", "index"),
+    }
     workflow_entries = []
     workflow_runnable = not active_runs and not external_processes
+    update_source_map = {
+        "law_download": "law",
+        "order_download": "order",
+        "judgment_download": "judgment",
+    }
     for definition in workflow_catalog():
         workflow_active = _active_run(runs, kind=definition["kind"])
-        workflow_latest = _latest_run(runs, kind=definition["kind"])
+        service_branch, service_kind = service_run_map.get(
+            definition["id"], ("", "")
+        )
+        if service_kind:
+            history_runs = [
+                run
+                for run in runs
+                if run.get("kind") == service_kind
+                and (not service_branch or run.get("branch") == service_branch)
+            ]
+        else:
+            history_runs = [
+                run for run in runs if run.get("kind") == definition["kind"]
+            ]
+        history_runs = history_runs[:10]
+        workflow_latest = (
+            history_runs[0]
+            if history_runs
+            else _latest_run(runs, kind=definition["kind"])
+        )
+        service_active = (
+            _active_run(runs, branch=service_branch, kind=service_kind)
+            if service_kind
+            else None
+        )
+        if service_active is not None:
+            progress_run = service_active
+        elif workflow_active is not None:
+            progress_run = workflow_active
+        elif history_runs:
+            progress_run = history_runs[0]
+        else:
+            progress_run = workflow_latest
+        update_source = update_source_map.get(definition["id"], "")
+        update_record = (
+            (update_state.get("sources") or {}).get(update_source, {})
+            if update_source
+            else {}
+        )
+        index_runtime = None
+        if definition["id"] == "index_versions":
+            index_runtime = _index_runtime_view(progress_run)
+            if not index_runtime.get("available"):
+                coverage = _index_month_coverage_runtime(
+                    settings, session_factory, index
+                )
+                if coverage is not None:
+                    index_runtime = coverage
         workflow_entries.append(
             {
                 **definition,
                 "active_run": _public_run(workflow_active),
                 "last_run": _public_run(workflow_latest),
+                "recent_runs": [_public_run(run) for run in history_runs],
+                "progress": _workflow_progress(progress_run),
+                "index_runtime": index_runtime,
+                "import_timeline": (
+                    import_timeline
+                    if definition["id"] == "judgment_import"
+                    else None
+                ),
                 "can_run": bool(workflow_runnable),
+                "update_available": bool(
+                    update_record.get("update_available")
+                ),
+                "update_status": deepcopy(update_record),
+                "update_history": update_history_map.get(update_source, []),
             }
         )
 
@@ -1323,6 +1761,7 @@ def build_processing_snapshot(
         "active_runs": [_public_run(run) for run in active_runs],
         "recent_runs": [_public_run(run) for run in runs[:10]],
         "archives": archives,
+        "import_timeline": import_timeline,
         "timeline": _build_timeline(runs),
         "update": update,
         "capabilities": capabilities,

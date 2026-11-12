@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatNumber,
   icon,
+  notice,
   setBusy,
   statusBadge,
   toast,
@@ -227,6 +228,758 @@ function flowPointTimings(segments) {
     timings.set(segment.seq, { offset, duration, lap, cumulative });
   });
   return timings;
+}
+
+const RAG_PIPELINE_STAGES = [
+  {
+    key: "parsing",
+    label: "Parsing",
+    hint: "輸入長度、解析時間",
+    names: ["rag.parse_question"],
+    color: "#64748b",
+  },
+  {
+    key: "embedding",
+    label: "Embedding",
+    hint: "Model、Token、Batch、耗時",
+    names: ["rag.embed_query"],
+    color: "#3984c6",
+  },
+  {
+    key: "qdrant",
+    label: "Qdrant Search",
+    hint: "Collection、Filter、Top K、耗時",
+    names: ["rag.qdrant_search"],
+    color: "#d97706",
+  },
+  {
+    key: "reranker",
+    label: "Reranker",
+    hint: "Model、候選筆數、耗時",
+    names: ["rag.rerank"],
+    color: "#8b5cf6",
+  },
+  {
+    key: "context",
+    label: "Context",
+    hint: "Chunk 數、Token 數、耗時",
+    names: ["rag.context"],
+    fallbackNames: ["rag.fetch_documents", "rag.build_citations"],
+    color: "#64748b",
+  },
+  {
+    key: "llm",
+    label: "LLM",
+    hint: "Model、Input/Output Token、TTFT、耗時",
+    names: ["rag.llm_request"],
+    color: "#16a34a",
+  },
+];
+
+const RAG_STATUS_TONES = {
+  ok: "badge-ok",
+  warn: "badge-warn",
+  danger: "badge-danger",
+  info: "badge-info",
+  idle: "badge-neutral",
+};
+
+function ragTraceStatus(flow) {
+  const response = flow?.metadata?.rag_response || {};
+  const status = String(
+    response.status || flow?.metadata?.rag_status || flow?.status || "",
+  );
+  if (status === "operational" || status === "success") {
+    return { label: "Completed", tone: "ok" };
+  }
+  if (status === "retrieval_only") {
+    return { label: "Abstain", tone: "warn" };
+  }
+  if (status === "preview") {
+    return { label: "Preview", tone: "info" };
+  }
+  if (status === "failed" || status === "error") {
+    return { label: "Failed", tone: "danger" };
+  }
+  return { label: status || "Unknown", tone: "idle" };
+}
+
+function ragPipelineWindow(segment) {
+  const offset = Math.max(0, Number(segment?.offset_ms) || 0);
+  const duration = Math.max(0, Number(segment?.duration_ms) || 0);
+  const end = Math.max(
+    offset,
+    Number(segment?.end_offset_ms) || offset + duration,
+  );
+  return {
+    ...segment,
+    offset,
+    end,
+    duration: Math.max(duration, end - offset),
+  };
+}
+
+function buildRagPipeline(flow, rowDurationMs = 0) {
+  const segments = Array.isArray(flow?.segments)
+    ? [...flow.segments].sort(
+        (left, right) =>
+          Number(left.offset_ms || 0) - Number(right.offset_ms || 0),
+      )
+    : [];
+  const total = Math.max(
+    Number(flow?.total_ms) || 0,
+    Number(rowDurationMs) || 0,
+    ...segments.map((segment) => ragPipelineWindow(segment).end),
+    1,
+  );
+  const stages = RAG_PIPELINE_STAGES.map((definition) => {
+    let matched = segments.filter((segment) =>
+      definition.names.includes(segment.name),
+    );
+    if (!matched.length && definition.fallbackNames) {
+      matched = segments.filter((segment) =>
+        definition.fallbackNames.includes(segment.name),
+      );
+    }
+    const spans = matched.map(ragPipelineWindow);
+    const start = spans.length
+      ? Math.min(...spans.map((span) => span.offset))
+      : null;
+    const end = spans.length
+      ? Math.max(...spans.map((span) => span.end))
+      : null;
+    return {
+      ...definition,
+      spans,
+      start,
+      end,
+      duration: start === null ? null : end - start,
+    };
+  });
+  const loadSpans = [];
+  for (const stage of stages) {
+    if (stage.key !== "embedding" && stage.key !== "llm") continue;
+    for (const span of stage.spans) {
+      const metadata = span.metadata || {};
+      const rawLoad = Number(metadata.load_duration_ms);
+      const loadMs =
+        Number.isFinite(rawLoad) && rawLoad > 0 ? rawLoad : 0;
+      const requestDuration = Math.max(0, Number(span.duration) || 0);
+      loadSpans.push({
+        ...span,
+        offset: span.offset,
+        end: span.offset + loadMs,
+        duration: loadMs,
+        metadata: {
+          ...metadata,
+          source_stage: stage.label,
+          model_load_ms: loadMs,
+          request_duration_ms: requestDuration,
+          warm_duration_ms: Math.max(0, requestDuration - loadMs),
+          cold_start: loadMs >= 100,
+        },
+        params: {
+          ...(span.params || {}),
+          source_stage: stage.label,
+        },
+      });
+    }
+  }
+  if (loadSpans.length) {
+    const loadTotal = loadSpans.reduce(
+      (sum, span) => sum + span.duration,
+      0,
+    );
+    stages.push({
+      key: "model_load",
+      label: "Model Load",
+      hint: "冷啟動載入 vs 熱啟動推論",
+      color: "#0ea5e9",
+      spans: loadSpans,
+      start: Math.min(...loadSpans.map((span) => span.offset)),
+      end: Math.max(...loadSpans.map((span) => span.end)),
+      duration: loadTotal,
+    });
+  }
+  const tracedEnd = Math.max(
+    0,
+    ...stages.flatMap((stage) => stage.spans.map((span) => span.end)),
+  );
+  const responseMeta = flow?.metadata?.rag_response || {};
+  const traceStatus = ragTraceStatus(flow);
+  const responseStart = Math.min(total, tracedEnd);
+  stages.push({
+    key: "response",
+    label: "Response",
+    hint: "總耗時、引用數、成功或 Abstain",
+    color: "#0f766e",
+    spans: [
+      {
+        offset: responseStart,
+        end: total,
+        duration: Math.max(0, total - responseStart),
+        status: traceStatus.tone === "danger" ? "error" : "ok",
+        metadata: responseMeta,
+        params: {},
+        started_at: flow?.started_at,
+        finished_at: flow?.finished_at,
+      },
+    ],
+    start: responseStart,
+    end: total,
+    duration: Math.max(0, total - responseStart),
+    responseMetadata: responseMeta,
+  });
+  return {
+    total,
+    stages,
+    response: responseMeta,
+    traceStatus,
+    requestId: flow?.request_id || "",
+    startedAt: flow?.started_at,
+    finishedAt: flow?.finished_at,
+    client: flow?.client || {},
+    models: Array.isArray(flow?.summary?.models) ? flow.summary.models : [],
+  };
+}
+
+function ragStageDetailEntries(stage) {
+  const entries = [];
+  const push = (label, value) => {
+    if (value === null || value === undefined || value === "") return;
+    entries.push([label, String(value)]);
+  };
+  const first = stage.spans[0] || null;
+  if (!first) {
+    push("狀態", "此紀錄沒有這個 span");
+    return entries;
+  }
+  const params = first.params || {};
+  const metadata = first.metadata || {};
+  const spanHost = ragSpanHost(first);
+  const spanModelLabel = ragSpanModelLabel(first);
+  if (stage.key === "response") {
+    push("Trace 狀態", stage.responseMetadata.status || "—");
+    push("Answer source", stage.responseMetadata.answer_source || "—");
+    push("Abstain", stage.responseMetadata.abstain ? "是" : "否");
+    push("引用總數", stage.responseMetadata.citation_count ?? "—");
+    push(
+      "判決／法規引用",
+      `${stage.responseMetadata.judgment_citations ?? "—"} / ${
+        stage.responseMetadata.law_citations ?? "—"
+      }`,
+    );
+    push("總耗時", formatDuration(stage.duration));
+    return entries;
+  }
+  push(
+    "開始",
+    `${formatFlowClock(first.started_at) || "—"} · +${first.offset.toFixed(
+      1,
+    )} ms`,
+  );
+  push(
+    "結束",
+    `${formatFlowClock(first.finished_at) || "—"} · +${first.end.toFixed(
+      1,
+    )} ms`,
+  );
+  push("耗時", formatDuration(first.duration));
+  if (stage.key === "parsing") {
+    push("輸入長度", metadata.input_length ?? params.input_length);
+    push("正規化長度", metadata.normalized_length ?? params.normalized_length);
+    push("移除空白", metadata.trimmed_chars);
+  } else if (stage.key === "embedding") {
+    push("Model", spanModelLabel || metadata.model || params.model);
+    push("主機", spanHost);
+    push("Endpoint", metadata.active_base_url || metadata.base_url);
+    push("Input tokens", metadata.prompt_eval_count);
+    push("Batch", metadata.batch);
+    push("向量維度", metadata.dimensions);
+    push("Fallback", metadata.fallback_used ? "是" : "否");
+  } else if (stage.key === "qdrant") {
+    push("Collection", metadata.collection || params.collection);
+    if (metadata.filter) push("Filter", formatParamValue(metadata.filter));
+    push("Top K", metadata.top_k ?? params.limit);
+    push("Hits", metadata.hits);
+    push("Unique judgments", metadata.unique_judgments);
+    push("Top score", metadata.top_score);
+  } else if (stage.key === "reranker") {
+    push("Model", spanModelLabel || metadata.model || params.model);
+    push("主機", spanHost);
+    push("候選筆數", metadata.candidates);
+    push("選用筆數", metadata.selected);
+  } else if (stage.key === "context") {
+    push("Chunks", metadata.chunks);
+    push("判決 chunks", metadata.judgment_chunks);
+    push("法規 chunks", metadata.law_chunks);
+    push("Token 估算", metadata.token_estimate);
+    push("Context 字元", metadata.context_chars);
+    push("文件數", metadata.documents);
+  } else if (stage.key === "llm") {
+    push("Model", spanModelLabel || metadata.model || params.model);
+    push("主機", spanHost);
+    push("Endpoint", metadata.base_url || params.url);
+    push("Input tokens", metadata.input_tokens);
+    push("Output tokens", metadata.output_tokens);
+    push("TTFT", metadata.ttft_ms === null || metadata.ttft_ms === undefined
+      ? "—"
+      : formatDuration(metadata.ttft_ms));
+    push(
+      "API 總耗時",
+      metadata.total_duration_ms === null ||
+        metadata.total_duration_ms === undefined
+        ? "—"
+        : formatDuration(metadata.total_duration_ms),
+    );
+    push(
+      "載入耗時",
+      metadata.load_duration_ms === null ||
+        metadata.load_duration_ms === undefined
+        ? "—"
+        : formatDuration(metadata.load_duration_ms),
+    );
+    push("Strict retry", metadata.strict ? "是" : "否");
+  } else if (stage.key === "model_load") {
+    push("Model", spanModelLabel || metadata.model || params.model);
+    push("主機", spanHost);
+    push("來源階段", metadata.source_stage);
+    push("冷啟動", metadata.cold_start ? "是" : "否（熱啟動）");
+    push(
+      "模型呼叫總耗時",
+      metadata.request_duration_ms === null ||
+        metadata.request_duration_ms === undefined
+        ? "—"
+        : formatDuration(metadata.request_duration_ms),
+    );
+    push(
+      "載入耗時",
+      metadata.model_load_ms === null ||
+        metadata.model_load_ms === undefined
+        ? "—"
+        : formatDuration(metadata.model_load_ms),
+    );
+    push(
+      "扣除載入後流程時間",
+      metadata.warm_duration_ms === null ||
+        metadata.warm_duration_ms === undefined
+        ? "—"
+        : formatDuration(metadata.warm_duration_ms),
+    );
+    if (
+      Number(metadata.request_duration_ms) > 0 &&
+      Number(metadata.model_load_ms) >= 0
+    ) {
+      const ratio =
+        (Number(metadata.model_load_ms) /
+          Number(metadata.request_duration_ms)) *
+        100;
+      push("載入占比", `${ratio.toFixed(ratio >= 10 ? 0 : 1)}%`);
+    }
+    if (metadata.eval_duration_ms !== null && metadata.eval_duration_ms !== undefined) {
+      push("推論耗時", formatDuration(metadata.eval_duration_ms));
+    }
+  } else if (stage.key === "segment" || stage.key === "test_stage") {
+    push("Model", spanModelLabel || metadata.model || params.model);
+    push("狀態", metadata.status || first.status);
+    if (stage.key === "test_stage") {
+      push(
+        "進度",
+        metadata.progress === null || metadata.progress === undefined
+          ? ""
+          : `${Number(metadata.progress) || 0}%`,
+      );
+      if (first.error) push("錯誤", first.error);
+    } else {
+      if (first.error) push("錯誤", first.error);
+      for (const [key, value] of Object.entries(params).slice(0, 10)) {
+        push(key, formatParamValue(value));
+      }
+    }
+  }
+  if (stage.spans.length > 1) {
+    if (stage.key === "model_load") {
+      push(
+        "各模型載入",
+        stage.spans
+          .map(
+            (span) =>
+              `${span.metadata?.source_stage || "model"} ${ragSpanModelLabel(
+                span,
+              )} ${formatDuration(span.metadata?.model_load_ms || 0)}`,
+          )
+          .join(" · "),
+      );
+    } else {
+      push("Span 數", stage.spans.length);
+      push(
+        "Span 明細",
+        stage.spans
+          .map(
+            (span, index) =>
+              `#${index + 1} +${span.offset.toFixed(0)}ms/${formatDuration(
+                span.duration,
+              )}`,
+          )
+          .join(" · "),
+      );
+    }
+  }
+  if (first.module) push("Module", first.module);
+  if (first.function) push("Function", first.function);
+  return entries;
+}
+
+function ragHostLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text.includes("://") ? text : `http://${text}`);
+    return url.hostname || text;
+  } catch (error) {
+    return text;
+  }
+}
+
+function ragSpanHost(span) {
+  const metadata = span?.metadata || {};
+  const explicit = String(metadata.provider_name || "").trim();
+  if (explicit) return explicit;
+  const raw = String(
+    metadata.active_base_url ||
+      metadata.base_url ||
+      span?.params?.url ||
+      "",
+  ).trim();
+  return ragHostLabel(raw);
+}
+
+function ragSpanModel(span) {
+  const metadata = span?.metadata || {};
+  return String(metadata.model || span?.params?.model || "").trim();
+}
+
+function ragSpanModelLabel(span) {
+  const host = ragSpanHost(span);
+  const model = ragSpanModel(span);
+  if (!model) return "";
+  return host ? `${host}:${model}` : model;
+}
+
+function ragStageModelLabels(stage) {
+  const labels = new Set();
+  for (const span of stage?.spans || []) {
+    const label = ragSpanModelLabel(span);
+    if (label) labels.add(label);
+  }
+  return [...labels];
+}
+
+function ragSpanTooltip(stage, span) {
+  const entries = ragStageDetailEntries({ ...stage, spans: [span] });
+  return [String(stage.label || ""), ...entries.map(([label, value]) => `${label}: ${value}`)]
+    .join("\n");
+}
+
+function renderRagPipelineStage(stage, total) {
+  const spans = stage.spans || [];
+  const modelLabels = ragStageModelLabels(stage);
+  const lanes = Math.max(1, Math.min(4, spans.length));
+  const multi = spans.length > 1;
+  const trackHeight = multi ? Math.max(12, lanes * 7) : 12;
+  const bars = spans
+    .slice(0, 4)
+    .map((span, index) => {
+      if (Number(span.duration) <= 0) return "";
+      const left = Math.max(
+        0,
+        Math.min(100, (span.offset / total) * 100),
+      );
+      const width = Math.max(
+        0.35,
+        Math.min(100 - left, (span.duration / total) * 100),
+      );
+      const top = multi ? index * 7 : 0;
+      const height = multi ? 6 : 12;
+      const tip = ragSpanTooltip(stage, span);
+      return `<span class="rag-wf-bar" style="left:${left.toFixed(
+        3,
+      )}%;width:${width.toFixed(3)}%;top:${top}px;height:${height}px"
+        data-rag-wf-tip="${escapeHtml(tip)}"
+        aria-label="${escapeHtml(tip)}" role="img"></span>`;
+    })
+    .join("");
+  const details = ragStageDetailEntries(stage)
+    .map(
+      ([label, value]) =>
+        `<span class="rag-wf-detail"><span>${escapeHtml(
+          label,
+        )}</span><strong>${escapeHtml(value)}</strong></span>`,
+    )
+    .join("");
+  const statusClass = !spans.length
+    ? "is-missing"
+    : spans.some((span) => span.status === "error")
+      ? "is-error"
+      : "";
+  const duration = spans.length
+    ? formatDuration(stage.duration)
+    : "未記錄";
+  return `<details class="rag-wf-stage ${statusClass}" style="--stage-color:${
+    stage.color
+  }">
+    <summary class="rag-wf-stage-summary">
+      <span class="rag-wf-stage-head">
+        <span class="rag-wf-stage-label">
+          <i aria-hidden="true"></i>
+          <span><strong>${escapeHtml(stage.label)}</strong><small>${escapeHtml(
+            stage.hint,
+          )}</small>${
+            modelLabels.length
+              ? `<small class="rag-wf-model-line">${escapeHtml(
+                  modelLabels.join(" · "),
+                )}</small>`
+              : ""
+          }</span>
+        </span>
+        <span class="rag-wf-stage-meta">${duration} · ${
+          spans.length ? `${spans.length} span` : "—"
+        } <span class="rag-wf-chevron">${icon("chevronRight", 12)}</span></span>
+      </span>
+      <span class="rag-wf-track" style="height:${trackHeight}px">${bars}</span>
+    </summary>
+    <div class="rag-wf-details">${details}</div>
+  </details>`;
+}
+
+function ragPipelineSummaryMarkup(pipeline, serverDurationMs, loading = false) {
+  const response = pipeline.response || {};
+  const client = pipeline.client || {};
+  const models = pipeline.models || [];
+  return `<div class="rag-wf-summary">
+      <span>總耗時 <strong>${escapeHtml(formatDuration(pipeline.total))}</strong></span>
+      <span>Server <strong>${escapeHtml(
+        formatDuration(serverDurationMs),
+      )}</strong></span>
+      ${
+        client.total_ms
+          ? `<span>Client <strong>${escapeHtml(
+              formatDuration(client.total_ms),
+            )}</strong></span>`
+          : ""
+      }
+      ${
+        client.render_ms !== undefined
+          ? `<span>Render <strong>${escapeHtml(
+              formatDuration(client.render_ms),
+            )}</strong></span>`
+          : ""
+      }
+      <span>引用 <strong>${escapeHtml(
+        String(response.citation_count ?? "—"),
+      )}</strong></span>
+      <span>Abstain <strong>${response.abstain ? "是" : "否"}</strong></span>
+      ${
+        models.length
+          ? `<span>Model <strong>${escapeHtml(models.join(" · "))}</strong></span>`
+          : ""
+      }
+      ${loading ? `<span class="rag-wf-updating">更新中…</span>` : ""}
+    </div>`;
+}
+
+export function renderWaterfallStages(
+  stages,
+  total,
+  hint = "點選任一階段，查看參數、Token、TTFT、開始／結束時間與來源數量。Waterfall 以絕對 offset 定位，平行執行的 span 會依實際時間重疊顯示。",
+) {
+  return `<div class="rag-wf-axis"><span>0 ms</span><span>${escapeHtml(
+    formatDuration(total),
+  )}</span></div>
+    <div class="rag-wf-stages">${(stages || [])
+      .map((stage) => renderRagPipelineStage(stage, total))
+      .join("")}</div>
+    <p class="rag-wf-hint">${escapeHtml(hint)}</p>`;
+}
+
+function ragPipelineStagesMarkup(pipeline) {
+  return renderWaterfallStages(pipeline.stages, pipeline.total);
+}
+
+export function renderRagPipelineWaterfall(
+  flow,
+  { serverDurationMs = 0, loading = false, embedded = false } = {},
+) {
+  if (!flow || typeof flow !== "object") return "";
+  const pipeline = buildRagPipeline(flow, serverDurationMs);
+  const status = pipeline.traceStatus;
+  return `<section class="report-card rag-wf-card${
+    embedded ? " rag-wf-embedded" : ""
+  }">
+    <div class="rag-wf-head">
+      <div class="report-title-group">
+        <div class="report-kicker">RAG PIPELINE WATERFALL</div>
+        <div class="report-title">Single Query Trace
+          <span class="badge ${
+            RAG_STATUS_TONES[status.tone] || RAG_STATUS_TONES.idle
+          }">${escapeHtml(status.label)}</span>
+        </div>
+        <div class="report-sub">Trace ID:
+          <span class="mono">${escapeHtml(pipeline.requestId || "—")}</span>
+          · ${escapeHtml(formatDateTime(pipeline.startedAt))}
+        </div>
+      </div>
+      <div class="rag-wf-actions">
+        <a class="btn btn-secondary btn-sm" href="#/performance">
+          ${icon("activity", 14)}<span>完整 Flow</span>
+        </a>
+      </div>
+    </div>
+    ${ragPipelineSummaryMarkup(pipeline, serverDurationMs, loading)}
+    ${ragPipelineStagesMarkup(pipeline)}
+  </section>`;
+}
+
+let ragWaterfallTooltip = null;
+
+function ensureRagWaterfallTooltip() {
+  if (ragWaterfallTooltip) return ragWaterfallTooltip;
+  ragWaterfallTooltip = document.createElement("div");
+  ragWaterfallTooltip.className = "rag-wf-tooltip";
+  ragWaterfallTooltip.hidden = true;
+  document.body.appendChild(ragWaterfallTooltip);
+  return ragWaterfallTooltip;
+}
+
+function hideRagWaterfallTooltip() {
+  if (ragWaterfallTooltip) ragWaterfallTooltip.hidden = true;
+}
+
+function positionRagWaterfallTooltip(event) {
+  if (!ragWaterfallTooltip || ragWaterfallTooltip.hidden) return;
+  const gap = 14;
+  const padding = 10;
+  const rect = ragWaterfallTooltip.getBoundingClientRect();
+  let left = event.clientX + gap;
+  let top = event.clientY + gap;
+  if (left + rect.width > window.innerWidth - padding) {
+    left = event.clientX - rect.width - gap;
+  }
+  if (top + rect.height > window.innerHeight - padding) {
+    top = event.clientY - rect.height - gap;
+  }
+  ragWaterfallTooltip.style.left = `${Math.max(padding, left)}px`;
+  ragWaterfallTooltip.style.top = `${Math.max(padding, top)}px`;
+}
+
+document.addEventListener("pointerover", (event) => {
+  const bar = event.target.closest?.(".rag-wf-bar[data-rag-wf-tip]");
+  if (!bar) return;
+  const tooltip = ensureRagWaterfallTooltip();
+  const text = bar.dataset.ragWfTip || "";
+  if (!text) return;
+  tooltip.textContent = text;
+  tooltip.hidden = false;
+  positionRagWaterfallTooltip(event);
+});
+
+document.addEventListener("pointermove", (event) => {
+  if (!ragWaterfallTooltip || ragWaterfallTooltip.hidden) return;
+  if (!event.target.closest?.(".rag-wf-bar[data-rag-wf-tip]")) {
+    hideRagWaterfallTooltip();
+    return;
+  }
+  positionRagWaterfallTooltip(event);
+});
+
+document.addEventListener("pointerout", (event) => {
+  const bar = event.target.closest?.(".rag-wf-bar[data-rag-wf-tip]");
+  if (!bar) return;
+  const next = event.relatedTarget;
+  if (next instanceof Node && bar.contains(next)) return;
+  hideRagWaterfallTooltip();
+});
+
+window.addEventListener("scroll", hideRagWaterfallTooltip, {
+  capture: true,
+  passive: true,
+});
+
+function renderRagPipelinePanel(records, selectedId, loading, error) {
+  if (error && !records.length) {
+    return `<div class="report-card rag-wf-card">
+      ${notice({
+        tone: "danger",
+        title: "RAG Pipeline 讀取失敗",
+        text: escapeHtml(error.message || "請確認後端服務是否啟動。"),
+      })}
+      <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
+        <button class="btn btn-secondary btn-sm" type="button" data-action="refresh-rag-waterfall">${icon(
+          "refresh",
+          14,
+        )}<span>重試</span></button>
+      </div>
+    </div>`;
+  }
+  if (!records.length) {
+    return `<div class="report-card rag-wf-card">
+      ${emptyState({
+        iconName: "activity",
+        title: loading ? "讀取 RAG Pipeline…" : "尚無 RAG Pipeline 紀錄",
+        text: loading
+          ? "正在整理最近的 RAG 問答 Trace。"
+          : "產生新的 RAG 問答後，這裡會顯示 Parsing、Embedding、Qdrant、Context、LLM 與 Response 的 waterfall。",
+      })}
+    </div>`;
+  }
+  const selected =
+    records.find((record) => String(record.id) === String(selectedId)) ||
+    records[0];
+  const flow = selected.flow && typeof selected.flow === "object"
+    ? selected.flow
+    : {};
+  const pipeline = buildRagPipeline(flow, selected.duration_ms);
+  const status = pipeline.traceStatus;
+  const traceOptions = records
+    .map((record) => {
+      const recordStatus = ragTraceStatus(record.flow || {});
+      return `<option value="${escapeHtml(String(record.id))}" ${
+        String(record.id) === String(selected.id) ? "selected" : ""
+      }>#${escapeHtml(String(record.id))} · ${escapeHtml(
+        formatDateTime(record.started_at),
+      )} · ${escapeHtml(formatDuration(record.duration_ms))} · ${escapeHtml(
+        recordStatus.label,
+      )}</option>`;
+    })
+    .join("");
+  return `<section class="report-card rag-wf-card">
+    <div class="rag-wf-head">
+      <div class="report-title-group">
+        <div class="report-kicker">RAG PIPELINE WATERFALL</div>
+        <div class="report-title">Single Query Trace
+          <span class="badge ${
+            RAG_STATUS_TONES[status.tone] || RAG_STATUS_TONES.idle
+          }">${escapeHtml(status.label)}</span>
+        </div>
+        <div class="report-sub">Trace ID:
+          <span class="mono">${escapeHtml(
+            pipeline.requestId || selected.request_id || "—",
+          )}</span>
+          · ${escapeHtml(formatDateTime(selected.started_at))}
+        </div>
+      </div>
+      <div class="rag-wf-actions">
+        <label class="rag-wf-select">Trace
+          <select class="select" data-rag-trace-select aria-label="選擇 RAG Trace">${traceOptions}</select>
+        </label>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="refresh-rag-waterfall">
+          ${icon("refresh", 14)}<span>重新整理</span>
+        </button>
+      </div>
+    </div>
+    ${ragPipelineSummaryMarkup(pipeline, selected.duration_ms, loading)}
+    ${ragPipelineStagesMarkup(pipeline)}
+  </section>`;
 }
 
 function renderFlowSegment(segment, totalDuration, depths, timings) {
@@ -683,6 +1436,58 @@ function renderPerfPagination(result) {
   </div>`;
 }
 
+function flowSegmentColor(segment) {
+  const module = String(segment?.module || "");
+  if (module.includes("static") || module.includes("frontend")) return "#65a30d";
+  if (module.includes("judgment.rag")) return "#8b5cf6";
+  if (module.includes("judgment.web.app")) return "#3b82f6";
+  if (module.includes("judgment.web.query")) return "#d97706";
+  if (module.includes("judgment.judgment_index")) return "#0d9488";
+  return "#64748b";
+}
+
+function flowSegmentStage(segment) {
+  const window = ragPipelineWindow(segment);
+  const depth = Math.max(0, Math.min(8, Number(segment.depth) || 0));
+  return {
+    key: "segment",
+    label: `${"› ".repeat(depth)}${segment.name || "unnamed"}`,
+    hint: [segment.module || "—", segment.function || "—"].join(" · "),
+    color: flowSegmentColor(segment),
+    spans: [
+      {
+        ...window,
+        status: segment.status || "ok",
+        error: segment.error,
+        metadata: segment.metadata || {},
+        params: segment.params || {},
+        started_at: segment.started_at,
+        finished_at: segment.finished_at,
+      },
+    ],
+    start: window.offset,
+    end: window.end,
+    duration: window.duration,
+  };
+}
+
+export function buildFlowWaterfallStages(segments) {
+  return (segments || []).map(flowSegmentStage);
+}
+
+function flowWaterfallTotal(segments, fallback = 0) {
+  return Math.max(
+    Number(fallback) || 0,
+    ...(segments || []).map(
+      (segment) =>
+        Number(segment.end_offset_ms) ||
+        (Number(segment.offset_ms) || 0) +
+          (Number(segment.duration_ms) || 0),
+    ),
+    1,
+  );
+}
+
 function renderFlowRecord(row, index) {
   const flow = row.flow && typeof row.flow === "object" ? row.flow : null;
   const segments = Array.isArray(flow?.segments)
@@ -722,8 +1527,6 @@ function renderFlowRecord(row, index) {
     ),
     1,
   );
-  const depths = segmentDepths(segments);
-  const timings = flowPointTimings(segments);
   return `<details class="perf-record" ${index === 0 ? "open" : ""}>
     <summary class="perf-record-summary">
       <span class="perf-record-id">#${escapeHtml(String(row.id))}</span>
@@ -757,7 +1560,7 @@ function renderFlowRecord(row, index) {
         <span><strong>Flow</strong> ${segments.length} 段</span>
         ${
           segments.length
-            ? `<span><strong>點位</strong> 區間＝下一點開始－本點開始；累計＝第一點到本點結束，最後一點為總時間</span>`
+            ? `<span><strong>Waterfall</strong> 每個 segment 以絕對 offset 定位、可點選展開參數</span>`
             : ""
         }
       </div>
@@ -771,14 +1574,11 @@ function renderFlowRecord(row, index) {
       }
       ${
         segments.length
-          ? `<div class="flow-axis"><span>0 ms</span><span>${formatDuration(
+          ? renderWaterfallStages(
+              buildFlowWaterfallStages(segments),
               totalDuration,
-            )}</span></div>
-            <div class="flow-timeline">${segments
-              .map((segment) =>
-                renderFlowSegment(segment, totalDuration, depths, timings),
-              )
-              .join("")}</div>`
+              "此 Flow 使用與 RAG Pipeline 相同的 waterfall；每個 segment 以絕對 offset 定位，點選可查看參數、module／function、開始／結束時間與錯誤。",
+            )
           : `<div class="perf-no-flow">此紀錄沒有 flow 明細（可能是舊資料或 CLI 紀錄）。${
               row.params_text && row.params_text !== "{}"
                 ? `<pre>${escapeHtml(row.params_text)}</pre>`
@@ -824,6 +1624,101 @@ function testStepStatusText(status) {
     skipped: "略過",
   };
   return labels[status] || status || "未知";
+}
+
+const TEST_STAGE_COLORS = {
+  embedding: "#3984c6",
+  retrieval: "#d97706",
+  context: "#64748b",
+  llm: "#16a34a",
+  validation: "#8b5cf6",
+};
+
+function buildTestFlowWaterfall(run, steps) {
+  const runStarted = Date.parse(run.started_at || "");
+  const now = Date.now();
+  const order = Array.isArray(run.stage_order)
+    ? [...run.stage_order]
+    : Object.keys(TEST_STAGE_LABELS);
+  for (const step of steps) {
+    if (step.stage && !order.includes(step.stage)) order.push(step.stage);
+  }
+  const stages = [];
+  let maxEnd = 0;
+  for (const stage of order) {
+    const stageSteps = steps.filter((step) => step.stage === stage);
+    if (!stageSteps.length) continue;
+    const spans = stageSteps.map((step) => {
+      const started = Date.parse(step.started_at || "");
+      const offset =
+        Number.isFinite(runStarted) && Number.isFinite(started)
+          ? Math.max(0, started - runStarted)
+          : 0;
+      let duration = Math.max(0, Number(step.duration_ms) || 0);
+      if (
+        step.status === "running" &&
+        Number.isFinite(started)
+      ) {
+        duration = Math.max(duration, now - started);
+      }
+      const end = offset + duration;
+      maxEnd = Math.max(maxEnd, end);
+      return {
+        offset,
+        end,
+        duration,
+        status:
+          step.status === "failed"
+            ? "error"
+            : step.status === "running"
+              ? "running"
+              : "ok",
+        started_at: step.started_at,
+        finished_at: step.finished_at,
+        error: step.error_message,
+        metadata: {
+          ...(step.details || {}),
+          model: step.model,
+          status: step.status,
+          progress: Number(step.progress) || 0,
+          module: step.module,
+          function: step.function,
+        },
+        params: {
+          model: step.model,
+        },
+      };
+    });
+    const totalDuration = spans.reduce(
+      (sum, span) => sum + span.duration,
+      0,
+    );
+    stages.push({
+      key: "test_stage",
+      label: TEST_STAGE_LABELS[stage] || stage,
+      hint: `${spans.length} 個程序`,
+      color: TEST_STAGE_COLORS[stage] || "#64748b",
+      spans,
+      start: spans.length
+        ? Math.min(...spans.map((span) => span.offset))
+        : null,
+      end: spans.length
+        ? Math.max(...spans.map((span) => span.end))
+        : null,
+      duration: totalDuration,
+    });
+  }
+  const runningElapsed =
+    run.status === "running" && Number.isFinite(runStarted)
+      ? Math.max(0, now - runStarted)
+      : 0;
+  const total = Math.max(
+    Number(run.total_ms) || 0,
+    runningElapsed,
+    maxEnd,
+    1,
+  );
+  return { stages, total };
 }
 
 function renderTestFlowStep(step) {
@@ -1040,22 +1935,11 @@ export function renderTestFlowPanel(run, runs, selectedRunId, viewOptions = {}) 
   }
 
   const steps = Array.isArray(run.steps) ? run.steps : [];
-  const byStage = new Map();
-  for (const step of steps) {
-    if (!byStage.has(step.stage)) byStage.set(step.stage, []);
-    byStage.get(step.stage).push(step);
-  }
-  const order = Array.isArray(run.stage_order)
-    ? run.stage_order
-    : Object.keys(TEST_STAGE_LABELS);
-  const stages = order
-    .map((stage) => renderTestFlowStage(stage, byStage.get(stage) || []))
-    .join("");
+  const waterfall = buildTestFlowWaterfall(run, steps);
   const models = run.models || {};
-  const stageTime = testStageTimeEntries(run, steps);
   const totalTimeLabel =
     run.status === "running"
-      ? `${formatDuration(stageTime.total)}（估算）`
+      ? `${formatDuration(waterfall.total)}（估算）`
       : formatDuration(run.total_ms);
   const primaryStep =
     steps.find(
@@ -1092,22 +1976,15 @@ export function renderTestFlowPanel(run, runs, selectedRunId, viewOptions = {}) 
       <span><strong>階段</strong> ${escapeHtml(run.stage_label || run.stage || "—")}</span>
     </div>
     ${answerBlock}
-    <div class="test-flow-stages">${stages || `<p class="muted">此測試沒有區段資料。</p>`}</div>
-    <div class="test-flow-total">
-      <div class="test-flow-total-head">
-        <span>總流程進度</span>
-        <span>${Number(run.progress) || 0}%</span>
-      </div>
-      <div class="test-flow-track is-total ${
-        run.status === "running" ? "is-running" : ""
-      }">
-        <span class="test-flow-bar is-total" style="width:${Math.max(
-          0,
-          Math.min(100, Number(run.progress) || 0),
-        )}%"></span>
-      </div>
-    </div>
-    ${renderTestFlowTime(run, steps)}
+    ${
+      waterfall.stages.length
+        ? renderWaterfallStages(
+            waterfall.stages,
+            waterfall.total,
+            "測試 Flow 使用與 RAG Pipeline 相同的 waterfall；每個程序以絕對 offset 定位，點選可查看模型、狀態、進度、module／function 與錯誤。",
+          )
+        : `<p class="muted">此測試沒有區段資料。</p>`
+    }
     <div class="test-flow-foot">
       <span>${
         run.status === "running"
@@ -1208,6 +2085,11 @@ export async function render(root, ctx) {
   let page = 1;
   let pageSize = 25;
   let result = null;
+  let pipelineRecords = [];
+  let pipelineSelectedId = "";
+  let pipelineLoading = false;
+  let pipelineError = null;
+  let pipelineLoaded = false;
 
   root.innerHTML = `<section class="page data-page performance-page">
     <div class="page-header">
@@ -1235,6 +2117,10 @@ export async function render(root, ctx) {
           <button class="status-tab is-active" type="button" data-performance-tab="overview" aria-current="page">
             <span class="status-tab-icon">${icon("activity", 15)}</span>
             <span class="status-tab-copy"><strong>效能總覽</strong><small>Flow、區段耗時與索引效能</small></span>
+          </button>
+          <button class="status-tab" type="button" data-performance-tab="pipeline">
+            <span class="status-tab-icon">${icon("activity", 15)}</span>
+            <span class="status-tab-copy"><strong>RAG Pipeline</strong><small>Span waterfall、Token 與 TTFT</small></span>
           </button>
           <button class="status-tab" type="button" data-performance-tab="benchmark">
             <span class="status-tab-icon">${icon("brain", 15)}</span>
@@ -1275,6 +2161,7 @@ export async function render(root, ctx) {
             </section>
           </div>
         </div>
+        <div id="performance-panel-pipeline" hidden></div>
         <div id="performance-panel-benchmark" hidden></div>
       </section>
     </div>
@@ -1284,11 +2171,13 @@ export async function render(root, ctx) {
   const form = root.querySelector("#performance-filter-form");
   const flowBox = root.querySelector("#performance-test-flow");
   const reportBox = root.querySelector("#performance-report");
+  const pipelineBox = root.querySelector("#performance-panel-pipeline");
   const metaBadge = root.querySelector("#performance-meta");
   const refreshButton = root.querySelector("#performance-refresh");
   const performanceTabs = [...root.querySelectorAll("[data-performance-tab]")];
   const performancePanels = {
     overview: root.querySelector("#performance-panel-overview"),
+    pipeline: root.querySelector("#performance-panel-pipeline"),
     benchmark: root.querySelector("#performance-panel-benchmark"),
   };
   let activePerformanceTab = "overview";
@@ -1306,6 +2195,10 @@ export async function render(root, ctx) {
     }
     if (tab === "benchmark") {
       metaBadge.textContent = "BENCHMARK · RAG";
+    } else if (tab === "pipeline") {
+      metaBadge.textContent = "PERFORMANCE · RAG WATERFALL";
+    } else if (result) {
+      metaBadge.textContent = `PERFORMANCE · ${formatNumber(result.total)} 筆`;
     }
   };
 
@@ -1313,15 +2206,76 @@ export async function render(root, ctx) {
     onNavigate: (tab) => syncPerformanceTab(tab),
   });
 
+  const paintPipeline = () => {
+    if (!pipelineBox) return;
+    pipelineBox.innerHTML = renderRagPipelinePanel(
+      pipelineRecords,
+      pipelineSelectedId,
+      pipelineLoading,
+      pipelineError,
+    );
+  };
+
+  const loadPipeline = async ({ force = false } = {}) => {
+    if (disposed || pipelineLoading) return;
+    if (pipelineLoaded && !force) {
+      paintPipeline();
+      return;
+    }
+    pipelineLoading = true;
+    if (!pipelineRecords.length) paintPipeline();
+    try {
+      const response = await api.performance({ keyword: "/api/rag" }, 1, 50);
+      if (disposed) return;
+      const rows = (Array.isArray(response.rows) ? response.rows : []).filter(
+        (row) =>
+          row.flow &&
+          (String(row.path || "").includes("/api/rag") ||
+            String(row.process || "").includes("RAG")),
+      );
+      pipelineRecords = rows;
+      if (
+        !pipelineSelectedId ||
+        !rows.some(
+          (row) => String(row.id) === String(pipelineSelectedId),
+        )
+      ) {
+        pipelineSelectedId = rows[0] ? String(rows[0].id) : "";
+      }
+      pipelineError = null;
+      pipelineLoaded = true;
+    } catch (error) {
+      if (disposed) return;
+      pipelineError = error;
+    } finally {
+      if (!disposed) {
+        pipelineLoading = false;
+        paintPipeline();
+      }
+    }
+  };
+
   const activatePerformanceTab = (tab) => {
     syncPerformanceTab(tab);
     if (tab === "benchmark") benchmarkController.show();
+    if (tab === "pipeline") loadPipeline();
   };
 
   root.addEventListener("click", (event) => {
     const tabButton = event.target.closest("[data-performance-tab]");
     if (!tabButton) return;
     activatePerformanceTab(tabButton.dataset.performanceTab || "overview");
+  });
+
+  pipelineBox?.addEventListener("change", (event) => {
+    if (!event.target.matches("[data-rag-trace-select]")) return;
+    pipelineSelectedId = String(event.target.value || "");
+    paintPipeline();
+  });
+
+  pipelineBox?.addEventListener("click", (event) => {
+    if (!event.target.closest('[data-action="refresh-rag-waterfall"]')) return;
+    loadPipeline({ force: true });
   });
 
   let testRun = null;
@@ -1347,8 +2301,9 @@ export async function render(root, ctx) {
             run_id: testRun.run_id,
             status: testRun.status,
             progress: testRun.progress,
+            total_ms: testRun.total_ms,
             steps: (testRun.steps || []).map(
-              (step) => `${step.stage}:${step.model}:${step.status}:${step.progress}`,
+              (step) => `${step.stage}:${step.model}:${step.status}:${step.progress}:${step.duration_ms}`,
             ),
           }
         : null,
@@ -1417,23 +2372,44 @@ export async function render(root, ctx) {
     await refreshTestFlow();
   });
 
-  const runQuery = async (nextPage = page) => {
+  const runQuery = async (nextPage = page, { quiet = false } = {}) => {
     page = Math.max(1, Number(nextPage) || 1);
     filters = readFilterForm();
-    reportBox.innerHTML = reportLoading({ label: "效能報表" });
+    const existingCard = reportBox.querySelector(".report-card");
+    const focusedPageSize = document.activeElement?.matches?.("[data-page-size]")
+      ? document.activeElement.value
+      : null;
+    // Never replace a visible report with a skeleton. Keep the current table
+    // visible until the new page, filter result, or error arrives.
+    const quietUpdate = Boolean(existingCard);
+    if (quietUpdate) {
+      reportBox.setAttribute("aria-busy", "true");
+    } else {
+      reportBox.removeAttribute("aria-busy");
+      reportBox.innerHTML = reportLoading({ label: "效能報表" });
+    }
     const submit = root.querySelector("#performance-run");
-    setBusy(submit, true, "查詢中…");
+    if (!quiet) setBusy(submit, true, "查詢中…");
     try {
       const response = await api.performance(filters, page, pageSize);
       if (disposed) return;
       result = response;
       page = Number(response.page) || page;
       pageSize = Number(response.page_size) || pageSize;
+      reportBox.removeAttribute("aria-busy");
       reportBox.innerHTML = renderPerformanceReport(response);
+      if (focusedPageSize !== null) {
+        const nextPageSize = reportBox.querySelector("[data-page-size]");
+        if (nextPageSize) {
+          nextPageSize.value = String(pageSize);
+          nextPageSize.focus({ preventScroll: true });
+        }
+      }
       metaBadge.textContent = `PERFORMANCE · ${formatNumber(response.total)} 筆`;
       metaBadge.className = "badge badge-neutral badge-mono";
     } catch (error) {
       if (disposed) return;
+      reportBox.removeAttribute("aria-busy");
       reportBox.innerHTML = reportError(error, { label: "效能報表" });
       toast(error.message || "效能報表查詢失敗。", "danger");
     } finally {
@@ -1463,6 +2439,15 @@ export async function render(root, ctx) {
   });
 
   refreshButton.addEventListener("click", async () => {
+    if (activePerformanceTab === "pipeline") {
+      setBusy(refreshButton, true, "整理中…");
+      try {
+        await loadPipeline({ force: true });
+      } finally {
+        if (!disposed) setBusy(refreshButton, false);
+      }
+      return;
+    }
     if (activePerformanceTab === "benchmark") {
       setBusy(refreshButton, true, "整理中…");
       try {
@@ -1494,7 +2479,7 @@ export async function render(root, ctx) {
       return;
     }
     if (action === "prev-page") {
-      runQuery(Math.max(1, Number(result.page) - 1));
+      runQuery(Math.max(1, Number(result.page) - 1), { quiet: true });
       return;
     }
     if (action === "next-page") {
@@ -1502,7 +2487,7 @@ export async function render(root, ctx) {
         1,
         Math.ceil(Number(result.total) / Number(result.page_size)),
       );
-      runQuery(Math.min(totalPages, Number(result.page) + 1));
+      runQuery(Math.min(totalPages, Number(result.page) + 1), { quiet: true });
       return;
     }
     if (action === "copy-query") {
@@ -1531,7 +2516,7 @@ export async function render(root, ctx) {
     if (!event.target.matches("[data-page-size]")) return;
     pageSize = Number(event.target.value) || 25;
     if (!PAGE_SIZES.includes(pageSize)) pageSize = 25;
-    runQuery(1);
+    runQuery(1, { quiet: true });
   });
 
   await Promise.allSettled([loadOptions(), loadTestRuns()]);

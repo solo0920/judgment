@@ -72,6 +72,7 @@ class LawApiClient:
                 payload=payload,
                 update_date=update_date,
                 http_status=status_code,
+                filename=f"{source.json_filename}.zip",
             )
         except Exception:
             if temp_path.exists():

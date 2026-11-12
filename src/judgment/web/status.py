@@ -4,7 +4,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from sqlalchemy import func, select, text
@@ -250,7 +250,11 @@ def _qdrant_metrics(
 
 
 def _embedding_metrics(
-    *, base_url: str, model: str, fallback_url: str = ""
+    *,
+    base_url: str,
+    model: str,
+    fallback_url: str = "",
+    fallback_urls: tuple[str, ...] = (),
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     base_url = base_url.rstrip("/")
@@ -262,55 +266,48 @@ def _embedding_metrics(
             "detail": f"未設定 EMBEDDING_URL（模型：{model}）",
             "model": model,
         }
-    detail = ollama_models_detail(base_url)
-    if detail["status"] != "operational":
-        if fallback_url:
-            fallback_detail = ollama_models_detail(fallback_url)
-            if fallback_detail["status"] == "operational" and ollama_model_available(
-                fallback_url, model
-            ):
-                return {
-                    "status": "operational",
-                    "latency_ms": _ms(started),
-                    "detail": (
-                        f"主要 {base_url} 不可用；fallback 模型：{model} · "
-                        f"{fallback_url}"
-                    ),
-                    "model": model,
-                    "models": fallback_detail["models"],
-                }
+    candidates: List[str] = []
+    for url in (base_url, fallback_url, *fallback_urls):
+        text = str(url or "").strip().rstrip("/")
+        if text and text not in candidates:
+            candidates.append(text)
+    primary_detail = ollama_models_detail(base_url)
+    primary_available = (
+        primary_detail["status"] == "operational"
+        and ollama_model_available(base_url, model)
+    )
+    if primary_available:
         return {
-            "status": "degraded",
+            "status": "operational",
             "latency_ms": _ms(started),
-            "detail": f"{detail['detail']} · {base_url}",
+            "detail": f"模型：{model} · {base_url}",
             "model": model,
+            "models": primary_detail["models"],
         }
-    available = ollama_model_available(base_url, model)
-    if not available and fallback_url:
-        fallback_detail = ollama_models_detail(fallback_url)
+    for url in candidates[1:]:
+        fallback_detail = ollama_models_detail(url)
         if fallback_detail["status"] == "operational" and ollama_model_available(
-            fallback_url, model
+            url, model
         ):
             return {
                 "status": "operational",
                 "latency_ms": _ms(started),
                 "detail": (
-                    f"主要 {base_url} 找不到模型 {model}；fallback · "
-                    f"{fallback_url}"
+                    f"主要 {base_url} 不可用；fallback 模型：{model} · {url}"
                 ),
                 "model": model,
                 "models": fallback_detail["models"],
             }
     return {
-        "status": "operational" if available else "degraded",
+        "status": "degraded",
         "latency_ms": _ms(started),
         "detail": (
-            f"模型：{model} · {base_url}"
-            if available
-            else f"已連線 {base_url}，但找不到模型 {model}"
+            f"已連線 {base_url}，但找不到模型 {model}"
+            if primary_detail["status"] == "operational"
+            else f"{primary_detail['detail']} · {base_url}"
         ),
         "model": model,
-        "models": detail["models"],
+        "models": primary_detail["models"],
     }
 
 
@@ -420,6 +417,7 @@ def build_status(
         base_url=settings.embedding_url,
         model=settings.embedding_model,
         fallback_url=settings.embedding_fallback_url,
+        fallback_urls=settings.embedding_failover_urls,
     )
     llm = _llm_metrics(base_url=settings.llm_url, model=settings.llm_model)
     rag = _rag_metrics(qdrant, embedding, llm)

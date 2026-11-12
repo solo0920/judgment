@@ -413,6 +413,169 @@ def backfill_article_versions(
     return summary
 
 
+def _version_month(version: LawDatasetVersion) -> str:
+    match = re.search(r"(\d{4})[/-](\d{1,2})", str(version.update_date or ""))
+    if match:
+        year, month = match.groups()
+        if 1 <= int(month) <= 12:
+            return f"{year}{int(month):02d}"
+    downloaded = version.downloaded_at
+    if downloaded is not None:
+        return downloaded.strftime("%Y%m")
+    return ""
+
+
+def check_law_version_status(
+    session_factory,
+    *,
+    data_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Read-only per-month check of law/order article-history coverage."""
+
+    counts = (
+        select(
+            LawArticleVersion.law_version_id.label("law_version_id"),
+            func.count().label("article_rows"),
+        )
+        .group_by(LawArticleVersion.law_version_id)
+        .subquery()
+    )
+    with session_factory() as session:
+        rows = session.execute(
+            select(
+                LawDatasetVersion,
+                func.coalesce(counts.c.article_rows, 0),
+            )
+            .outerjoin(
+                counts,
+                counts.c.law_version_id == LawDatasetVersion.id,
+            )
+            .order_by(LawDatasetVersion.id.desc())
+        ).all()
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for version, article_rows in rows:
+        key = _version_month(version)
+        if not key:
+            continue
+        item = grouped.setdefault(
+            key,
+            {
+                "month": key,
+                "year": int(key[:4]),
+                "month_no": int(key[4:6]),
+                "version_count": 0,
+                "backfilled_count": 0,
+                "missing_count": 0,
+                "needs_backfill_count": 0,
+                "backfillable_count": 0,
+                "blocked_count": 0,
+                "article_rows": 0,
+                "article_count": 0,
+                "law_count": 0,
+                "law_versions": 0,
+                "order_versions": 0,
+                "current": False,
+                "versions": [],
+            },
+        )
+        row_count = int(article_rows or 0)
+        status = "green" if row_count > 0 else "red"
+        needs_backfill = row_count == 0
+        raw_path: Optional[Path] = None
+        if needs_backfill and data_dir is not None:
+            raw_path = _find_raw_parquet(
+                Path(data_dir).expanduser().resolve(), version
+            )
+        raw_available = bool(raw_path)
+        backfillable = needs_backfill and raw_available
+        blocked = needs_backfill and data_dir is not None and not raw_available
+        if row_count > 0:
+            reason = "已有條文快照"
+        elif data_dir is None:
+            reason = "需建立；未檢查原始 Parquet"
+        elif raw_available:
+            reason = "可建立：找到原始 Parquet"
+        else:
+            reason = "無法建立：找不到原始 Parquet"
+        item["version_count"] += 1
+        item["backfilled_count"] += 1 if row_count > 0 else 0
+        item["missing_count"] += 0 if row_count > 0 else 1
+        item["needs_backfill_count"] += 1 if needs_backfill else 0
+        item["backfillable_count"] += 1 if backfillable else 0
+        item["blocked_count"] += 1 if blocked else 0
+        item["article_rows"] += row_count
+        item["article_count"] += int(version.article_count or 0)
+        item["law_count"] += int(version.law_count or 0)
+        if version.source_type == "law":
+            item["law_versions"] += 1
+        elif version.source_type == "order":
+            item["order_versions"] += 1
+        item["current"] = item["current"] or bool(version.is_current)
+        item["versions"].append(
+            {
+                "version_id": int(version.id),
+                "source_type": version.source_type,
+                "update_date": str(version.update_date or ""),
+                "downloaded_at": version.downloaded_at.isoformat()
+                if version.downloaded_at
+                else None,
+                "is_current": bool(version.is_current),
+                "status": status,
+                "needs_backfill": needs_backfill,
+                "backfillable": backfillable,
+                "blocked": blocked,
+                "raw_parquet_available": raw_available,
+                "raw_parquet_path": str(raw_path) if raw_path else "",
+                "reason": reason,
+                "article_rows": row_count,
+                "article_count": int(version.article_count or 0),
+                "law_count": int(version.law_count or 0),
+            }
+        )
+
+    months: List[Dict[str, Any]] = []
+    summary = {"green": 0, "red": 0, "gray": 0}
+    for item in grouped.values():
+        if item["missing_count"] == 0:
+            item["status"] = "green"
+        elif item["backfilled_count"] == 0:
+            item["status"] = "red"
+        else:
+            item["status"] = "gray"
+        summary[item["status"]] += 1
+        item["versions"].sort(key=lambda value: value["version_id"], reverse=True)
+        months.append(item)
+    months.sort(
+        key=lambda item: (int(item["year"]), int(item["month_no"])),
+        reverse=True,
+    )
+    total_versions = sum(item["version_count"] for item in months)
+    backfilled_versions = sum(item["backfilled_count"] for item in months)
+    return {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "months": months,
+        "summary": summary,
+        "totals": {
+            "versions": total_versions,
+            "backfilled_versions": backfilled_versions,
+            "missing_versions": total_versions - backfilled_versions,
+            "needs_backfill_versions": sum(
+                item["needs_backfill_count"] for item in months
+            ),
+            "backfillable_versions": sum(
+                item["backfillable_count"] for item in months
+            ),
+            "blocked_versions": sum(
+                item["blocked_count"] for item in months
+            ),
+            "article_rows": sum(item["article_rows"] for item in months),
+            "article_count": sum(item["article_count"] for item in months),
+            "law_count": sum(item["law_count"] for item in months),
+        },
+    }
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Backfill law_article_versions from stored raw Parquet snapshots."

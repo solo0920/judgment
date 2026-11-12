@@ -96,6 +96,7 @@ TABLE_COLUMNS: Dict[str, List[Dict[str, str]]] = {
         {"key": "citation_count", "label": "引用數", "type": "number"},
         {"key": "source_archive", "label": "來源", "type": "mono"},
         {"key": "full_text_length", "label": "全文長度", "type": "number"},
+        {"key": "is_current", "label": "現行", "type": "bool"},
     ],
     "judgment_import_runs": [
         {"key": "id", "label": "Run ID", "type": "number"},
@@ -390,6 +391,18 @@ def _apply_filters(
             statement = statement.where(model.started_at <= date_to)
 
     if table == "judgment_documents":
+        column_filters = filters.get("column_filters") or {}
+        requested_current = str(
+            filters.get("is_current")
+            or (
+                column_filters.get("is_current")
+                if isinstance(column_filters, dict)
+                else ""
+            )
+            or ""
+        ).lower()
+        if requested_current not in {"否", "false", "0", "no", "all", "history"}:
+            statement = statement.where(model.is_current.is_(True))
         keyword = str(filters.get("keyword") or "").strip()
         if keyword:
             pattern = f"%{_escape_like(keyword)}%"
@@ -1753,7 +1766,10 @@ def get_judgment_detail(
         raise ValueError("jid 不可為空")
     with session_factory() as session:
         record = session.scalars(
-            select(JudgmentDocument).where(JudgmentDocument.jid == key)
+            select(JudgmentDocument).where(
+                JudgmentDocument.jid == key,
+                JudgmentDocument.is_current.is_(True),
+            )
         ).first()
         if record is None:
             raise LookupError(f"找不到判決：{key}")
@@ -1962,6 +1978,7 @@ def _query_qdrant(
         query_timeout=settings.embedding_query_timeout_seconds,
         health_timeout=settings.embedding_health_timeout_seconds,
         fallback_base_url=settings.embedding_fallback_url,
+        fallback_base_urls=settings.embedding_failover_urls,
     )
     embed_started = time.perf_counter()
     try:
@@ -2396,7 +2413,10 @@ def data_suggestions(
                 )
             courts = session.scalars(
                 select(JudgmentDocument.court_normalized)
-                .where(JudgmentDocument.court_normalized.is_not(None))
+                .where(
+                    JudgmentDocument.court_normalized.is_not(None),
+                    JudgmentDocument.is_current.is_(True),
+                )
                 .distinct()
                 .limit(500)
             ).all()
@@ -2420,7 +2440,10 @@ def data_suggestions(
                 pattern = f"%{_escape_like(query)}%"
                 jids = session.scalars(
                     select(JudgmentDocument.jid)
-                    .where(JudgmentDocument.jid.ilike(pattern, escape="\\"))
+                    .where(
+                        JudgmentDocument.jid.ilike(pattern, escape="\\"),
+                        JudgmentDocument.is_current.is_(True),
+                    )
                     .order_by(JudgmentDocument.jid.asc())
                     .limit(limit)
                 ).all()

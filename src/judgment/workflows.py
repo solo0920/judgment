@@ -88,7 +88,7 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     WorkflowDefinition(
         id="judgment_download",
         label="判決下載",
-        description="檢查 1996-01 到最新月份的裁判書壓縮檔，缺檔下載、舊版以新 fileset 取代；僅於 00:00–06:00（Asia/Taipei）執行，可跨時段續傳。",
+        description="優先續傳待補齊的裁判書月份，完成後由最新月份往回驗證既有檔案；缺檔下載、舊版以新 fileset 取代，預設非 API 時段也可下載（一次一個），可跨時段續傳。",
         branch="judgment",
         stage="download",
         kind="judgment_download",
@@ -124,7 +124,7 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     WorkflowDefinition(
         id="index_versions",
         label="Qdrant 版本建置",
-        description="建立完整的新版本 collection，複製可重用向量、只 embedding 差異資料，驗證後原子切換 alias。",
+        description="先測試 Ollama 主機與 embedding 模型，建立完整的新版本 collection，複製可重用向量、只 embedding 差異資料，驗證後原子切換 alias。",
         branch="judgment",
         stage="qdrant",
         kind="index_versions",
@@ -155,8 +155,8 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     ),
     WorkflowDefinition(
         id="backfill_law_articles",
-        label="法規條文版本回填",
-        description="為既有法規版本補建 law_article_versions 條文快照與變更事件。",
+        label="建立條文歷史",
+        description="為既有法規／命令版本建立歷史條文快照與變更紀錄，讓資料頁能切換歷史版本並比較條文差異。",
         branch="law",
         stage="postgres",
         kind="backfill_law_articles",

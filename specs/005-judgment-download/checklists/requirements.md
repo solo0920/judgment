@@ -32,10 +32,10 @@
 
 ## Notes
 
-- The API only supports the 00:00–06:00 (Asia/Taipei) service window; long downloads must resume across windows.
-- The official FilesetLists endpoint returns HTTP 405 for HEAD; the specification allows a header-only GET stream fallback.
-- 72012 is `Delete-Infor.csv`, not a judgment archive; the specification requires it to be classified and excluded.
-- The monthly table covers 1996-01 through the latest official month (currently 2026-08), with green/gray/red status and future months blank.
+- The API was originally assumed to serve only 00:00–06:00 (Asia/Taipei); on 2026-11-11 the authenticated file GET, resources, and metadata were confirmed to work off-hours, so off-hours downloads are on by default (`JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS=true`) with one file at a time. Set it to `false` to restore the strict window.
+- The official FilesetLists endpoint returns HTTP 405 for HEAD; the specification allows a header-only GET stream fallback. It currently ignores Range requests and returns 200, so interrupted downloads restart from zero.
+- `Delete-Infor.csv` and any non-`YYYYMM`/non-archive fileset are classified as non-judgment files and excluded from the month table.
+- The monthly table scope and counts are derived from the resources snapshot at run time (the current snapshot is 1996-01 through 2026-08), with green/gray/red status and future months blank.
 - The default download mode is the complete month list; `--incremental` is only for quick checks.
 - The month table refresh must re-scan `raw_rar`; manually downloaded files are detected without rerunning the download workflow.
 - Month hover downloads use an authenticated backend proxy keyed by fileset ID; passwords and Tokens are never exposed to the browser.

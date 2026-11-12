@@ -142,6 +142,19 @@ def _docker_usage() -> Dict[str, Any]:
     detail_result = _run(
         ["docker", "system", "df", "-v", "--format", "{{json .}}"], timeout=8
     )
+    context_result = _run(["docker", "context", "show"], timeout=3)
+    inspect_result = _run(
+        ["docker", "inspect", "judgment-qdrant"], timeout=6
+    )
+    qdrant_inspect: Dict[str, Any] = {}
+    if inspect_result is not None and inspect_result.returncode == 0:
+        try:
+            inspected = json.loads(inspect_result.stdout)
+            if isinstance(inspected, list) and inspected:
+                if isinstance(inspected[0], dict):
+                    qdrant_inspect = inspected[0]
+        except json.JSONDecodeError:
+            qdrant_inspect = {}
 
     ps_rows = _parse_json_lines(ps_result.stdout if ps_result else "")
     stats_rows = _parse_json_lines(stats_result.stdout if stats_result else "")
@@ -168,6 +181,30 @@ def _docker_usage() -> Dict[str, Any]:
         name = str(row.get("Names") or "")
         stats = stats_by_name.get(name) or {}
         memory_used, memory_limit = _parse_mem_usage(stats.get("MemUsage"))
+        mounts: List[Dict[str, Any]] = []
+        if name == "judgment-qdrant" and qdrant_inspect:
+            for mount in qdrant_inspect.get("Mounts") or []:
+                if not isinstance(mount, dict):
+                    continue
+                mounts.append(
+                    {
+                        "type": mount.get("Type") or "",
+                        "name": mount.get("Name") or "",
+                        "source": mount.get("Source") or "",
+                        "destination": mount.get("Destination") or "",
+                        "rw": bool(mount.get("RW")),
+                    }
+                )
+        storage_path = next(
+            (
+                mount["destination"]
+                for mount in mounts
+                if str(mount.get("destination") or "").rstrip("/")
+                == "/qdrant/storage"
+            ),
+            "/qdrant/storage",
+        )
+        config = (qdrant_inspect.get("Config") or {}) if qdrant_inspect else {}
         containers.append(
             {
                 "id": str(row.get("ID") or "")[:12],
@@ -186,6 +223,21 @@ def _docker_usage() -> Dict[str, Any]:
                 "pids": int(stats.get("PIDs") or 0)
                 if str(stats.get("PIDs") or "").isdigit()
                 else None,
+                "working_dir": config.get("WorkingDir") or "",
+                "mounts": mounts,
+                "storage_path": storage_path,
+                "volume_name": next(
+                    (mount["name"] for mount in mounts if mount.get("name")),
+                    "",
+                ),
+                "volume_source": next(
+                    (
+                        mount["source"]
+                        for mount in mounts
+                        if mount.get("destination") == storage_path
+                    ),
+                    "",
+                ),
             }
         )
 
@@ -227,15 +279,24 @@ def _docker_usage() -> Dict[str, Any]:
                 "size_bytes": size_bytes,
             }
         elif name.endswith("judgment_qdrant"):
+            qdrant_container = _find_container(containers, "judgment-qdrant") or {}
             judgment_volumes["qdrant"] = {
                 "name": name,
                 "size": row.get("Size") or "",
                 "size_bytes": size_bytes,
+                "container": "judgment-qdrant",
+                "container_path": qdrant_container.get("storage_path") or "",
+                "host_path": qdrant_container.get("volume_source") or "",
             }
 
     return {
         "available": True,
         "detail": f"Docker {version.stdout.strip() or 'daemon'}",
+        "context": (
+            context_result.stdout.strip()
+            if context_result is not None and context_result.returncode == 0
+            else "default"
+        ),
         "containers": containers,
         "system": system,
         "breakdown": {
@@ -388,6 +449,7 @@ def _host_usage() -> Dict[str, Any]:
     except (AttributeError, OSError):
         load_1 = load_5 = load_15 = None
     return {
+        "hostname": platform.node(),
         "platform": platform.platform(),
         "python": platform.python_version(),
         "cpu": {
@@ -460,9 +522,34 @@ def build_system_usage(
             "memory_percent": (qdrant_container or {}).get("memory_percent"),
             "volume_name": qdrant_volume.get("name"),
             "volume_bytes": qdrant_volume.get("size_bytes"),
+            "container_path": qdrant_volume.get("container_path"),
+            "host_path": qdrant_volume.get("host_path"),
+            "docker_context": docker.get("context"),
+            "mounts": (qdrant_container or {}).get("mounts") or [],
             **qdrant,
         },
     ]
+    qdrant_storage = {
+        "host": platform.node(),
+        "docker_context": docker.get("context") or "default",
+        "container": "judgment-qdrant",
+        "container_id": (qdrant_container or {}).get("id"),
+        "container_state": (qdrant_container or {}).get("state") or "unknown",
+        "image": (qdrant_container or {}).get("image") or "",
+        "container_path": (qdrant_container or {}).get("storage_path")
+        or qdrant_volume.get("container_path")
+        or "",
+        "working_dir": (qdrant_container or {}).get("working_dir") or "",
+        "volume_name": qdrant_volume.get("name") or "",
+        "volume_size": qdrant_volume.get("size") or "",
+        "volume_bytes": qdrant_volume.get("size_bytes"),
+        "host_path": qdrant_volume.get("host_path") or "",
+        "mounts": (qdrant_container or {}).get("mounts") or [],
+        "collection": qdrant.get("collection"),
+        "alias": settings.judgment_vector_alias,
+        "points_count": qdrant.get("points_count"),
+        "segments_count": qdrant.get("segments_count"),
+    }
 
     project_root = Path(__file__).resolve().parents[3]
     frontend_path = project_root / "frontend"
@@ -515,6 +602,7 @@ def build_system_usage(
         "disk": disks,
         "docker": docker,
         "databases": databases,
+        "qdrant_storage": qdrant_storage,
         "storage": {
             "application": {
                 "frontend_bytes": frontend_bytes,

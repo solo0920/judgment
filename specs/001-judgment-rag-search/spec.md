@@ -297,9 +297,9 @@
 - API middleware 自動記錄 request process、module、timestamp、duration、status、request id 與 query params。
 - 法規下載 CLI 與判決匯入 CLI 會寫入 `performance_records`。
 - 新增 `#/performance` 效能報表頁，支援 metadata 篩選、平均／P95 耗時、分頁與 CSV／JSON 匯出。
-- 效能紀錄預設保留至少 90 天，並在背景清理過期資料。
+- 效能紀錄預設保留至少 90 天；每累積約 200 筆寫入後，於寫入流程中機會性清理過期資料，不是獨立背景工作。
 
-尚未完成：RAG 各階段（檢索、重排、法規擷取、生成、後處理）的細部效能紀錄、Google 登入、判決向量索引與完整 RAG 回答。
+已完成：RAG 各階段（法規／命令比對、檢索、取全文、生成、引用驗證）的細部效能紀錄、判決向量索引與完整 RAG 回答，包含版本化 Qdrant collection 與 alias。尚未完成：Google 登入；目前沒有獨立的 reranker／後處理階段，因此這兩項不列為已實作。
 
 ## Implementation Note (2026-11-08): 法規條文版本
 
