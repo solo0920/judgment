@@ -674,6 +674,75 @@ function matchedChipsMarkup(matched, lawSources) {
       .join("")}</div>`;
 }
 
+function renderRerankStrip(rerank, refreshing) {
+  if (!rerank) return "";
+  const providers = Array.isArray(rerank.providers)
+    ? rerank.providers
+    : [];
+  const active = rerank.active || providers.find((item) => item.active);
+  const status = String(rerank.status || "");
+  const model = String(rerank.model || "").trim();
+  const currentLabel = active
+    ? `${active.name}:${model}`
+    : status === "not_configured"
+      ? "未啟用"
+      : "無可用模型";
+  const chips = providers
+    .map((provider) => {
+      const available = provider.status === "operational";
+      const isActive = Boolean(provider.active) || provider === active;
+      const label = `${provider.name || "reranker"}:${model}`;
+      const stateLabel = isActive
+        ? "使用中"
+        : available
+          ? provider.role === "fallback"
+            ? "fallback"
+            : "主要"
+          : "離線";
+      return `<span class="rag-model-button is-static${
+        isActive ? " is-active" : ""
+      }${available ? "" : " is-unavailable"}"
+        title="${escapeHtml(`${label} · ${provider.url || ""}`)}"
+        aria-label="${escapeHtml(`${label}，${stateLabel}`)}">
+        <span class="rag-model-state" aria-hidden="true"></span>
+        <span>${escapeHtml(label)}</span>
+        <span class="rag-model-current">${escapeHtml(stateLabel)}</span>
+      </span>`;
+    })
+    .join("");
+  const empty = providers.length
+    ? ""
+    : `<p class="rag-model-empty">尚未設定 reranker URL。</p>`;
+  return `<div class="rag-model-strip rag-model-strip-rerank">
+    <div class="rag-model-strip-head">
+      <span class="rag-model-strip-title">${icon("layers", 13)} Rerank models</span>
+      ${
+        model
+          ? `<span class="rag-model-strip-base mono">${escapeHtml(
+              model,
+            )}</span>`
+          : ""
+      }
+      <span class="rag-model-strip-current">目前：<strong>${escapeHtml(
+        currentLabel,
+      )}</strong></span>
+      <button class="btn btn-ghost btn-sm rag-model-refresh" type="button"
+        data-rag-action="refresh-rerank-models"
+        ${refreshing ? "disabled" : ""}>
+        ${icon("refresh", 12)}<span>${
+          refreshing ? "檢查中…" : "檢查模型"
+        }</span>
+      </button>
+    </div>
+    ${
+      chips
+        ? `<div class="rag-model-buttons">${chips}</div>`
+        : empty
+    }
+    <p class="rag-model-hint">Reranker 由 llama.cpp 提供；不可用時會回退 Qdrant 排序。</p>
+  </div>`;
+}
+
 function renderRagModeCard({
   tone,
   title,
@@ -684,6 +753,8 @@ function renderRagModeCard({
   baseUrl,
   modelState,
   untestedProviders = [],
+  rerank = null,
+  rerankRefreshing = false,
   busy,
   refreshing,
 }) {
@@ -780,6 +851,7 @@ function renderRagModeCard({
           : ""
       }
     </div>
+    ${renderRerankStrip(rerank, rerankRefreshing)}
   </section>`;
 }
 
@@ -1189,6 +1261,7 @@ export async function render(root) {
   let modeError = null;
   let modeModelBusy = false;
   let modeModelRefreshing = false;
+  let modeRerankRefreshing = false;
 
   root.innerHTML = `<section class="page rag-page">
     <div class="rag-layout">
@@ -1230,11 +1303,7 @@ export async function render(root) {
         </section>
       </aside>
       <div class="rag-workspace">
-        <header class="rag-hero">
-      <span class="eyebrow">JUDGMENT · LEGAL RAG</span>
-      <h1 class="rag-title">讓每一個答案，都能回到法規與判決</h1>
-      <p class="rag-lead">以金融法規的現行條文與判決片段為檢索基礎。
-        先從 Qdrant 檢索相似判決，再由 LLM 依檢索片段生成回答；若索引或模型尚未就緒，會降級為只顯示可驗證的檢索結果。</p>
+        <header class="rag-hero rag-hero-compact">
       <div id="rag-mode-notice">${notice({
         tone: "info",
         title: "RAG 服務狀態檢查中",
@@ -1949,6 +2018,11 @@ export async function render(root) {
     const currentProviderName = String(
       modeModelState?.provider_name || "",
     ).trim();
+    const rerank = modeStatus
+      ? (modeStatus.services || []).find(
+          (item) => item.id === "reranker",
+        ) || null
+      : null;
     if (!modeStatus) {
       if (!modeError) return;
       heroNotice.innerHTML = renderRagModeCard({
@@ -1962,6 +2036,8 @@ export async function render(root) {
         baseUrl,
         modelState: modeModelState,
         untestedProviders,
+        rerank,
+        rerankRefreshing: modeRerankRefreshing,
         busy: modeModelBusy,
         refreshing: modeModelRefreshing,
       });
@@ -1984,6 +2060,8 @@ export async function render(root) {
         baseUrl,
         modelState: modeModelState,
         untestedProviders,
+        rerank,
+        rerankRefreshing: modeRerankRefreshing,
         busy: modeModelBusy,
         refreshing: modeModelRefreshing,
       });
@@ -1998,6 +2076,8 @@ export async function render(root) {
         baseUrl,
         modelState: modeModelState,
         untestedProviders,
+        rerank,
+        rerankRefreshing: modeRerankRefreshing,
         busy: modeModelBusy,
         refreshing: modeModelRefreshing,
       });
@@ -2014,6 +2094,8 @@ export async function render(root) {
         baseUrl,
         modelState: modeModelState,
         untestedProviders,
+        rerank,
+        rerankRefreshing: modeRerankRefreshing,
         busy: modeModelBusy,
         refreshing: modeModelRefreshing,
       });
@@ -2095,6 +2177,28 @@ export async function render(root) {
     } finally {
       modeModelRefreshing = false;
       if (!disposed) await loadModeNotice();
+    }
+  };
+
+  const refreshRerankModels = async () => {
+    if (modeRerankRefreshing) return;
+    modeRerankRefreshing = true;
+    paintModeNotice();
+    try {
+      const status = await api.status();
+      if (disposed) return;
+      modeStatus = status;
+      modeError = null;
+      toast("已更新 rerank model 狀態。", "ok", 3000);
+    } catch (error) {
+      toast(
+        error.message || "無法檢查 rerank model。",
+        "danger",
+        6000,
+      );
+    } finally {
+      modeRerankRefreshing = false;
+      if (!disposed) paintModeNotice();
     }
   };
 
@@ -2759,6 +2863,10 @@ export async function render(root) {
       );
       return;
     }
+    if (event.target.closest('[data-rag-action="refresh-rerank-models"]')) {
+      await refreshRerankModels();
+      return;
+    }
     if (event.target.closest('[data-rag-action="refresh-chat-models"]')) {
       await refreshChatModels();
     }
@@ -2856,6 +2964,29 @@ export async function render(root) {
     loadTestMode(),
   ]);
   await loadCurrentTestFlow();
+
+  let pendingQuestion = "";
+  try {
+    pendingQuestion =
+      window.sessionStorage.getItem("judgment.pending_question") || "";
+    window.sessionStorage.removeItem("judgment.pending_question");
+  } catch (error) {
+    pendingQuestion = "";
+  }
+  if (!pendingQuestion && typeof window.__judgmentPendingQuestion === "string") {
+    pendingQuestion = window.__judgmentPendingQuestion;
+  }
+  delete window.__judgmentPendingQuestion;
+  pendingQuestion = String(pendingQuestion || "").trim().slice(0, 500);
+  if (pendingQuestion && input) {
+    input.value = pendingQuestion;
+    resizeInput();
+    window.setTimeout(() => {
+      if (!disposed) {
+        runQuestion(pendingQuestion, { fresh: true, source: "home" });
+      }
+    }, 40);
+  }
 
   return () => {
     disposed = true;

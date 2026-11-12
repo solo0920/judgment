@@ -19,6 +19,7 @@ from .law_rag import (
     is_article_count_question,
     is_citation_stats_question,
     is_history_question,
+    is_law_first_question,
     is_related_laws_question,
     judgment_law_stats,
     law_source_text,
@@ -27,6 +28,7 @@ from .law_rag import (
 )
 from .models import JudgmentDocument
 from .observability import trace_segment, traced
+from .rerank import RerankOutcome, RerankerClient
 from .vector_store import QdrantError, QdrantStore
 
 logger = logging.getLogger(__name__)
@@ -169,14 +171,120 @@ def _fetch_documents(session_factory, jids: Sequence[str]) -> Dict[str, Judgment
     return {record.jid: record for record in records}
 
 
+def _rerank_text(
+    record: JudgmentDocument,
+    question: str,
+    *,
+    max_chars: int,
+) -> str:
+    heading = " ".join(
+        value
+        for value in (
+            str(record.court_normalized or "").strip(),
+            str(record.title or "").strip(),
+        )
+        if value
+    )
+    excerpt = extract_excerpt(
+        record.full_text or "",
+        question,
+        budget=max(200, int(max_chars)),
+    )
+    text = "\n".join(value for value in (heading, excerpt) if value)
+    return text[: max(200, int(max_chars))]
+
+
+def _rerank_hits(
+    *,
+    settings: Settings,
+    question: str,
+    hits: Sequence[Dict[str, Any]],
+    documents: Dict[str, JudgmentDocument],
+) -> Tuple[List[Dict[str, Any]], RerankOutcome]:
+    """Rerank candidate hits, falling back to the original vector order."""
+
+    fallback_hits = list(hits[: max(1, settings.rag_top_k)])
+    client = RerankerClient(
+        [settings.rerank_url, settings.rerank_fallback_url],
+        model=settings.rerank_model,
+        timeout=settings.rerank_timeout_seconds,
+        connect_timeout=settings.rerank_connect_timeout_seconds,
+    )
+    if not client.configured:
+        return fallback_hits, RerankOutcome(
+            status="disabled",
+            model=settings.rerank_model,
+            candidate_count=len(hits),
+        )
+    if not hits:
+        return [], RerankOutcome(
+            status="empty",
+            model=settings.rerank_model,
+            candidate_count=0,
+        )
+
+    candidate_hits: List[Dict[str, Any]] = []
+    documents_for_rerank: List[str] = []
+    for hit in hits:
+        jid = str((hit.get("payload") or {}).get("jid") or "")
+        record = documents.get(jid)
+        if record is None:
+            continue
+        text = _rerank_text(
+            record,
+            question,
+            max_chars=settings.rerank_max_chars,
+        )
+        if not text.strip():
+            continue
+        candidate_hits.append(hit)
+        documents_for_rerank.append(text)
+    if not documents_for_rerank:
+        return fallback_hits, RerankOutcome(
+            status="empty",
+            model=settings.rerank_model,
+            candidate_count=0,
+        )
+
+    outcome = client.rerank(
+        question,
+        documents_for_rerank,
+        top_n=settings.rag_top_k,
+    )
+    if outcome.status != "ok":
+        return fallback_hits, outcome
+
+    reranked: List[Dict[str, Any]] = []
+    for rank, result in enumerate(outcome.results, start=1):
+        if not 0 <= result.index < len(candidate_hits):
+            continue
+        hit = dict(candidate_hits[result.index])
+        hit["vector_score"] = float(hit.get("score") or 0)
+        hit["rerank_score"] = float(result.score)
+        hit["rerank_rank"] = rank
+        reranked.append(hit)
+    if not reranked:
+        return fallback_hits, RerankOutcome(
+            status="degraded",
+            model=outcome.model,
+            provider=outcome.provider,
+            url=outcome.url,
+            fallback_used=outcome.fallback_used,
+            latency_ms=outcome.latency_ms,
+            candidate_count=outcome.candidate_count,
+            errors=outcome.errors + ["rerank returned no usable indexes"],
+        )
+    return reranked, outcome
+
+
 @traced(
     "rag.search",
     module=__name__,
-    params_fn=lambda *, question, settings, collection=None, **_: {
+    params_fn=lambda *, question, settings, collection=None, limit=None, **_: {
         "question_length": len(question or ""),
         "collection": collection or settings.judgment_vector_collection,
         "embedding_model": settings.embedding_model,
-        "top_k": settings.rag_top_k,
+        "top_k": limit or settings.rag_top_k,
         "score_threshold": settings.rag_score_threshold,
     },
 )
@@ -187,8 +295,10 @@ def _search_hits(
     store: QdrantStore,
     embedder: OllamaEmbedder,
     collection: Optional[str] = None,
+    limit: Optional[int] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     collection = collection or settings.judgment_vector_collection
+    search_limit = max(1, int(limit or settings.rag_top_k))
     with trace_segment(
         "rag.embed_query",
         module=__name__,
@@ -210,14 +320,14 @@ def _search_hits(
         function="QdrantStore.search",
         params={
             "collection": collection,
-            "limit": settings.rag_top_k,
+            "limit": search_limit,
             "score_threshold": settings.rag_score_threshold,
         },
     ) as qdrant_segment:
         hits = store.search(
             collection,
             vector,
-            limit=max(1, settings.rag_top_k),
+            limit=search_limit,
             score_threshold=settings.rag_score_threshold,
         )
     latency_ms = _elapsed_ms(started)
@@ -239,7 +349,7 @@ def _search_hits(
                     if settings.rag_score_threshold
                     else None
                 ),
-                "top_k": settings.rag_top_k,
+                "top_k": search_limit,
                 "hits": len(hits),
                 "unique_judgments": len(deduped),
                 "top_score": (
@@ -252,7 +362,8 @@ def _search_hits(
     return deduped, {
         "status": "ok",
         "latency_ms": latency_ms,
-        "top_k": settings.rag_top_k,
+        "top_k": search_limit,
+        "candidate_k": search_limit,
         "score_threshold": settings.rag_score_threshold,
         "hits": len(hits),
         "unique_judgments": len(deduped),
@@ -412,6 +523,12 @@ def _llm_request_payload(
 ) -> Tuple[Dict[str, Any], int]:
     user_prompt = _build_llm_prompt(question=question, contexts=contexts)
     system_prompt = SYSTEM_PROMPT
+    if contexts and contexts[0].get("kind") == "law":
+        system_prompt += (
+            " 本次問題以法規／命令條文為主要依據；若參考資料包含法規或命令，"
+            "必須優先整理並引用條文內容，判決僅作實務補充，不得以判決取代條文。"
+            "若條文不足，請明確說明資料不足。"
+        )
     if strict:
         system_prompt += (
             " 你上一次的回答缺少有效引用標記；這次每個結論後都必須加上 "
@@ -766,6 +883,9 @@ def answer_question(
                     settings.law_data_dir,
                     question,
                     stats=law_stats,
+                    article_limit=(
+                        6 if is_law_first_question(question) else 4
+                    ),
                 )
         except Exception as exc:
             logger.warning("law/order retrieval failed: %s", exc)
@@ -791,15 +911,15 @@ def answer_question(
         or (law_stats and law_stats.get("articles"))
     ):
         assign_law_indexes(law_sources)
-        if (
-            is_article_count_question(question)
-            or is_history_question(question)
-            or is_related_laws_question(question)
-        ):
-            for source in law_sources:
-                source["articles"] = []
         structured_answer = structured_law_answer(question, law_sources, law_stats)
         if structured_answer:
+            if (
+                is_article_count_question(question)
+                or is_history_question(question)
+                or is_related_laws_question(question)
+            ):
+                for source in law_sources:
+                    source["articles"] = []
             terms = [source["law_name"] for source in law_sources]
             if law_stats.get("entity") and law_stats["entity"] not in terms:
                 terms.append(law_stats["entity"])
@@ -878,6 +998,18 @@ def answer_question(
         "unique_judgments": 0,
         "law_hits": len(law_sources),
     }
+    rerank_active = bool(
+        settings.rag_rerank_enabled
+        and (settings.rerank_url or settings.rerank_fallback_url)
+    )
+    candidate_k = max(
+        1,
+        settings.rag_rerank_candidates
+        if rerank_active
+        else settings.rag_top_k,
+    )
+    if rerank_active:
+        candidate_k = max(candidate_k, settings.rag_top_k)
     qdrant_available = bool(settings.qdrant_url)
     if qdrant_available:
         try:
@@ -949,8 +1081,10 @@ def answer_question(
                 store=store,
                 embedder=embedder,
                 collection=search_collection,
+                limit=candidate_k,
             )
             retrieval["law_hits"] = len(law_sources)
+            retrieval["candidate_k"] = candidate_k
         except (EmbeddingError, QdrantError) as exc:
             retrieval = {"status": "degraded", "hits": 0, "law_hits": len(law_sources)}
             if not law_sources:
@@ -966,53 +1100,131 @@ def answer_question(
     else:
         hits = []
 
+    law_first = bool(
+        law_sources
+        and any(source.get("articles") for source in law_sources)
+        and is_law_first_question(question, law_sources)
+    )
+    retrieval["mode"] = "law_first" if law_first else "judgment_first"
+    citation_start = 1
+    if law_first:
+        assign_law_indexes(law_sources, start=1)
+        citation_start = len(law_sources) + 1
+
     citations: List[Dict[str, Any]] = []
     judgment_contexts: List[Dict[str, Any]] = []
     context_segment = None
+    documents: Dict[str, JudgmentDocument] = {}
     if hits:
-        with trace_segment(
-            "rag.context",
-            module=__name__,
-            function="_build_citations",
-            params={
-                "hit_count": len(hits),
-                "max_context_chars": settings.rag_max_context_chars,
-            },
-        ) as context_segment:
-            documents = _fetch_documents(
-                session_factory,
-                [
-                    str((hit.get("payload") or {}).get("jid") or "")
-                    for hit in hits
-                ],
-            )
-            hits = [
-                hit
+        documents = _fetch_documents(
+            session_factory,
+            [
+                str((hit.get("payload") or {}).get("jid") or "")
                 for hit in hits
-                if str((hit.get("payload") or {}).get("jid") or "")
-                in documents
-            ]
-            citations, judgment_contexts = _build_citations(
-                hits=hits,
-                documents=documents,
-                question=question,
-                max_context_chars=settings.rag_max_context_chars,
-                start_index=1,
+            ],
+        )
+        hits = [
+            hit
+            for hit in hits
+            if str((hit.get("payload") or {}).get("jid") or "")
+            in documents
+        ]
+        if rerank_active:
+            with trace_segment(
+                "rag.rerank",
+                module=__name__,
+                function="RerankerClient.rerank",
+                params={
+                    "model": settings.rerank_model,
+                    "question_length": len(question),
+                    "candidate_count": len(hits),
+                    "top_k": settings.rag_top_k,
+                },
+            ) as rerank_segment:
+                hits, rerank_outcome = _rerank_hits(
+                    settings=settings,
+                    question=question,
+                    hits=hits,
+                    documents=documents,
+                )
+                if rerank_segment is not None:
+                    top_scores = [
+                        round(result.score, 4)
+                        for result in rerank_outcome.results[:10]
+                    ]
+                    rerank_segment["metadata"].update(
+                        {
+                            "model": (
+                                rerank_outcome.model
+                                or settings.rerank_model
+                            ),
+                            "provider_name": rerank_outcome.provider,
+                            "base_url": rerank_outcome.url,
+                            "status": rerank_outcome.status,
+                            "candidates": rerank_outcome.candidate_count,
+                            "selected": rerank_outcome.selected_count,
+                            "fallback_used": rerank_outcome.fallback_used,
+                            "top_score": top_scores[0] if top_scores else None,
+                            "scores": top_scores,
+                            "errors": rerank_outcome.errors,
+                            "usage": rerank_outcome.usage,
+                        }
+                    )
+            retrieval["rerank"] = rerank_outcome.to_dict()
+        else:
+            hits = hits[: settings.rag_top_k]
+            retrieval["rerank"] = {"status": "disabled"}
+        if law_first:
+            judgment_limit = max(
+                1, settings.rag_law_first_judgment_limit
             )
-            if context_segment is not None:
-                context_chars = sum(
-                    len(str(context.get("text") or ""))
-                    for context in judgment_contexts
+            if len(hits) > judgment_limit:
+                hits = hits[:judgment_limit]
+            retrieval["judgment_limit"] = judgment_limit
+        retrieval["top_k"] = len(hits)
+        if hits:
+            with trace_segment(
+                "rag.context",
+                module=__name__,
+                function="_build_citations",
+                params={
+                    "hit_count": len(hits),
+                    "max_context_chars": settings.rag_max_context_chars,
+                },
+            ) as context_segment:
+                citations, judgment_contexts = _build_citations(
+                    hits=hits,
+                    documents=documents,
+                    question=question,
+                    max_context_chars=settings.rag_max_context_chars,
+                    start_index=citation_start,
                 )
-                context_segment["metadata"].update(
-                    {
-                        "documents": len(documents),
-                        "chunks": len(judgment_contexts),
-                        "citation_count": len(citations),
-                        "context_chars": context_chars,
-                        "token_estimate": max(1, context_chars // 3),
-                    }
-                )
+                if context_segment is not None:
+                    context_chars = sum(
+                        len(str(context.get("text") or ""))
+                        for context in judgment_contexts
+                    )
+                    context_segment["metadata"].update(
+                        {
+                            "documents": len(documents),
+                            "chunks": len(judgment_contexts),
+                            "citation_count": len(citations),
+                            "context_chars": context_chars,
+                            "token_estimate": max(1, context_chars // 3),
+                        }
+                    )
+        elif rerank_active:
+            retrieval["rerank"] = {
+                "status": "empty",
+                "model": settings.rerank_model,
+                "candidate_count": 0,
+            }
+    elif rerank_active:
+        retrieval["rerank"] = {
+            "status": "empty",
+            "model": settings.rerank_model,
+            "candidate_count": 0,
+        }
 
     if not citations and not law_sources:
         if not qdrant_available:
@@ -1059,7 +1271,8 @@ def answer_question(
             "duration_ms": _elapsed_ms(started),
         }
 
-    assign_law_indexes(law_sources, start=len(citations) + 1)
+    if not law_first:
+        assign_law_indexes(law_sources, start=len(citations) + 1)
     law_answer = _law_answer_summary(law_sources)
     law_framework = build_insurance_responsibility_framework(
         question=question,
@@ -1070,7 +1283,11 @@ def answer_question(
     law_contexts = [
         {**source, "text": law_source_text(source)} for source in law_sources
     ]
-    contexts = judgment_contexts + law_contexts
+    contexts = (
+        law_contexts + judgment_contexts
+        if law_first
+        else judgment_contexts + law_contexts
+    )
     citation_total = len(law_sources) + len(citations)
     if context_segment is not None:
         context_chars = sum(
@@ -1078,6 +1295,7 @@ def answer_question(
         )
         context_segment["metadata"].update(
             {
+                "mode": "law_first" if law_first else "judgment_first",
                 "chunks": len(contexts),
                 "judgment_chunks": len(judgment_contexts),
                 "law_chunks": len(law_contexts),

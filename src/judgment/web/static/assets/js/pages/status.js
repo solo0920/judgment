@@ -132,6 +132,7 @@ function nodeIsLive(node, services) {
     Qdrant: "qdrant",
     Embedding: "embedding",
     Retriever: "rag",
+    Reranker: "reranker",
     "RAG Engine": "rag",
     LLM: "llm",
   };

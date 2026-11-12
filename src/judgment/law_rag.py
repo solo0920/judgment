@@ -390,6 +390,35 @@ _LEGAL_CONCEPT_EXPANSIONS: Dict[str, Tuple[Tuple[str, float], ...]] = {
         ("不利益之交易", 3.0),
         ("重大損害", 2.0),
     ),
+    "銀行法": (
+        ("從業人員", 3.0),
+        ("銀行負責人或職員", 5.0),
+        ("銀行負責人及職員", 5.0),
+        ("銀行負責人", 4.0),
+        ("銀行職員", 4.0),
+        ("負責人", 2.5),
+        ("職員", 2.5),
+        ("受僱人", 2.0),
+        ("董事", 1.5),
+        ("監察人", 1.5),
+        ("經理人", 1.5),
+        ("兼職", 2.5),
+        ("佣金", 2.0),
+        ("酬金", 2.0),
+        ("不當利益", 2.0),
+        ("資格條件", 2.0),
+        ("利益衝突", 2.0),
+        ("違背職務", 3.0),
+        ("辦理授信", 2.5),
+        ("利害關係人", 2.0),
+        ("第十八條", 3.0),
+        ("第三十五條", 4.0),
+        ("第三十五條之一", 4.0),
+        ("第三十五條之二", 4.0),
+        ("第一百二十五條之二", 5.0),
+        ("第一百二十七條之二", 3.0),
+        ("銀行", 1.0),
+    ),
 }
 
 _LEGAL_CONCEPT_ALIASES: Dict[str, str] = {
@@ -877,11 +906,87 @@ def responsibility_related_law_names(question: str) -> List[str]:
         return []
     return ["金融消費者保護法", "保險業務員管理規則"]
 
-_RELATED_LAW_RE = re.compile(r"哪些|那些|相關|有關|列出|清單")
+_RELATED_LAW_PATTERNS = (
+    re.compile(
+        r"(?:有哪些|哪些|那些|什麼|何種)(?:相關|有關|涉及|適用)?"
+        r"(?:法規|法律|法令|命令)"
+        r"(?!規定|條文|內容|責任|義務|罰則|要件|範圍)"
+    ),
+    re.compile(r"(?:相關|有關|涉及|適用|依據)的?(?:法規|法律|法令|命令)"),
+    re.compile(r"(?:法規|法律|法令|命令)(?:有哪些|清單|列表)"),
+)
 
 
 def is_related_laws_question(question: str) -> bool:
-    return bool(_RELATED_LAW_RE.search(_normalize(question)))
+    text = _normalize(question)
+    if re.search(r"列出.{0,24}(?:法規|法律|法令|命令)", text):
+        return True
+    return any(pattern.search(text) for pattern in _RELATED_LAW_PATTERNS)
+
+
+_CASE_SIGNAL_TERMS = (
+    "判決",
+    "案例",
+    "裁判",
+    "法院",
+    "實務",
+    "起訴",
+    "被告",
+    "原告",
+    "勝訴",
+    "敗訴",
+    "判刑",
+)
+
+_LAW_PROVISION_TERMS = (
+    "規定",
+    "規範",
+    "條文",
+    "義務",
+    "責任",
+    "罰則",
+    "處罰",
+    "要件",
+    "定義",
+    "範圍",
+    "資格",
+    "適用",
+    "限制",
+    "禁止",
+    "許可",
+    "罰金",
+    "刑責",
+    "刑度",
+    "法律效果",
+    "從業人員",
+    "負責人",
+    "職員",
+    "董事",
+    "監察人",
+    "經理人",
+    "受僱人",
+    "授信",
+    "利害關係人",
+)
+
+
+def is_law_first_question(
+    question: str,
+    law_sources: Optional[Sequence[Dict[str, Any]]] = None,
+) -> bool:
+    """Return True when the question should prioritize legal provisions."""
+
+    text = _normalize(question)
+    if any(term in text for term in _CASE_SIGNAL_TERMS):
+        return False
+    if any(term in text for term in _LAW_PROVISION_TERMS):
+        return True
+    if law_sources:
+        for source in law_sources:
+            name = _normalize(source.get("law_name") or "")
+            if name and name in text:
+                return True
+    return False
 
 
 def find_related_law_records(

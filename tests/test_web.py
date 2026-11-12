@@ -482,8 +482,19 @@ def test_static_console_is_served(web_client) -> None:
     assert 'data-route="tests"' not in page.text
     assert 'href="#/tests"' not in page.text
     assert 'id="header-status"' not in page.text
+    assert 'data-route="home"' not in page.text
+    assert '<a class="brand" href="#/home"' in page.text
+    assert "MIT License" in page.text
+    assert "© 2026 Judgment RAG Console" in page.text
     assert 'data-route="performance"' in page.text
     assert 'data-route="quality"' in page.text
+
+    home_js = web_client.get("/assets/js/pages/home.js")
+    assert home_js.status_code == 200
+    assert "home-ask-form" in home_js.text
+    app_js = web_client.get("/assets/js/app.js")
+    assert app_js.status_code == 200
+    assert 'DEFAULT_ROUTE = "home"' in app_js.text
 
     css = web_client.get("/assets/styles.css")
     assert css.status_code == 200
@@ -574,6 +585,7 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
     assert services["parquet"]["status"] == "operational"
     assert services["qdrant"]["status"] == "not_configured"
     assert services["embedding"]["status"] == "not_configured"
+    assert services["reranker"]["status"] == "not_configured"
     assert services["llm"]["status"] == "not_configured"
     assert services["rag"]["status"] == "not_configured"
     assert payload["data"]["judgment_indexed_count"] == 0

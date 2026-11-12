@@ -8,6 +8,25 @@ AGENT_PORT="${JUDGMENT_POWER_PORT:-9201}"
 RUN_DIR=".run"
 PID_FILE="${RUN_DIR}/web.pid"
 AGENT_PID_FILE="${RUN_DIR}/agent.pid"
+RERANK_PID_FILE="${RUN_DIR}/rerank_server.pid"
+
+read_env_value() {
+  local key="$1"
+  [[ -f .env ]] || return 0
+  awk -v key="${key}" -F= '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      gsub(/\r$/, "")
+      print
+      exit
+    }
+  ' .env
+}
+
+if [[ -z "${RERANK_PORT:-}" ]]; then
+  RERANK_PORT="$(read_env_value RERANK_PORT)"
+fi
+RERANK_PORT="${RERANK_PORT:-11435}"
 
 kill_matching_listener() {
   local port="$1"
@@ -65,8 +84,26 @@ stop_agent() {
   rm -f "${AGENT_PID_FILE}"
 }
 
+stop_reranker() {
+  echo "停止本機 reranker…"
+  if [[ -f "${RERANK_PID_FILE}" ]]; then
+    local pid
+    pid="$(cat "${RERANK_PID_FILE}" 2>/dev/null || true)"
+    if [[ -n "${pid}" ]]; then
+      kill -TERM "${pid}" 2>/dev/null || true
+    fi
+  fi
+  kill_matching_listener "${RERANK_PORT}" "llama-server" "TERM"
+  if ! wait_for_port_close "${RERANK_PORT}"; then
+    kill_matching_listener "${RERANK_PORT}" "llama-server" "KILL"
+    wait_for_port_close "${RERANK_PORT}" 8 || true
+  fi
+  rm -f "${RERANK_PID_FILE}"
+}
+
 stop_backend
 stop_agent
+stop_reranker
 
 if [[ "${JUDGMENT_SKIP_DOCKER:-0}" == "1" ]]; then
   echo "略過 Docker 停止（JUDGMENT_SKIP_DOCKER=1）。"

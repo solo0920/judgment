@@ -166,6 +166,15 @@ function formatFlowClock(value) {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
+function flowTimestampAfter(value, offsetMs) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(
+    date.getTime() + Math.max(0, Number(offsetMs) || 0),
+  ).toISOString();
+}
+
 function segmentTone(segment) {
   const module = String(segment?.module || "");
   if (module.includes("static") || module.includes("frontend")) return "is-client";
@@ -332,7 +341,7 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
     ...segments.map((segment) => ragPipelineWindow(segment).end),
     1,
   );
-  const stages = RAG_PIPELINE_STAGES.map((definition) => {
+  const sourceStages = RAG_PIPELINE_STAGES.map((definition) => {
     let matched = segments.filter((segment) =>
       definition.names.includes(segment.name),
     );
@@ -356,9 +365,9 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
       duration: start === null ? null : end - start,
     };
   });
-  const loadSpans = [];
-  for (const stage of stages) {
+  for (const stage of sourceStages) {
     if (stage.key !== "embedding" && stage.key !== "llm") continue;
+    const loadSpans = [];
     for (const span of stage.spans) {
       const metadata = span.metadata || {};
       const rawLoad = Number(metadata.load_duration_ms);
@@ -384,23 +393,24 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
         },
       });
     }
-  }
-  if (loadSpans.length) {
+    if (!loadSpans.length) continue;
     const loadTotal = loadSpans.reduce(
       (sum, span) => sum + span.duration,
       0,
     );
-    stages.push({
-      key: "model_load",
-      label: "Model Load",
-      hint: "冷啟動載入 vs 熱啟動推論",
-      color: "#0ea5e9",
+    const requestTotal = stage.spans.reduce(
+      (sum, span) => sum + Math.max(0, Number(span.duration) || 0),
+      0,
+    );
+    stage.loadInfo = {
       spans: loadSpans,
-      start: Math.min(...loadSpans.map((span) => span.offset)),
-      end: Math.max(...loadSpans.map((span) => span.end)),
-      duration: loadTotal,
-    });
+      total: loadTotal,
+      requestTotal,
+      ratio:
+        requestTotal > 0 ? Math.min(1, Math.max(0, loadTotal / requestTotal)) : 0,
+    };
   }
+  const stages = [...sourceStages];
   const tracedEnd = Math.max(
     0,
     ...stages.flatMap((stage) => stage.spans.map((span) => span.end)),
@@ -430,6 +440,7 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
     duration: Math.max(0, total - responseStart),
     responseMetadata: responseMeta,
   });
+  applyRagSequentialDisplay(stages, total);
   return {
     total,
     stages,
@@ -440,10 +451,162 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
     finishedAt: flow?.finished_at,
     client: flow?.client || {},
     models: Array.isArray(flow?.summary?.models) ? flow.summary.models : [],
+    hasLoad: stages.some((stage) => Boolean(stage.loadInfo)),
   };
 }
 
-function ragStageDetailEntries(stage) {
+function applyRagSequentialDisplay(stages, total) {
+  const stageTotal = stages.reduce(
+    (sum, stage) => sum + Math.max(0, Number(stage.duration) || 0),
+    0,
+  );
+  const scale = stageTotal > 0 ? total / stageTotal : 1;
+  let cursor = 0;
+  for (const stage of stages) {
+    const duration = Math.max(0, Number(stage.duration) || 0) * scale;
+    stage.displayStart = cursor;
+    stage.displayDuration = duration;
+    stage.displayEnd = cursor + duration;
+    const firstSpan = stage.spans[0] || null;
+    const detailSegments = [];
+    let split = false;
+    if (firstSpan) {
+      const requestDuration = Math.max(
+        0,
+        Number(firstSpan.duration) || 0,
+      );
+      const loadMs = stage.loadInfo
+        ? Math.max(0, Number(stage.loadInfo.total) || 0)
+        : 0;
+      if (
+        stage.loadInfo &&
+        loadMs > 0 &&
+        stage.spans.length === 1 &&
+        requestDuration > 0
+      ) {
+        const loadEnd = Math.min(
+          firstSpan.end,
+          firstSpan.offset + loadMs,
+        );
+        const loadDuration = Math.max(0, loadEnd - firstSpan.offset);
+        const inferenceDuration = Math.max(0, firstSpan.end - loadEnd);
+        if (loadDuration > 0 && inferenceDuration > 0) {
+          const loadFinished = flowTimestampAfter(
+            firstSpan.started_at,
+            loadDuration,
+          );
+          const loadSpan = {
+            ...firstSpan,
+            offset: firstSpan.offset,
+            end: loadEnd,
+            duration: loadDuration,
+            finished_at: loadFinished,
+            metadata: {
+              ...(firstSpan.metadata || {}),
+              source_stage: stage.label,
+              model_load_ms: loadDuration,
+              request_duration_ms: requestDuration,
+              warm_duration_ms: Math.max(
+                0,
+                requestDuration - loadDuration,
+              ),
+              cold_start: loadDuration >= 100,
+            },
+            params: {
+              ...(firstSpan.params || {}),
+              source_stage: stage.label,
+            },
+          };
+          const inferenceSpan = {
+            ...firstSpan,
+            offset: loadEnd,
+            end: firstSpan.end,
+            duration: inferenceDuration,
+            started_at: loadFinished,
+            finished_at: firstSpan.finished_at,
+          };
+          detailSegments.push({
+            kind: "load",
+            label: "Model Load",
+            span: loadSpan,
+            duration: loadDuration,
+          });
+          detailSegments.push({
+            kind: "stage",
+            label: `${stage.label} 推論`,
+            span: inferenceSpan,
+            duration: inferenceDuration,
+          });
+          split = true;
+        }
+      }
+      if (!split) {
+        detailSegments.push({
+          kind: "stage",
+          label: stage.label,
+          span: firstSpan,
+          duration: requestDuration,
+        });
+      }
+    }
+    stage.detailSegments = detailSegments;
+    const segments = [];
+    if (firstSpan && duration > 0) {
+      if (split) {
+        const [loadSegment, inferenceSegment] = detailSegments;
+        const requestDuration =
+          loadSegment.duration + inferenceSegment.duration;
+        const loadDisplay =
+          requestDuration > 0
+            ? duration * (loadSegment.duration / requestDuration)
+            : 0;
+        const loadStage = {
+          ...stage,
+          key: "model_load",
+          label: `Model Load · ${stage.label}`,
+          spans: [loadSegment.span],
+          duration: loadSegment.duration,
+        };
+        const inferenceStage = {
+          ...stage,
+          label: `${stage.label} 推論`,
+          spans: [inferenceSegment.span],
+          duration: inferenceSegment.duration,
+        };
+        segments.push({
+          offset: cursor,
+          duration: loadDisplay,
+          color: "#0ea5e9",
+          kind: "load",
+          tip: ragSpanTooltip(loadStage, loadSegment.span),
+        });
+        segments.push({
+          offset: cursor + loadDisplay,
+          duration: Math.max(0, duration - loadDisplay),
+          color: stage.color,
+          kind: "stage",
+          tip: ragSpanTooltip(
+            inferenceStage,
+            inferenceSegment.span,
+            { includeLoad: false },
+          ),
+        });
+      } else {
+        segments.push({
+          offset: cursor,
+          duration,
+          color: stage.color,
+          kind: "stage",
+          tip: ragSpanTooltip(stage, firstSpan),
+        });
+      }
+    }
+    stage.displaySegments = segments;
+    cursor += duration;
+  }
+}
+
+function ragStageDetailEntries(stage, { includeLoad = true } = {}) {
   const entries = [];
   const push = (label, value) => {
     if (value === null || value === undefined || value === "") return;
@@ -458,6 +621,22 @@ function ragStageDetailEntries(stage) {
   const metadata = first.metadata || {};
   const spanHost = ragSpanHost(first);
   const spanModelLabel = ragSpanModelLabel(first);
+  const pushModelLoad = (spanMetadata, requestDuration) => {
+    const rawLoad = Number(spanMetadata?.load_duration_ms);
+    if (!Number.isFinite(rawLoad)) return;
+    const loadMs = Math.max(0, rawLoad);
+    push("Model Load", formatDuration(loadMs));
+    push("冷啟動", loadMs >= 100 ? "是" : "否（熱啟動）");
+    const duration = Math.max(0, Number(requestDuration) || 0);
+    if (duration > 0) {
+      const warmMs = Math.max(0, duration - loadMs);
+      push("扣除載入後", formatDuration(warmMs));
+      push(
+        "載入占比",
+        `${((loadMs / duration) * 100).toFixed(loadMs / duration >= 0.1 ? 0 : 1)}%`,
+      );
+    }
+  };
   if (stage.key === "response") {
     push("Trace 狀態", stage.responseMetadata.status || "—");
     push("Answer source", stage.responseMetadata.answer_source || "—");
@@ -497,6 +676,7 @@ function ragStageDetailEntries(stage) {
     push("Batch", metadata.batch);
     push("向量維度", metadata.dimensions);
     push("Fallback", metadata.fallback_used ? "是" : "否");
+    if (includeLoad) pushModelLoad(metadata, first.duration);
   } else if (stage.key === "qdrant") {
     push("Collection", metadata.collection || params.collection);
     if (metadata.filter) push("Filter", formatParamValue(metadata.filter));
@@ -507,8 +687,15 @@ function ragStageDetailEntries(stage) {
   } else if (stage.key === "reranker") {
     push("Model", spanModelLabel || metadata.model || params.model);
     push("主機", spanHost);
+    push("Endpoint", metadata.base_url || params.url);
+    push("Rerank 狀態", metadata.status);
+    push("Fallback", metadata.fallback_used ? "是" : "否");
     push("候選筆數", metadata.candidates);
     push("選用筆數", metadata.selected);
+    push("Top score", metadata.top_score);
+    if (Array.isArray(metadata.errors) && metadata.errors.length) {
+      push("錯誤", metadata.errors.join(" · "));
+    }
   } else if (stage.key === "context") {
     push("Chunks", metadata.chunks);
     push("判決 chunks", metadata.judgment_chunks);
@@ -532,13 +719,7 @@ function ragStageDetailEntries(stage) {
         ? "—"
         : formatDuration(metadata.total_duration_ms),
     );
-    push(
-      "載入耗時",
-      metadata.load_duration_ms === null ||
-        metadata.load_duration_ms === undefined
-        ? "—"
-        : formatDuration(metadata.load_duration_ms),
-    );
+    if (includeLoad) pushModelLoad(metadata, first.duration);
     push("Strict retry", metadata.strict ? "是" : "否");
   } else if (stage.key === "model_load") {
     push("Model", spanModelLabel || metadata.model || params.model);
@@ -675,8 +856,11 @@ function ragStageModelLabels(stage) {
   return [...labels];
 }
 
-function ragSpanTooltip(stage, span) {
-  const entries = ragStageDetailEntries({ ...stage, spans: [span] });
+function ragSpanTooltip(stage, span, options = {}) {
+  const entries = ragStageDetailEntries(
+    { ...stage, spans: [span] },
+    options,
+  );
   return [String(stage.label || ""), ...entries.map(([label, value]) => `${label}: ${value}`)]
     .join("\n");
 }
@@ -684,31 +868,102 @@ function ragSpanTooltip(stage, span) {
 function renderRagPipelineStage(stage, total) {
   const spans = stage.spans || [];
   const modelLabels = ragStageModelLabels(stage);
+  const displaySegments = Array.isArray(stage.displaySegments)
+    ? stage.displaySegments
+    : null;
+  const laneGap = 7;
   const lanes = Math.max(1, Math.min(4, spans.length));
   const multi = spans.length > 1;
-  const trackHeight = multi ? Math.max(12, lanes * 7) : 12;
-  const bars = spans
-    .slice(0, 4)
-    .map((span, index) => {
-      if (Number(span.duration) <= 0) return "";
-      const left = Math.max(
-        0,
-        Math.min(100, (span.offset / total) * 100),
-      );
-      const width = Math.max(
-        0.35,
-        Math.min(100 - left, (span.duration / total) * 100),
-      );
-      const top = multi ? index * 7 : 0;
-      const height = multi ? 6 : 12;
-      const tip = ragSpanTooltip(stage, span);
-      return `<span class="rag-wf-bar" style="left:${left.toFixed(
-        3,
-      )}%;width:${width.toFixed(3)}%;top:${top}px;height:${height}px"
-        data-rag-wf-tip="${escapeHtml(tip)}"
-        aria-label="${escapeHtml(tip)}" role="img"></span>`;
-    })
-    .join("");
+  const trackHeight = displaySegments
+    ? 12
+    : multi
+      ? Math.max(12, lanes * laneGap)
+      : 12;
+  const bars = displaySegments
+    ? displaySegments
+        .map((segment) => {
+          if (Number(segment.duration) <= 0) return "";
+          const left = Math.max(
+            0,
+            Math.min(100, (segment.offset / total) * 100),
+          );
+          const width = Math.min(
+            100 - left,
+            (segment.duration / total) * 100,
+          );
+          return `<span class="rag-wf-bar is-sequential${
+            segment.kind === "load" ? " is-load" : ""
+          }" style="left:${left.toFixed(3)}%;width:${width.toFixed(
+            4,
+          )}%;top:0;height:12px;--bar-color:${segment.color}"
+            data-rag-wf-tip="${escapeHtml(segment.tip)}"
+            aria-label="${escapeHtml(segment.tip)}" role="img"></span>`;
+        })
+        .join("")
+    : spans
+        .slice(0, 4)
+        .map((span, index) => {
+          if (Number(span.duration) <= 0) return "";
+          const left = Math.max(
+            0,
+            Math.min(100, (span.offset / total) * 100),
+          );
+          const width = Math.max(
+            0.35,
+            Math.min(100 - left, (span.duration / total) * 100),
+          );
+          const top = multi ? index * laneGap : 0;
+          const height = multi ? 6 : 12;
+          const tip = ragSpanTooltip(stage, span);
+          return `<span class="rag-wf-bar" style="left:${left.toFixed(
+            3,
+          )}%;width:${width.toFixed(3)}%;top:${top}px;height:${height}px"
+            data-rag-wf-tip="${escapeHtml(tip)}"
+            aria-label="${escapeHtml(tip)}" role="img"></span>`;
+        })
+        .join("");
+  const detailSegments = Array.isArray(stage.detailSegments)
+    ? stage.detailSegments
+    : [];
+  const detailGroups =
+    detailSegments.length > 1
+      ? detailSegments
+          .map((segment) => {
+            const detailStage =
+              segment.kind === "load"
+                ? {
+                    ...stage,
+                    key: "model_load",
+                    label: `Model Load · ${stage.label}`,
+                    spans: [segment.span],
+                    duration: segment.duration,
+                  }
+                : {
+                    ...stage,
+                    label: `${stage.label} 推論`,
+                    spans: [segment.span],
+                    duration: segment.duration,
+                  };
+            const entries = ragStageDetailEntries(detailStage, {
+              includeLoad: segment.kind !== "stage",
+            });
+            return `<div class="rag-wf-detail-group">
+              <div class="rag-wf-detail-group-head">
+                <strong>${escapeHtml(segment.label)}</strong>
+                <span>${escapeHtml(formatDuration(segment.duration))}</span>
+              </div>
+              <div class="rag-wf-detail-grid">${entries
+                .map(
+                  ([label, value]) =>
+                    `<span class="rag-wf-detail"><span>${escapeHtml(
+                      label,
+                    )}</span><strong>${escapeHtml(value)}</strong></span>`,
+                )
+                .join("")}</div>
+            </div>`;
+          })
+          .join("")
+      : "";
   const details = ragStageDetailEntries(stage)
     .map(
       ([label, value]) =>
@@ -717,6 +972,10 @@ function renderRagPipelineStage(stage, total) {
         )}</span><strong>${escapeHtml(value)}</strong></span>`,
     )
     .join("");
+  const detailsMarkup =
+    detailSegments.length > 1
+      ? `<div class="rag-wf-details is-split">${detailGroups}</div>`
+      : `<div class="rag-wf-details">${details}</div>`;
   const statusClass = !spans.length
     ? "is-missing"
     : spans.some((span) => span.status === "error")
@@ -725,9 +984,7 @@ function renderRagPipelineStage(stage, total) {
   const duration = spans.length
     ? formatDuration(stage.duration)
     : "未記錄";
-  return `<details class="rag-wf-stage ${statusClass}" style="--stage-color:${
-    stage.color
-  }">
+  return `<details class="rag-wf-stage ${statusClass}" style="--stage-color:${stage.color}">
     <summary class="rag-wf-stage-summary">
       <span class="rag-wf-stage-head">
         <span class="rag-wf-stage-label">
@@ -748,7 +1005,7 @@ function renderRagPipelineStage(stage, total) {
       </span>
       <span class="rag-wf-track" style="height:${trackHeight}px">${bars}</span>
     </summary>
-    <div class="rag-wf-details">${details}</div>
+    ${detailsMarkup}
   </details>`;
 }
 
@@ -792,10 +1049,12 @@ export function renderWaterfallStages(
   stages,
   total,
   hint = "點選任一階段，查看參數、Token、TTFT、開始／結束時間與來源數量。Waterfall 以絕對 offset 定位，平行執行的 span 會依實際時間重疊顯示。",
+  { legend = "" } = {},
 ) {
   return `<div class="rag-wf-axis"><span>0 ms</span><span>${escapeHtml(
     formatDuration(total),
   )}</span></div>
+    ${legend}
     <div class="rag-wf-stages">${(stages || [])
       .map((stage) => renderRagPipelineStage(stage, total))
       .join("")}</div>
@@ -803,7 +1062,19 @@ export function renderWaterfallStages(
 }
 
 function ragPipelineStagesMarkup(pipeline) {
-  return renderWaterfallStages(pipeline.stages, pipeline.total);
+  const hasLoad = (pipeline.stages || []).some((stage) => stage.loadInfo);
+  const legend = hasLoad
+    ? `<div class="rag-wf-legend"><span><i class="is-load"></i>Model Load（階段 bar 前段）</span></div>`
+    : "";
+  const hint = hasLoad
+    ? "階段依執行順序由左至右排列，上一階段結束後接續下一階段；Embedding／LLM 的藍色前段為 Model Load，後段為推論。實際開始／結束時間、Token 與載入占比可展開查看。"
+    : "階段依執行順序由左至右排列，上一階段結束後接續下一階段。實際開始／結束時間與 Token 可展開查看。";
+  return renderWaterfallStages(
+    pipeline.stages,
+    pipeline.total,
+    hint,
+    { legend },
+  );
 }
 
 export function renderRagPipelineWaterfall(

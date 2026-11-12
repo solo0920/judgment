@@ -24,10 +24,13 @@ from judgment.rag import (
     extract_excerpt,
     generate_answer_with_model,
 )
+from judgment.rerank import RerankOutcome, RerankResult
 from judgment.law_rag import (
     _article_ref_key,
     _extract_article_refs,
     build_insurance_responsibility_framework,
+    is_law_first_question,
+    is_related_laws_question,
     law_sources_for_question,
     select_law_articles,
 )
@@ -153,6 +156,26 @@ class FakeStore:
                 },
             }
         ]
+
+
+class MultiHitStore(FakeStore):
+    def search(self, collection, vector, *, limit=4, **kwargs):
+        hits = []
+        for index in range(1, 4):
+            hits.append(
+                {
+                    "score": round(0.9 - index * 0.01, 4),
+                    "payload": {
+                        "jid": f"TPDV,114,訴,{index},20260101,1",
+                        "court": "臺灣臺北地方法院",
+                        "title": "清償借款",
+                        "jdate": "20260101",
+                        "matched_laws": ["銀行法"],
+                        "snippet": "原告主張被告向其借款。",
+                    },
+                }
+            )
+        return hits[:limit]
 
 
 def _security_law_articles() -> list[dict]:
@@ -326,6 +349,134 @@ def test_answer_question_returns_retrieval_only_without_llm(monkeypatch) -> None
     assert "LLM_URL" in payload["notice"]
 
 
+def test_answer_question_reranks_candidates_and_traces_provider(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    settings = _settings(
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        rag_rerank_enabled=True,
+        rerank_url="http://x570:11435",
+        rag_rerank_candidates=3,
+        rag_top_k=2,
+    )
+
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def rerank(self, query, documents, *, top_n):
+            assert len(documents) == 3
+            return RerankOutcome(
+                status="ok",
+                results=[
+                    RerankResult(index=2, score=0.93),
+                    RerankResult(index=0, score=0.55),
+                ],
+                model="bge-reranker-v2-m3",
+                provider="x570",
+                url="http://x570:11435/v1/rerank",
+                fallback_used=False,
+                latency_ms=4,
+                candidate_count=3,
+                selected_count=2,
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    flow = start_flow(
+        request_id="test-rag-rerank",
+        entrypoint="/api/rag/query",
+        method="POST",
+        path="/api/rag/query",
+    )
+    try:
+        payload = answer_question(
+            session_factory=session_factory,
+            question="原告如何請求返還借款？",
+            settings=settings,
+            store=MultiHitStore(),
+            embedder=FakeEmbedder(),
+            enable_law_retrieval=False,
+        )
+        flow.finish()
+    finally:
+        clear_flow()
+
+    assert payload["status"] == "retrieval_only"
+    assert [item["jid"] for item in payload["judgments"]] == [
+        "TPDV,114,訴,3,20260101,1",
+        "TPDV,114,訴,1,20260101,1",
+    ]
+    assert payload["retrieval"]["top_k"] == 2
+    assert payload["retrieval"]["candidate_k"] == 3
+    assert payload["retrieval"]["rerank"]["status"] == "ok"
+    assert payload["retrieval"]["rerank"]["provider"] == "x570"
+    assert payload["retrieval"]["rerank"]["candidate_count"] == 3
+    assert payload["retrieval"]["rerank"]["selected_count"] == 2
+
+    segment = next(
+        item for item in flow.segments if item["name"] == "rag.rerank"
+    )
+    assert segment["metadata"]["model"] == "bge-reranker-v2-m3"
+    assert segment["metadata"]["provider_name"] == "x570"
+    assert segment["metadata"]["candidates"] == 3
+    assert segment["metadata"]["selected"] == 2
+    assert segment["metadata"]["fallback_used"] is False
+    assert segment["metadata"]["top_score"] == 0.93
+
+
+def test_answer_question_keeps_vector_order_when_reranker_degrades(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    settings = _settings(
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        rag_rerank_enabled=True,
+        rerank_url="http://x570:11435",
+        rag_rerank_candidates=3,
+        rag_top_k=2,
+    )
+
+    class DegradedReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def rerank(self, query, documents, *, top_n):
+            return RerankOutcome(
+                status="degraded",
+                model="bge-reranker-v2-m3",
+                provider="x570",
+                url="http://x570:11435/v1/rerank",
+                candidate_count=len(documents),
+                errors=["connect failed"],
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", DegradedReranker)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="原告如何請求返還借款？",
+        settings=settings,
+        store=MultiHitStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+
+    assert [item["jid"] for item in payload["judgments"]] == [
+        "TPDV,114,訴,1,20260101,1",
+        "TPDV,114,訴,2,20260101,1",
+    ]
+    assert payload["retrieval"]["rerank"]["status"] == "degraded"
+    assert payload["retrieval"]["top_k"] == 2
+
+
 def test_answer_question_accepts_grounded_llm_answer(monkeypatch) -> None:
     session_factory = _session_factory()
     _seed_judgments(session_factory)
@@ -410,6 +561,53 @@ def test_select_law_articles_honors_explicit_article_reference() -> None:
         "證券交易法第171條的刑責是什麼？",
     )
     assert selected[0]["article_no"] == "第 171 條"
+
+
+def test_related_laws_question_does_not_match_provision_questions() -> None:
+    assert not is_related_laws_question(
+        "銀行法對從業人員有那些規定？"
+    )
+    assert not is_related_laws_question("銀行法有哪些規定？")
+    assert not is_related_laws_question("有哪些法律規定？")
+    assert is_related_laws_question(
+        "有哪些法規是和壽險及產險相關的？"
+    )
+    assert is_related_laws_question("內線交易的法律有哪些？")
+    assert is_related_laws_question("銀行法相關法規有哪些？")
+
+
+def test_law_first_question_detects_bank_personnel_question() -> None:
+    assert is_law_first_question("銀行法對從業人員有那些規定？")
+    assert is_law_first_question("銀行法有哪些規定？")
+    assert not is_law_first_question(
+        "銀行法在法院實務上如何適用？"
+    )
+    assert not is_law_first_question("有哪些判決涉及銀行法？")
+
+
+def test_select_law_articles_expands_bank_personnel_terms() -> None:
+    articles = [
+        {
+            "article_no": "第 35-2 條",
+            "article_content": (
+                "銀行負責人及職員辦理授信時，應遵守利害關係人交易規定。"
+            ),
+        },
+        {
+            "article_no": "第 1 條",
+            "article_content": "本法所稱銀行，指依本法組織登記之銀行。",
+        },
+        {
+            "article_no": "第 99 條",
+            "article_content": "銀行分派盈餘時，應先提法定盈餘公積。",
+        },
+    ]
+    selected = select_law_articles(
+        articles,
+        "銀行法對從業人員有那些規定？",
+        limit=1,
+    )
+    assert selected[0]["article_no"] == "第 35-2 條"
 
 
 def test_insider_trading_law_sources_select_157_1_and_171(
@@ -960,6 +1158,74 @@ def test_llm_prompt_includes_law_sources(tmp_path: Path) -> None:
     assert len(payload["law_sources"]) == 1
     assert payload["law_sources"][0]["index"] == 2
     assert [context.get("kind") for context in captured["contexts"]] == [None, "law"]
+
+
+def test_bank_personnel_question_keeps_articles_and_law_first_context(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    settings = _settings(
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+        rag_top_k=4,
+        rag_law_first_judgment_limit=2,
+    )
+    bank_source = {
+        "index": 0,
+        "kind": "law",
+        "law_name": "銀行法",
+        "law_key": "BANK",
+        "source_type": "law",
+        "source_label": "法規",
+        "law_level": "法律",
+        "law_category": "金融法規",
+        "law_url": "https://law.test/bank",
+        "article_count": 204,
+        "law_modified_date": "20230628",
+        "law_effective_date": "",
+        "first_promulgation": None,
+        "law_histories": "",
+        "stats": None,
+        "articles": [
+            {
+                "article_no": "第 35-2 條",
+                "article_content": (
+                    "銀行負責人及職員辦理授信時，應遵守利害關係人交易規定。"
+                ),
+            }
+        ],
+    }
+    captured = {}
+
+    monkeypatch.setattr(
+        "judgment.rag.law_sources_for_question",
+        lambda *args, **kwargs: [bank_source],
+    )
+
+    def fake_generate(**kwargs):
+        captured["contexts"] = kwargs["contexts"]
+        return "依銀行法第 35-2 條，銀行負責人及職員辦理授信時應遵守相關規定 [1]。"
+
+    monkeypatch.setattr("judgment.rag._generate_answer", fake_generate)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對從業人員有那些規定？",
+        settings=settings,
+        store=MultiHitStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["status"] == "operational"
+    assert payload["retrieval"]["mode"] == "law_first"
+    assert payload["law_sources"][0]["articles"][0]["article_no"] == "第 35-2 條"
+    assert payload["law_sources"][0]["index"] == 1
+    assert payload["judgments"][0]["index"] == 2
+    assert payload["judgments"][1]["index"] == 3
+    assert captured["contexts"][0]["kind"] == "law"
+    assert captured["contexts"][1]["jid"] == "TPDV,114,訴,1,20260101,1"
 
 
 def test_answer_question_rejects_empty_question() -> None:

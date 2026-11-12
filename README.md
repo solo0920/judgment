@@ -113,7 +113,7 @@ uv run judgment-backfill-law-articles --data-dir ./data/laws
 uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 ```
 
-`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、探測 x570 Ollama 的 `bge-m3`，在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端。若 x570 不可用，`up.sh` 會立即把 `EMBEDDING_URL` 改成本機 Ollama；x570 可用時則以本機作為 runtime fallback。查詢 embedding 前會先做 2 秒健康檢查，非本機 Ollama 未回應即直接改用本機；實際 embedding 若超過 `EMBEDDING_QUERY_TIMEOUT_SECONDS`（預設 2 秒）未回應，也會改用本機 Ollama。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端與控制器（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器，`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過啟動時的線上更新檢查。
+`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、視設定啟動本機 llama.cpp reranker、探測 x570 Ollama 的 `bge-m3`，在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端或 reranker。若 x570 不可用，`up.sh` 會立即把 `EMBEDDING_URL` 改成本機 Ollama；x570 可用時則以本機作為 runtime fallback。查詢 embedding 前會先做 2 秒健康檢查，非本機 Ollama 未回應即直接改用本機；實際 embedding 若超過 `EMBEDDING_QUERY_TIMEOUT_SECONDS`（預設 2 秒）未回應，也會改用本機 Ollama。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端、控制器與本機 reranker（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器，`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過啟動時的線上更新檢查。
 
 開啟 <http://127.0.0.1:9200/>，預設進入 RAG 提問頁。主控台是純靜態的 Vanilla JS SPA，由 FastAPI 直接服務，原始碼模式不需要 Node.js 建置步驟。若要以 `file://` 直接開啟，或部署到 Cloudflare Pages，請先產生 `frontend/`，見〈靜態前端與部署〉。
 
@@ -211,9 +211,22 @@ cd /Volumes/USB/judgment-backup-20261108
 | `LLM_NUM_CTX` | `4096` | Ollama context window |
 | `LLM_NUM_PREDICT` | `384` | 最多生成 tokens；降低可縮短回答時間 |
 | `LLM_KEEP_ALIVE` | `30m` | Ollama 模型保持載入時間，避免反覆載入 |
-| `RAG_TOP_K` | `4` | 每次回答檢索的判決數 |
+| `RAG_TOP_K` | `4` | 最終提供給 LLM 的判決數；啟用 reranker 時建議 `8` |
 | `RAG_SCORE_THRESHOLD` | `0.35` | 向量相似度下限；低於門檻不提供給 LLM |
 | `RAG_MAX_CONTEXT_CHARS` | `4000` | 提供給 LLM 的判決片段總字數上限 |
+| `RAG_LAW_FIRST_JUDGMENT_LIMIT` | `1` | 法規優先題最多保留幾筆判決作為輔助 context |
+| `RAG_RERANK_ENABLED` | `false` | 啟用 BGE reranker；需先啟動 `scripts/rerank_server.sh` |
+| `RAG_RERANK_CANDIDATES` | `30` | 啟用 reranker 時先向 Qdrant 取得的候選判決數 |
+| `RERANK_URL` | `http://x570:11435` | 主要 reranker 服務；llama.cpp 使用 `/v1/rerank` |
+| `RERANK_FALLBACK_URL` | `http://127.0.0.1:11435` | x570 不可用時的本機 reranker fallback |
+| `RERANK_MODEL` | `bge-reranker-v2-m3` | reranker 模型名稱，會記錄在 Flow |
+| `RERANK_PORT` | `11435` | 本機 llama-server 監聽埠；`up.sh`／`down.sh` 共用 |
+| `RERANK_LOCAL_HOST` | `127.0.0.1` | `up.sh` 啟動本機 reranker 的綁定位址 |
+| `RERANK_START_LOCAL` | `auto` | `auto` 表示啟用 reranker 且設定了本機 URL 時由 `up.sh` 啟動；`1` 強制啟動、`0` 不啟動 |
+| `RERANK_OLLAMA_MODEL` | `qllama/bge-reranker-v2-m3:latest` | 由 Ollama 模型庫取出 GGUF 時使用的 tag |
+| `RERANK_TIMEOUT_SECONDS` | `3` | reranker 單次請求逾時 |
+| `RERANK_CONNECT_TIMEOUT_SECONDS` | `0.75` | reranker 連線逾時；避免 x570 離線時拖慢回答 |
+| `RERANK_MAX_CHARS` | `1200` | 每個候選文件送進 reranker 的最大字元數 |
 | `JUDGMENT_INDEX_MAX_CHARS` | `1600` | 每筆判決 embedded 的頭尾視窗字數 |
 | `JUDGMENT_POINT_ID_VERSION` | `jid-uuid5-v1` | Qdrant point ID 規則版本；變更會使舊向量不相容 |
 | `OPENDATA_JUDICIAL_GOV_TW_ACCOUNT` | 空 | 司法院開放資料帳號；判決下載 workflow 使用 |
@@ -471,12 +484,13 @@ uv run judgment-normalize-courts --all
 
 | 路由 | 頁面 | 功能 |
 | --- | --- | --- |
-| `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。首頁狀態卡彙整所有可用主機已確認支援 chat 的模型按鈕（以「主機:模型」顯示，例如 `mbp:gemma3:4b`、`x570:gemma3:4b`；綠色可切換，下一次提問生效），並可手動重新檢查所有主機的模型能力。每次回答最下方會嵌入與效能報表相同規格的 RAG Pipeline waterfall，顯示 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Model Load／Response 的絕對時間、Token、TTFT、主機／模型與引用數；後端處理流程與測試 Flow 也使用同一套 waterfall。 |
+| `#/home` | 首頁 | 預設入口。包含主視覺、法律問題輸入框、七個主要分頁的介紹卡與完整頁尾；輸入問題按 Enter 會帶著題目前往 `#/rag` 並自動送出。品牌標誌固定返回首頁。 |
+| `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、可選 BGE reranker 精排、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。狀態卡彙整所有可用主機已確認支援 chat 的模型按鈕（以「主機:模型」顯示，例如 `mbp:gemma3:4b`、`x570:gemma3:4b`；綠色可切換，下一次提問生效），並可手動重新檢查所有主機的模型能力；另列 Rerank models，顯示主要與 fallback reranker 的可用狀態，離線或未啟用時以灰色呈現。每次回答最下方會嵌入與效能報表相同規格的 RAG Pipeline waterfall，依執行順序接續顯示 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 的 Token、TTFT、主機／模型與引用數；Embedding／LLM 的 bar 以藍色前段標示 Model Load，後段為推論；展開後分成兩個明細區塊，各自顯示正確的開始／結束時間與耗時，載入結束時間等於推論開始時間；後端處理流程與測試 Flow 也使用同一套 waterfall。 |
 | `#/data` | 資料庫查詢 | 左側 sidebar：查詢法規命令、查詢判決、資料庫 Schema。法規命令與判決查詢支援 fuzzy 多條件（AND）與 suggestion，選取後立即查詢；可展開進階 metadata 條件。Schema 模式可切換法規命令／判決與資料庫，列出資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
 | `#/quality` | 資料品質 | 左側 sidebar：品質總覽、題庫新增、題庫管理、Benchmark 題庫、題庫人工驗收批注。品質總覽以 DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。題庫工作區支援法規／條文／判決驗證、版本、JSON 匯入匯出、suite 凍結與人工批注。 |
-| `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Pipeline、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Pipeline 以絕對 offset 繪製 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response waterfall，顯示各 span 的開始／結束時間、Token、TTFT、模型與來源數量，平行 span 會依實際時間重疊，滑鼠移到 bar 上會顯示該 span 的詳細資訊；使用模型的階段會標註「主機:模型」，Model Load 階段分開顯示冷啟動載入與扣除載入後的熱啟動流程時間；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
+| `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Pipeline、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Pipeline 依執行順序接續繪製 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response waterfall，上一階段結束位置即下一階段開始位置；顯示各 span 的開始／結束時間、Token、TTFT、模型與來源數量，滑鼠移到 bar 上會顯示該 span 的詳細資訊；使用模型的階段會標註「主機:模型」，Embedding／LLM bar 的藍色前段為 Model Load，後段為扣除載入後的推論時間，展開明細會分成兩段並各自顯示開始／結束時間；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
 | `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 9 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。含 embedding 的流程會在「執行資訊」卡片列出已知 Ollama 主機與模型，可用拖移或箭頭調整優先順序；綠色代表可用、灰色代表離線或不可用，第一優先失敗時會依序改用下一台。另含判決、法規、命令三條即時流程圖、判決壓縮檔逐檔進度、各階段子進度與顏色、整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
-| `#/status` | 系統狀態 | 左側分類依序為服務總覽、系統測試、系統資料使用、Model Provider、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。Model Provider 可管理 Ollama 主機與模型、切換使用中的主機；每個模型會顯示 Chat／Embedding／Vision／Tools／Thinking／Speech／Reranker 能力標籤，並可手動「檢查模型能力」更新尚未測試的模型。embedding 主機優先順序可在資料處理頁拖移調整。 |
+| `#/status` | 系統狀態 | 左側分類依序為服務總覽、系統測試、系統資料使用、Model Provider、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康（含 Reranker 服務）、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。Model Provider 可管理 Ollama 主機與模型、切換使用中的主機；每個模型會顯示 Chat／Embedding／Vision／Tools／Thinking／Speech／Reranker 能力標籤，並可手動「檢查模型能力」更新尚未測試的模型。embedding 主機優先順序可在資料處理頁拖移調整。 |
 | `#/tests` | 系統測試 | 獨立路由，內容與 `#/status` 的「系統測試」分類相同：API 連線設定、測試模式開關、LLM 服務測試與測試 Flow。header 不直接列出此頁；未設定 API Base 的 standalone 前端會自動導向此頁。 |
 
 ### HTTP API
@@ -745,7 +759,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 
 - `module`、`function`：實際執行的 Python 模組與函式（或外部服務呼叫，例如 `QdrantStore.search`）。
 - `params` / `param_names`：參數名稱與安全摘要值；長字串、物件與列表會截斷或只保留型別、長度與 key。
-- `started_at`、`finished_at`、`offset_ms`、`end_offset_ms`、`duration_ms`：實際開始／結束時間、相對於 Flow 開始的位移與該段原始耗時。報表時間軸會顯示每個點位的開始時鐘時間（例如 `20:59:13.912`）。RAG Pipeline waterfall 以此絕對時間定位，平行 span 會依實際重疊區間呈現。
+- `started_at`、`finished_at`、`offset_ms`、`end_offset_ms`、`duration_ms`：實際開始／結束時間、相對於 Flow 開始的位移與該段原始耗時。報表時間軸會顯示每個點位的開始時鐘時間（例如 `20:59:13.912`）。效能 Flow 與測試 Flow 以絕對時間定位；RAG Pipeline waterfall 為清楚呈現先後順序，依階段耗時接續排列，實際 offset 仍保留在展開明細與 hover 資訊中。
 - 每個點位的主要數字是「本點到下一點」的區間：`下一點 offset_ms - 本點 offset_ms`；最後一點使用本段 `duration_ms`。長條左端依 `offset_ms` 定位、寬度依該區間佔總 Flow 時間的比例計算。
 - 「累計」是流水線累計：從第一點開始，依序加上每個點位區間，也就是第一點 `offset_ms` 到本點結束的差額。不能使用父區段自身的 `duration_ms`；例如 `http.request` 的點位區間是 1 ms，累計就是 1 ms，而不是 3.9 秒。隨流水線推進，累計會逐步增加，最後一點才等於總時間。
 - `parent_seq`、`depth`：巢狀呼叫關係，前端據此縮排顯示。
@@ -764,7 +778,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 - 摘要：符合筆數、成功率、平均耗時、P95、平均段數。
 - Flow 統計：模型使用次數與平均模型呼叫耗時、最慢區段排行、Client 全流程與 Render 平均。
 - 每筆紀錄可展開點位時間軸，查看實際開始時間、本點到下一點的區間、流水線累計、module／function／params；長條以開始時間定位、長度表示點位區間，並可展開原始 Flow JSON。
-- **RAG Pipeline** 分頁提供 Single Query Trace waterfall：Parsing（輸入長度）、Embedding（主機／Model／Token／Batch）、Qdrant（Collection／Filter／Top K）、Reranker（主機／Model／候選數）、Context（Chunk／Token）、LLM（主機／Model／Input／Output Token／TTFT）、Model Load（冷啟動載入 vs 熱啟動）與 Response（總耗時／引用數／Abstain）。每個階段可展開查看 module、function、開始／結束時間與原始 params，滑鼠移到 bar 上會顯示同一份明細；可切換最近 50 筆 RAG Trace。效能 Flow 紀錄、測試 Flow 與 RAG 後端處理流程也使用相同 waterfall 元件。
+- **RAG Pipeline** 分頁提供 Single Query Trace waterfall：Parsing（輸入長度）、Embedding（主機／Model／Token／Batch）、Qdrant（Collection／Filter／Top K）、Reranker（主機／Model／候選數／選用數／fallback 狀態）、Context（Chunk／Token）、LLM（主機／Model／Input／Output Token／TTFT）、Embedding／LLM bar 內的 Model Load 藍色前段（顯示冷啟動載入 vs 熱啟動，後段接續推論；展開後分成 Model Load 與推論兩段明細，各自顯示開始／結束時間）與 Response（總耗時／引用數／Abstain）。階段依執行順序接續排列；每個階段可展開查看 module、function、實際開始／結束時間與原始 params，滑鼠移到 bar 上會顯示同一份明細；可切換最近 50 筆 RAG Trace。效能 Flow 紀錄、測試 Flow 與 RAG 後端處理流程也使用相同 waterfall 元件。
 - CSV／JSON 匯出與分頁。
 - CLI 紀錄若沒有逐段 instrumentation，會自動建立單一 summary segment，仍可在報表查看總耗時。
 - 既有資料庫啟動時會自動執行 `ALTER TABLE performance_records ADD COLUMN flow JSON`；舊紀錄的 `flow` 可為空，頁面會顯示 fallback 訊息。
@@ -1094,6 +1108,184 @@ curl "http://127.0.0.1:9200/api/index-alias/reconcile"
 
 Qdrant 資料頁提供「語意查詢」「Collection」「Top K」「相似度門檻」；結果包含相似度、案號、法院、案由、裁判日期、命中法規與相似片段，點選案號可開啟判決原文。RAG 回答與所有引用皆不是法律意見。 點擊 RAG 回覆中的法規／命令卡，會從本地原始法規 Parquet 開啟完整原始條文 dialog；dialog 一次列出全部條文、法規沿革與來源網站，並可透過右上角 X、「返回回答」或點擊外部關閉。點擊卡內的單一條文預覽，則只顯示該條文的完整內容，不列出其他條文。
 
+### 法規優先題型（Phase 1）
+
+RAG 現在會區分「法規條文題」與「判決檢索題」：
+
+- 問題包含明確法規名稱，或出現「規定、條文、義務、責任、限制、罰則、從業人員、負責人、職員」等法規導向詞彙時，採 **law-first**。
+- 問題出現「判決、案例、法院、實務、被告、原告」等詞彙時，仍以判決為主。
+- law-first 時：
+  - 法規／命令 context 排在判決前面。
+  - 法規 citation 編號從 `[1]` 開始，判決接續在後。
+  - 預設最多只保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT`（預設 1）筆判決作為輔助，避免判決壓過條文。
+  - LLM system prompt 會要求以現行法規／命令條文為主要依據，判決僅作實務補充。
+- 「銀行法對從業人員有那些規定？」這類問句不再被誤判為「列出相關法規」；`那些規定` 不會觸發 related-laws 清單，也不會提前清空已選出的法規 articles。
+- 銀行法加入從業人員概念擴展：銀行負責人、銀行職員、負責人、職員、兼職、佣金、酬金、不當利益、資格條件、利益衝突、違背職務，以及第 18、35、35-1、35-2、125-2、127-2 條等概念索引。
+
+這是 Phase 1 的 law-first 修正；法規／命令仍以 PostgreSQL／Parquet 檢索為主，尚未建立法規／命令的 Qdrant 向量索引。
+
+### Reranker（第一輪：BGE-reranker-v2-m3）
+
+第一輪使用 `BAAI/bge-reranker-v2-m3` Q8 GGUF，透過 llama.cpp 的 `/v1/rerank` 提供服務。Ollama 目前沒有 rerank API，因此不使用 Ollama 的 reranker 模型端點。
+
+架構：
+
+```text
+問題
+→ bge-m3 embedding
+→ Qdrant 取 RAG_RERANK_CANDIDATES 筆候選
+→ x570 reranker（主要）
+→ MBP reranker（fallback）
+→ 取 RAG_TOP_K 筆進入 Context
+→ LLM
+```
+
+啟動 x570 主要 reranker（在 x570 上執行）：
+
+```bash
+# 預設使用 Ollama 已下載的 qllama/bge-reranker-v2-m3 GGUF
+RERANK_HOST=0.0.0.0 RERANK_PORT=11435 ./scripts/rerank_server.sh
+
+# 若 llama-server 不在常見路徑
+LLAMA_SERVER_BIN=/path/to/llama-server \
+RERANK_HOST=0.0.0.0 RERANK_PORT=11435 \
+./scripts/rerank_server.sh
+```
+
+注意：
+
+- x570 若模型位於 `/usr/share/ollama`，目前使用者可能沒有讀取權限；請以 Ollama 服務使用者執行，或把 GGUF 複製到可讀路徑並設定 `RERANK_MODEL_PATH`。
+- `RERANK_HOST=0.0.0.0` 會開放區網／Tailscale 存取；請只在受信任網路使用，並確認 x570 防火牆允許 11435。
+- RTX 5070 Ti 需要支援 Blackwell 的 NVIDIA driver；llama.cpp 需使用 CUDA 12.8+ 建置。
+
+#### x570 開機自動啟動（systemd）
+
+不需要在 x570 clone 整個 repo。把部署腳本傳過去執行即可：
+
+```bash
+scp scripts/deploy_rerank_systemd.sh x570:/tmp/
+ssh -t x570 'sudo bash /tmp/deploy_rerank_systemd.sh'
+```
+
+`ssh -t` 是必要的：`sudo` 需要 TTY 才能輸入密碼。若不加 `-t`，會出現 `sudo: A terminal is required to authenticate`。
+
+腳本會：
+
+- 尋找 x570 上的 `llama-server`
+- 自動偵測 Ollama 的 CUDA backend（例如 `/usr/local/lib/ollama/cuda_v13/libggml-cuda.so`）
+- 設定 `GGML_BACKEND_PATH` 與 `LD_LIBRARY_PATH`，並使用 `--gpu-layers all`
+- 從 Ollama 取得 `qllama/bge-reranker-v2-m3:latest` 的 GGUF
+- 複製到 `/opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf`
+- 建立 `/etc/systemd/system/judgment-reranker.service`
+- `systemctl enable --now`，之後 x570 開機自動啟動
+- 等待 `/health` 並顯示結果
+
+安裝時會印出 `llama-server devices`；應看到 `CUDA0`／NVIDIA 裝置。若只看到 CPU/BLAS，表示 CUDA backend 沒有載入，請確認：
+
+```bash
+ssh -t x570 'sudo journalctl -u judgment-reranker -n 80 --no-pager'
+ssh x570 'nvidia-smi'
+```
+
+必要時指定 Ollama 的 CUDA 目錄重跑：
+
+```bash
+ssh -t x570 'sudo LLAMA_LIB_DIR=/usr/local/lib/ollama:/usr/local/lib/ollama/cuda_v13 bash /tmp/deploy_rerank_systemd.sh'
+```
+
+若 `llama-server` 不在常見路徑：
+
+```bash
+scp scripts/deploy_rerank_systemd.sh x570:/tmp/
+ssh -t x570 'sudo LLAMA_SERVER_BIN=/path/to/llama-server bash /tmp/deploy_rerank_systemd.sh'
+```
+
+若需要指定 library 目錄（Ollama 內附 binary 常見）：
+
+```bash
+ssh -t x570 'sudo LLAMA_SERVER_BIN=/usr/local/lib/ollama/llama-server LLAMA_LIB_DIR=/usr/local/lib/ollama bash /tmp/deploy_rerank_systemd.sh'
+```
+
+常用管理：
+
+```bash
+ssh -t x570 'sudo systemctl status judgment-reranker.service'
+ssh -t x570 'sudo systemctl restart judgment-reranker.service'
+ssh -t x570 'sudo journalctl -u judgment-reranker.service -f'
+ssh -t x570 'sudo bash /tmp/deploy_rerank_systemd.sh --uninstall'
+```
+
+若 x570 有 ufw，記得開放：
+
+```bash
+ssh -t x570 'sudo ufw allow 11435/tcp'
+```
+
+啟動後 MBP 的 `/api/status` 會自動顯示 x570 為主要 reranker；目前 `up.sh`／`down.sh` 只管理 MBP 本機 fallback，不遠端控制 x570。
+
+啟動 MBP fallback：
+
+`./up.sh` 會在 `RAG_RERANK_ENABLED=true` 且 `RERANK_START_LOCAL=auto`、且 `RERANK_URL`／`RERANK_FALLBACK_URL` 包含本機位址時，自動啟動本機 llama-server；`./down.sh` 會依 `RERANK_PORT` 停止它。若你已經手動啟動，`up.sh` 會偵測 `/health` 後跳過重複啟動。
+
+也可以手動啟動（在 MBP 上執行）：
+
+```bash
+RERANK_HOST=127.0.0.1 RERANK_PORT=11435 ./scripts/rerank_server.sh
+```
+
+驗證：
+
+```bash
+curl http://x570:11435/health
+curl http://x570:11435/v1/rerank \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "bge-reranker-v2-m3",
+    "query": "金融消費者保護法如何處理金融消費爭議？",
+    "documents": [
+      "金融消費者保護法第13條規定金融消費爭議處理程序。",
+      "銀行法第33條規定借款利率。"
+    ],
+    "top_n": 2
+  }'
+```
+
+啟用設定：
+
+```dotenv
+RAG_RERANK_ENABLED=true
+RAG_RERANK_CANDIDATES=30
+RAG_TOP_K=8
+RERANK_URL=http://x570:11435
+RERANK_FALLBACK_URL=http://127.0.0.1:11435
+RERANK_MODEL=bge-reranker-v2-m3
+RERANK_PORT=11435
+RERANK_LOCAL_HOST=127.0.0.1
+RERANK_START_LOCAL=auto
+RERANK_OLLAMA_MODEL=qllama/bge-reranker-v2-m3:latest
+RERANK_TIMEOUT_SECONDS=3
+RERANK_CONNECT_TIMEOUT_SECONDS=0.75
+RERANK_MAX_CHARS=1200
+```
+
+行為：
+
+- x570 可用時使用 x570；失敗或 timeout 時自動改用 MBP fallback。
+- 兩台都失敗時保留原本 Qdrant 排序，只取 `RAG_TOP_K` 筆，回答不會失敗；`retrieval.rerank.status` 會標示 `degraded`。
+- `rag.rerank` Flow 會記錄 model、provider、候選數、選用數、top score、fallback 與錯誤。
+- `RERANK_MAX_CHARS` 控制每個候選送進 cross-encoder 的長度；BGE v2-m3 實務上建議控制在約 1024–1200 字元/tokens 的量級，避免過長輸入拖慢並降低排序品質。
+- 第一輪先只 rerank 判決候選，法規檢索與 citation 編號維持原流程。
+
+實測 MBP 使用 llama.cpp BGE Q8：
+
+| 候選數 | 每篇約 450 tokens | 耗時 |
+| ---: | ---: | ---: |
+| 20 | 20 篇 | 約 1.16 秒 |
+| 30 | 30 篇 | 約 1.73 秒 |
+| 30 | 短文件 | 約 0.24 秒 |
+
+x570 的 RTX 5070 Ti 16GB 會明顯快於 MBP；實際延遲主要由候選文件抓取與網路 hop 決定。
+
 ### RAG 速度調校（10 秒內）
 
 實測 RAG 的主要耗時在 LLM（27B 模型約 30–50 秒），embedding 與 Qdrant 檢索通常低於 1 秒。目前快速設定：
@@ -1109,6 +1301,10 @@ LLM_NUM_PREDICT=384
 LLM_KEEP_ALIVE=30m
 RAG_TOP_K=4
 RAG_MAX_CONTEXT_CHARS=4000
+RAG_RERANK_ENABLED=true
+RAG_RERANK_CANDIDATES=30
+RERANK_URL=http://x570:11435
+RERANK_FALLBACK_URL=http://127.0.0.1:11435
 ```
 
 目前實測：
@@ -1130,7 +1326,7 @@ RAG_MAX_CONTEXT_CHARS=4000
 
 ### 本階段驗證
 
-- `uv run pytest`：235 passed（含靜態資源、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：249 passed（含靜態資源、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料（2026-11-11）：1,351 筆法規、10,454 筆命令、222,124 條文；法規／命令原始 Parquet 2 個檔案，約 87 MB。
 - 判決原始檔：`data/judgments/raw_rar/` 目前有 368 個月份壓縮檔，約 52 GB；`download_manifest.json` 以執行時掃描結果為準，不固定月份數。欄位包含 `files`（以 fileset ID 為鍵）、`months` 陣列、`backfill`（待補齊月份、續傳起點、驗證游標、失敗紀錄與上次停止原因）與 `history_files`（移至 `raw_rar/history/` 的舊版容器 metadata）。

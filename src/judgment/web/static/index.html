@@ -47,7 +47,7 @@
     <a class="skip-link" href="#app-main">跳至主要內容</a>
     <div class="app-shell">
       <header class="app-header">
-        <a class="brand" href="#/rag" aria-label="Judgment RAG Console 首頁">
+        <a class="brand" href="#/home" aria-label="Judgment RAG Console 首頁">
           <span class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" fill="none">
               <path d="M8 5h8.5v14.2c0 4.1-2.4 6.8-6.5 6.8H7v-4h2.3c1.5 0 2.4-.9 2.4-2.7V9H8V5Z" fill="currentColor"/>
@@ -147,13 +147,38 @@
       </main>
 
       <footer class="app-footer">
-        <span>Judgment RAG Console</span>
-        <span class="footer-dot" aria-hidden="true"></span>
-        <span>法規資料僅供檢索與研究參考，不構成法律意見</span>
-        <span class="footer-spacer"></span>
-        <a href="https://getdesign.md/" target="_blank" rel="noopener noreferrer">
-          Design references: getdesign.md
-        </a>
+        <div class="footer-main">
+          <div class="footer-brand">
+            <strong>JUDGMENT · LEGAL RAG</strong>
+            <p>以法規、命令與判決片段為基礎的檢索與問答主控台。所有回答都會標示可回溯來源，不生成沒有依據的內容。</p>
+          </div>
+          <nav class="footer-links" aria-label="頁尾導覽">
+            <div class="footer-column">
+              <span class="footer-heading">工作區</span>
+              <a href="#/home">首頁</a>
+              <a href="#/rag">RAG 提問</a>
+              <a href="#/data">資料庫查詢</a>
+              <a href="#/quality">資料品質</a>
+            </div>
+            <div class="footer-column">
+              <span class="footer-heading">維運</span>
+              <a href="#/performance">效能報表</a>
+              <a href="#/processing">資料處理</a>
+              <a href="#/status">系統狀態</a>
+            </div>
+            <div class="footer-column">
+              <span class="footer-heading">資源與授權</span>
+              <a href="https://github.com/solo0920/judgment" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+              <a href="https://github.com/solo0920/judgment/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+              <a href="https://getdesign.md/" target="_blank" rel="noopener noreferrer">Design references</a>
+            </div>
+          </nav>
+        </div>
+        <div class="footer-bottom">
+          <span>© 2026 Judgment RAG Console · MIT License</span>
+          <span>法規資料僅供檢索與研究參考，不構成法律意見。</span>
+          <span>Built with FastAPI · PostgreSQL · Parquet · Qdrant · Ollama</span>
+        </div>
       </footer>
     </div>
 

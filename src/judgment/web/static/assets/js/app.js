@@ -1,6 +1,7 @@
 import { api, needsApiConfiguration } from "./api.js";
 import { initThemePicker } from "./themes.js";
 import { escapeHtml, icon, toast } from "./utils.js";
+import * as homePage from "./pages/home.js";
 import * as ragPage from "./pages/rag.js";
 import * as dataPage from "./pages/data.js";
 import * as performancePage from "./pages/performance.js";
@@ -9,8 +10,9 @@ import * as qualityPage from "./pages/quality.js";
 import * as statusPage from "./pages/status.js";
 import * as testsPage from "./pages/tests.js";
 
-const DEFAULT_ROUTE = "rag";
+const DEFAULT_ROUTE = "home";
 const ROUTES = {
+  home: { page: homePage, title: "Judgment RAG Console · 法規與判決檢索" },
   rag: { page: ragPage, title: "RAG 提問 · Judgment RAG Console" },
   data: { page: dataPage, title: "資料庫查詢 · Judgment RAG Console" },
   quality: { page: qualityPage, title: "資料品質 · Judgment RAG Console" },
@@ -131,8 +133,10 @@ function initGlobalShortcuts() {
         active.tagName === "SELECT" ||
         active.isContentEditable);
     if (typing) return;
-    if (parseRoute() !== "rag") return;
-    const input = document.getElementById("rag-question");
+    const route = parseRoute();
+    const inputId = route === "home" ? "home-question" : route === "rag" ? "rag-question" : "";
+    if (!inputId) return;
+    const input = document.getElementById(inputId);
     if (input) {
       event.preventDefault();
       input.focus();
@@ -180,7 +184,7 @@ function boot() {
 
   if (needsApiConfiguration()) {
     window.setTimeout(() => {
-      if (parseRoute() !== "tests") window.location.hash = "#/tests";
+      if (parseRoute() === "rag") window.location.hash = "#/tests";
     }, 700);
   }
 }

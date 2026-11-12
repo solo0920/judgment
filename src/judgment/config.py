@@ -76,6 +76,15 @@ class Settings:
     rag_top_k: int = 4
     rag_score_threshold: float = 0.35
     rag_max_context_chars: int = 4000
+    rag_rerank_enabled: bool = False
+    rag_rerank_candidates: int = 30
+    rag_law_first_judgment_limit: int = 1
+    rerank_url: str = ""
+    rerank_fallback_url: str = ""
+    rerank_model: str = "bge-reranker-v2-m3"
+    rerank_timeout_seconds: float = 3.0
+    rerank_connect_timeout_seconds: float = 0.75
+    rerank_max_chars: int = 1200
     judgment_index_max_chars: int = 1600
     opendata_judicial_account: str = ""
     opendata_judicial_password: str = ""
@@ -177,6 +186,24 @@ class Settings:
             rag_top_k=_env_int("RAG_TOP_K", 4),
             rag_score_threshold=_env_float("RAG_SCORE_THRESHOLD", 0.35),
             rag_max_context_chars=_env_int("RAG_MAX_CONTEXT_CHARS", 4000),
+            rag_rerank_enabled=_env_bool("RAG_RERANK_ENABLED", False),
+            rag_rerank_candidates=_env_int("RAG_RERANK_CANDIDATES", 30),
+            rag_law_first_judgment_limit=_env_int(
+                "RAG_LAW_FIRST_JUDGMENT_LIMIT", 1
+            ),
+            rerank_url=os.getenv("RERANK_URL", "").rstrip("/"),
+            rerank_fallback_url=os.getenv(
+                "RERANK_FALLBACK_URL", ""
+            ).rstrip("/"),
+            rerank_model=os.getenv(
+                "RERANK_MODEL", "bge-reranker-v2-m3"
+            ).strip()
+            or "bge-reranker-v2-m3",
+            rerank_timeout_seconds=_env_float("RERANK_TIMEOUT_SECONDS", 3.0),
+            rerank_connect_timeout_seconds=_env_float(
+                "RERANK_CONNECT_TIMEOUT_SECONDS", 0.75
+            ),
+            rerank_max_chars=_env_int("RERANK_MAX_CHARS", 1200),
             judgment_index_max_chars=_env_int("JUDGMENT_INDEX_MAX_CHARS", 1600),
             opendata_judicial_account=os.getenv(
                 "OPENDATA_JUDICIAL_GOV_TW_ACCOUNT", ""

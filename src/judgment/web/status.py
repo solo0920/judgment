@@ -311,6 +311,113 @@ def _embedding_metrics(
     }
 
 
+def _rerank_health(url: str) -> bool:
+    try:
+        parsed = httpx.URL(url)
+        netloc = parsed.netloc
+        if isinstance(netloc, bytes):
+            netloc = netloc.decode()
+        health_url = f"{parsed.scheme}://{netloc}/health"
+        response = httpx.get(health_url, timeout=1.0)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def _rerank_provider_name(url: str) -> str:
+    try:
+        parsed = httpx.URL(url)
+        host = parsed.host
+        if isinstance(host, bytes):
+            host = host.decode()
+        host = str(host or "").strip()
+        if host in {"127.0.0.1", "localhost", "::1"}:
+            return "local"
+        return host or url
+    except Exception:
+        return url
+
+
+def _rerank_metrics(settings: Settings) -> Dict[str, Any]:
+    model = settings.rerank_model
+    candidates = [
+        (role, str(url).strip().rstrip("/"))
+        for role, url in (
+            ("primary", settings.rerank_url),
+            ("fallback", settings.rerank_fallback_url),
+        )
+        if str(url or "").strip()
+    ]
+    providers = [
+        {
+            "name": _rerank_provider_name(url),
+            "role": role,
+            "url": url,
+            "model": model,
+            "status": "disabled" if not settings.rag_rerank_enabled else "degraded",
+            "active": False,
+        }
+        for role, url in candidates
+    ]
+    if not settings.rag_rerank_enabled:
+        return {
+            "status": "not_configured",
+            "latency_ms": None,
+            "detail": f"RAG_RERANK_ENABLED=false（模型：{model}）",
+            "model": model,
+            "enabled": False,
+            "providers": providers,
+            "active": None,
+        }
+    if not candidates:
+        return {
+            "status": "not_configured",
+            "latency_ms": None,
+            "detail": f"未設定 RERANK_URL（模型：{model}）",
+            "model": model,
+            "enabled": True,
+            "providers": [],
+            "active": None,
+        }
+
+    started = time.perf_counter()
+    for provider in providers:
+        provider["status"] = (
+            "operational"
+            if _rerank_health(provider["url"])
+            else "degraded"
+        )
+    active = next(
+        (
+            provider
+            for provider in providers
+            if provider["status"] == "operational"
+        ),
+        None,
+    )
+    if active is not None:
+        active["active"] = True
+        prefix = "fallback " if active["role"] == "fallback" else ""
+        return {
+            "status": "operational",
+            "latency_ms": _ms(started),
+            "detail": f"{prefix}模型：{model} · {active['url']}",
+            "model": model,
+            "enabled": True,
+            "providers": providers,
+            "active": active,
+        }
+    return {
+        "status": "degraded",
+        "latency_ms": _ms(started),
+        "detail": f"無法連線 reranker（模型：{model}）",
+        "model": model,
+        "enabled": True,
+        "providers": providers,
+        "active": None,
+    }
+
+
 def _llm_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
     started = time.perf_counter()
     base_url = base_url.rstrip("/")
@@ -420,6 +527,7 @@ def build_status(
         fallback_urls=settings.embedding_failover_urls,
     )
     llm = _llm_metrics(base_url=settings.llm_url, model=settings.llm_model)
+    rerank = _rerank_metrics(settings)
     rag = _rag_metrics(qdrant, embedding, llm)
 
     try:
@@ -479,6 +587,12 @@ def build_status(
             "name": "Embedding",
             "kind": "ai",
             **embedding,
+        },
+        {
+            "id": "reranker",
+            "name": "Reranker",
+            "kind": "ai",
+            **rerank,
         },
         {
             "id": "rag",
@@ -553,7 +667,13 @@ def build_status(
                 {
                     "id": "ai",
                     "label": "Intelligence",
-                    "nodes": ["Embedding", "Retriever", "RAG Engine", "LLM"],
+                    "nodes": [
+                        "Embedding",
+                        "Retriever",
+                        "Reranker",
+                        "RAG Engine",
+                        "LLM",
+                    ],
                 },
             ],
             "flow": ["client", "api", "data", "ai"],
