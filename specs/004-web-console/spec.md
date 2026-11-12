@@ -381,12 +381,15 @@
 - **FR-124**: RAG MUST 支援 cross-encoder reranker。啟用時 MUST 先向 Qdrant 取得 `RAG_RERANK_CANDIDATES` 筆候選，依序嘗試 `RERANK_URL` 與 `RERANK_FALLBACK_URL` 的 `/v1/rerank` 或 `/rerank`，再依 rerank 分數取 `RAG_TOP_K` 筆進入 Context；不得把 reranker 當成 Ollama chat 模型。`rag.rerank` Flow MUST 記錄 model、provider、候選數、選用數、top score、fallback 與錯誤。主要與 fallback 都失敗時 MUST 保留原本 Qdrant 排序並將 `retrieval.rerank.status` 標示為 `degraded`，不得因此讓回答失敗。第一輪預設模型為 `bge-reranker-v2-m3`。
 - **FR-125**: `#/rag` 的模型狀態區 MUST 另列 Rerank models，顯示主要與 fallback reranker 的「主機:模型」；可用者 MUST 以綠色呈現，離線、degraded 或未啟用者 MUST 以灰色呈現，並標示目前實際使用的 reranker。區塊 MUST 提供重新檢查健康狀態的動作；reranker 設定未啟用時 MUST 顯示「未啟用」，不得把離線模型標示為可用。
 - **FR-126**: RAG MUST 區分法規優先（law-first）與判決優先（judgment-first）。問題含明確法規名稱或法規導向詞彙（規定、條文、義務、責任、限制、罰則、從業人員、負責人、職員等）時 MUST 採 law-first；含判決、案例、法院、實務等詞彙時 MUST 採 judgment-first。law-first 時法規／命令 context MUST 排在判決前、法規 citation MUST 從 `[1]` 開始、判決最多保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT` 筆；LLM prompt MUST 要求以現行法規／命令條文為主要依據，判決僅作實務補充。`那些規定`／`有哪些規定` 不得被誤判為「列出相關法規」，且未實際回傳結構化清單前 MUST NOT 清空已選出的法規 articles。
+- **FR-127**: 法規／命令條文 MUST 使用獨立於判決的 Qdrant collection 與 alias（預設 `legal_articles_vNNN`／`legal_articles_current`），MUST NOT 寫入判決 collection。索引 MUST 使用 `bge-m3`，只收錄有條號與內容的現行條文，payload MUST 包含 `source_type`、`law_key`、`law_name`、`article_no`、`article_content`、`content_hash` 與版本 metadata。CLI MUST 支援全量建置、`--incremental`、`--if-changed`、`--dry-run`、`--status`、`--list-versions`、`--rollback`、`--no-activate` 與 `--discard-version`；建置 MUST 驗證 Qdrant 筆數、維度與取樣 payload 後才切換 alias，舊版本 MUST 保留供 rollback。
+- **FR-128**: RAG 的法規／命令檢索 MUST 與判決檢索共用同一個查詢 embedding，MUST NOT 為兩邊重複呼叫 embedding。法規候選 MUST 以 BM25／概念分數與 dense 分數融合；問題明確指名法規時，該法規 MUST 作為 anchor，dense 分數只用於排序其條文。法規條文 rerank MUST 與判決 rerank 分開執行；`retrieval.law_vector` 與 `retrieval.law_rerank` MUST 記錄 alias／collection、候選數、top score、provider、延遲與 fallback。alias 不存在、Qdrant 或 embedding 失敗時 MUST 退回 PostgreSQL／Parquet + BM25，不得讓 RAG 中斷。
 - **FR-050**: 文件 MUST 說明電源控制器的啟動方式、日誌位置、停用設定，以及由後端提供頁面時停止後重新整理的限制。
 
 ### Key Entities
 
 - **Console Route**: 主控台的主要頁面與 URL 片段，包含 RAG、資料庫、資料品質、效能報表、資料處理、系統狀態，以及獨立的 `#/tests` 系統測試路由。
 - **Service Status**: 單一服務元件的識別、名稱、類型、狀態、延遲與說明；狀態必須來自實際檢查或明確設定。
+- **Legal Article Index**: 法規／命令條文的版本化 Qdrant collection、alias、embedding／recipe 版本、法規數、條文數、驗證結果與增量建置 snapshot；不得與判決索引共用 collection。
 - **Database Catalog**: 可用資料來源、狀態、說明與動態 metadata 欄位定義。
 - **Query Report**: 一次查詢的資料庫、資料表、條件、摘要、分布、查詢語句、資料列、分頁、警告與耗時。
 - **Law Detail Report**: 單一法規的 metadata、狀態、沿革、附件、條文、資料來源與 Parquet 快照資訊，以及返回原查詢報表的狀態。
@@ -449,6 +452,8 @@
 - **SC-048**: 啟用 reranker 且主要端點可用時，RAG 回覆的判決順序 MUST 依 rerank 分數排列，`retrieval.rerank.status` MUST 為 `ok`，`rag.rerank` Flow MUST 顯示「主機:模型」、候選數、選用數與 top score。主要端點失敗但 fallback 可用時 MUST 自動改用 fallback，並將 `fallback_used` 標示為真。兩者都失敗時 MUST 保留 Qdrant 原排序、只取 `RAG_TOP_K` 筆，且 `retrieval.rerank.status` MUST 為 `degraded`，回答不得因 reranker 失敗而中斷。
 - **SC-049**: 當主要 reranker 離線、fallback 可用時，`#/rag` 的 Rerank models MUST 將主要模型顯示為灰色「離線」、fallback 顯示為綠色「使用中」，並以 fallback 作為目前 reranker。兩者都離線時 MUST 全部灰色並顯示「無可用模型」；`RAG_RERANK_ENABLED=false` 時 MUST 顯示「未啟用」。按下重新檢查後 MUST 依最新健康狀態更新顏色與目前使用標示。
 - **SC-050**: 當使用者詢問「銀行法對從業人員有那些規定？」時，RAG MUST 判定為 law-first、保留銀行法已選出的 articles、將法規 source 編號為 `[1]`，並讓判決從 `[2]` 開始；`retrieval.mode` MUST 為 `law_first`，判決 context 數 MUST 不超過 `RAG_LAW_FIRST_JUDGMENT_LIMIT`。同時，「有哪些法規和壽險及產險相關？」仍 MUST 觸發 related-laws 結構化清單；「銀行法有哪些規定？」MUST NOT 被當成相關法規清單。
+- **SC-051**: 以現行法規／命令 Parquet 建置時，`legal_articles_current` MUST 指向新版本 collection，索引筆數 MUST 等於可檢索條文數（目前 222,124），維度 MUST 為 1,024，且判決 collection `judgments_v002` 的 points 數 MUST 不變。第二次以未變更來源執行 `--incremental --if-changed` MUST 回傳 `unchanged` 且不新增 collection；變更一部法規後執行 `--incremental` MUST 只替換該法規的 points，未變動法規的 points 與向量 MUST 保留。
+- **SC-052**: 啟用法規向量檢索時，同一次 RAG 查詢 MUST 只呼叫一次 `bge-m3` embedding；`retrieval.law_vector.status` MUST 為 `ok` 並包含命中的法規，`retrieval.law_rerank` MUST 獨立記錄法規 rerank。把 `legal_articles_current` alias 移除後，同一題 MUST 仍能由 PostgreSQL／Parquet + BM25 產出法規來源，且不得回傳 5xx。
 - **SC-034**: 點擊 `證券交易法` 法規卡 MUST 從本地 Parquet 開啟 229 條原文 dialog，一次列出全部條文並顯示 `Parquet 條文` 來源，不得出現分頁控制；X、「返回回答」與點擊外部 MUST 可關閉，且 390px 無水平溢出。
 - **SC-019**: 資料庫頁可在法規命令與判決間切換；判決分類可查詢已篩選的 `judgment_documents`，且未匯入或未命中時顯示 0 筆，不出現虛構資料。
 - **SC-020**: 從判決查詢結果可開啟判決原文，並以「返回查詢結果」回到原本的判決頁碼與資料列。

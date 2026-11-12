@@ -459,6 +459,51 @@ class JudgmentVectorIndex(Base):
     )
 
 
+class LegalArticleIndexVersion(Base):
+    """Version metadata for the law/order article vector collection."""
+
+    __tablename__ = "legal_article_index_versions"
+
+    version_id = Column(Integer, primary_key=True, autoincrement=True)
+    physical_collection = Column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    alias_name = Column(
+        String(128), nullable=False, default="legal_articles_current", index=True
+    )
+    build_mode = Column(String(32), nullable=False, default="full")
+    embedding_model = Column(String(128), nullable=False, default="")
+    embedding_version = Column(String(128), nullable=False, default="")
+    embedding_dimension = Column(Integer, nullable=False, default=0)
+    index_recipe_version = Column(String(128), nullable=False, default="")
+    point_id_version = Column(String(64), nullable=False, default="")
+    law_count = Column(Integer, nullable=False, default=0)
+    article_count = Column(Integer, nullable=False, default=0)
+    indexed_count = Column(Integer, nullable=False, default=0)
+    source_snapshot = Column(JSON, nullable=False, default=dict)
+    validation_result = Column(JSON, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="building", index=True)
+    previous_version_id = Column(
+        Integer,
+        ForeignKey("legal_article_index_versions.version_id"),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    validated_at = Column(DateTime(timezone=True), nullable=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_legal_article_index_versions_alias_status",
+            "alias_name",
+            "status",
+        ),
+        Index("ix_legal_article_index_versions_created", "created_at"),
+    )
+
+
 class PerformanceRecord(Base):
     __tablename__ = "performance_records"
 

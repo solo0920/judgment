@@ -19,6 +19,7 @@ from judgment.models import (
 )
 from judgment.observability import clear_flow, start_flow
 from judgment.rag import (
+    _search_legal_articles,
     _valid_citation_markers,
     answer_question,
     extract_excerpt,
@@ -176,6 +177,45 @@ class MultiHitStore(FakeStore):
                 }
             )
         return hits[:limit]
+
+
+class LegalVectorStore(MultiHitStore):
+    def get_alias(self, alias):
+        if alias == "legal_articles_current":
+            return "legal_articles_v001"
+        if alias == "judgments_current":
+            return "judgments_v002"
+        return None
+
+    def collection_info(self, collection):
+        return {"points_count": 10}
+
+    def search(self, collection, vector, *, limit=4, **kwargs):
+        if "legal_articles" in collection:
+            return [
+                {
+                    "score": 0.88,
+                    "payload": {
+                        "law_name": "銀行法",
+                        "law_key": "BANK",
+                        "source_type": "law",
+                        "article_no": "第 18 條",
+                    },
+                }
+            ][:limit]
+        return super().search(collection, vector, limit=limit, **kwargs)
+
+
+class NoLegalVectorStore(MultiHitStore):
+    def get_alias(self, alias):
+        if alias == "judgments_current":
+            return "judgments_v002"
+        return None
+
+    def collection_info(self, collection):
+        if "legal_articles" in collection:
+            return None
+        return super().collection_info(collection)
 
 
 def _security_law_articles() -> list[dict]:
@@ -608,6 +648,186 @@ def test_select_law_articles_expands_bank_personnel_terms() -> None:
         limit=1,
     )
     assert selected[0]["article_no"] == "第 35-2 條"
+
+
+def test_select_law_articles_uses_dense_scores_when_bm25_is_empty() -> None:
+    articles = [
+        {
+            "article_no": "第 35 條",
+            "article_content": "銀行負責人及職員不得收受佣金。",
+        },
+        {
+            "article_no": "第 99 條",
+            "article_content": "銀行分派盈餘時，應先提法定盈餘公積。",
+        },
+    ]
+
+    selected = select_law_articles(
+        articles,
+        "請問",
+        limit=1,
+        dense_scores={"第 99 條": 0.9, "第 35 條": 0.1},
+    )
+
+    assert selected[0]["article_no"] == "第 99 條"
+
+
+def test_law_sources_adds_dense_law_when_keyword_lookup_finds_none(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "民法"): {
+            "article_count": 1439,
+            "law_articles": [
+                {
+                    "article_no": "第 184 條",
+                    "article_content": (
+                        "因故意或過失不法侵害他人之權利者，負損害賠償責任。"
+                    ),
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    vector_hits = [
+        {
+            "score": 0.81,
+            "payload": {
+                "law_name": "民法",
+                "law_key": "CIVIL",
+                "source_type": "law",
+                "article_no": "第 184 條",
+            },
+        }
+    ]
+
+    sources = law_sources_for_question(
+        session_factory,
+        tmp_path,
+        "損害賠償責任如何認定？",
+        vector_hits=vector_hits,
+    )
+
+    assert [source["law_name"] for source in sources] == ["民法"]
+    assert sources[0]["articles"][0]["article_no"] == "第 184 條"
+
+
+def test_dense_law_fallback_prefers_statute_over_near_tied_order(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "民法"): {
+            "article_count": 1439,
+            "law_articles": [
+                {
+                    "article_no": "第 184 條",
+                    "article_content": "不法侵害他人之權利者，負損害賠償責任。",
+                }
+            ],
+        },
+        ("order", "銀行法施行細則"): {
+            "article_count": 11,
+            "law_articles": [
+                {
+                    "article_no": "第 1 條",
+                    "article_content": "本細則依銀行法規定訂定之。",
+                }
+            ],
+        },
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    vector_hits = [
+        {
+            "score": 0.69,
+            "payload": {
+                "law_name": "銀行法施行細則",
+                "law_key": "BANK-RULE",
+                "source_type": "order",
+                "article_no": "第 1 條",
+            },
+        },
+        {
+            "score": 0.68,
+            "payload": {
+                "law_name": "民法",
+                "law_key": "CIVIL",
+                "source_type": "law",
+                "article_no": "第 184 條",
+            },
+        },
+    ]
+
+    sources = law_sources_for_question(
+        session_factory,
+        tmp_path,
+        "損害賠償責任如何認定？",
+        limit=1,
+        vector_hits=vector_hits,
+    )
+
+    assert [source["law_name"] for source in sources] == ["民法"]
+
+
+def test_explicit_law_anchor_ignores_unrelated_dense_laws(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "銀行法"): {
+            "article_count": 204,
+            "law_articles": [
+                {
+                    "article_no": "第 35 條",
+                    "article_content": "銀行負責人及職員不得收受佣金。",
+                }
+            ],
+        },
+        ("law", "民法"): {
+            "article_count": 1439,
+            "law_articles": [
+                {
+                    "article_no": "第 184 條",
+                    "article_content": "不法侵害他人之權利者，負損害賠償責任。",
+                }
+            ],
+        },
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    vector_hits = [
+        {
+            "score": 0.9,
+            "payload": {
+                "law_name": "民法",
+                "law_key": "CIVIL",
+                "source_type": "law",
+                "article_no": "第 184 條",
+            },
+        }
+    ]
+
+    sources = law_sources_for_question(
+        session_factory,
+        tmp_path,
+        "銀行法對從業人員有那些規定？",
+        vector_hits=vector_hits,
+    )
+
+    assert [source["law_name"] for source in sources] == ["銀行法"]
+    assert sources[0]["articles"][0]["article_no"] == "第 35 條"
 
 
 def test_insider_trading_law_sources_select_157_1_and_171(
@@ -1226,6 +1446,164 @@ def test_bank_personnel_question_keeps_articles_and_law_first_context(
     assert payload["judgments"][1]["index"] == 3
     assert captured["contexts"][0]["kind"] == "law"
     assert captured["contexts"][1]["jid"] == "TPDV,114,訴,1,20260101,1"
+
+
+def test_law_vector_search_reuses_query_embedding(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "銀行法"): {
+            "article_count": 204,
+            "law_articles": [
+                {
+                    "article_no": "第 18 條",
+                    "article_content": "本法稱銀行負責人，謂依公司法規定應負責之人。",
+                },
+                {
+                    "article_no": "第 35 條",
+                    "article_content": "銀行負責人及職員不得收受佣金。",
+                },
+                {
+                    "article_no": "第 125-2 條",
+                    "article_content": "銀行負責人或職員違背職務者，處有期徒刑。",
+                },
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "依銀行法第 35 條，銀行負責人及職員不得收受佣金 [1]。",
+    )
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+        rag_law_vector_enabled=True,
+    )
+    embedder = FakeEmbedder()
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對從業人員有那些規定？",
+        settings=settings,
+        store=LegalVectorStore(),
+        embedder=embedder,
+    )
+
+    assert payload["status"] == "operational"
+    assert payload["retrieval"]["law_vector"]["status"] == "ok"
+    assert payload["retrieval"]["law_vector"]["unique_articles"] == 1
+    assert payload["retrieval"]["law_vector"]["alias"] == "legal_articles_current"
+    assert payload["retrieval"]["law_rerank"]["status"] == "disabled"
+    assert payload["retrieval"]["mode"] == "law_first"
+    assert embedder.calls == [["銀行法對從業人員有那些規定？"]]
+    assert payload["law_sources"][0]["index"] == 1
+
+
+def test_legal_vector_search_filters_non_article_payloads() -> None:
+    class MixedStore:
+        configured = True
+
+        def get_alias(self, alias):
+            return "legal_articles_v001"
+
+        def collection_info(self, collection):
+            return {"points_count": 3}
+
+        def search(self, collection, vector, **kwargs):
+            return [
+                {
+                    "score": 0.99,
+                    "payload": {"jid": "TPDV,114,訴,1,20260101,1"},
+                },
+                {
+                    "score": 0.88,
+                    "payload": {
+                        "law_name": "銀行法",
+                        "law_key": "BANK",
+                        "source_type": "law",
+                        "article_no": "第 35 條",
+                    },
+                },
+                {
+                    "score": 0.77,
+                    "payload": {
+                        "law_name": "銀行法",
+                        "law_key": "BANK",
+                        "source_type": "law",
+                        "article_no": "",
+                    },
+                },
+            ]
+
+    hits, metadata = _search_legal_articles(
+        settings=_settings(),
+        question="銀行法對從業人員有那些規定？",
+        store=MixedStore(),
+        vector=[0.1, 0.2],
+    )
+
+    assert metadata["status"] == "ok"
+    assert metadata["unique_articles"] == 1
+    assert metadata["law_count"] == 1
+    assert hits[0]["payload"]["article_no"] == "第 35 條"
+
+
+def test_missing_law_vector_alias_falls_back_to_bm25(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "銀行法"): {
+            "article_count": 204,
+            "law_articles": [
+                {
+                    "article_no": "第 35 條",
+                    "article_content": "銀行負責人及職員不得收受佣金。",
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "依銀行法第 35 條，銀行負責人及職員不得收受佣金 [1]。",
+    )
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+        rag_law_vector_enabled=True,
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對從業人員有那些規定？",
+        settings=settings,
+        store=NoLegalVectorStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["status"] == "operational"
+    assert payload["retrieval"]["law_vector"]["status"] == "not_indexed"
+    assert payload["law_sources"][0]["law_name"] == "銀行法"
+    assert payload["law_sources"][0]["articles"][0]["article_no"] == "第 35 條"
 
 
 def test_answer_question_rejects_empty_question() -> None:

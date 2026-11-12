@@ -251,6 +251,23 @@ class QdrantStore:
             deleted += len(batch)
         return deleted
 
+    def delete_points_by_filter(
+        self,
+        collection: str,
+        query_filter: Dict[str, Any],
+        *,
+        wait: bool = True,
+    ) -> None:
+        if not query_filter:
+            return
+        self._request(
+            "POST",
+            f"/collections/{collection}/points/delete",
+            params={"wait": "true" if wait else "false"},
+            json={"filter": query_filter},
+            timeout=max(self.timeout, 120.0),
+        )
+
     def retrieve_points(
         self,
         collection: str,

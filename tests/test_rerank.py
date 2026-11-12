@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 
-from judgment.rerank import RerankerClient
+from judgment.config import Settings
+from judgment.rag import _rerank_law_sources
+from judgment.rerank import RerankOutcome, RerankResult, RerankerClient
 from judgment.web.status import _rerank_metrics
 
 
@@ -216,3 +219,103 @@ def test_reranker_status_checks_primary_and_fallback(monkeypatch) -> None:
     assert metrics["providers"][1]["status"] == "operational"
     assert metrics["providers"][1]["active"] is True
     assert metrics["active"]["name"] == "local"
+
+
+def _law_settings() -> Settings:
+    return Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=Path("data/laws"),
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        rerank_url="http://reranker.test",
+        rag_rerank_enabled=True,
+    )
+
+
+def test_law_rerank_orders_articles_per_source(monkeypatch) -> None:
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def rerank(self, query, documents, *, top_n):
+            return RerankOutcome(
+                status="ok",
+                results=[
+                    RerankResult(index=1, score=9.0),
+                    RerankResult(index=0, score=1.0),
+                    RerankResult(index=2, score=0.5),
+                ],
+                model="bge-reranker-v2-m3",
+                candidate_count=len(documents),
+                selected_count=len(documents),
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    sources = [
+        {
+            "law_name": "銀行法",
+            "source_label": "法規",
+            "articles": [
+                {"article_no": "第 35 條", "article_content": "佣金"},
+                {"article_no": "第 125-2 條", "article_content": "刑責"},
+                {"article_no": "第 35-1 條", "article_content": "兼職"},
+            ],
+        }
+    ]
+
+    reranked, outcome = _rerank_law_sources(
+        settings=_law_settings(),
+        question="銀行法對從業人員有那些規定？",
+        law_sources=sources,
+        article_limit=2,
+    )
+
+    assert outcome.status == "ok"
+    # Rank fusion keeps the strongest BM25/hybrid article while promoting the
+    # cross-encoder's preferred article into the remaining slot.
+    assert [
+        article["article_no"] for article in reranked[0]["articles"]
+    ] == ["第 35 條", "第 125-2 條"]
+
+
+def test_law_rerank_keeps_explicit_article_reference(monkeypatch) -> None:
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def rerank(self, query, documents, *, top_n):
+            return RerankOutcome(
+                status="ok",
+                results=[
+                    RerankResult(index=0, score=9.0),
+                    RerankResult(index=1, score=8.0),
+                ],
+                model="bge-reranker-v2-m3",
+                candidate_count=len(documents),
+                selected_count=len(documents),
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    sources = [
+        {
+            "law_name": "銀行法",
+            "source_label": "法規",
+            "articles": [
+                {"article_no": "第 35 條", "article_content": "佣金"},
+                {"article_no": "第 125-2 條", "article_content": "刑責"},
+            ],
+        }
+    ]
+
+    reranked, _ = _rerank_law_sources(
+        settings=_law_settings(),
+        question="銀行法第 125-2 條的刑責是什麼？",
+        law_sources=sources,
+        article_limit=1,
+    )
+
+    assert reranked[0]["articles"][0]["article_no"] == "第 125-2 條"

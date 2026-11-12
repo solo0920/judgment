@@ -4,7 +4,7 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow.parquet as pq
 from sqlalchemy import or_, select
@@ -606,6 +606,26 @@ def _article_key(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
 
+def _dense_article_scores(
+    scores: Optional[Mapping[str, float]],
+) -> Dict[str, float]:
+    normalized: Dict[str, float] = {}
+    for article_no, score in (scores or {}).items():
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0:
+            continue
+        key = _article_key(article_no)
+        if key:
+            normalized[key] = max(normalized.get(key, 0.0), value)
+        ref = _article_ref_key(article_no)
+        if ref:
+            normalized[ref] = max(normalized.get(ref, 0.0), value)
+    return normalized
+
+
 def select_law_articles(
     articles: Sequence[Dict[str, Any]],
     question: str,
@@ -613,6 +633,8 @@ def select_law_articles(
     priority: Optional[Sequence[str]] = None,
     limit: int = 4,
     budget: int = 3000,
+    dense_scores: Optional[Mapping[str, float]] = None,
+    dense_weight: float = 0.2,
 ) -> List[Dict[str, str]]:
     usable = [
         article
@@ -623,14 +645,21 @@ def select_law_articles(
     if not usable:
         return []
     relevance = _article_scores(usable, question)
+    dense = _dense_article_scores(dense_scores)
     priority_order = {
         _article_key(article_no): index
         for index, article_no in enumerate(priority or [])
     }
+    explicit_refs = _extract_article_refs(question)
     candidates: List[Dict[str, Any]] = []
     for index, article in enumerate(usable):
         article_no = str(article.get("article_no") or "").strip()
         article_key = _article_key(article_no)
+        ref = _article_ref_key(article_no)
+        dense_score = max(
+            dense.get(article_key, 0.0),
+            dense.get(ref, 0.0) if ref else 0.0,
+        )
         in_priority = article_key in priority_order
         candidates.append(
             {
@@ -638,14 +667,35 @@ def select_law_articles(
                 "article_content": str(article.get("article_content") or "").strip(),
                 "is_priority": in_priority,
                 "priority_rank": priority_order.get(article_key, len(priority_order) + 1),
-                "score": relevance[index] if index < len(relevance) else 0.0,
+                "bm25_score": relevance[index] if index < len(relevance) else 0.0,
+                "dense_score": dense_score,
+                "score": 0.0,
             }
         )
+    if explicit_refs:
+        explicit_candidates = [
+            item
+            for item in candidates
+            if _article_ref_key(item["article_no"]) in explicit_refs
+        ]
+        if explicit_candidates:
+            candidates = explicit_candidates
+    best_bm25 = max((item["bm25_score"] for item in candidates), default=0.0)
+    best_dense = max((item["dense_score"] for item in candidates), default=0.0)
+    for item in candidates:
+        bm25_part = (
+            item["bm25_score"] / best_bm25 if best_bm25 > 0 else 0.0
+        )
+        dense_part = (
+            item["dense_score"] / best_dense if best_dense > 0 else 0.0
+        )
+        item["score"] = bm25_part + max(0.0, float(dense_weight)) * dense_part
     candidates.sort(
         key=lambda item: (
             0 if item["is_priority"] else 1,
             item["priority_rank"],
             -item["score"],
+            -item["bm25_score"],
             len(item["article_content"]),
             item["article_no"],
         )
@@ -762,6 +812,7 @@ def build_law_source(
     priority_articles: Optional[Sequence[str]] = None,
     article_limit: int = 4,
     article_budget: int = 3000,
+    dense_scores: Optional[Mapping[str, float]] = None,
 ) -> Dict[str, Any]:
     content = content or {}
     histories = str(
@@ -775,6 +826,7 @@ def build_law_source(
         priority=priority_articles,
         limit=article_limit,
         budget=article_budget,
+        dense_scores=dense_scores,
     )
     promulgation = parse_first_promulgation(histories)
     return {
@@ -1183,6 +1235,35 @@ def _records_by_names(session_factory, names: Sequence[str]) -> List[LawDocument
     return [by_name[name] for name in wanted if name in by_name]
 
 
+def _dense_hits_by_law(
+    vector_hits: Optional[Sequence[Dict[str, Any]]],
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, float]]:
+    by_law: Dict[str, Dict[str, float]] = {}
+    law_scores: Dict[str, float] = {}
+    for hit in vector_hits or []:
+        if not isinstance(hit, dict):
+            continue
+        payload = hit.get("payload") or {}
+        law_name = str(payload.get("law_name") or "").strip()
+        if not law_name:
+            continue
+        try:
+            score = float(hit.get("score") or 0)
+        except (TypeError, ValueError):
+            continue
+        if score <= 0:
+            continue
+        article_no = str(payload.get("article_no") or "").strip()
+        if article_no:
+            law_scores_for_articles = by_law.setdefault(law_name, {})
+            law_scores_for_articles[article_no] = max(
+                law_scores_for_articles.get(article_no, 0.0),
+                score,
+            )
+        law_scores[law_name] = max(law_scores.get(law_name, 0.0), score)
+    return by_law, law_scores
+
+
 def law_sources_for_question(
     session_factory,
     law_data_dir: Path,
@@ -1192,7 +1273,9 @@ def law_sources_for_question(
     limit: int = 4,
     article_limit: int = 4,
     article_budget: int = 3000,
+    vector_hits: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
+    dense_by_law, dense_law_scores = _dense_hits_by_law(vector_hits)
     effective_limit = limit
     if is_related_laws_question(question):
         effective_limit = max(limit, 8)
@@ -1232,6 +1315,70 @@ def law_sources_for_question(
         if extras:
             records = list(records) + extras
             effective_limit = max(effective_limit, len(records))
+    if dense_law_scores:
+        existing_names = {record.law_name for record in records}
+        question_text = _normalize(question)
+        explicit_law = any(
+            _normalize(record.law_name) in question_text
+            for record in records
+        )
+        # Dense law candidates are most useful when keyword lookup found
+        # nothing or when the question asks for related statutes.  When the
+        # user named a statute explicitly, keep that statute as the anchor and
+        # only use dense scores to rank its articles.
+        if (
+            not records
+            or not explicit_law
+            or is_related_laws_question(question)
+        ):
+            ranked_names = [
+                name
+                for name in sorted(
+                    dense_law_scores,
+                    key=lambda name: (-dense_law_scores[name], name),
+                )
+                if name not in existing_names
+            ]
+            room = max(0, effective_limit - len(records))
+            if records:
+                # Keep keyword/concept matches as the main sources; dense may
+                # add one complementary statute, not replace the whole list.
+                room = min(room, 1)
+            else:
+                # A purely dense lookup should stay focused instead of
+                # surrounding one question with four unrelated statutes.
+                room = min(room, 2)
+            if room and ranked_names:
+                candidate_names = ranked_names[: max(room * 3, room)]
+                extras = _records_by_names(
+                    session_factory, candidate_names
+                )
+                by_name = {record.law_name: record for record in extras}
+                ordered_extras = sorted(
+                    (
+                        by_name[name]
+                        for name in candidate_names
+                        if name in by_name
+                    ),
+                    key=lambda record: (
+                        -(
+                            dense_law_scores.get(
+                                record.law_name, 0.0
+                            )
+                            + (
+                                0.02
+                                if record.source_type == "law"
+                                else 0.0
+                            )
+                        ),
+                        record.law_name,
+                    ),
+                )[:room]
+                if ordered_extras:
+                    records = list(records) + ordered_extras
+                    effective_limit = max(
+                        effective_limit, len(records)
+                    )
     if not records:
         return []
     contents = load_law_contents(law_data_dir, records)
@@ -1256,6 +1403,7 @@ def law_sources_for_question(
                 priority_articles=priority,
                 article_limit=article_limit,
                 article_budget=article_budget,
+                dense_scores=dense_by_law.get(record.law_name),
             )
         )
     return sources

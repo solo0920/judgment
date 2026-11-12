@@ -59,6 +59,15 @@ class EmbeddingError(RuntimeError):
     """Raised when an embedding provider cannot return usable vectors."""
 
 
+class EmbeddingInputError(EmbeddingError):
+    """Raised when the provider rejects the input length or shape.
+
+    This is not a host failure.  Index builders can split the batch and retry
+    on the same host instead of cooling the host down or switching to a
+    fallback provider.
+    """
+
+
 def _normalized_models(payload: Dict[str, Any]) -> List[str]:
     models: List[str] = []
     for item in payload.get("models") or []:
@@ -292,7 +301,12 @@ class OllamaEmbedder:
             payload = response.json()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:300]
-            raise EmbeddingError(
+            error_type = (
+                EmbeddingInputError
+                if exc.response.status_code == 413
+                else EmbeddingError
+            )
+            raise error_type(
                 f"Embedding API HTTP {exc.response.status_code}: {detail}"
             ) from exc
         except Exception as exc:
@@ -395,6 +409,10 @@ class OllamaEmbedder:
                     )
                     _clear_primary_down(self._cooldown_key)
                     return result
+                except EmbeddingInputError:
+                    # Bad input is not a host outage.  Let the caller split or
+                    # truncate the batch and retry the same host.
+                    raise
                 except EmbeddingError as exc:
                     primary_error = exc
                     _mark_primary_down(
@@ -426,6 +444,8 @@ class OllamaEmbedder:
                     }
                 )
                 return result
+            except EmbeddingInputError:
+                raise
             except EmbeddingError as exc:
                 fallback_errors.append((url, exc))
 

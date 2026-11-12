@@ -1,6 +1,6 @@
 # Judgment RAG
 
-判決檢索與法規引用問答系統。目前已包含「法規／命令資料下載」、「判決下載」、「判決金融法規篩選匯入」、「資料品質」、「題庫與 RAG Benchmark」與「版本化 Qdrant 索引」模組，以及以 FastAPI + Vanilla JS 建置的 Web 主控台：從全國法規資料庫與司法院開放資料下載最新資料、判斷是否有新版、將原始資料寫入 Parquet、把版本與中繼資料寫入 PostgreSQL；判決資料會先將壓縮檔內原始 JSON 寫入不可變的原始 Parquet 備份，再依金融法規清單篩選後寫入 PostgreSQL，最後建立 Qdrant 向量索引，透過本機 Ollama 提供有引用依據的 RAG 回答。
+判決檢索與法規引用問答系統。目前已包含「法規／命令資料下載」、「判決下載」、「判決金融法規篩選匯入」、「資料品質」、「題庫與 RAG Benchmark」、「版本化判決 Qdrant 索引」與「法規／命令條文向量索引」模組，以及以 FastAPI + Vanilla JS 建置的 Web 主控台：從全國法規資料庫與司法院開放資料下載最新資料、判斷是否有新版、將原始資料寫入 Parquet、把版本與中繼資料寫入 PostgreSQL；判決資料會先將壓縮檔內原始 JSON 寫入不可變的原始 Parquet 備份，再依金融法規清單篩選後寫入 PostgreSQL，最後建立 Qdrant 向量索引，透過本機 Ollama 提供有引用依據的 RAG 回答。
 
 ## 法規下載模組
 
@@ -201,7 +201,7 @@ cd /Volumes/USB/judgment-backup-20261108
 | `JUDGMENT_X570_EMBEDDING_URL` | `http://x570:11434` | `up.sh` 啟動時探測的 x570 Ollama |
 | `JUDGMENT_LOCAL_EMBEDDING_URL` | `http://127.0.0.1:11434` | x570 不可用時使用的本機 Ollama |
 | `JUDGMENT_EMBEDDING_PROBE_TIMEOUT` | `2` | `up.sh` 探測 Ollama 的逾時秒數 |
-| `EMBEDDING_MODEL` | `bge-m3` | 判決與查詢使用的 embedding 模型（1024 維） |
+| `EMBEDDING_MODEL` | `bge-m3` | 判決、法規條文與查詢共用的 embedding 模型（1024 維） |
 | `EMBEDDING_TIMEOUT_SECONDS` | `120` | Embedding 請求逾時 |
 | `EMBEDDING_QUERY_TIMEOUT_SECONDS` | `2` | 非本機 Ollama 查詢 embedding 的逾時；超過即改用 fallback（本機 Ollama）；本機 primary 使用 `EMBEDDING_TIMEOUT_SECONDS` |
 | `EMBEDDING_HEALTH_TIMEOUT_SECONDS` | `2` | 使用非本機 Ollama 前的健康檢查逾時；未回應即直接改用本機 Ollama |
@@ -215,6 +215,22 @@ cd /Volumes/USB/judgment-backup-20261108
 | `RAG_SCORE_THRESHOLD` | `0.35` | 向量相似度下限；低於門檻不提供給 LLM |
 | `RAG_MAX_CONTEXT_CHARS` | `4000` | 提供給 LLM 的判決片段總字數上限 |
 | `RAG_LAW_FIRST_JUDGMENT_LIMIT` | `1` | 法規優先題最多保留幾筆判決作為輔助 context |
+| `LEGAL_ARTICLE_VECTOR_ALIAS` | `legal_articles_current` | 法規／命令條文索引 alias；與判決 alias 完全分開 |
+| `LEGAL_ARTICLE_VECTOR_COLLECTION` | `legal_articles` | alias 不存在時的後備 collection 名稱 |
+| `LEGAL_ARTICLE_VECTOR_COLLECTION_PREFIX` | `legal_articles` | 版本化法規條文 collection 前綴，例如 `legal_articles_v001` |
+| `LEGAL_ARTICLE_EMBEDDING_VERSION` | `bge-m3@v1` | 法規條文向量指紋；模型或前處理改變時更新 |
+| `LEGAL_ARTICLE_INDEX_RECIPE_VERSION` | `law-article-v1` | 法規條文 index text 規則版本 |
+| `LEGAL_ARTICLE_INDEX_MAX_CHARS` | `4000` | 每筆法規條文送 embedding 的字數上限 |
+| `LEGAL_ARTICLE_INDEX_BATCH_SIZE` | `32` | 法規條文索引每批 embedding／upsert 筆數 |
+| `LEGAL_ARTICLE_PAYLOAD_MAX_CHARS` | `8000` | Qdrant payload 保留的條文原文上限 |
+| `RAG_LAW_VECTOR_ENABLED` | `false` | 啟用法規／命令條文向量檢索；alias 不存在時自動退回 BM25（`.env.example` 預設開啟） |
+| `RAG_LAW_VECTOR_CANDIDATES` | `30` | 法規條文向量候選數 |
+| `RAG_LAW_SCORE_THRESHOLD` | `0.25` | 法規條文向量相似度下限 |
+| `RAG_LAW_ARTICLE_LIMIT` | `4` | 判決優先題每部法規最多保留幾條條文 |
+| `RAG_LAW_ARTICLE_LIMIT_LAW_FIRST` | `6` | 法規優先題每部法規最多保留幾條條文 |
+| `RAG_LAW_CANDIDATE_ARTICLE_LIMIT` | `8` | 啟用 reranker 時每部法規先取幾條候選條文 |
+| `RAG_LAW_RERANK_WEIGHT` | `0.15` | 法規 rerank 與 BM25／dense 前置排序的融合權重（0–1） |
+| `RAG_LAW_RERANK_MAX_CHARS` | `600` | 每條法規條文送 law reranker 的字數上限 |
 | `RAG_RERANK_ENABLED` | `false` | 啟用 BGE reranker；需先啟動 `scripts/rerank_server.sh` |
 | `RAG_RERANK_CANDIDATES` | `30` | 啟用 reranker 時先向 Qdrant 取得的候選判決數 |
 | `RERANK_URL` | `http://x570:11435` | 主要 reranker 服務；llama.cpp 使用 `/v1/rerank` |
@@ -1122,7 +1138,71 @@ RAG 現在會區分「法規條文題」與「判決檢索題」：
 - 「銀行法對從業人員有那些規定？」這類問句不再被誤判為「列出相關法規」；`那些規定` 不會觸發 related-laws 清單，也不會提前清空已選出的法規 articles。
 - 銀行法加入從業人員概念擴展：銀行負責人、銀行職員、負責人、職員、兼職、佣金、酬金、不當利益、資格條件、利益衝突、違背職務，以及第 18、35、35-1、35-2、125-2、127-2 條等概念索引。
 
-這是 Phase 1 的 law-first 修正；法規／命令仍以 PostgreSQL／Parquet 檢索為主，尚未建立法規／命令的 Qdrant 向量索引。
+### 法規／命令條文向量索引（Phase 2）
+
+法規／命令不再只靠 PostgreSQL／Parquet 關鍵字與 BM25。Phase 2 建立獨立的 Qdrant collection，**不與判決 `judgments_v002` 混合**：
+
+```text
+11,805 部法規／命令
+→ 222,124 條可檢索條文
+→ bge-m3（1,024 維）
+→ legal_articles_v001
+→ legal_articles_current alias
+```
+
+索引只包含有 `article_no` 與內容的條文；章節標題（14,840 筆）會跳過。Payload 保留 `source_type`、`law_key`、`law_name`、`law_level`、`law_category`、`article_no`、`article_content`、`content_hash`、`law_hash` 與模型版本，供混合檢索、rerank、citation 與 incremental diff 使用。
+
+#### 建立與更新
+
+```bash
+# 全量建立（預設驗證通過後切換 alias）
+uv run judgment-index-legal-articles
+
+# 只統計，不呼叫 embedding／Qdrant
+uv run judgment-index-legal-articles --dry-run
+
+# 法規來源沒有變更就跳過
+uv run judgment-index-legal-articles --incremental --if-changed
+
+# 只重建有變動的法規；其餘向量由 active collection 複製
+uv run judgment-index-legal-articles --incremental
+
+# 先驗證但不切換 alias
+uv run judgment-index-legal-articles --no-activate
+
+# 狀態、版本、回滾與清除
+uv run judgment-index-legal-articles --status
+uv run judgment-index-legal-articles --list-versions
+uv run judgment-index-legal-articles --rollback
+uv run judgment-index-legal-articles --discard-version 3
+```
+
+每次建置會建立新的 `legal_articles_vNNN`，驗證 Qdrant 筆數、維度與取樣 payload 後才切換 `legal_articles_current`；舊版本保留供 rollback。`--incremental` 會比對每個法規的內容 hash，複製未變動向量、刪除變動／移除法規的舊 points，再只重新 embedding 有變動的條文。若 Ollama 因單批條文總長度回傳 413，索引器會自動拆分批次；單筆過長條文會截斷 embedding 文字後重試，payload 仍保留原文供 citation 使用。
+
+#### 混合檢索流程
+
+```text
+問題
+→ bge-m3 查詢向量（只算一次）
+├─ 判決：judgments_current → 候選判決
+└─ 法規：legal_articles_current → 候選條文
+→ 法規：BM25／概念展開 + dense 分數融合
+→ 每部法規取候選條文
+→ BGE-reranker-v2-m3 單獨 rerank 法規條文（與判決分開）
+→ law-first 或 judgment-first quota
+→ LLM（法規優先題以條文為主、判決為輔）
+```
+
+重點：
+
+- 判決與法規共用同一個查詢向量，避免重複 embedding。
+- 法規候選以 `select_law_articles()` 的 BM25／概念分數與 Qdrant dense 分數融合；dense 可在關鍵字完全找不到時補上法規。
+- 若問題已明確指名法規（例如「銀行法對從業人員有那些規定？」），該法規是 anchor；其他 dense 法規不會蓋過它，dense 只用來排序該法規的條文。
+- 法規 rerank 與判決 rerank 分開執行；法規候選先取 `RAG_LAW_CANDIDATE_ARTICLE_LIMIT` 條，再以 `RAG_LAW_RERANK_WEIGHT` 將 rerank 排名與 BM25／dense 前置排名融合，最後縮到 `RAG_LAW_ARTICLE_LIMIT`／`RAG_LAW_ARTICLE_LIMIT_LAW_FIRST`。這樣可保留最強關鍵字／概念條文，不會被 cross-encoder 的單一偏好蓋掉。
+- `retrieval.law_vector` 記錄 alias、collection、候選數、top score 與命中的法規；`retrieval.law_rerank` 記錄法規 rerank 狀態、provider、延遲與分數。
+- 條文數、沿革、相關法規清單與引用統計等結構化題型不呼叫法規向量與法規 rerank，維持原本的快速回應路徑。
+- alias 不存在、Qdrant 失敗或 embedding 失敗時，法規檢索會退回 PostgreSQL／Parquet + BM25，不中斷 RAG；判決向量檢索維持原本的 fallback 行為。
+- 不使用 Qwen 系列模型；embedding 固定 `bge-m3`、reranker 固定 `BGE-reranker-v2-m3`。
 
 ### Reranker（第一輪：BGE-reranker-v2-m3）
 
@@ -1255,6 +1335,14 @@ curl http://x570:11435/v1/rerank \
 ```dotenv
 RAG_RERANK_ENABLED=true
 RAG_RERANK_CANDIDATES=30
+RAG_LAW_VECTOR_ENABLED=true
+RAG_LAW_VECTOR_CANDIDATES=30
+RAG_LAW_SCORE_THRESHOLD=0.25
+RAG_LAW_ARTICLE_LIMIT=4
+RAG_LAW_ARTICLE_LIMIT_LAW_FIRST=6
+RAG_LAW_CANDIDATE_ARTICLE_LIMIT=8
+RAG_LAW_RERANK_WEIGHT=0.15
+RAG_LAW_RERANK_MAX_CHARS=600
 RAG_TOP_K=8
 RERANK_URL=http://x570:11435
 RERANK_FALLBACK_URL=http://127.0.0.1:11435
@@ -1326,9 +1414,11 @@ RERANK_FALLBACK_URL=http://127.0.0.1:11435
 
 ### 本階段驗證
 
-- `uv run pytest`：249 passed（含靜態資源、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：265 passed（含靜態資源、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料（2026-11-11）：1,351 筆法規、10,454 筆命令、222,124 條文；法規／命令原始 Parquet 2 個檔案，約 87 MB。
+- 法規／命令條文向量索引：11,805 部法規／命令、222,124 條可檢索條文，`bge-m3` 1,024 維；Qdrant `legal_articles_v001` 由 `legal_articles_current` alias 提供，索引不含 14,840 筆章節標題。判決索引仍為 `judgments_v002`（738,743 筆），兩個 collection 完全分開。
+- 法規／命令混合檢索實測（2026-11-13）：「銀行法對從業人員有那些規定？」為 `law_first`，`retrieval.law_vector.status=ok`（30 個候選）、`law_rerank.status=ok`（x570），選出銀行法第 35、35-2、125-2、35-1、127-2、18 條與 1 筆輔助判決；「證券交易法對內線交易有什麼規範？」先取第 157-1、171 條；「損害賠償責任如何認定？」在沒有明確法規名稱時由 dense 找到民法與國家賠償法；「有哪些法規和壽險及產險相關？」維持結構化清單，`law_vector`／`law_rerank` 為 `skipped`，約 0.35 秒。
 - 判決原始檔：`data/judgments/raw_rar/` 目前有 368 個月份壓縮檔，約 52 GB；`download_manifest.json` 以執行時掃描結果為準，不固定月份數。欄位包含 `files`（以 fileset ID 為鍵）、`months` 陣列、`backfill`（待補齊月份、續傳起點、驗證游標、失敗紀錄與上次停止原因）與 `history_files`（移至 `raw_rar/history/` 的舊版容器 metadata）。
 - 判決匯入：24 個原始 archive 共掃描 2,485,151 筆，命中 99 項金融法規清單並寫入 738,743 筆判決、1,578,718 筆引用；`judgment_documents` 約 4.6 GB。新增 16 個月份掃描 1,655,684 筆、寫入 494,413 筆，耗時 858.6 秒（歷史匯入紀錄）。
 - 原始判決 Parquet：24 個壓縮檔共 2,485,151 筆，約 6.23 GB；以 `jid` filter 單筆讀取後解析 `raw_json`，點擊 RAG 引用卡標題可開啟完整判決 dialog，並保留 PDF 連結。

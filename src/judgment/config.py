@@ -79,6 +79,14 @@ class Settings:
     rag_rerank_enabled: bool = False
     rag_rerank_candidates: int = 30
     rag_law_first_judgment_limit: int = 1
+    rag_law_vector_enabled: bool = False
+    rag_law_vector_candidates: int = 30
+    rag_law_score_threshold: float = 0.25
+    rag_law_article_limit: int = 4
+    rag_law_article_limit_law_first: int = 6
+    rag_law_candidate_article_limit: int = 8
+    rag_law_rerank_weight: float = 0.15
+    rag_law_rerank_max_chars: int = 600
     rerank_url: str = ""
     rerank_fallback_url: str = ""
     rerank_model: str = "bge-reranker-v2-m3"
@@ -95,6 +103,15 @@ class Settings:
     judgment_raw_rar_keep_versions: bool = True
     judgment_raw_parquet_keep_versions: bool = False
     judgment_vector_history_collection: str = "judgment_documents_history"
+    legal_article_vector_collection: str = "legal_articles"
+    legal_article_vector_alias: str = "legal_articles_current"
+    legal_article_vector_collection_prefix: str = "legal_articles"
+    legal_article_embedding_version: str = "bge-m3@v1"
+    legal_article_index_recipe_version: str = "law-article-v1"
+    legal_article_point_id_version: str = "law-article-uuid5-v1"
+    legal_article_index_max_chars: int = 4000
+    legal_article_index_batch_size: int = 32
+    legal_article_payload_max_chars: int = 8000
     test_embedding_models: tuple[str, ...] = ()
     test_llm_models: tuple[str, ...] = ()
 
@@ -159,6 +176,39 @@ class Settings:
                 "JUDGMENT_POINT_ID_VERSION", "jid-uuid5-v1"
             ).strip()
             or "jid-uuid5-v1",
+            legal_article_vector_collection=os.getenv(
+                "LEGAL_ARTICLE_VECTOR_COLLECTION", "legal_articles"
+            ).strip()
+            or "legal_articles",
+            legal_article_vector_alias=os.getenv(
+                "LEGAL_ARTICLE_VECTOR_ALIAS", "legal_articles_current"
+            ).strip()
+            or "legal_articles_current",
+            legal_article_vector_collection_prefix=os.getenv(
+                "LEGAL_ARTICLE_VECTOR_COLLECTION_PREFIX", "legal_articles"
+            ).strip()
+            or "legal_articles",
+            legal_article_embedding_version=os.getenv(
+                "LEGAL_ARTICLE_EMBEDDING_VERSION", "bge-m3@v1"
+            ).strip()
+            or "bge-m3@v1",
+            legal_article_index_recipe_version=os.getenv(
+                "LEGAL_ARTICLE_INDEX_RECIPE_VERSION", "law-article-v1"
+            ).strip()
+            or "law-article-v1",
+            legal_article_point_id_version=os.getenv(
+                "LEGAL_ARTICLE_POINT_ID_VERSION", "law-article-uuid5-v1"
+            ).strip()
+            or "law-article-uuid5-v1",
+            legal_article_index_max_chars=_env_int(
+                "LEGAL_ARTICLE_INDEX_MAX_CHARS", 4000
+            ),
+            legal_article_index_batch_size=_env_int(
+                "LEGAL_ARTICLE_INDEX_BATCH_SIZE", 32
+            ),
+            legal_article_payload_max_chars=_env_int(
+                "LEGAL_ARTICLE_PAYLOAD_MAX_CHARS", 8000
+            ),
             embedding_url=os.getenv("EMBEDDING_URL", "").rstrip("/"),
             embedding_fallback_url=os.getenv(
                 "EMBEDDING_FALLBACK_URL", ""
@@ -190,6 +240,28 @@ class Settings:
             rag_rerank_candidates=_env_int("RAG_RERANK_CANDIDATES", 30),
             rag_law_first_judgment_limit=_env_int(
                 "RAG_LAW_FIRST_JUDGMENT_LIMIT", 1
+            ),
+            rag_law_vector_enabled=_env_bool(
+                "RAG_LAW_VECTOR_ENABLED", False
+            ),
+            rag_law_vector_candidates=_env_int(
+                "RAG_LAW_VECTOR_CANDIDATES", 30
+            ),
+            rag_law_score_threshold=_env_float(
+                "RAG_LAW_SCORE_THRESHOLD", 0.25
+            ),
+            rag_law_article_limit=_env_int("RAG_LAW_ARTICLE_LIMIT", 4),
+            rag_law_article_limit_law_first=_env_int(
+                "RAG_LAW_ARTICLE_LIMIT_LAW_FIRST", 6
+            ),
+            rag_law_candidate_article_limit=_env_int(
+                "RAG_LAW_CANDIDATE_ARTICLE_LIMIT", 8
+            ),
+            rag_law_rerank_weight=_env_float(
+                "RAG_LAW_RERANK_WEIGHT", 0.15
+            ),
+            rag_law_rerank_max_chars=_env_int(
+                "RAG_LAW_RERANK_MAX_CHARS", 600
             ),
             rerank_url=os.getenv("RERANK_URL", "").rstrip("/"),
             rerank_fallback_url=os.getenv(
@@ -254,6 +326,9 @@ class Settings:
         judgment_embedding_version: str | None = None,
         judgment_index_recipe_version: str | None = None,
         judgment_point_id_version: str | None = None,
+        legal_article_vector_collection: str | None = None,
+        legal_article_vector_alias: str | None = None,
+        legal_article_vector_collection_prefix: str | None = None,
         embedding_url: str | None = None,
         embedding_fallback_url: str | None = None,
         embedding_model: str | None = None,
@@ -290,6 +365,16 @@ class Settings:
             )
         if judgment_point_id_version:
             changes["judgment_point_id_version"] = judgment_point_id_version
+        if legal_article_vector_collection:
+            changes["legal_article_vector_collection"] = (
+                legal_article_vector_collection
+            )
+        if legal_article_vector_alias:
+            changes["legal_article_vector_alias"] = legal_article_vector_alias
+        if legal_article_vector_collection_prefix:
+            changes["legal_article_vector_collection_prefix"] = (
+                legal_article_vector_collection_prefix
+            )
         if embedding_url is not None:
             changes["embedding_url"] = embedding_url.rstrip("/")
         if embedding_fallback_url is not None:

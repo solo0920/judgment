@@ -14,6 +14,8 @@ from .embeddings import EmbeddingError, OllamaEmbedder
 from .judgment_index import index_coverage
 from .index_versions import active_version
 from .law_rag import (
+    _article_ref_key,
+    _extract_article_refs,
     build_insurance_responsibility_framework,
     extract_stat_entity,
     is_article_count_question,
@@ -36,6 +38,8 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "你是法律資料檢索助理。只能根據下方提供的判決片段、法規與命令內容回答，"
     "不得使用資料以外的知識，也不得創造案號、法院、日期或法條。"
+    "引用條文時必須完整保留來源的條號，包括「之幾」與連字號，"
+    "例如來源是第 157-1 條時不得寫成第 157 條。"
     "每個結論後必須標註對應來源編號，例如 [1]；回答時要區分判決、法規與命令。"
     "若資料不足以回答，請直接說明「檢索到的資料不足以回答」，不要猜測。"
     "回答使用繁體中文，2 到 4 句，並提醒這不是法律意見。"
@@ -277,6 +281,144 @@ def _rerank_hits(
     return reranked, outcome
 
 
+def _trim_law_sources(
+    law_sources: Sequence[Dict[str, Any]],
+    article_limit: int,
+) -> List[Dict[str, Any]]:
+    limit = max(0, int(article_limit))
+    return [
+        {
+            **source,
+            "articles": list(source.get("articles") or [])[:limit],
+        }
+        for source in law_sources
+    ]
+
+
+def _rerank_law_sources(
+    *,
+    settings: Settings,
+    question: str,
+    law_sources: Sequence[Dict[str, Any]],
+    article_limit: int,
+) -> Tuple[List[Dict[str, Any]], RerankOutcome]:
+    """Rerank law/order article candidates separately from judgments."""
+
+    fallback = _trim_law_sources(law_sources, article_limit)
+    client = RerankerClient(
+        [settings.rerank_url, settings.rerank_fallback_url],
+        model=settings.rerank_model,
+        timeout=settings.rerank_timeout_seconds,
+        connect_timeout=settings.rerank_connect_timeout_seconds,
+    )
+    if not client.configured:
+        return fallback, RerankOutcome(
+            status="disabled",
+            model=settings.rerank_model,
+            candidate_count=0,
+        )
+
+    documents: List[str] = []
+    positions: List[Tuple[int, int]] = []
+    law_max_chars = max(200, int(settings.rag_law_rerank_max_chars))
+    for source_index, source in enumerate(law_sources):
+        for article_index, article in enumerate(source.get("articles") or []):
+            # Score the provision text itself.  Repeating the law name in
+            # every document makes the cross-encoder over-weight generic
+            # articles that merely mention the statute.
+            text = str(article.get("article_content") or "").strip()
+            if not text:
+                text = (
+                    f"{source.get('law_name') or ''} "
+                    f"{article.get('article_no') or ''}"
+                ).strip()
+            if not text:
+                continue
+            documents.append(text[:law_max_chars])
+            positions.append((source_index, article_index))
+    if not documents:
+        return fallback, RerankOutcome(
+            status="empty",
+            model=settings.rerank_model,
+            candidate_count=0,
+        )
+
+    outcome = client.rerank(
+        question,
+        documents,
+        top_n=len(documents),
+    )
+    if outcome.status != "ok":
+        return fallback, outcome
+
+    rerank_rank: Dict[Tuple[int, int], int] = {}
+    for rank, result in enumerate(outcome.results):
+        if 0 <= result.index < len(positions):
+            rerank_rank[positions[result.index]] = rank
+    explicit_refs = _extract_article_refs(question)
+    weight = max(0.0, min(1.0, float(settings.rag_law_rerank_weight)))
+    rank_span = max(1, len(documents) - 1)
+    reranked: List[Dict[str, Any]] = []
+    for source_index, source in enumerate(law_sources):
+        articles = list(source.get("articles") or [])
+        ordered = sorted(
+            enumerate(articles),
+            key=lambda pair: (
+                0
+                if _article_ref_key(pair[1].get("article_no")) in explicit_refs
+                else 1,
+                # Blend normalized pre-rerank and rerank ranks.  The BM25 /
+                # hybrid order remains an anchor so the cross-encoder can
+                # improve the order without dropping the strongest matches.
+                (1.0 - weight) * (pair[0] / rank_span)
+                + weight
+                * (
+                    rerank_rank.get(
+                        (source_index, pair[0]),
+                        len(documents) + pair[0],
+                    )
+                    / rank_span
+                ),
+                pair[0],
+            ),
+        )
+        reranked.append(
+            {
+                **source,
+                "articles": [
+                    article
+                    for _, article in ordered[: max(0, int(article_limit))]
+                ],
+            }
+        )
+    return reranked, outcome
+
+
+def _embed_question(
+    *,
+    settings: Settings,
+    question: str,
+    embedder: OllamaEmbedder,
+) -> List[float]:
+    """Embed one question so judgment and law searches share the vector."""
+
+    with trace_segment(
+        "rag.embed_query",
+        module=__name__,
+        function="OllamaEmbedder.embed_query",
+        params={
+            "model": settings.embedding_model,
+            "question_length": len(question),
+        },
+    ) as embed_segment:
+        vector = embedder.embed_query(question)
+        if embed_segment is not None:
+            embed_segment["metadata"].update(
+                dict(getattr(embedder, "last_call", {}) or {})
+            )
+    return vector
+
+
 @traced(
     "rag.search",
     module=__name__,
@@ -296,23 +438,16 @@ def _search_hits(
     embedder: OllamaEmbedder,
     collection: Optional[str] = None,
     limit: Optional[int] = None,
+    vector: Optional[Sequence[float]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     collection = collection or settings.judgment_vector_collection
     search_limit = max(1, int(limit or settings.rag_top_k))
-    with trace_segment(
-        "rag.embed_query",
-        module=__name__,
-        function="OllamaEmbedder.embed_query",
-        params={
-            "model": settings.embedding_model,
-            "question_length": len(question),
-        },
-    ) as embed_segment:
-        vector = embedder.embed_query(question)
-        if embed_segment is not None:
-            embed_segment["metadata"].update(
-                dict(getattr(embedder, "last_call", {}) or {})
-            )
+    if not vector:
+        vector = _embed_question(
+            settings=settings,
+            question=question,
+            embedder=embedder,
+        )
     started = time.perf_counter()
     with trace_segment(
         "rag.qdrant_search",
@@ -368,6 +503,136 @@ def _search_hits(
         "hits": len(hits),
         "unique_judgments": len(deduped),
         "top_score": round(float(deduped[0].get("score") or 0), 4) if deduped else None,
+    }
+
+
+@traced(
+    "rag.law_vector_search",
+    module=__name__,
+    params_fn=lambda *, settings, question, **_: {
+        "question_length": len(question or ""),
+        "alias": settings.legal_article_vector_alias,
+        "candidate_k": settings.rag_law_vector_candidates,
+        "score_threshold": settings.rag_law_score_threshold,
+    },
+)
+def _search_legal_articles(
+    *,
+    settings: Settings,
+    question: str,
+    store: QdrantStore,
+    vector: Sequence[float],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    alias = settings.legal_article_vector_alias
+    collection = settings.legal_article_vector_collection
+    alias_target: Optional[str] = None
+    try:
+        alias_target = store.get_alias(alias)
+    except Exception:
+        alias_target = None
+    search_name = alias if alias_target else collection
+    try:
+        info = store.collection_info(search_name)
+    except Exception as exc:
+        return [], {
+            "status": "degraded",
+            "alias": alias,
+            "collection": search_name,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    if info is None:
+        return [], {
+            "status": "not_indexed",
+            "alias": alias,
+            "collection": search_name,
+        }
+
+    search_limit = max(1, int(settings.rag_law_vector_candidates))
+    started = time.perf_counter()
+    try:
+        hits = store.search(
+            search_name,
+            vector,
+            limit=search_limit,
+            score_threshold=settings.rag_law_score_threshold,
+        )
+    except Exception as exc:
+        return [], {
+            "status": "degraded",
+            "alias": alias,
+            "collection": search_name,
+            "candidate_k": search_limit,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+    latency_ms = _elapsed_ms(started)
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for hit in hits:
+        payload = hit.get("payload") or {}
+        law_name = str(payload.get("law_name") or "").strip()
+        article_no = str(payload.get("article_no") or "").strip()
+        if not law_name or not article_no:
+            continue
+        key = (
+            str(payload.get("law_key") or law_name),
+            str(payload.get("article_type") or ""),
+            article_no,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(hit)
+    laws: Dict[str, Dict[str, Any]] = {}
+    for hit in deduped:
+        payload = hit.get("payload") or {}
+        law_name = str(payload.get("law_name") or "")
+        entry = laws.setdefault(
+            law_name,
+            {
+                "law_name": law_name,
+                "source_type": payload.get("source_type"),
+                "hits": 0,
+                "top_score": 0.0,
+            },
+        )
+        entry["hits"] = int(entry["hits"]) + 1
+        entry["top_score"] = max(
+            float(entry["top_score"]),
+            float(hit.get("score") or 0),
+        )
+    ranked_laws = sorted(
+        laws.values(),
+        key=lambda item: (
+            -float(item.get("top_score") or 0),
+            str(item.get("law_name") or ""),
+        ),
+    )
+    top_score = (
+        round(float(deduped[0].get("score") or 0), 4)
+        if deduped
+        else None
+    )
+    return deduped, {
+        "status": "ok",
+        "alias": alias,
+        "alias_target": alias_target,
+        "collection": search_name,
+        "latency_ms": latency_ms,
+        "candidate_k": search_limit,
+        "score_threshold": settings.rag_law_score_threshold,
+        "hits": len(hits),
+        "unique_articles": len(deduped),
+        "law_count": len(ranked_laws),
+        "laws": [
+            {
+                "law_name": item["law_name"],
+                "source_type": item.get("source_type"),
+                "hits": item["hits"],
+                "top_score": round(float(item["top_score"]), 4),
+            }
+            for item in ranked_laws[:8]
+        ],
+        "top_score": top_score,
     }
 
 
@@ -858,6 +1123,88 @@ def answer_question(
 
     law_sources: List[Dict[str, Any]] = []
     law_stats: Dict[str, Any] = {}
+    law_first_hint = is_law_first_question(question)
+    structured_law_question = bool(
+        is_article_count_question(question)
+        or is_history_question(question)
+        or is_related_laws_question(question)
+        or is_citation_stats_question(question)
+    )
+    law_article_limit = (
+        settings.rag_law_article_limit_law_first
+        if law_first_hint
+        else settings.rag_law_article_limit
+    )
+    rerank_law_articles = bool(
+        settings.rag_rerank_enabled
+        and (settings.rerank_url or settings.rerank_fallback_url)
+        and not structured_law_question
+    )
+    law_candidate_limit = (
+        max(
+            settings.rag_law_article_limit,
+            settings.rag_law_article_limit_law_first,
+            settings.rag_law_candidate_article_limit,
+        )
+        if rerank_law_articles
+        else law_article_limit
+    )
+    query_vector: Optional[List[float]] = None
+    law_vector_hits: List[Dict[str, Any]] = []
+    law_vector: Dict[str, Any] = {
+        "status": (
+            "disabled"
+            if (
+                not settings.rag_law_vector_enabled
+                or not enable_law_retrieval
+            )
+            else (
+                "not_configured"
+                if not settings.qdrant_url
+                else "pending"
+            )
+        )
+    }
+    if settings.rag_law_vector_enabled and structured_law_question:
+        law_vector = {
+            "status": "skipped",
+            "reason": "structured_law_question",
+        }
+    if (
+        enable_law_retrieval
+        and settings.rag_law_vector_enabled
+        and not structured_law_question
+        and settings.qdrant_url
+        and embedder.configured
+    ):
+        try:
+            query_vector = _embed_question(
+                settings=settings,
+                question=question,
+                embedder=embedder,
+            )
+            law_vector_hits, law_vector = _search_legal_articles(
+                settings=settings,
+                question=question,
+                store=store,
+                vector=query_vector,
+            )
+        except EmbeddingError as exc:
+            query_vector = None
+            law_vector = {
+                "status": "degraded",
+                "alias": settings.legal_article_vector_alias,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+        except Exception as exc:
+            law_vector = {
+                "status": "degraded",
+                "alias": settings.legal_article_vector_alias,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+    law_rerank: Dict[str, Any] = {
+        "status": "disabled" if not settings.rag_rerank_enabled else "skipped"
+    }
     stat_entity = (
         extract_stat_entity(question)
         if enable_law_retrieval and is_citation_stats_question(question)
@@ -872,6 +1219,8 @@ def answer_question(
                 params={
                     "question_length": len(question),
                     "stat_entity": stat_entity or None,
+                    "article_limit": law_candidate_limit,
+                    "law_vector_hits": len(law_vector_hits),
                 },
             ):
                 if stat_entity:
@@ -883,14 +1232,66 @@ def answer_question(
                     settings.law_data_dir,
                     question,
                     stats=law_stats,
-                    article_limit=(
-                        6 if is_law_first_question(question) else 4
-                    ),
+                    article_limit=law_candidate_limit,
+                    vector_hits=law_vector_hits,
                 )
         except Exception as exc:
             logger.warning("law/order retrieval failed: %s", exc)
             law_sources = []
             law_stats = {}
+
+    if rerank_law_articles and law_sources:
+        try:
+            with trace_segment(
+                "rag.law_rerank",
+                module=__name__,
+                function="RerankerClient.rerank",
+                params={
+                    "model": settings.rerank_model,
+                    "question_length": len(question),
+                    "candidate_count": sum(
+                        len(source.get("articles") or [])
+                        for source in law_sources
+                    ),
+                    "article_limit": law_article_limit,
+                },
+            ) as law_rerank_segment:
+                law_sources, law_rerank_outcome = _rerank_law_sources(
+                    settings=settings,
+                    question=question,
+                    law_sources=law_sources,
+                    article_limit=law_article_limit,
+                )
+                law_rerank = law_rerank_outcome.to_dict()
+                if law_rerank_segment is not None:
+                    law_rerank_segment["metadata"].update(
+                        {
+                            "status": law_rerank_outcome.status,
+                            "provider_name": law_rerank_outcome.provider,
+                            "base_url": law_rerank_outcome.url,
+                            "candidates": law_rerank_outcome.candidate_count,
+                            "selected": len(law_rerank_outcome.results),
+                            "fallback_used": law_rerank_outcome.fallback_used,
+                            "errors": law_rerank_outcome.errors,
+                        }
+                    )
+        except Exception as exc:
+            law_sources = _trim_law_sources(
+                law_sources, law_article_limit
+            )
+            law_rerank = {
+                "status": "degraded",
+                "model": settings.rerank_model,
+                "error": f"{exc.__class__.__name__}: {exc}",
+            }
+    elif rerank_law_articles:
+        law_rerank = {
+            "status": "empty",
+            "model": settings.rerank_model,
+            "candidate_count": 0,
+        }
+    else:
+        law_sources = _trim_law_sources(law_sources, law_article_limit)
 
     def assign_law_indexes(sources: Sequence[Dict[str, Any]], start: int = 1) -> None:
         for offset, source in enumerate(sources, start=start):
@@ -941,6 +1342,8 @@ def answer_question(
                     "status": "law_only",
                     "law_hits": len(law_sources),
                     "law_stats": law_stats or None,
+                    "law_vector": law_vector,
+                    "law_rerank": law_rerank,
                     "hits": 0,
                 },
                 "coverage": coverage,
@@ -997,6 +1400,9 @@ def answer_question(
         "hits": 0,
         "unique_judgments": 0,
         "law_hits": len(law_sources),
+        "law_article_limit": law_article_limit,
+        "law_vector": law_vector,
+        "law_rerank": law_rerank,
     }
     rerank_active = bool(
         settings.rag_rerank_enabled
@@ -1022,7 +1428,13 @@ def answer_question(
                 collection_info = store.collection_info(search_collection)
         except QdrantError as exc:
             qdrant_available = False
-            retrieval = {"status": "unavailable", "hits": 0, "law_hits": len(law_sources)}
+            retrieval = {
+                "status": "unavailable",
+                "hits": 0,
+                "law_hits": len(law_sources),
+                "law_vector": law_vector,
+                "law_rerank": law_rerank,
+            }
             if not law_sources:
                 return _preview_fallback(
                     session_factory=session_factory,
@@ -1035,7 +1447,13 @@ def answer_question(
         else:
             if collection_info is None:
                 qdrant_available = False
-                retrieval = {"status": "not_indexed", "hits": 0, "law_hits": len(law_sources)}
+                retrieval = {
+                    "status": "not_indexed",
+                    "hits": 0,
+                    "law_hits": len(law_sources),
+                    "law_vector": law_vector,
+                    "law_rerank": law_rerank,
+                }
                 if not law_sources:
                     return _preview_fallback(
                         session_factory=session_factory,
@@ -1082,11 +1500,21 @@ def answer_question(
                 embedder=embedder,
                 collection=search_collection,
                 limit=candidate_k,
+                vector=query_vector,
             )
             retrieval["law_hits"] = len(law_sources)
+            retrieval["law_article_limit"] = law_article_limit
+            retrieval["law_vector"] = law_vector
+            retrieval["law_rerank"] = law_rerank
             retrieval["candidate_k"] = candidate_k
         except (EmbeddingError, QdrantError) as exc:
-            retrieval = {"status": "degraded", "hits": 0, "law_hits": len(law_sources)}
+            retrieval = {
+                "status": "degraded",
+                "hits": 0,
+                "law_hits": len(law_sources),
+                "law_vector": law_vector,
+                "law_rerank": law_rerank,
+            }
             if not law_sources:
                 return _preview_fallback(
                     session_factory=session_factory,

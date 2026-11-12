@@ -6,6 +6,7 @@ import pytest
 from judgment.embeddings import (
     _PRIMARY_COOLDOWNS,
     EmbeddingError,
+    EmbeddingInputError,
     OllamaEmbedder,
     probe_embedding_hosts,
 )
@@ -145,6 +146,39 @@ def test_embedding_falls_back_to_local_ollama(monkeypatch) -> None:
         "http://primary.test/api/embed",
         "http://127.0.0.1:11434/api/embed",
     ]
+
+
+def test_embedding_context_length_error_does_not_fallback(monkeypatch) -> None:
+    calls = []
+
+    class TooLongResponse:
+        status_code = 413
+        text = '{"error":"the input length exceeds the context length"}'
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError(
+                "too long",
+                request=httpx.Request("POST", "http://primary.test/api/embed"),
+                response=httpx.Response(self.status_code),
+            )
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return TooLongResponse()
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://primary.test",
+        "bge-m3",
+        timeout=10,
+        fallback_base_url="http://fallback.test",
+    )
+
+    with pytest.raises(EmbeddingInputError):
+        embedder.embed(["x" * 5000])
+
+    assert calls == ["http://primary.test/api/embed"]
+    assert embedder.using_fallback is False
 
 
 def test_embedding_falls_through_multiple_fallback_hosts(monkeypatch) -> None:
