@@ -1330,6 +1330,33 @@ curl http://x570:11435/v1/rerank \
   }'
 ```
 
+`llama-server` 沒有 `ollama ps` 或 `/api/ps`；查詢目前載入的模型與 slot 狀態：
+
+```bash
+# 模型路徑、context、slot 數、是否 sleeping
+curl -sS http://x570:11435/props | python3 -m json.tool
+
+# 已載入模型、參數量、檔案大小、量化格式
+curl -sS http://x570:11435/v1/models | python3 -m json.tool
+
+# 各 slot 是否正在處理請求、目前 prompt token 數
+curl -sS http://x570:11435/slots | python3 -m json.tool
+
+# 健康檢查
+curl -sS http://x570:11435/health
+```
+
+`/metrics` 預設不可用（回傳 501）；需要 Prometheus 指標時，在 service 的 `ExecStart` 加上 `--metrics`。主機層級則用：
+
+```bash
+ssh x570 'systemctl is-enabled judgment-reranker; systemctl is-active judgment-reranker'
+ssh x570 'systemctl status judgment-reranker --no-pager'
+ssh x570 'ps -o pid,etime,%cpu,%mem,rss,cmd -C llama-server'
+ssh x570 'nvidia-smi'
+```
+
+reranker 是獨立的 `llama-server` 程序，啟動時以 `--model /opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf` 一次載入，沒有 Ollama 的 `keep_alive` 或閒置卸載機制；只要 service 持續執行，模型就會常駐在 RAM／VRAM。用 `scripts/deploy_rerank_systemd.sh` 安裝時已執行 `systemctl enable`，所以正常情況下 x570 開機就會啟動並載入；停止 service 或程序崩潰（`Restart=on-failure` 會重啟）才會重新載入。
+
 啟用設定：
 
 ```dotenv
@@ -1411,6 +1438,48 @@ RERANK_FALLBACK_URL=http://127.0.0.1:11435
 - 若需要較高品質，將 `LLM_MODEL` 改回 `gemma3:27b`，並可把 `RAG_TOP_K`／`RAG_MAX_CONTEXT_CHARS` 調高；代價是每次約 30–50 秒。
 - 測試模式不受此限制：仍會依序執行所有可用模型，且不設 timeout。
 - `LLM_KEEP_ALIVE=30m` 讓 Ollama 保持模型載入，避免第一次請求反覆載入造成延遲。
+
+#### x570 開機預載 gemma3:4b（systemd）
+
+Ollama 只會在收到請求時載入模型，重開機後不會自動預載。若希望 x570 開機完成後就把 `gemma3:4b` 放進 VRAM，可用 `scripts/deploy_ollama_preload_systemd.sh` 建立一個 oneshot systemd service；它在 `ollama.service` 之後呼叫 `/api/generate` 空請求，並以 `keep_alive=-1` 保持載入。
+
+先在 x570 確認模型已下載：
+
+```bash
+ssh -t x570 'ollama pull gemma3:4b'
+```
+
+從 MBP 部署：
+
+```bash
+scp scripts/deploy_ollama_preload_systemd.sh x570:/tmp/
+ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh'
+```
+
+腳本會：
+
+- 檢查 `ollama.service`、Ollama API 與 `gemma3:4b` 是否存在
+- 建立 `/usr/local/lib/judgment/ollama-preload.sh`
+- 建立 `/etc/systemd/system/judgment-ollama-preload.service`
+- `systemctl enable --now`，之後 x570 開機自動預載
+- 等待模型出現在 `/api/ps` 後顯示結果
+
+驗證：
+
+```bash
+ssh x570 'curl -sS http://127.0.0.1:11434/api/ps'
+```
+
+`expires_at` 顯示約 2319 年表示 `keep_alive=-1`，模型會一直保留到被卸載或 Ollama 重啟。常用管理：
+
+```bash
+ssh -t x570 'sudo systemctl status judgment-ollama-preload.service'
+ssh -t x570 'sudo systemctl restart judgment-ollama-preload.service'
+ssh -t x570 'sudo journalctl -u judgment-ollama-preload.service -f'
+ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh --uninstall'
+```
+
+注意：應用端每次請求若送出較短的 `LLM_KEEP_ALIVE`（目前 `.env` 為 `30m`），會在該次請求後覆寫預載的 `-1`，模型仍可能在閒置 30 分鐘後卸載。若希望一直保留，請把應用端 `LLM_KEEP_ALIVE` 改為 `-1`；或只在 x570 的 Ollama 服務設定 `OLLAMA_KEEP_ALIVE=-1`（會套用到所有模型）。
 
 ### 本階段驗證
 
