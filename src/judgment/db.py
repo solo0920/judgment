@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
+from .version_codes import version_code_for_datetime
 
 
 def build_engine(database_url: str) -> Engine:
@@ -179,10 +182,66 @@ def _ensure_judgment_versioning(engine: Engine) -> None:
             connection.execute(text(statement))
 
 
+def _ensure_law_version_code(engine: Engine) -> None:
+    """Add and backfill the datetime-based law/order download version code."""
+
+    inspector = inspect(engine)
+    if "law_dataset_versions" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("law_dataset_versions")
+    }
+    with engine.begin() as connection:
+        if "version_code" not in columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE law_dataset_versions "
+                    "ADD COLUMN version_code VARCHAR(12) NOT NULL DEFAULT ''"
+                )
+            )
+        rows = connection.execute(
+            text(
+                "SELECT id, downloaded_at FROM law_dataset_versions "
+                "WHERE version_code IS NULL OR version_code = ''"
+            )
+        ).fetchall()
+        for row in rows:
+            value = row[1]
+            moment = value
+            if isinstance(value, str):
+                try:
+                    moment = datetime.fromisoformat(
+                        value.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    moment = None
+            elif isinstance(value, datetime):
+                moment = value
+            else:
+                moment = None
+            code = version_code_for_datetime(moment)
+            connection.execute(
+                text(
+                    "UPDATE law_dataset_versions SET version_code = :code "
+                    "WHERE id = :id"
+                ),
+                {"code": code, "id": int(row[0])},
+            )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_law_dataset_versions_version_code "
+                "ON law_dataset_versions (version_code)"
+            )
+        )
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_judgment_court_normalized(engine)
     _ensure_judgment_versioning(engine)
+    _ensure_law_version_code(engine)
     _ensure_performance_flow(engine)
     _ensure_performance_test_columns(engine)
     _ensure_ollama_host_priority(engine)

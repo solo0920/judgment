@@ -475,9 +475,14 @@ def test_static_console_is_served(web_client) -> None:
     assert page.status_code == 200
     assert "Judgment RAG Console" in page.text
     assert "/assets/js/app.js" in page.text
-    assert 'id="style-trigger"' in page.text
-    assert 'aria-label="選擇介面風格"' in page.text
-    assert 'class="style-trigger-copy"' not in page.text
+    assert 'id="settings-trigger"' in page.text
+    assert 'aria-label="設定選項"' in page.text
+    assert 'id="settings-sidebar"' in page.text
+    assert 'id="settings-panel"' in page.text
+    assert "judgment.appearance" in page.text
+    assert 'id="style-trigger"' not in page.text
+    assert 'id="style-menu"' not in page.text
+    assert 'class="style-picker"' not in page.text
     assert 'id="system-test-trigger"' not in page.text
     assert 'data-route="tests"' not in page.text
     assert 'href="#/tests"' not in page.text
@@ -507,7 +512,7 @@ def test_static_console_is_served(web_client) -> None:
     theme_script = web_client.get("/assets/js/themes.js")
     assert theme_script.status_code == 200
     assert 'DEFAULT_THEME = "nvidia"' in theme_script.text
-    assert 'id="style-menu"' in page.text
+    assert "initThemePicker" not in theme_script.text
     assert 'id="theme-label"' not in page.text
     assert 'id="theme-swatches"' not in page.text
 
@@ -584,12 +589,15 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
     assert services["postgres"]["status"] == "operational"
     assert services["parquet"]["status"] == "operational"
     assert services["qdrant"]["status"] == "not_configured"
+    assert services["legal_index"]["status"] == "degraded"
     assert services["embedding"]["status"] == "not_configured"
     assert services["reranker"]["status"] == "not_configured"
     assert services["llm"]["status"] == "not_configured"
     assert services["rag"]["status"] == "not_configured"
     assert payload["data"]["judgment_indexed_count"] == 0
+    assert payload["data"]["judgment_index_pending"] == 2
     assert payload["data"]["judgment_vector_collection"] == "judgment_documents"
+    assert payload["data"]["legal_index"]["status"] == "not_indexed"
     assert payload["data"]["law_count"] == 2
     assert payload["data"]["order_count"] == 1
     assert payload["data"]["article_count"] == 5
@@ -2054,6 +2062,40 @@ def test_console_assets_avoid_flicker_prone_effects() -> None:
     for script in (app_js, data_js, performance_js, bundle_js):
         assert "is-refreshing" not in script
         assert "is-quiet" not in script
+
+
+def test_settings_sidebar_source_and_bundle_are_present() -> None:
+    root = Path(__file__).resolve().parents[1]
+    static_assets = root / "src" / "judgment" / "web" / "static" / "assets"
+    settings_js = (static_assets / "js" / "settings.js").read_text(encoding="utf-8")
+    source_css = (static_assets / "styles.css").read_text(encoding="utf-8")
+    bundle_css = (root / "frontend" / "assets" / "styles.css").read_text(
+        encoding="utf-8"
+    )
+    bundle_js = (root / "frontend" / "assets" / "js" / "app.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "judgment.fontSizes.v1" in settings_js
+    assert "font-size-slider" in settings_js
+    assert "回復預設值" in settings_js
+    assert 'icon("palette", 15)' in settings_js
+    assert 'data-theme="${escapeHtml(theme.id)}"' in settings_js
+    assert "theme-option-active-preview" in settings_js
+    assert "judgment.appearance" in settings_js
+    assert "data-appearance-option" in settings_js
+    assert "settings-open" in source_css
+    assert "appearance-switch" in source_css
+    assert ':root[data-appearance="dark"]' in source_css
+    assert ':root[data-appearance="light"]' not in source_css
+    assert "settings-open" in bundle_css
+    assert "appearance-switch" in bundle_css
+    assert ':root[data-appearance="dark"]' in bundle_css
+    assert ':root[data-appearance="light"]' not in bundle_css
+    assert "font-size-slider" in bundle_js
+    assert "theme-option-active-preview" in bundle_js
+    assert "data-appearance-option" in bundle_js
+    assert "judgment.fontSizes.v1" in bundle_js
 
 
 def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
 from .db import build_engine, build_session_factory, init_db
+from .judgment_citations import law_citations_from_items
 from .judgment_raw_parquet import latest_raw_manifest, raw_judgment_files, raw_judgment_totals
 from .models import JudgmentDocument
 from .observability import record_performance
@@ -227,9 +228,7 @@ def get_judgment_from_parquet(
         "source_archive": row.get("source_archive") or "",
         "content_hash": row.get("content_hash") or "",
         "matched_laws": row.get("matched_laws") or [],
-        "citations": [
-            dict(item) for item in citations if isinstance(item, dict)
-        ],
+        "citations": law_citations_from_items(citations, full_text),
         "citation_count": int(row.get("citation_count") or 0),
         "full_text_length": int(
             row.get("full_text_length") or len(full_text)

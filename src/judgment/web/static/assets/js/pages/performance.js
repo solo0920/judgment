@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, subscribeRefresh } from "../api.js";
 import { createBenchmarkPanel } from "./benchmark_page.js";
 import {
   copyText,
@@ -2552,7 +2552,7 @@ export async function render(root, ctx) {
   let testRun = null;
   let testRuns = [];
   let selectedTestRunId = "";
-  let testPollTimer = null;
+  let testFlowStream = null;
   let lastTestSignature = "";
 
   const paintFilters = () => {
@@ -2599,11 +2599,14 @@ export async function render(root, ctx) {
     }
   };
 
-  const refreshTestFlow = async () => {
+  const refreshTestFlow = async (payload = null) => {
     try {
-      const data = selectedTestRunId
-        ? await api.testRun(selectedTestRunId)
-        : await api.testRunCurrent();
+      const data =
+        payload && !selectedTestRunId
+          ? payload
+          : selectedTestRunId
+            ? await api.testRun(selectedTestRunId)
+            : await api.testRunCurrent();
       if (disposed) return;
       testRun = data.run || null;
       if (
@@ -2622,12 +2625,17 @@ export async function render(root, ctx) {
     }
   };
 
-  const pollTestFlow = async () => {
-    if (disposed) return;
-    if (!selectedTestRunId) await refreshTestFlow();
-    if (!disposed) {
-      testPollTimer = window.setTimeout(pollTestFlow, 1500);
-    }
+  const refreshLiveTestFlow = async (payload = null) => {
+    if (disposed || selectedTestRunId) return;
+    await refreshTestFlow(payload);
+  };
+
+  const startTestFlowUpdates = () => {
+    if (disposed || testFlowStream) return;
+    testFlowStream = subscribeRefresh(
+      "test-runs",
+      (_topic, payload) => refreshLiveTestFlow(payload?.snapshot || null),
+    );
   };
 
   flowBox.addEventListener("change", async (event) => {
@@ -2794,7 +2802,7 @@ export async function render(root, ctx) {
   if (!disposed) {
     await refreshTestFlow();
     await runQuery(1);
-    pollTestFlow();
+    startTestFlowUpdates();
   }
 
   if (ctx && typeof ctx.setTitle === "function") {
@@ -2803,7 +2811,7 @@ export async function render(root, ctx) {
 
   return () => {
     disposed = true;
-    if (testPollTimer) window.clearTimeout(testPollTimer);
+    if (testFlowStream) testFlowStream();
     benchmarkController.destroy();
   };
 }

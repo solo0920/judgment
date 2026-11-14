@@ -1,4 +1,4 @@
-import { api, apiUrl } from "../api.js";
+import { api, apiUrl, subscribeRefresh } from "../api.js";
 import {
   escapeHtml,
   formatBytes,
@@ -12,10 +12,8 @@ import {
   toast,
 } from "../utils.js";
 
-const POLL_INTERVAL_MS = 2000;
-const OLLAMA_CHECK_INTERVAL_MS = 30000;
 const OLLAMA_PRIORITY_WORKFLOWS = new Set([
-  "full_update",
+  "legal_index_versions",
   "judgment_import",
   "index_versions",
 ]);
@@ -40,6 +38,48 @@ const STATUS_META = {
   ok: { label: "正常", tone: "ok" },
   provided: { label: "外部提供", tone: "info" },
 };
+
+const FILE_TIMELINE_STAGES = ["download", "parquet", "postgres", "qdrant"];
+const FILE_TIMELINE_STAGE_LABELS = {
+  download: "下載",
+  parquet: "Parquet",
+  postgres: "PostgreSQL",
+  qdrant: "Qdrant",
+};
+const FILE_TIMELINE_STATUS_LABELS = {
+  complete: "完成",
+  incomplete: "未完成",
+  processing: "處理中",
+  empty: "無資料",
+  not_applicable: "已取代",
+};
+const FILE_TIMELINE_STATUS_CLASSES = {
+  complete: "is-green",
+  incomplete: "is-red",
+  processing: "is-gray",
+  empty: "is-empty",
+  not_applicable: "is-empty",
+};
+
+const PHASE_META = {
+  completed: { label: "upgraded", tone: "ok" },
+  running: { label: "upgrading", tone: "info" },
+  updating: { label: "updating", tone: "info" },
+  updated: { label: "updated", tone: "ok" },
+  update_available: { label: "可更新", tone: "warn" },
+  pending: { label: "待執行", tone: "idle" },
+  failed: { label: "失敗", tone: "danger" },
+  skipped: { label: "未執行", tone: "idle" },
+  ready: { label: "已就緒", tone: "info" },
+  idle: { label: "待命", tone: "idle" },
+};
+
+let stageOperations = new Map();
+// Keep the run button locked from the first click until the backend snapshot
+// confirms the new run.  SSE refreshes may repaint the panel while the start
+// request is still in flight, so this has to survive outside the click handler.
+let pendingWorkflowId = "";
+let pendingWorkflowBaselineRunId = "";
 
 const TONE_CLASS = {
   ok: "badge-ok",
@@ -77,6 +117,7 @@ const STAGE_ICONS = {
   filter: "filter",
   postgres: "database",
   qdrant: "brain",
+  legal_qdrant: "shield",
   ollama: "cloud",
   validate: "shield",
   download: "download",
@@ -84,7 +125,7 @@ const STAGE_ICONS = {
 };
 
 const STAGE_FLOW_LABELS = {
-  raw_parquet: "原始 Parquet",
+  raw_parquet: "原始資料檢查",
   postgres: "PostgreSQL",
 };
 
@@ -117,7 +158,7 @@ const WORKFLOW_SCOPE_NOTES = {
   judgment_download:
     "流程範圍：只下載判決 RAR。PostgreSQL／Parquet 匯入與 Qdrant 索引需另執行「判決匯入」或完整資料更新；IndexedDB 不參與資料管線。",
   judgment_import:
-    "流程範圍：RAR → 原始 Parquet → 金融法規篩選 → PostgreSQL。Qdrant 索引需另執行；IndexedDB 不參與資料管線。",
+    "流程範圍：RAR → 原始資料檢查／Parquet 備份 → 金融法規篩選 → PostgreSQL。Qdrant 索引需另執行；IndexedDB 不參與資料管線。",
   judgment_parquet:
     "流程範圍：從 PostgreSQL 匯出查詢用 Parquet 快照；不寫入 Qdrant／IndexedDB。",
   index_versions:
@@ -138,6 +179,88 @@ function statusBadge(status, label) {
   return `<span class="badge ${TONE_CLASS[meta.tone] || TONE_CLASS.idle}"><span class="status-dot ${
     TONE_DOT[meta.tone] || TONE_DOT.idle
   }"></span>${escapeHtml(label || meta.label)}</span>`;
+}
+
+function phaseInfo(stage) {
+  const phase = stage?.phase || "idle";
+  if (PHASE_META[phase]) return PHASE_META[phase];
+  return statusInfo(stage?.status || "idle");
+}
+
+function phaseBadge(stage) {
+  const meta = phaseInfo(stage);
+  return `<span class="badge ${TONE_CLASS[meta.tone] || TONE_CLASS.idle}"><span class="status-dot ${
+    TONE_DOT[meta.tone] || TONE_DOT.idle
+  }"></span>${escapeHtml(meta.label)}</span>`;
+}
+
+function operationLanes(stage, phase) {
+  return (Array.isArray(stage.lanes) ? stage.lanes : []).map((lane) => ({
+    ...lane,
+    stage: {
+      ...(lane.stage || {}),
+      phase: phase === "completed" ? "completed" : "running",
+      status: phase === "completed" ? "success" : "running",
+      show_progress: true,
+      current: phase === "completed" ? lane.stage?.current : 0,
+      percent: phase === "completed" ? 100 : 0,
+    },
+  }));
+}
+
+function stageWithOperation(stage, id) {
+  const operation = stageOperations.get(id);
+  if (!operation) return stage;
+  if (operation.kind === "check") {
+    if (operation.phase === "updating") {
+      return {
+        ...stage,
+        phase: "updating",
+        status: "running",
+        show_progress: true,
+        percent: 0,
+        cancelable: false,
+        lanes: operationLanes(stage, "running"),
+      };
+    }
+    return {
+      ...stage,
+      phase: "updated",
+      status: "success",
+      show_progress: true,
+      percent: 100,
+      cancelable: false,
+      lanes: operationLanes(stage, "completed"),
+    };
+  }
+  if (operation.kind === "upgrade") {
+    if (stage.phase === "failed") {
+      return stage;
+    }
+    if (stage.phase === "running" && stage.percent !== null) {
+      return stage;
+    }
+    if (stage.phase === "completed") {
+      const started = Date.parse(stage.last_run?.started_at || "");
+      if (
+        Number.isFinite(started) &&
+        started >= Number(operation.startedAt || 0) - 1000
+      ) {
+        return stage;
+      }
+    }
+    return {
+      ...stage,
+      phase: "running",
+      status: "running",
+      show_progress: true,
+      percent: 0,
+      upgrading: true,
+      cancelable: true,
+      lanes: operationLanes(stage, "running"),
+    };
+  }
+  return stage;
 }
 
 function percentText(value) {
@@ -504,6 +627,718 @@ function flowCanvasMarkup(snapshot) {
   </div>`;
 }
 
+function processingActionButton(
+  action,
+  { primary = false, stageId = "" } = {},
+) {
+  if (!action) return "";
+  const className = `btn ${primary ? "btn-primary" : "btn-secondary"} btn-sm`;
+  if (action.kind === "check_updates") {
+    return `<button class="${className}" type="button"
+      data-processing-action="check-updates"
+      data-stage-id="${escapeHtml(stageId)}"
+      data-source-types="${escapeHtml((action.source_types || []).join(","))}">
+      ${icon("refresh", 13)}<span>${escapeHtml(action.label || "重新檢查")}</span>
+    </button>`;
+  }
+  if (action.kind === "run_workflow") {
+    return `<button class="${className}" type="button"
+      data-processing-action="run-workflow"
+      data-stage-id="${escapeHtml(stageId)}"
+      data-workflow-id="${escapeHtml(action.workflow_id || "")}">
+      ${icon("play", 13)}<span>${escapeHtml(action.label || "執行更新")}</span>
+    </button>`;
+  }
+  return `<button class="${className}" type="button" data-processing-action="refresh">
+    ${icon("refresh", 13)}<span>${escapeHtml(action.label || "重新檢查")}</span>
+  </button>`;
+}
+
+function processingStageCountBadges(stage) {
+  const updateCount = Number(stage.update?.count) || 0;
+  const pendingCount = Number(stage.pending?.count) || 0;
+  const badges = [];
+  if (updateCount > 0) {
+    badges.push(`<span class="processing-wf-count is-update" title="${escapeHtml(
+      `${formatNumber(updateCount)} 項線上更新`,
+    )}">${icon("download", 11)}<strong>${formatNumber(updateCount)}</strong></span>`);
+  }
+  if (pendingCount > 0 && (!updateCount || pendingCount !== updateCount)) {
+    badges.push(`<span class="processing-wf-count is-pending" title="${escapeHtml(
+      `${formatNumber(pendingCount)} 項待執行工作`,
+    )}">${icon("clock", 11)}<strong>${formatNumber(pendingCount)}</strong></span>`);
+  }
+  badges.push(phaseBadge(stage));
+  return badges.join("");
+}
+
+function processingLaneValue(stage) {
+  const current = stage.current;
+  const total = stage.total;
+  const unit = stage.unit === "bytes" ? "" : stage.unit || "筆";
+  if (current === null || current === undefined) {
+    return statusInfo(stage.status).label;
+  }
+  if (stage.unit === "bytes") {
+    return total
+      ? `${formatBytes(current)} / ${formatBytes(total)}`
+      : formatBytes(current);
+  }
+  if (total && Number(total) !== Number(current)) {
+    return `${formatNumber(current)} / ${formatNumber(total)} ${unit}`;
+  }
+  return `${formatNumber(current)} ${unit}`;
+}
+
+function processingRateText(stage) {
+  if (!stage || stage.status !== "running") return "";
+  const rate = Number(stage.rate);
+  if (!Number.isFinite(rate) || rate <= 0) return "";
+  if (stage.unit === "bytes") return `${formatBytes(rate)}/秒`;
+  const unit = stage.unit || "筆";
+  return `${formatNumber(Math.round(rate * 10) / 10)} ${unit}/秒`;
+}
+
+function processingLaneMetaValue(stage) {
+  const value = processingLaneValue(stage);
+  const rate = processingRateText(stage);
+  return rate ? `${value} · ${rate}` : value;
+}
+
+function processingSourceDate(value) {
+  if (!value) return "";
+  const text = String(value).trim();
+  const slash = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (slash) {
+    return `${slash[1]}/${slash[2].padStart(2, "0")}/${slash[3].padStart(2, "0")}`;
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}/${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function processingSourceInfo(stage) {
+  const sources = [];
+  if (Array.isArray(stage?.sources)) sources.push(...stage.sources);
+  if (stage?.source) sources.push(stage.source);
+  for (const lane of stage?.lanes || []) {
+    if (lane.stage?.source) sources.push(lane.stage.source);
+    if (Array.isArray(lane.stage?.sources)) {
+      sources.push(...lane.stage.sources);
+    }
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const source of sources) {
+    if (!source || (!source.downloaded_at && !source.update_date)) continue;
+    const key = `${source.label || ""}:${source.version_id || ""}:${
+      source.version_code || ""
+    }:${source.downloaded_at || ""}:${source.update_date || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(source);
+  }
+  if (!unique.length) return null;
+  const downloaded = [
+    ...new Set(
+      unique
+        .map((source) => processingSourceDate(source.downloaded_at))
+        .filter(Boolean),
+    ),
+  ];
+  const tokens = unique
+    .map((source) => {
+      const name = source.label || "";
+      if (source.version_code) {
+        return [name, `#${source.version_code}`].filter(Boolean).join(" ");
+      }
+      const date = processingSourceDate(source.downloaded_at);
+      return [name, date ? `下載 ${date}` : ""].filter(Boolean).join(" ");
+    })
+    .filter(Boolean);
+  const parts = [];
+  if (tokens.length) parts.push(tokens.join(" · "));
+  if (downloaded.length) parts.push(`下載 ${downloaded.join("、")}`);
+  const title = unique
+    .map((source) => {
+      const name = source.label || "資料";
+      const versionCode = source.version_code
+        ? `版本 ${source.version_code}`
+        : source.version_id
+          ? `#${source.version_id}`
+          : "";
+      const downloadedAt = source.downloaded_at
+        ? `下載 ${formatDateTime(source.downloaded_at)}`
+        : "";
+      const updatedAt = source.update_date
+        ? `來源版本 ${source.update_date}`
+        : "";
+      const counts =
+        source.law_count !== undefined || source.article_count !== undefined
+          ? `${formatNumber(source.law_count || 0)} 筆／${formatNumber(
+              source.article_count || 0,
+            )} 條文`
+          : "";
+      return [name, versionCode, downloadedAt, updatedAt, counts]
+        .filter(Boolean)
+        .join(" · ");
+    })
+    .join("；");
+  return { text: parts.join(" · "), title };
+}
+
+function processingComparisonText(stage) {
+  const comparison = stage?.comparison;
+  if (!comparison) return "";
+  if (comparison.unit === "bytes") {
+    const local = comparison.local_size;
+    const remote = comparison.remote_size;
+    if (local === null || local === undefined) {
+      return remote === null || remote === undefined
+        ? comparison.message || "無法取得版本大小"
+        : `本機無檔案 · 遠端 ${formatNumber(remote)} bytes`;
+    }
+    if (remote === null || remote === undefined) {
+      return `本機 ${formatNumber(local)} bytes · 遠端大小未知`;
+    }
+    const diff = Number(remote) - Number(local);
+    if (diff === 0) {
+      const note =
+        comparison.available && comparison.message
+          ? `；檢查結果：${comparison.message}`
+          : "";
+      return `本機與遠端皆為 ${formatNumber(
+        local,
+      )} bytes（大小相同${note}）`;
+    }
+    const change =
+      diff > 0
+        ? `遠端多 ${formatNumber(diff)} bytes`
+        : `遠端少 ${formatNumber(-diff)} bytes`;
+    return `本機 ${formatNumber(local)} bytes → 遠端 ${formatNumber(
+      remote,
+    )} bytes（${change}）`;
+  }
+  if (comparison.unit === "months") {
+    const local = Number(comparison.local_months || 0);
+    const pending = Number(comparison.remote_pending || 0);
+    return pending > 0
+      ? `本機 ${formatNumber(local)} 個月 · 遠端待補 ${formatNumber(
+          pending,
+        )} 個月`
+      : `本機 ${formatNumber(local)} 個月 · 遠端無待補月份`;
+  }
+  return comparison.message || "";
+}
+
+function processingLaneMarkup(lane, stage) {
+  const laneStage = lane.stage || {};
+  const showProgress = Boolean(stage?.show_progress);
+  const meta = showProgress ? phaseInfo(laneStage) : phaseInfo(stage);
+  const percent =
+    laneStage.percent === null || laneStage.percent === undefined
+      ? null
+      : Math.max(0, Math.min(100, Number(laneStage.percent) || 0));
+  const success =
+    laneStage.phase === "completed" ||
+    ["success", "no_change"].includes(laneStage.status);
+  const showTrack = showProgress && percent !== null;
+  const width = success ? 100 : percent ?? 0;
+  const accent = lane.accent || barColor(stage);
+  const fillColor = success ? "var(--surface-3)" : accent;
+  const label = lane.label || lane.source || "資料";
+  const versionCode = laneStage.source?.version_code
+    ? `#${laneStage.source.version_code}`
+    : "";
+  const comparison = processingComparisonText(laneStage);
+  const message = String(laneStage.message || "").trim();
+  const idleText = comparison || message || meta.label;
+  const metaValue =
+    showProgress && comparison
+      ? comparison
+      : processingLaneMetaValue(laneStage);
+  const duration = Number(laneStage.duration_ms) || 0;
+  const running = !success && laneStage.phase === "running";
+  const title = [
+    label,
+    versionCode,
+    meta.label,
+    comparison,
+    showProgress && percent !== null ? percentText(percent) : "",
+    processingLaneMetaValue(laneStage),
+    message,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const bar = showTrack
+    ? `<span class="processing-bar processing-wf-lane-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${
+        success ? 100 : Math.round(width)
+      }" aria-label="${escapeHtml(title)}">
+      <span class="processing-bar-fill${
+        success ? " is-completed" : ""
+      }" style="width:${width}%;background:${escapeHtml(fillColor)}"></span>
+    </span>`
+    : `<span class="processing-wf-lane-idle" title="${escapeHtml(
+        comparison || message || idleText,
+      )}">${escapeHtml(showProgress ? meta.label : idleText)}</span>`;
+  return `<span class="processing-wf-lane${
+    success ? " is-completed" : ""
+  }${running ? " is-running" : ""}" style="--lane-accent:${escapeHtml(
+    accent,
+  )}" title="${escapeHtml(title)}">
+    <span class="processing-wf-lane-head">
+      <span class="processing-wf-lane-swatch" aria-hidden="true"></span>
+      <span class="processing-wf-lane-label">${escapeHtml(label)}${
+        versionCode
+          ? `<small title="${escapeHtml(
+              laneStage.source?.downloaded_at
+                ? `下載 ${formatDateTime(laneStage.source.downloaded_at)}`
+                : versionCode,
+            )}">${escapeHtml(versionCode)}</small>`
+          : ""
+      }</span>
+      ${phaseBadge(laneStage)}
+      ${
+        showTrack
+          ? `<span class="processing-wf-lane-percent${
+              success ? " is-completed" : ""
+            }">${percentText(percent)}</span>`
+          : ""
+      }
+    </span>
+    ${bar}
+    <span class="processing-wf-lane-meta">
+      <span class="processing-wf-lane-count" title="${escapeHtml(
+        metaValue,
+      )}">${escapeHtml(metaValue || "—")}</span>
+      ${duration ? `<span class="mono">${formatDuration(duration)}</span>` : ""}
+      ${
+        showTrack && message
+          ? `<span class="processing-wf-lane-message" title="${escapeHtml(
+              message,
+            )}">${escapeHtml(message)}</span>`
+          : ""
+      }
+    </span>
+  </span>`;
+}
+
+function processingWorkItemMarkup(item) {
+  const meta = statusInfo(item.status);
+  const count = Number(item.count) || 0;
+  const iconName =
+    item.status === "update"
+      ? "download"
+      : item.status === "failed"
+        ? "alert"
+        : item.status === "success"
+          ? "check"
+          : "clock";
+  return `<div class="processing-wf-work-item is-${meta.tone}">
+    <span class="processing-wf-work-icon">${icon(iconName, 13)}</span>
+    <div class="processing-wf-work-copy">
+      <div class="processing-wf-work-title">
+        <strong>${escapeHtml(item.label || "待處理")}</strong>
+        ${count > 1 ? `<span class="processing-wf-work-count">${formatNumber(count)}</span>` : ""}
+      </div>
+      ${item.detail ? `<p>${escapeHtml(item.detail)}</p>` : ""}
+      ${
+        item.checked_at
+          ? `<small>檢查於 ${escapeHtml(formatDateTime(item.checked_at))}</small>`
+          : ""
+      }
+    </div>
+  </div>`;
+}
+
+function processingLaneFactsMarkup(lane, parentStage = {}) {
+  const stage = lane.stage || {};
+  const model = stage.model || parentStage.model || {};
+  const usesModel = model.role === "embedding";
+  const stats = [
+    ...(Array.isArray(stage.stats) ? stage.stats : []),
+    { label: "主機", value: model.host || "—" },
+    { label: "Model", value: usesModel ? model.model || "—" : "不使用模型" },
+  ];
+  const lastRun = stage.last_run || {};
+  const lastRunAt = lastRun.finished_at || lastRun.started_at || "";
+  return `<div class="processing-wf-fact" style="--lane-accent:${escapeHtml(
+    lane.accent || "var(--accent)",
+  )}">
+    <div class="processing-wf-fact-head">
+      <span class="processing-wf-fact-label"><i aria-hidden="true"></i>${escapeHtml(
+        lane.label || lane.source || "資料",
+      )}</span>
+      ${phaseBadge(stage)}
+      <span class="processing-wf-fact-value">${escapeHtml(
+        processingLaneMetaValue(stage),
+      )}</span>
+    </div>
+    ${
+      stage.message
+        ? `<p class="processing-wf-fact-message">${escapeHtml(stage.message)}</p>`
+        : ""
+    }
+    ${
+      stats.length || lastRunAt
+        ? `<div class="processing-wf-fact-stats">${stats
+            .map(
+              (item) =>
+                `<span><span>${escapeHtml(item.label || "")}</span><strong>${escapeHtml(
+                  item.value || "—",
+                )}</strong></span>`,
+            )
+            .join("")}${
+            lastRunAt
+              ? `<span><span>上次執行</span><strong>${escapeHtml(
+                  formatDateTime(lastRunAt),
+                )}</strong></span>`
+              : ""
+          }</div>`
+        : ""
+    }
+  </div>`;
+}
+
+function processingStageDetailsMarkup(stage) {
+  const updateItems = Array.isArray(stage.update?.items)
+    ? stage.update.items
+    : [];
+  const pendingItems = Array.isArray(stage.pending?.items)
+    ? stage.pending.items
+    : [];
+  const updateIds = new Set(updateItems.map((item) => item.id));
+  const pendingOnly = pendingItems.filter((item) => !updateIds.has(item.id));
+  const lanes = Array.isArray(stage.lanes) ? stage.lanes : [];
+  const embeddingStrip =
+    stage.key === "legal_qdrant"
+      ? '<div class="processing-embedding-strip-slot" data-processing-embedding-strip data-preserve-children></div>'
+      : "";
+  return `<div class="processing-wf-details">
+    ${embeddingStrip}
+    ${
+      updateItems.length
+        ? `<div class="processing-wf-work-group">
+            <div class="processing-wf-work-head">
+              <span class="processing-wf-work-kicker">${icon("download", 12)}可更新內容</span>
+              <span class="badge badge-warn">${formatNumber(
+                Number(stage.update?.count) || updateItems.length,
+              )}</span>
+            </div>
+            <div class="processing-wf-work-list">${updateItems
+              .map(processingWorkItemMarkup)
+              .join("")}</div>
+          </div>`
+        : ""
+    }
+    ${
+      pendingOnly.length
+        ? `<div class="processing-wf-work-group">
+            <div class="processing-wf-work-head">
+              <span class="processing-wf-work-kicker">${icon("clock", 12)}待執行工作</span>
+              <span class="badge badge-neutral">${formatNumber(
+                Number(stage.pending?.count) || pendingOnly.length,
+              )}</span>
+            </div>
+            <div class="processing-wf-work-list">${pendingOnly
+              .map(processingWorkItemMarkup)
+              .join("")}</div>
+          </div>`
+        : ""
+    }
+    ${
+      lanes.length
+        ? `<div class="processing-wf-facts">${lanes
+            .map((lane) => processingLaneFactsMarkup(lane, stage))
+            .join("")}</div>`
+        : ""
+    }
+    ${
+      stage.note
+        ? `<p class="processing-wf-note">${icon("info", 12)}<span>${escapeHtml(
+            stage.note,
+          )}</span></p>`
+        : ""
+    }
+  </div>`;
+}
+
+function processingRecheckIconButton(action, stageId = "") {
+  if (!action) return "";
+  if (action.kind === "check_updates") {
+    return `<button class="processing-wf-icon-btn is-label" type="button"
+      data-processing-action="check-updates"
+      data-stage-id="${escapeHtml(stageId)}"
+      data-source-types="${escapeHtml((action.source_types || []).join(","))}"
+      title="更新狀態" aria-label="更新狀態">${icon("refresh", 14)}<span>update</span></button>`;
+  }
+  return `<button class="processing-wf-icon-btn is-label" type="button"
+    data-processing-action="refresh" data-stage-id="${escapeHtml(stageId)}"
+    title="更新狀態" aria-label="更新狀態">${icon("refresh", 14)}<span>refresh</span></button>`;
+}
+
+function processingStageRailMarkup(stage, stageId = "") {
+  const actions = Array.isArray(stage.actions) ? stage.actions : [];
+  const lanes = Array.isArray(stage.lanes) ? stage.lanes : [];
+  const running =
+    stage.status === "running" ||
+    lanes.some((lane) => lane.stage?.status === "running");
+  const cancelable = running && stage.cancelable !== false;
+  return `<span class="processing-wf-rail">
+    <span class="processing-wf-rail-top">
+      ${processingStageCountBadges(stage)}
+      ${processingRecheckIconButton(stage.recheck, stageId)}
+    </span>
+    <span class="processing-wf-rail-actions">
+      ${
+        actions.length
+          ? actions
+              .map((action) =>
+                processingActionButton(action, {
+                  primary: true,
+                  stageId,
+                }),
+              )
+              .join("")
+          : `<button class="btn btn-primary btn-sm" type="button" disabled
+              title="此階段目前沒有可執行的工作">${icon("play", 13)}<span>升級</span></button>`
+      }
+      <button class="btn btn-secondary btn-sm processing-wf-cancel" type="button"
+        data-processing-action="stop"
+        title="${cancelable ? "取消目前執行中的處理程序" : "目前沒有可取消的程序"}"
+        ${cancelable ? "" : "disabled"}>${icon("x", 13)}<span>取消</span></button>
+    </span>
+  </span>`;
+}
+
+function processingStageMarkup(section, stage, index, expandedStages) {
+  const id = `${section.key || "section"}-${stage.key || index}`;
+  const effectiveStage = stageWithOperation(stage, id);
+  const lanes = Array.isArray(effectiveStage.lanes)
+    ? effectiveStage.lanes
+    : [];
+  const statusKey = effectiveStage.status || "idle";
+  const meta = phaseInfo(effectiveStage);
+  const percent = effectiveStage.percent;
+  const showPercent =
+    Boolean(effectiveStage.show_progress) &&
+    percent !== null &&
+    percent !== undefined;
+  const durations = lanes
+    .map((lane) => Number(lane.stage?.duration_ms) || 0)
+    .filter((value) => value > 0);
+  const duration = durations.length ? Math.max(...durations) : 0;
+  const counts = lanes
+    .map(
+      (lane) =>
+        `${lane.label || lane.source || "資料"} ${processingLaneValue(lane.stage || {})}`,
+    )
+    .join(" · ");
+  const message = String(effectiveStage.message || "").trim();
+  const sourceInfo = processingSourceInfo(effectiveStage);
+  const model = effectiveStage.model || {};
+  const usesModel = model.role === "embedding";
+  const modelLabel = usesModel
+    ? model.label || `${model.host || "—"}:${model.model || "—"}`
+    : "不使用模型";
+  return `<details class="processing-wf-stage is-${meta.tone}" data-processing-stage="${escapeHtml(
+    id,
+  )}" ${expandedStages.has(id) ? "open" : ""}>
+    <summary class="processing-wf-summary"
+      data-stage-key="${escapeHtml(id)}"
+      data-stage-status-key="${escapeHtml(statusKey)}"
+      data-stage-status="${escapeHtml(meta.label)}"
+      data-stage-label="${escapeHtml(`${section.label || ""} · ${effectiveStage.label || effectiveStage.key}`)}"
+      data-stage-color="${escapeHtml(barColor(effectiveStage))}"
+      data-stage-percent="${escapeHtml(showPercent ? percentText(percent) : "—")}"
+      data-stage-contribution="${escapeHtml(String(lanes.length))}"
+      data-stage-contribution-label="資料線"
+      data-stage-duration="${escapeHtml(
+        duration ? formatDuration(duration) : "—",
+      )}"
+      data-stage-counts="${escapeHtml(counts || "—")}"
+      data-stage-message="${escapeHtml(message)}"
+      data-stage-update="${escapeHtml(String(Number(effectiveStage.update?.count) || 0))}"
+      data-stage-pending="${escapeHtml(String(Number(effectiveStage.pending?.count) || 0))}">
+      <span class="processing-wf-summary-main">
+        <span class="processing-wf-step">${String(index + 1).padStart(2, "0")}</span>
+        <span class="processing-wf-stage-icon" style="--stage-color:${escapeHtml(
+          barColor(effectiveStage),
+        )}">${icon(STAGE_ICONS[effectiveStage.key] || "cube", 15)}</span>
+        <span class="processing-wf-stage-copy">
+          <strong>${escapeHtml(
+            effectiveStage.label || effectiveStage.key,
+          )}</strong>
+          <small>${escapeHtml(
+            effectiveStage.short_label || effectiveStage.key || "",
+          )} · ${formatNumber(lanes.length)} 條資料線</small>
+          <small class="processing-wf-stage-model" title="${escapeHtml(
+            usesModel ? model.url || modelLabel : "此階段不使用模型",
+          )}">${escapeHtml(modelLabel)}</small>
+        </span>
+        ${
+          showPercent
+            ? `<span class="processing-wf-stage-percent${
+                effectiveStage.phase === "completed" ? " is-completed" : ""
+              }">${percentText(percent)}</span>`
+            : ""
+        }
+        ${
+          sourceInfo
+            ? `<span class="processing-wf-stage-source" title="${escapeHtml(
+                sourceInfo.title,
+              )}">${escapeHtml(sourceInfo.text)}</span>`
+            : ""
+        }
+        <span class="processing-wf-chevron">${icon("chevronDown", 14)}</span>
+      </span>
+      <span class="processing-wf-lanes">${lanes
+        .map((lane) => processingLaneMarkup(lane, effectiveStage))
+        .join("")}</span>
+      ${processingStageRailMarkup(effectiveStage, id)}
+    </summary>
+    ${processingStageDetailsMarkup(effectiveStage)}
+  </details>`;
+}
+
+function processingVersionsMarkup(section) {
+  const versions = Array.isArray(section.versions)
+    ? section.versions
+    : [];
+  if (!versions.length) return "";
+  const columns = [
+    "來源",
+    "版本編號",
+    "下載時間",
+    "來源版本",
+    "筆數／條文",
+  ];
+  return `<div class="processing-wf-versions">
+    <div class="processing-wf-versions-title">
+      <span>版本編號表</span>
+      <span class="mono">YYYYMMDDHHMM</span>
+    </div>
+    <div class="processing-wf-versions-scroll">
+      <div class="processing-wf-version-grid processing-wf-version-head">${columns
+        .map((column) => `<span>${escapeHtml(column)}</span>`)
+        .join("")}</div>
+      ${versions
+        .map(
+          (version) => `<div class="processing-wf-version-grid processing-wf-version-row">
+            <strong>${escapeHtml(version.label || version.source_type || "—")}</strong>
+            <code>${escapeHtml(version.version_code || "—")}</code>
+            <span>${escapeHtml(formatDateTime(version.downloaded_at))}</span>
+            <span>${escapeHtml(
+              processingSourceDate(version.update_date) || "—",
+            )}</span>
+            <span>${formatNumber(version.law_count || 0)} 筆／${formatNumber(
+              version.article_count || 0,
+            )} 條文</span>
+          </div>`,
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function processingSectionMarkup(section, expandedStages) {
+  const stages = Array.isArray(section.stages) ? section.stages : [];
+  const updateCount = Number(section.update_count) || 0;
+  const pendingCount = Number(section.pending_count) || 0;
+  const accent = section.accent || "var(--accent)";
+  const sources = Array.isArray(section.sources) ? section.sources : [];
+  const updateStage = stages.find(
+    (stage) => Number(stage.update?.count) > 0,
+  );
+  const pendingStage =
+    stages.find(
+      (stage) =>
+        Number(stage.pending?.count) > 0 &&
+        Number(stage.update?.count) === 0,
+    ) || stages.find((stage) => Number(stage.pending?.count) > 0);
+  const stageId = (stage) =>
+    stage ? `${section.key || "section"}-${stage.key || ""}` : "";
+  return `<section class="report-card processing-card processing-wf-section" style="--section-accent:${escapeHtml(
+    accent,
+  )}">
+    <div class="report-head processing-wf-section-head">
+      <div class="processing-wf-section-title">
+        <span class="processing-wf-section-icon">${icon(
+          section.icon || "activity",
+          17,
+        )}</span>
+        <div>
+          <div class="report-kicker">DATA WATERFALL</div>
+          <h2 class="report-section-title">${escapeHtml(section.label || "")}</h2>
+          <p class="processing-section-sub">${escapeHtml(
+            section.description || "",
+          )}</p>
+        </div>
+      </div>
+      <div class="processing-wf-section-actions">
+        ${
+          updateCount
+            ? `<button class="processing-wf-section-count is-update" type="button"
+                data-processing-action="open-stage"
+                data-stage-id="${escapeHtml(stageId(updateStage))}"
+                title="展開可更新內容">${icon(
+                  "download",
+                  13,
+                )}<strong>${formatNumber(updateCount)}</strong><span>線上更新</span></button>`
+            : ""
+        }
+        ${
+          pendingCount
+            ? `<button class="processing-wf-section-count is-pending" type="button"
+                data-processing-action="open-stage"
+                data-stage-id="${escapeHtml(stageId(pendingStage))}"
+                title="展開待執行工作">${icon(
+                  "clock",
+                  13,
+                )}<strong>${formatNumber(pendingCount)}</strong><span>待執行</span></button>`
+            : ""
+        }
+        ${statusBadge(section.status || "idle")}
+        ${processingActionButton(section.recheck)}
+      </div>
+    </div>
+    <div class="report-section processing-wf-body">
+      ${processingVersionsMarkup(section)}
+      <div class="processing-wf-legend">
+        <span class="processing-wf-legend-item">${icon("download", 12)}線上更新</span>
+        <span class="processing-wf-legend-item">${icon("clock", 12)}待執行工作</span>
+        ${sources
+          .map(
+            (source) =>
+              `<span class="processing-wf-source" style="--source-accent:${escapeHtml(
+                source.accent || accent,
+              )}"><i aria-hidden="true"></i>${escapeHtml(
+                source.label || source.key || "",
+              )}</span>`,
+          )
+          .join("")}
+        <span class="processing-wf-legend-hint">點選任一階段展開工作清單；滑鼠移到階段可快速查看狀態。</span>
+      </div>
+      <div class="processing-wf-stages">${stages
+        .map((stage, index) =>
+          processingStageMarkup(section, stage, index, expandedStages),
+        )
+        .join("")}</div>
+    </div>
+  </section>`;
+}
+
+function processingSectionsMarkup(snapshot, expandedStages = new Set()) {
+  const sections = Array.isArray(snapshot.sections) ? snapshot.sections : [];
+  if (!sections.length) return flowCanvasMarkup(snapshot);
+  return `<div class="processing-wf-overview">${sections
+    .map((section) => processingSectionMarkup(section, expandedStages))
+    .join("")}</div>`;
+}
+
 function summaryCard(label, value, hint = "", extra = "") {
   return `<div class="processing-summary-card">
     <span class="processing-summary-label">${escapeHtml(label)}</span>
@@ -552,13 +1387,13 @@ function summaryMarkup(snapshot) {
       archiveHint,
     )}
     ${summaryCard(
-      "原始 Parquet 備份",
+      "原始資料備份",
       rawAvailable ? `${formatNumber(raw.count)} 檔` : statusBadge("unavailable"),
       rawAvailable
         ? `共 ${formatNumber(rawTotals.row_count)} 筆 · ${formatBytes(
             rawTotals.compressed_bytes,
           )}`
-        : escapeHtml(raw.error || "無法掃描原始 Parquet 備份。"),
+        : escapeHtml(raw.error || "無法掃描原始資料備份。"),
     )}
     ${summaryCard(
       "PostgreSQL 判決",
@@ -842,20 +1677,343 @@ function noticesMarkup(snapshot) {
     .join("")}</div>`;
 }
 
-function contentMarkup(snapshot) {
+function processingTimelineStageWorkflow(timelineKey, stage) {
+  if (timelineKey === "law" || timelineKey === "order") {
+    return stage === "qdrant" ? "legal_index_versions" : `${timelineKey}_download`;
+  }
+  if (timelineKey === "judgment") {
+    if (stage === "download") return "judgment_download";
+    if (stage === "parquet" || stage === "postgres") return "judgment_import";
+    if (stage === "qdrant") return "index_versions";
+  }
+  return "";
+}
+
+function timelineMonthCellMarkup({
+  month,
+  year,
+  monthNo,
+  stageOrder,
+  stageLabels,
+  stageStatuses,
+  overall,
+  active,
+  workflowForStage,
+}) {
+  const statuses = stageStatuses || {};
+  const monthKey = String(
+    month?.month || `${year}${String(monthNo).padStart(2, "0")}`,
+  );
+  const monthLabel =
+    month?.month_label || `${year}-${String(monthNo).padStart(2, "0")}`;
+  const stageTitle = stageOrder
+    .map(
+      (stage) =>
+        `${stageLabels[stage] || stage}：${
+          FILE_TIMELINE_STATUS_LABELS[statuses[stage] || "empty"]
+        }`,
+    )
+    .join(" · ");
+  const versionCodes = (month?.versions || [])
+    .map((version) => version.version_code)
+    .filter(Boolean);
+  const fileNames = [
+    ...new Set([
+      ...(month?.files || []),
+      ...(month?.local_files || []),
+      ...(month?.imported_files || []),
+    ]),
+  ].filter(Boolean);
+  const detail = versionCodes.length
+    ? ` · 版本 ${versionCodes.join("、")}`
+    : fileNames.length
+      ? ` · ${fileNames.join("、")}`
+      : "";
+  const title = month
+    ? `${monthLabel} · ${stageTitle}${detail}`
+    : `${monthLabel} · 無資料`;
+  const segments = stageOrder
+    .map((stage) => {
+      const status = statuses[stage] || "empty";
+      const workflowId =
+        status === "incomplete" ? workflowForStage(stage) : "";
+      const tag = workflowId ? "button" : "span";
+      const action = workflowId
+        ? ` type="button" data-timeline-workflow="${escapeHtml(workflowId)}"`
+        : "";
+      return `<${tag} class="processing-month-stage ${
+        FILE_TIMELINE_STATUS_CLASSES[status] || "is-empty"
+      }${workflowId ? " is-actionable" : ""}"${action} title="${escapeHtml(
+        `${stageLabels[stage] || stage}：${
+          FILE_TIMELINE_STATUS_LABELS[status]
+        }${workflowId ? "（點選前往處理）" : ""}`,
+      )}" aria-label="${escapeHtml(
+        `${monthLabel} ${stageLabels[stage] || stage} ${
+          FILE_TIMELINE_STATUS_LABELS[status]
+        }${workflowId ? "，點選前往處理" : ""}`,
+      )}"></${tag}>`;
+    })
+    .join("");
+  return `<td class="judgment-month import-month processing-month${
+    active ? " is-current" : ""
+  } is-${escapeHtml(overall)}" data-month="${escapeHtml(
+    monthKey,
+  )}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${
+    active ? ' aria-current="true"' : ""
+  }>
+    <span class="processing-month-number">${monthNo}</span>
+    <span class="processing-month-stages">${segments}</span>
+  </td>`;
+}
+
+function processingTimelineMonthCell(timeline, month, year, monthNo) {
+  return timelineMonthCellMarkup({
+    month,
+    year,
+    monthNo,
+    stageOrder: FILE_TIMELINE_STAGES,
+    stageLabels: FILE_TIMELINE_STAGE_LABELS,
+    stageStatuses: month?.stages || {},
+    overall: month?.overall || "empty",
+    active: Boolean(month?.active),
+    workflowForStage: (stage) =>
+      processingTimelineStageWorkflow(timeline.key, stage),
+  });
+}
+
+function importActiveRowMarkup({
+  activeMonth,
+  activeArchive,
+  activePhase = "",
+  processingMonth = "",
+  processingArchive = "",
+  stageLabels = {},
+}) {
+  if (!activeMonth || !activeArchive) return "";
+  const monthLabel = `${String(activeMonth).slice(0, 4)}-${String(
+    activeMonth,
+  ).slice(4, 6)}`;
+  const phaseLabel =
+    stageLabels[activePhase] || (activePhase ? "準備中" : "");
+  const processingLabel = `${String(processingMonth || "").slice(
+    0,
+    4,
+  )}-${String(processingMonth || "").slice(4, 6)}`;
+  const processingDiffers =
+    Boolean(processingMonth) &&
+    (processingMonth !== activeMonth ||
+      processingArchive !== activeArchive);
+  return `<span class="badge badge-info">${icon(
+    "activity",
+    11,
+  )}目前匯入</span>
+    <strong class="mono">${escapeHtml(monthLabel)}</strong>
+    <span class="mono">${escapeHtml(activeArchive)}</span>
+    ${
+      phaseLabel
+        ? `<span class="badge badge-neutral">${escapeHtml(phaseLabel)}</span>`
+        : ""
+    }
+    ${
+      processingDiffers
+        ? `<span class="processing-current-processing">
+            <span class="faint">處理中</span>
+            <strong class="mono">${escapeHtml(processingLabel)}</strong>
+            <span class="mono">${escapeHtml(processingArchive || "—")}</span>
+          </span>`
+        : ""
+    }`;
+}
+
+function importTimelineMonthCell(timeline, month, year, monthNo) {
+  const stageOrder =
+    Array.isArray(timeline.stage_order) && timeline.stage_order.length
+      ? timeline.stage_order
+      : ["extract", "raw_parquet", "filter", "postgres"];
+  const stageLabels = timeline.stage_labels || {
+    extract: "RAR 檢查／解壓縮",
+    raw_parquet: "原始資料檢查／Parquet 備份",
+    filter: "金融法規篩選",
+    postgres: "PostgreSQL metadata",
+  };
+  return timelineMonthCellMarkup({
+    month,
+    year,
+    monthNo,
+    stageOrder,
+    stageLabels,
+    stageStatuses: month?.import_stages || {},
+    overall: month?.import_overall || "empty",
+    active: Boolean(month?.active),
+    workflowForStage: () => "judgment_import",
+  });
+}
+
+function processingTimelineYearRow(timeline, year, byMonth) {
+  const cells = [];
+  for (let monthNo = 1; monthNo <= 12; monthNo += 1) {
+    const key = `${year}${String(monthNo).padStart(2, "0")}`;
+    cells.push(
+      processingTimelineMonthCell(timeline, byMonth.get(key), year, monthNo),
+    );
+  }
+  return `<tr><th scope="row">${year}</th>${cells.join("")}</tr>`;
+}
+
+function processingTimelineModelsMarkup(timeline) {
+  const models = timeline?.models || {};
+  const items = [
+    ["Embedding", models.embedding],
+    ["Rerank", models.rerank],
+  ]
+    .filter(([, model]) => model && (model.label || model.model))
+    .map(([label, model]) => {
+      const value =
+        model.label ||
+        [model.host, model.model].filter(Boolean).join(" ") ||
+        "—";
+      const title = [
+        `${label} 主機與模型：${value}`,
+        model.url ? `端點：${model.url}` : "",
+        label === "Rerank" && model.enabled === false
+          ? "RAG_RERANK_ENABLED=false"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<span class="processing-timeline-model" title="${escapeHtml(
+        title,
+      )}"><span>${label}</span><strong class="mono">${escapeHtml(
+        value,
+      )}</strong>${
+        label === "Rerank" && model.enabled === false
+          ? "<em>未啟用</em>"
+          : ""
+      }</span>`;
+    });
+  return items.length
+    ? `<span class="processing-timeline-models">${items.join("")}</span>`
+    : "";
+}
+
+function processingTimelinesMarkup(snapshot) {
+  const timelines = Array.isArray(snapshot.file_timelines)
+    ? snapshot.file_timelines
+    : [];
+  if (!timelines.length) {
+    return `<div class="processing-workflow-empty">目前沒有可顯示的處理時間表。</div>`;
+  }
+  return `<div class="processing-timeline-overview">${timelines
+    .map((timeline) => {
+      const months = Array.isArray(timeline.months) ? timeline.months : [];
+      const byMonth = new Map(
+        months.map((month) => [String(month.month || ""), month]),
+      );
+      const years = [...new Set(months.map((month) => Number(month.year)))]
+        .filter((year) => Number.isFinite(year))
+        .sort((left, right) => right - left);
+      const summary = timeline.summary || {};
+      const current = timeline.current || null;
+      return `<section class="report-card processing-card import-files-card processing-timeline-card" data-processing-timeline="${escapeHtml(
+        timeline.key || "",
+      )}">
+        <div class="side-card-head">
+          <span class="processing-timeline-head-main">
+            <span class="side-card-title">${icon(
+              timeline.icon || "activity",
+              14,
+            )}${escapeHtml(
+              timeline.title || `${timeline.label || ""}處理時間表`,
+            )}</span>
+            ${processingTimelineModelsMarkup(timeline)}
+          </span>
+          <span class="badge badge-neutral">${formatNumber(
+            timeline.total_months || 0,
+          )} 個月</span>
+        </div>
+        <div class="judgment-months index-months">
+          <div class="judgment-months-meta">
+            <span class="badge badge-ok">完成 ${formatNumber(
+              summary.complete || 0,
+            )}</span>
+            <span class="badge badge-danger">未完成 ${formatNumber(
+              summary.incomplete || 0,
+            )}</span>
+            <span class="badge badge-neutral">處理中 ${formatNumber(
+              summary.processing || 0,
+            )}</span>
+            <span class="badge badge-info">有更新 ${formatNumber(
+              summary.update || 0,
+            )}</span>
+            <span class="muted">共 ${formatNumber(
+              timeline.total_months || 0,
+            )} 個月</span>
+          </div>
+          ${
+            current
+              ? `<div class="index-current-row">
+                  <span class="badge badge-info">${icon(
+                    "activity",
+                    11,
+                  )}${escapeHtml(current.label || "目前")}</span>
+                  <strong class="mono">${escapeHtml(
+                    current.month_label || "—",
+                  )}</strong>
+                  <span class="mono">${escapeHtml(current.file || "—")}</span>
+                  ${
+                    current.detail
+                      ? `<span class="muted">${escapeHtml(
+                          current.detail,
+                        )}</span>`
+                      : ""
+                  }
+                </div>`
+              : ""
+          }
+          ${
+            months.length
+              ? `<div class="judgment-months-scroll">
+                  <table class="judgment-months-table import-months-table processing-months-table">
+                    <thead><tr><th scope="col">年份</th>${Array.from(
+                      { length: 12 },
+                      (_, index) =>
+                        `<th scope="col">${index + 1}</th>`,
+                    ).join("")}</tr></thead>
+                    <tbody>${years
+                      .map((year) =>
+                        processingTimelineYearRow(timeline, year, byMonth),
+                      )
+                      .join("")}</tbody>
+                  </table>
+                </div>`
+              : '<div class="processing-workflow-empty">目前沒有資料。</div>'
+          }
+          <div class="processing-timeline-key">
+            ${["complete", "incomplete", "processing", "empty"]
+              .map(
+                (status) =>
+                  `<span><i class="processing-timeline-swatch ${
+                    FILE_TIMELINE_STATUS_CLASSES[status]
+                  }"></i>${FILE_TIMELINE_STATUS_LABELS[status]}</span>`,
+              )
+              .join("")}
+            <span class="processing-timeline-key-order">每格由左至右：下載／Parquet／PostgreSQL／Qdrant</span>
+          </div>
+          <p class="judgment-months-hint">${
+            timeline.key === "judgment"
+              ? "判決以裁判書月份顯示。"
+              : "法規／命令以來源版本月份顯示。"
+          }綠色：完成；紅色：未完成；灰色：處理中；空白：無資料。滑鼠移到月份或色塊可查看各階段狀態。</p>
+        </div>
+      </section>`;
+    })
+    .join("")}</div>`;
+}
+
+function contentMarkup(snapshot, expandedStages = new Set()) {
   return `${noticesMarkup(snapshot)}
     ${summaryMarkup(snapshot)}
-    <section class="processing-flow-section">
-      <div class="processing-section-head">
-        <div>
-          <div class="report-kicker">PIPELINE CANVAS</div>
-          <h2 class="report-section-title">處理流程</h2>
-          <p class="processing-section-sub">判決、法規、命令三條流程即時反映目前執行階段；曲線由來源節點連到各階段，發光節點與流動曲線表示目前執行位置。</p>
-        </div>
-      </div>
-      ${flowCanvasMarkup(snapshot)}
-    </section>
-    ${archivesMarkup(snapshot)}
+    ${processingTimelinesMarkup(snapshot)}
     ${timelineMarkup(snapshot)}
     ${recentRunsMarkup(snapshot)}`;
 }
@@ -884,9 +2042,54 @@ function errorMarkup(message, snapshot) {
   </div>`;
 }
 
+function morphNode(current, next) {
+  if (current.nodeType !== next.nodeType || current.nodeName !== next.nodeName) {
+    current.replaceWith(next.cloneNode(true));
+    return;
+  }
+  if (current.nodeType === Node.TEXT_NODE) {
+    if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+    return;
+  }
+  if (current.nodeType !== Node.ELEMENT_NODE) return;
+  for (const attribute of [...current.attributes]) {
+    if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+  }
+  for (const attribute of [...next.attributes]) {
+    if (current.getAttribute(attribute.name) !== attribute.value) {
+      current.setAttribute(attribute.name, attribute.value);
+    }
+  }
+  // Slots such as the embedding strip and judgment month table are filled by
+  // their own sync functions.  Keep their current children so polling does
+  // not replace a loaded table with a loading skeleton every two seconds.
+  if (next.hasAttribute("data-preserve-children")) return;
+  morphChildren(current, next);
+}
+
+function morphChildren(currentParent, nextParent) {
+  const currentNodes = [...currentParent.childNodes];
+  const nextNodes = [...nextParent.childNodes];
+  const shared = Math.min(currentNodes.length, nextNodes.length);
+  for (let index = 0; index < shared; index += 1) {
+    morphNode(currentNodes[index], nextNodes[index]);
+  }
+  for (let index = shared; index < currentNodes.length; index += 1) {
+    currentNodes[index].remove();
+  }
+  for (let index = shared; index < nextNodes.length; index += 1) {
+    currentParent.appendChild(nextNodes[index].cloneNode(true));
+  }
+}
+
+function morphMarkup(element, markup) {
+  const template = document.createElement("template");
+  template.innerHTML = markup;
+  morphChildren(element, template.content);
+}
+
 const WORKFLOW_ICONS = {
   overview: "activity",
-  full_update: "download",
   law_download: "layers",
   order_download: "file",
   judgment_download: "download",
@@ -932,6 +2135,11 @@ function workflowItems(snapshot) {
 
 function workflowNavMarkup(snapshot, activeWorkflowId) {
   const items = workflowItems(snapshot);
+  const dividerBefore = new Set([
+    "law_download",
+    "judgment_download",
+    "normalize_courts",
+  ]);
   return `<div class="status-sidebar-head">
       <div class="eyebrow">DATA WORKFLOWS</div>
       <div class="status-sidebar-title">資料流程</div>
@@ -941,10 +2149,9 @@ function workflowNavMarkup(snapshot, activeWorkflowId) {
         .map((item) => {
           const active = item.id === activeWorkflowId;
           const iconName = WORKFLOW_ICONS[item.id] || "terminal";
-          const divider =
-            item.id === "normalize_courts"
-              ? '<div class="status-tab-divider" role="separator" aria-hidden="true"></div>'
-              : "";
+          const divider = dividerBefore.has(item.id)
+            ? '<div class="status-tab-divider" role="separator" aria-hidden="true"></div>'
+            : "";
           return `${divider}<button class="status-tab${active ? " is-active" : ""}" type="button"
             data-processing-workflow="${escapeHtml(item.id)}"
             ${active ? 'aria-current="page"' : ""}>
@@ -1299,6 +2506,22 @@ function stageHoverAttributes(stage) {
   ].join(" ");
 }
 
+function workflowStageStatusBadge(stage) {
+  const status = String(stage.status || "idle");
+  if (status !== "failed") return statusBadge(status);
+  const reason = String(
+    stage.error || stage.message || "階段執行失敗。",
+  ).trim();
+  const resolution = String(
+    stage.resolution ||
+      "查看 .run 目錄中的最新日誌取得完整 traceback，修正後重新執行此流程。",
+  ).trim();
+  const tip = `原因：${reason}\n建議：${resolution}`;
+  return `<span class="badge badge-danger is-failure-tip" tabindex="0" aria-label="${escapeHtml(
+    tip,
+  )}" data-failure-tip="${escapeHtml(tip)}"><span class="status-dot is-danger"></span>失敗</span>`;
+}
+
 function workflowStageMarkup(stage) {
   const status = String(stage.status || "idle");
   return `<div class="processing-workflow-stage${
@@ -1311,7 +2534,7 @@ function workflowStageMarkup(stage) {
       <span class="processing-workflow-stage-label">${escapeHtml(
         stage.label || stage.key || "階段",
       )}</span>
-      ${statusBadge(status)}
+      ${workflowStageStatusBadge(stage)}
       <span class="processing-workflow-stage-percent mono">${percentText(
         stage.percent,
       )}</span>
@@ -1328,6 +2551,11 @@ function workflowStageMarkup(stage) {
 }
 
 function workflowProgressMarkup(workflow) {
+  if (pendingWorkflowId === workflow.id) {
+    // Starting a new run: hide the previous run's progress card immediately
+    // instead of showing stale results until the backend snapshot arrives.
+    return "";
+  }
   const progress = workflow.progress || {};
   const stages = Array.isArray(progress.stages) ? progress.stages : [];
   if (!stages.length) {
@@ -1577,57 +2805,38 @@ function importTimelineMarkup(workflow) {
   const years = [...new Set(months.map((item) => item.year))].sort(
     (left, right) => right - left,
   );
-  const statusLabels = {
-    green: "已匯入",
-    red: "未匯入",
-    gray: "有更新",
-  };
   const active = months.find((item) => item.active);
+  const stageSummary = timeline.stage_summary || {};
   const rows = years
     .map((year) => {
       const cells = Array.from({ length: 12 }, (_, index) => {
         const monthNo = index + 1;
         const key = `${year}${String(monthNo).padStart(2, "0")}`;
-        const item = byKey.get(key);
-        if (!item) {
-          return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
-        }
-        const status = statusLabels[item.status] ? item.status : "red";
-        const title = [
-          `${year}-${String(monthNo).padStart(2, "0")}`,
-          statusLabels[status],
-          `本機 ${item.local_files?.join("、") || "—"}`,
-          `已匯入 ${item.imported_files?.join("、") || "—"}`,
-          item.unimported_files?.length
-            ? `待匯入 ${item.unimported_files.join("、")}`
-            : "",
-          item.manifest_status === "gray" ? "遠端有新版本" : "",
-          item.active
-            ? `目前匯入${item.active_archive ? ` · ${item.active_archive}` : ""}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return `<td class="judgment-month import-month is-${status}${
-          item.active ? " is-active" : ""
-        }" title="${escapeHtml(title)}"${
-          item.active ? ' aria-current="true"' : ""
-        }><span>${monthNo}</span></td>`;
+        return importTimelineMonthCell(
+          timeline,
+          byKey.get(key),
+          year,
+          monthNo,
+        );
       }).join("");
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
     .join("");
   const summary = timeline.summary || {};
+  const stageLabels = timeline.stage_labels || {};
   const activeLine = active
-    ? `<div class="index-current-row">
-        <span class="badge badge-info">${icon("activity", 11)}目前匯入</span>
-        <strong class="mono">${escapeHtml(
-          `${String(active.year)}-${String(active.month_no).padStart(2, "0")}`,
-        )}</strong>
-        <span class="mono">${escapeHtml(active.active_archive || "—")}</span>
-      </div>`
+    ? `<div class="index-current-row">${importActiveRowMarkup({
+        activeMonth:
+          timeline.active_month || String(active.month || ""),
+        activeArchive:
+          timeline.active_archive || active.active_archive || "",
+        activePhase: timeline.active_phase || "",
+        processingMonth: timeline.processing_month || "",
+        processingArchive: timeline.processing_archive || "",
+        stageLabels,
+      })}</div>`
     : "";
-  return `<section class="report-card processing-card import-files-card">
+  return `<section class="report-card processing-card import-files-card" data-import-timeline="judgment">
     <div class="side-card-head">
       <span class="side-card-title">${icon("table", 14)}匯入檔案時間表</span>
       <span class="badge badge-neutral">${formatNumber(
@@ -1636,13 +2845,16 @@ function importTimelineMarkup(workflow) {
     </div>
     <div class="judgment-months index-months">
       <div class="judgment-months-meta">
-        <span class="badge badge-ok">已匯入 ${formatNumber(
-          summary.green || 0,
+        <span class="badge badge-ok">完成 ${formatNumber(
+          stageSummary.complete || 0,
         )}</span>
-        <span class="badge badge-danger">未匯入 ${formatNumber(
-          summary.red || 0,
+        <span class="badge badge-danger">未完成 ${formatNumber(
+          stageSummary.incomplete || 0,
         )}</span>
-        <span class="badge badge-neutral">有更新 ${formatNumber(
+        <span class="badge badge-neutral">處理中 ${formatNumber(
+          stageSummary.processing || 0,
+        )}</span>
+        <span class="badge badge-info">有更新 ${formatNumber(
           summary.gray || 0,
         )}</span>
         <span class="muted">共 ${formatNumber(
@@ -1651,7 +2863,7 @@ function importTimelineMarkup(workflow) {
       </div>
       ${activeLine}
       <div class="judgment-months-scroll">
-        <table class="judgment-months-table import-months-table">
+        <table class="judgment-months-table import-months-table processing-months-table">
           <thead><tr><th scope="col">年份</th>${Array.from(
             { length: 12 },
             (_, index) => `<th scope="col">${index + 1}</th>`,
@@ -1659,7 +2871,7 @@ function importTimelineMarkup(workflow) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">綠色：已匯入 PostgreSQL；灰色：有新檔或遠端新版本待匯入；紅色：尚未匯入；空白：沒有該月份資料。滑鼠移到月份可查看本機檔案與已匯入檔案。</p>
+      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。綠色：已完成（含先前 run 已匯入、本次尚未重跑）；紅色：尚未完成或本次有待匯入檔案；灰色：本次處理中；空白：無資料。點選紅色階段可回到判決匯入流程。</p>
     </div>
   </section>`;
 }
@@ -2467,9 +3679,8 @@ function ollamaPriorityMarkup(hostsData, loading, error) {
 function workflowPanelMarkup(workflow, workflowContext = {}) {
   const activeRun = workflow.active_run || null;
   const lastRun = activeRun || workflow.last_run || null;
-  const busy = Boolean(activeRun);
+  const busy = Boolean(activeRun) || pendingWorkflowId === workflow.id;
   const canRun = Boolean(workflow.can_run) && !busy;
-  const isFullUpdate = workflow.id === "full_update";
   const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
   return `<div class="processing-workflow-panel">
     ${notice({
@@ -2509,12 +3720,17 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
         <span>Shell／入口</span><code>${escapeHtml(workflow.script || "—")}</code>
         <span>實際命令</span><code class="processing-workflow-command">${escapeHtml(command || "—")}</code>
       </div>
+      ${
+        OLLAMA_PRIORITY_WORKFLOWS.has(workflow.id)
+          ? '<div class="processing-embedding-strip-slot" data-processing-embedding-strip data-preserve-children></div>'
+          : ""
+      }
       <div class="processing-workflow-actions">
         <button class="btn btn-primary btn-sm" type="button"
           data-processing-action="run-workflow"
           data-workflow-id="${escapeHtml(workflow.id)}"
           ${canRun ? "" : "disabled"}>
-          ${icon("play", 14)}<span>${busy ? "執行中" : isFullUpdate ? "執行資料更新" : "執行此流程"}</span>
+          ${icon("play", 14)}<span>${busy ? "執行中" : "執行此流程"}</span>
         </button>
         ${
           ["law_download", "order_download", "judgment_download"].includes(
@@ -2553,22 +3769,8 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
             : ""
         }
       </div>
-      ${
-        OLLAMA_PRIORITY_WORKFLOWS.has(workflow.id)
-          ? `<div class="processing-ollama-block">
-              <div class="processing-ollama-head">
-                <span class="side-card-title">${icon("server", 14)}Ollama 主機／模型</span>
-                <button class="btn btn-ghost btn-sm" type="button" data-processing-action="refresh-ollama">
-                  ${icon("refresh", 13)}<span>重新檢查</span>
-                </button>
-              </div>
-              <div class="processing-ollama-subtitle">依優先順序自動選用 embedding 主機；第一台同時設為目前主機，無法連線的主機會顯示為灰色。</div>
-              <div data-processing-ollama>${ollamaPriorityLoadingMarkup()}</div>
-            </div>`
-          : ""
-      }
       <div class="side-card-foot">
-        ${isFullUpdate ? "會依序執行法規／命令下載、判決匯入與可選的 Qdrant 索引。" : "執行結果會寫入共用處理狀態檔，可從處理總覽查看。"}
+        執行結果會寫入共用處理狀態檔，可從處理總覽查看。
       </div>
     </section>
     ${workflowProgressMarkup(workflow)}
@@ -2599,7 +3801,7 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
               <span class="side-card-title">${icon("calendar", 14)}月份下載狀態</span>
               <button class="btn btn-ghost btn-sm" type="button" title="重新掃描 raw_rar 目錄與月份狀態" data-processing-action="refresh-judgment-months">${icon("refresh", 13)}<span>重新整理</span></button>
             </div>
-            <div data-judgment-months-slot>${judgmentMonthsLoadingMarkup()}</div>
+            <div data-judgment-months-slot data-preserve-children>${judgmentMonthsLoadingMarkup()}</div>
           </section>`
         : ""
     }
@@ -2637,38 +3839,35 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
   </div>`;
 }
 
-function panelMarkup(snapshot, activeWorkflowId, workflowContext = {}) {
+function panelMarkup(
+  snapshot,
+  activeWorkflowId,
+  workflowContext = {},
+  expandedStages = new Set(),
+) {
   if (activeWorkflowId === "overview") {
-    return contentMarkup(snapshot);
+    return contentMarkup(snapshot, expandedStages);
   }
   const workflows = Array.isArray(snapshot.workflows) ? snapshot.workflows : [];
   const workflow = workflows.find((item) => item.id === activeWorkflowId);
   return workflow
     ? workflowPanelMarkup(workflow, workflowContext)
-    : contentMarkup(snapshot);
+    : contentMarkup(snapshot, expandedStages);
 }
 
 export async function render(root) {
   root.innerHTML = `<section class="page processing-page">
     <div class="page-header">
-      <div>
+      <div class="processing-page-heading">
         <div class="page-kicker">DATA PIPELINE</div>
-        <h1 class="page-title">資料處理</h1>
-        <p class="page-subtitle">即時追蹤判決、法規與命令的處理進度，檢查本機未處理壓縮檔，並可接續線上資料更新。</p>
+        <div class="processing-title-line">
+          <h1 class="page-title">資料處理</h1>
+          <p class="page-subtitle processing-page-subtitle">即時追蹤判決、法規與命令的處理進度，檢查本機未處理壓縮檔，並可接續線上資料更新。</p>
+        </div>
       </div>
       <div class="page-actions processing-actions">
-        <label class="processing-index-toggle" title="勾選後，資料更新完成匯入與 Parquet 會接續可中斷續跑的 Qdrant 索引">
-          <input type="checkbox" id="processing-index-toggle" />
-          <span>完成後接續 Qdrant 索引</span>
-        </label>
-        <button class="btn btn-secondary btn-sm" type="button" data-processing-action="refresh" id="processing-refresh">
-          ${icon("refresh", 14)}<span>重新整理</span>
-        </button>
         <button class="btn btn-secondary btn-sm processing-stop" type="button" data-processing-action="stop" id="processing-stop" hidden>
           ${icon("x", 14)}<span>停止更新</span>
-        </button>
-        <button class="btn btn-primary btn-sm" type="button" data-processing-action="update" id="processing-update">
-          ${icon("download", 14)}<span data-update-label>資料更新</span>
         </button>
       </div>
     </div>
@@ -2699,15 +3898,13 @@ export async function render(root) {
   const page = root.querySelector(".processing-page");
   const content = root.querySelector("#processing-root");
   const workflowNav = root.querySelector("#processing-workflows");
-  const updateButton = root.querySelector("#processing-update");
   const stopButton = root.querySelector("#processing-stop");
-  const refreshButton = root.querySelector("#processing-refresh");
-  const indexToggle = root.querySelector("#processing-index-toggle");
   const stageTooltip = document.createElement("div");
   stageTooltip.className = "processing-stage-tooltip";
   stageTooltip.hidden = true;
   page.appendChild(stageTooltip);
 
+  stageOperations = new Map();
   let disposed = false;
   let refreshing = false;
   let actionBusy = false;
@@ -2733,13 +3930,21 @@ export async function render(root) {
   let ollamaHosts = null;
   let ollamaHostsLoading = false;
   let ollamaHostsError = null;
-  let ollamaCheckedAt = 0;
   let ollamaDragHostId = 0;
   let ollamaDragChanged = false;
   let ollamaPointerDrag = null;
   let ollamaReorderBusy = false;
+  let embeddingSaving = false;
   let hoveredStageKey = "";
-  let timer = null;
+  const expandedStages = new Set();
+  let refreshStream = null;
+  let lastActiveImport = null;
+  let lastActiveImportStamp = -1;
+  let lastProgressRunId = "";
+  let lastProgressSeq = 0;
+  let progressFrame = 0;
+  let pendingLiveRender = null;
+  const pendingProgressEvents = [];
 
   const workflowContext = () => ({
     storage: indexStorage,
@@ -2958,14 +4163,392 @@ export async function render(root) {
     );
   };
 
-  const loadOllamaHosts = async ({ quiet = false, button = null } = {}) => {
+  const currentEmbeddingLabel = () => {
+    const legal = (lastSnapshot?.sections || []).find(
+      (section) => section.key === "legal",
+    );
+    const stage = (legal?.stages || []).find(
+      (item) => item.key === "legal_qdrant",
+    );
+    return String(stage?.model?.label || "");
+  };
+
+  const syncEmbeddingStrip = () => {
+    const slot = content.querySelector("[data-processing-embedding-strip]");
+    if (!slot) return;
+    const hosts = Array.isArray(ollamaHosts?.hosts)
+      ? ollamaHosts.hosts
+      : [];
+    const options = [];
+    for (const host of hosts) {
+      if (host.status !== "operational") continue;
+      for (const model of host.models || []) {
+        if (!Array.isArray(model.capabilities)) continue;
+        if (!model.capabilities.includes("embedding")) continue;
+        options.push({
+          hostId: Number(host.id),
+          model: model.name,
+          label: `${host.name || host.base_url || `主機 ${host.id}`}:${
+            model.name
+          }`,
+          baseUrl: host.base_url || "",
+        });
+      }
+    }
+    const current = currentEmbeddingLabel();
+    const activeHost = hosts.find(
+      (host) => Number(host.id) === Number(ollamaHosts?.active_host_id),
+    );
+    const buttons = options.map((option) => {
+      const active = option.label === current;
+      return `<button class="rag-model-button${
+        active ? " is-active" : ""
+      }" type="button"
+        data-processing-action="select-embedding-model"
+        data-host-id="${option.hostId}"
+        data-model="${escapeHtml(option.model)}"
+        title="${escapeHtml(option.label)}"
+        aria-pressed="${active ? "true" : "false"}"
+        ${embeddingSaving ? "disabled" : ""}>
+        <span class="rag-model-state" aria-hidden="true"></span>
+        <span>${escapeHtml(option.label)}</span>
+        ${
+          active
+            ? '<span class="rag-model-current">使用中</span>'
+            : ""
+        }
+      </button>`;
+    });
+    if (
+      current &&
+      !options.some((option) => option.label === current)
+    ) {
+      buttons.unshift(
+        `<button class="rag-model-button is-active is-static" type="button" aria-pressed="true" disabled>
+          <span class="rag-model-state" aria-hidden="true"></span>
+          <span>${escapeHtml(current)}</span>
+          <span class="rag-model-current">使用中</span>
+        </button>`,
+      );
+    }
+    const body = options.length
+      ? `<div class="rag-model-buttons">${buttons.join("")}</div>`
+      : `<p class="rag-model-empty">${
+          ollamaHostsLoading
+            ? "讀取線上主機與 Embedding model…"
+            : ollamaHostsError
+              ? `無法讀取線上主機：${escapeHtml(
+                  ollamaHostsError.message || String(ollamaHostsError),
+                )}`
+              : "目前沒有可用的 Embedding model。"
+        }</p>`;
+    const html = `<div class="processing-embedding-strip rag-model-strip">
+      <div class="rag-model-strip-head">
+        <span class="rag-model-strip-title">${icon(
+          "brain",
+          13,
+        )} Embedding 主機／模型</span>
+        ${
+          activeHost?.base_url
+            ? `<span class="rag-model-strip-base mono">${escapeHtml(
+                activeHost.base_url,
+              )}</span>`
+            : ""
+        }
+        <span class="rag-model-strip-current">目前：<strong>${escapeHtml(
+          current || "—",
+        )}</strong></span>
+        <button class="btn btn-ghost btn-sm rag-model-refresh" type="button"
+          data-processing-action="refresh-embedding-models"
+          ${ollamaHostsLoading ? "disabled" : ""}>
+          ${icon("refresh", 12)}<span>檢查模型</span>
+        </button>
+      </div>
+      ${body}
+      <p class="rag-model-hint">點選 <span class="mono">主機:模型</span> 切換 Embedding；選取後會成為第一優先，其他主機依序作為備援。切換模型後既有索引可能需要重建。</p>
+    </div>`;
+    if (slot.innerHTML !== html) slot.innerHTML = html;
+  };
+
+  const syncActiveImport = (active) => {
+    const card = content.querySelector('[data-import-timeline="judgment"]');
+    if (!card) return;
+    const monthKey = String(active?.active_month || "");
+    const processingMonthKey = String(active?.processing_month || "");
+    card.querySelectorAll(".processing-month").forEach((cell) => {
+      const isActive = Boolean(monthKey) && cell.dataset.month === monthKey;
+      cell.classList.toggle("is-current", isActive);
+      cell.classList.toggle(
+        "is-processing-current",
+        Boolean(processingMonthKey) &&
+          cell.dataset.month === processingMonthKey,
+      );
+      if (isActive) cell.setAttribute("aria-current", "true");
+      else cell.removeAttribute("aria-current");
+    });
+    const row = card.querySelector(".index-current-row");
+    if (!monthKey || !active?.active_archive) {
+      if (row) row.remove();
+      return;
+    }
+    const labels =
+      lastSnapshot?.workflows?.find((item) => item.id === "judgment_import")
+        ?.import_timeline?.stage_labels || {};
+    const html = importActiveRowMarkup({
+      activeMonth: monthKey,
+      activeArchive: active.active_archive,
+      activePhase: active.active_phase || "",
+      processingMonth: active.processing_month || "",
+      processingArchive: active.processing_archive || "",
+      stageLabels: labels,
+    });
+    if (row) {
+      row.innerHTML = html;
+      return;
+    }
+    const container = card.querySelector(".judgment-months");
+    if (!container) return;
+    const rowElement = document.createElement("div");
+    rowElement.className = "index-current-row";
+    rowElement.innerHTML = html;
+    const meta = container.querySelector(".judgment-months-meta");
+    if (meta) meta.insertAdjacentElement("afterend", rowElement);
+    else container.prepend(rowElement);
+  };
+
+  const activeImportStamp = (active) => {
+    const value = Number(active?.state_mtime_ns);
+    return Number.isFinite(value) ? value : -1;
+  };
+
+  const activeImportMonthRank = (active) => {
+    const month = String(active?.active_month || "");
+    return /^\d{6}$/.test(month) ? Number(month) : -1;
+  };
+
+  const applyActiveImport = (active) => {
+    if (!active) return;
+    const stamp = activeImportStamp(active);
+    if (stamp >= 0 && stamp < lastActiveImportStamp) {
+      if (lastActiveImport?.active_month) syncActiveImport(lastActiveImport);
+      return;
+    }
+    if (stamp >= 0) lastActiveImportStamp = stamp;
+    const month = String(active.active_month || "");
+    const sameRun = Boolean(
+      active.run_id && active.run_id === lastActiveImport?.run_id,
+    );
+    if (
+      sameRun &&
+      activeImportMonthRank(active) >= 0 &&
+      activeImportMonthRank(active) < activeImportMonthRank(lastActiveImport)
+    ) {
+      // Import phases visit archives from the first month again.  The
+      // outline stays on the highest month that has started in this run,
+      // while the processing row still follows the actual archive.
+      const merged = {
+        ...active,
+        active_month: lastActiveImport.active_month,
+        active_archive: lastActiveImport.active_archive,
+      };
+      lastActiveImport = merged;
+      syncActiveImport(merged);
+      return;
+    }
+    if (!month && active.run_status === "running") {
+      // There can be a short gap between archives while the next one is
+      // being prepared.  Keep the last circle instead of briefly jumping
+      // back to the previously completed month.  A new run clears it.
+      if (
+        lastActiveImport?.active_month &&
+        lastActiveImport?.run_id === active.run_id
+      ) {
+        syncActiveImport(lastActiveImport);
+      } else {
+        lastActiveImport = active;
+        syncActiveImport(active);
+      }
+      return;
+    }
+    lastActiveImport = active;
+    syncActiveImport(active);
+  };
+
+  const applySnapshotActiveImport = (snapshot) => {
+    const active = snapshot?.active_import;
+    if (active) {
+      applyActiveImport(active);
+      return;
+    }
+    if (lastActiveImport?.active_month) {
+      syncActiveImport(lastActiveImport);
+    }
+  };
+
+  const connectRefreshStream = () => {
+    if (disposed || refreshStream) return;
+    refreshStream = subscribeRefresh(
+      [
+        "processing",
+        "judgment-download",
+        "system-usage",
+        "ollama",
+        "court-check",
+        "law-version-check",
+      ],
+      (topic, payload) => {
+        if (disposed) return;
+        if (topic === "processing") {
+          if (payload?.snapshot?.live) {
+            applyLiveProcessing(payload.snapshot);
+          } else if (payload?.snapshot) {
+            applySnapshot(payload.snapshot, { silent: true });
+          } else {
+            // Compatibility fallback for an older backend that only sends
+            // the refresh notification.
+            refresh({ silent: true });
+          }
+          return;
+        }
+        if (topic === "judgment-download") {
+          if (activeWorkflowId === "judgment_download") {
+            loadJudgmentStatus({
+              quiet: true,
+              payload: payload?.snapshot || null,
+            });
+          }
+          return;
+        }
+        if (topic === "system-usage") {
+          if (activeWorkflowId === "index_versions") {
+            loadIndexStorage({
+              quiet: true,
+              force: true,
+              payload: payload?.snapshot || null,
+            });
+          }
+          return;
+        }
+        if (topic === "ollama") {
+          if (OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId)) {
+            loadOllamaHosts({
+              quiet: true,
+              payload: payload?.snapshot || null,
+            });
+          }
+          return;
+        }
+        if (topic === "court-check") {
+          if (activeWorkflowId === "normalize_courts") {
+            loadCourtCheck({
+              quiet: true,
+              force: true,
+              payload: payload?.snapshot || null,
+            });
+          }
+          return;
+        }
+        if (topic === "law-version-check") {
+          if (activeWorkflowId === "backfill_law_articles") {
+            loadLawVersionCheck({
+              quiet: true,
+              force: true,
+              payload: payload?.snapshot || null,
+            });
+          }
+        }
+      },
+      {
+        onProgress: (topic, payload) => {
+          if (topic !== "processing") return;
+          const event = payload?.event;
+          if (event) applyProgressEvent(event);
+        },
+        onError: () => {
+          // Fallback only when the stream never delivered an initial
+          // snapshot.  Normal updates always come via SSE.
+          if (!lastSnapshot) refresh({ silent: true });
+        },
+      },
+    );
+  };
+
+  const disconnectRefreshStream = () => {
+    if (!refreshStream) return;
+    refreshStream();
+    refreshStream = null;
+  };
+
+  const switchEmbeddingModel = async (value) => {
+    if (embeddingSaving) return;
+    const [hostIdRaw, ...modelParts] = String(value || "").split("|");
+    const hostId = Number(hostIdRaw);
+    const model = modelParts.join("|");
+    if (!hostId || !model) {
+      syncEmbeddingStrip();
+      return;
+    }
+    const host = (ollamaHosts?.hosts || []).find(
+      (item) => Number(item.id) === hostId,
+    );
+    if (!host) {
+      syncEmbeddingStrip();
+      return;
+    }
+    const label = `${host.name || host.base_url || `主機 ${host.id}`}:${model}`;
+    if (label === currentEmbeddingLabel()) {
+      syncEmbeddingStrip();
+      return;
+    }
+    if (
+      !window.confirm(
+        `切換 Embedding 為 ${label}？\n\n` +
+          "切換模型後，既有法規／命令與判決向量索引可能不相容，需要重新建立索引。",
+      )
+    ) {
+      syncEmbeddingStrip();
+      return;
+    }
+    embeddingSaving = true;
+    syncEmbeddingStrip();
+    try {
+      await api.selectOllamaModel(hostId, { model, role: "embedding" });
+      const hostIds = (ollamaHosts?.hosts || []).map((item) =>
+        Number(item.id),
+      );
+      const reordered = [
+        hostId,
+        ...hostIds.filter((id) => id !== hostId),
+      ];
+      await api.reorderOllamaHosts(reordered);
+      toast(`已切換 Embedding 為 ${label}。`, "ok", 6000);
+      ollamaHosts = null;
+      await loadOllamaHosts({ quiet: true });
+      await refresh({ silent: true });
+    } catch (error) {
+      toast(error.message || "無法切換 Embedding model。", "danger", 7000);
+      await loadOllamaHosts({ quiet: true });
+    } finally {
+      embeddingSaving = false;
+      syncEmbeddingStrip();
+    }
+  };
+
+  const loadOllamaHosts = async ({
+    quiet = false,
+    button = null,
+    payload = null,
+  } = {}) => {
     if (disposed || ollamaHostsLoading) return;
     ollamaHostsLoading = true;
     ollamaHostsError = null;
-    if (!ollamaHosts) syncOllamaDom();
+    if (!ollamaHosts) {
+      syncOllamaDom();
+      syncEmbeddingStrip();
+    }
     if (button) setBusy(button, true, "檢查中…");
     try {
-      const data = await api.ollamaHosts();
+      const data = payload || (await api.ollamaHosts());
       if (disposed) return;
       ollamaHosts = data;
     } catch (error) {
@@ -2977,9 +4560,9 @@ export async function render(root) {
     } finally {
       if (!disposed) {
         ollamaHostsLoading = false;
-        ollamaCheckedAt = Date.now();
         if (button) setBusy(button, false);
         syncOllamaDom();
+        syncEmbeddingStrip();
       }
     }
   };
@@ -3022,7 +4605,6 @@ export async function render(root) {
         "danger",
         6000,
       );
-      ollamaCheckedAt = 0;
       await loadOllamaHosts({ quiet: true });
     } finally {
       ollamaReorderBusy = false;
@@ -3164,14 +4746,17 @@ export async function render(root) {
     window.addEventListener("pointercancel", onOllamaPointerCancel);
   };
 
-  const loadJudgmentStatus = async ({ quiet = false } = {}) => {
+  const loadJudgmentStatus = async ({
+    quiet = false,
+    payload = null,
+  } = {}) => {
     if (judgmentStatusLoading) return;
     judgmentStatusLoading = true;
     if (!judgmentStatus && activeWorkflowId === "judgment_download") {
       syncJudgmentDom();
     }
     try {
-      judgmentStatus = await api.judgmentDownloadStatus();
+      judgmentStatus = payload || (await api.judgmentDownloadStatus());
       judgmentStatusError = null;
     } catch (error) {
       judgmentStatusError = error.message || "讀取月份狀態失敗。";
@@ -3186,7 +4771,11 @@ export async function render(root) {
     }
   };
 
-  const loadIndexStorage = async ({ quiet = true, force = false } = {}) => {
+  const loadIndexStorage = async ({
+    quiet = true,
+    force = false,
+    payload = null,
+  } = {}) => {
     if (indexStorageLoading) return;
     if (
       !force &&
@@ -3197,7 +4786,7 @@ export async function render(root) {
     }
     indexStorageLoading = true;
     try {
-      indexStorage = await api.systemUsage();
+      indexStorage = payload || (await api.systemUsage());
       indexStorageError = null;
       indexStorageLoadedAt = Date.now();
     } catch (error) {
@@ -3210,7 +4799,11 @@ export async function render(root) {
     }
   };
 
-  const loadCourtCheck = async ({ quiet = true, force = false } = {}) => {
+  const loadCourtCheck = async ({
+    quiet = true,
+    force = false,
+    payload = null,
+  } = {}) => {
     if (courtCheckLoading) return;
     if (
       !force &&
@@ -3221,7 +4814,7 @@ export async function render(root) {
     }
     courtCheckLoading = true;
     try {
-      courtCheck = await api.checkCourts();
+      courtCheck = payload || (await api.checkCourts());
       courtCheckError = null;
       courtCheckLoadedAt = Date.now();
     } catch (error) {
@@ -3238,6 +4831,7 @@ export async function render(root) {
     quiet = true,
     force = false,
     button = null,
+    payload = null,
   } = {}) => {
     if (lawVersionCheckLoading) return;
     if (
@@ -3250,7 +4844,7 @@ export async function render(root) {
     lawVersionCheckLoading = true;
     if (button) setBusy(button, true, "檢查中…");
     try {
-      lawVersionCheck = await api.checkLawVersions();
+      lawVersionCheck = payload || (await api.checkLawVersions());
       lawVersionCheckError = null;
       lawVersionCheckLoadedAt = Date.now();
       if (!quiet) {
@@ -3290,6 +4884,19 @@ export async function render(root) {
       (element) => element.dataset.stageKey === key,
     ) || null;
 
+  const openProcessingStage = (id) => {
+    if (!id) return;
+    expandedStages.add(id);
+    const details = Array.from(
+      content.querySelectorAll(
+        ".processing-wf-stage[data-processing-stage]",
+      ),
+    ).find((element) => element.dataset.processingStage === id);
+    if (!details) return;
+    details.open = true;
+    details.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   const clearStageHover = () => {
     if (!hoveredStageKey) return;
     hoveredStageKey = "";
@@ -3317,6 +4924,10 @@ export async function render(root) {
     const statusKey = target.dataset.stageStatusKey || "idle";
     const statusLabel = target.dataset.stageStatus || statusInfo(statusKey).label;
     const color = target.dataset.stageColor || "var(--accent)";
+    const updateCount = Number(target.dataset.stageUpdate) || 0;
+    const pendingCount = Number(target.dataset.stagePending) || 0;
+    const contributionLabel =
+      target.dataset.stageContributionLabel || "整體占比";
     stageTooltip.innerHTML = `<div class="processing-stage-tooltip-head">
       <span class="processing-stage-tooltip-swatch" style="background:${escapeHtml(
         color,
@@ -3328,7 +4939,7 @@ export async function render(root) {
       <span>階段進度 <strong>${escapeHtml(
         target.dataset.stagePercent || "—",
       )}</strong></span>
-      <span>整體占比 <strong>${escapeHtml(
+      <span>${escapeHtml(contributionLabel)} <strong>${escapeHtml(
         target.dataset.stageContribution || "—",
       )}</strong></span>
       <span class="mono">${escapeHtml(
@@ -3338,6 +4949,28 @@ export async function render(root) {
     <div class="processing-stage-tooltip-counts">${escapeHtml(
       target.dataset.stageCounts || "—",
     )}</div>
+    ${
+      updateCount || pendingCount
+        ? `<div class="processing-stage-tooltip-badges">
+            ${
+              updateCount
+                ? `<span class="processing-wf-count is-update">${icon(
+                    "download",
+                    11,
+                  )}<strong>${formatNumber(updateCount)}</strong><span>線上更新</span></span>`
+                : ""
+            }
+            ${
+              pendingCount
+                ? `<span class="processing-wf-count is-pending">${icon(
+                    "clock",
+                    11,
+                  )}<strong>${formatNumber(pendingCount)}</strong><span>待執行</span></span>`
+                : ""
+            }
+          </div>`
+        : ""
+    }
     ${
       target.dataset.stageMessage
         ? `<div class="processing-stage-tooltip-message">${escapeHtml(
@@ -3366,6 +4999,11 @@ export async function render(root) {
   };
 
   const onStagePointerOver = (event) => {
+    if (event.target.closest(".is-failure-tip")) {
+      clearStageHover();
+      return;
+    }
+    if (event.target.closest(".processing-wf-rail")) return;
     const target = event.target.closest("[data-stage-key]");
     if (!target || !content.contains(target)) return;
     if (target.contains(event.relatedTarget)) return;
@@ -3383,60 +5021,99 @@ export async function render(root) {
 
   const syncControls = (snapshot) => {
     const capabilities = snapshot.capabilities || {};
-    const wantsIndex = Boolean(indexToggle && indexToggle.checked);
-    const canStart = wantsIndex
-      ? capabilities.can_start_update_with_index !== false
-      : capabilities.can_start_update !== false;
-    const reason = wantsIndex
-      ? capabilities.index_blocked_reason || capabilities.start_blocked_reason
-      : capabilities.start_blocked_reason;
-    if (!actionBusy) {
-      updateButton.disabled = !canStart;
-      updateButton.title = reason || "檢查線上法規／命令，並處理未匯入的判決壓縮檔。";
-      const labelElement = updateButton.querySelector("[data-update-label]");
-      if (labelElement) {
-        labelElement.textContent = canStart
-          ? "資料更新"
-          : capabilities.active_update_id
-            ? "更新執行中"
-            : "處理程序執行中";
-      }
+    if (!actionBusy && stopButton) {
       stopButton.hidden = !capabilities.can_stop_update;
-      if (indexToggle) indexToggle.disabled = capabilities.can_start_update === false;
     }
   };
 
-  const refresh = async ({ silent = false } = {}) => {
-    if (disposed || refreshing) return;
-    refreshing = true;
-    if (!silent) setBusy(refreshButton, true, "更新中…");
-    try {
-      const snapshot = await api.processing();
-      if (disposed) return;
-      lastSnapshot = snapshot;
+  const repaintFromSnapshot = () => {
+    if (!lastSnapshot) return;
+    const markup = panelMarkup(
+      lastSnapshot,
+      activeWorkflowId,
+      workflowContext(),
+      expandedStages,
+    );
+    if (markup !== lastMarkup) {
+      morphMarkup(content, markup);
+      lastMarkup = markup;
+    }
+    syncJudgmentDom();
+    syncOllamaDom();
+    syncEmbeddingStrip();
+    applySnapshotActiveImport(lastSnapshot);
+  };
+
+  const applySnapshot = (snapshot, { silent = false } = {}) => {
+    if (disposed || !snapshot) return;
+    const incomingAt = Date.parse(snapshot.generated_at || "");
+    const currentAt = Date.parse(lastSnapshot?.generated_at || "");
+    if (
+      Number.isFinite(incomingAt) &&
+      Number.isFinite(currentAt) &&
+      incomingAt < currentAt
+    ) {
+      return;
+    }
+    if (pendingWorkflowId) {
+      const workflow = (snapshot.workflows || []).find(
+        (item) => item.id === pendingWorkflowId,
+      );
+      const runId =
+        workflow?.active_run?.id || workflow?.last_run?.id || "";
+      if (
+        workflow?.active_run ||
+        (runId && runId !== pendingWorkflowBaselineRunId)
+      ) {
+        pendingWorkflowId = "";
+        pendingWorkflowBaselineRunId = "";
+      }
+    }
+    lastSnapshot = snapshot;
+      const stageById = new Map();
+      for (const section of snapshot.sections || []) {
+        for (const stage of section.stages || []) {
+          stageById.set(`${section.key}-${stage.key}`, stage);
+        }
+      }
+      for (const [id, operation] of stageOperations) {
+        if (operation.kind !== "upgrade") continue;
+        const stage = stageById.get(id);
+        if (!stage) continue;
+        if (
+          stage.phase === "failed" ||
+          (stage.phase === "running" && stage.percent !== null)
+        ) {
+          stageOperations.delete(id);
+          continue;
+        }
+        if (stage.phase === "completed") {
+          const started = Date.parse(stage.last_run?.started_at || "");
+          if (
+            Number.isFinite(started) &&
+            started >= Number(operation.startedAt || 0) - 1000
+          ) {
+            stageOperations.delete(id);
+          }
+        }
+      }
       const navMarkup = workflowNavMarkup(snapshot, activeWorkflowId);
       if (navMarkup !== lastNavMarkup) {
-        workflowNav.innerHTML = navMarkup;
+        morphMarkup(workflowNav, navMarkup);
         lastNavMarkup = navMarkup;
       }
       const markup = panelMarkup(
         snapshot,
         activeWorkflowId,
         workflowContext(),
+        expandedStages,
       );
       if (markup !== lastMarkup) {
-        content.innerHTML = markup;
+        morphMarkup(content, markup);
         lastMarkup = markup;
       }
       syncJudgmentDom();
       syncOllamaDom();
-      if (
-        OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId) &&
-        !ollamaHostsLoading &&
-        Date.now() - ollamaCheckedAt >= OLLAMA_CHECK_INTERVAL_MS
-      ) {
-        loadOllamaHosts({ quiet: true });
-      }
       if (hoveredStageKey) {
         const next = findStageElement(hoveredStageKey);
         if (next) showStageTooltip(next);
@@ -3450,52 +5127,278 @@ export async function render(root) {
         }
       }
       syncControls(snapshot);
-      if (activeWorkflowId === "judgment_download") {
-        loadJudgmentStatus({ quiet: true });
+      syncEmbeddingStrip();
+      applySnapshotActiveImport(snapshot);
+      if (!ollamaHosts && !ollamaHostsLoading) {
+        loadOllamaHosts({ quiet: true });
       }
-      if (activeWorkflowId === "index_versions") {
-        loadIndexStorage({ quiet: true });
+    if (pendingProgressEvents.length) {
+      const events = pendingProgressEvents.splice(0);
+      for (const event of events) applyProgressEvent(event);
+    }
+  };
+
+  const scheduleLiveRender = (live) => {
+    pendingLiveRender = live;
+    if (typeof requestAnimationFrame === "undefined") {
+      const next = pendingLiveRender;
+      pendingLiveRender = null;
+      if (next) applyLiveProcessing(next);
+      return;
+    }
+    if (progressFrame) return;
+    progressFrame = requestAnimationFrame(() => {
+      progressFrame = 0;
+      const next = pendingLiveRender;
+      pendingLiveRender = null;
+      if (next) applyLiveProcessing(next);
+    });
+  };
+
+  const applyProgressEvent = (event) => {
+    if (!event) return;
+    if (!lastSnapshot) {
+      pendingProgressEvents.push(event);
+      if (pendingProgressEvents.length > 100) pendingProgressEvents.shift();
+      return;
+    }
+    const runId = String(event.run_id || "");
+    const seq = Number(event.seq) || 0;
+    if (
+      runId &&
+      runId === lastProgressRunId &&
+      seq > 0 &&
+      seq <= lastProgressSeq
+    ) {
+      return;
+    }
+    if (runId && runId !== lastProgressRunId) {
+      lastProgressRunId = runId;
+      lastProgressSeq = 0;
+    }
+    if (seq > 0) lastProgressSeq = seq;
+    const workflowId = String(event.workflow_id || "judgment_import");
+    const workflow = (lastSnapshot.workflows || []).find(
+      (item) => item.id === workflowId,
+    );
+    if (!workflow) return;
+    if (!workflow.progress) workflow.progress = { stages: [] };
+    if (!Array.isArray(workflow.progress.stages)) {
+      workflow.progress.stages = [];
+    }
+    const stageKey = String(event.stage || "");
+    const stage = stageKey
+      ? workflow.progress.stages.find(
+          (item) => String(item.key) === stageKey,
+        )
+      : null;
+    if (stage) {
+      if (event.status) stage.status = String(event.status);
+      if (event.current !== undefined) {
+        stage.current = Number(event.current) || 0;
       }
-      if (activeWorkflowId === "normalize_courts") {
-        loadCourtCheck({ quiet: true });
+      if (event.total !== undefined) {
+        stage.total = Number(event.total) || 0;
       }
-      if (activeWorkflowId === "backfill_law_articles") {
-        loadLawVersionCheck({ quiet: true });
+      if (event.percent !== undefined) {
+        stage.percent = Number(event.percent) || 0;
       }
+      if (event.message) stage.message = String(event.message);
+    }
+    if (event.overall_percent !== undefined) {
+      workflow.progress.overall_percent =
+        Number(event.overall_percent) || 0;
+    }
+    if (event.type !== "run_finished") {
+      workflow.progress.run_status = "running";
+    }
+    if (
+      (event.type === "archive_started" ||
+        event.type === "stage_progress") &&
+      !workflow.active_run &&
+      event.run_id
+    ) {
+      workflow.active_run = {
+        id: event.run_id,
+        status: "running",
+        started_at: event.timestamp,
+        message: event.message || "",
+      };
+    }
+    if (event.type === "archive_completed") {
+      for (const item of workflow.progress.stages) {
+        if (item.key === "filter" || item.key === "postgres") {
+          item.status = "success";
+        }
+      }
+    }
+    if (event.type === "run_finished") {
+      workflow.active_run = null;
+      workflow.progress.run_status = String(event.status || "success");
+      workflow.can_run = true;
+    }
+    const monthUpdates = [];
+    if (event.month && event.month_stages) {
+      monthUpdates.push({
+        month: event.month,
+        import_stages: event.month_stages,
+        import_overall: event.month_overall || "",
+      });
+    }
+    let activeImport = null;
+    if (event.type === "archive_started" && event.month) {
+      const parsed = Date.parse(event.timestamp || "");
+      activeImport = {
+        active_month: event.month,
+        active_archive: event.archive,
+        active_phase: event.stage || "filter",
+        processing_month: event.month,
+        processing_archive: event.archive,
+        run_id: event.run_id,
+        run_status: "running",
+        state_mtime_ns: Number.isFinite(parsed)
+          ? parsed * 1_000_000
+          : Date.now() * 1_000_000,
+      };
+    } else if (event.type === "run_finished") {
+      activeImport = {
+        ...(lastSnapshot.active_import || {}),
+        run_status: String(event.status || "success"),
+      };
+    }
+    scheduleLiveRender({
+      live: true,
+      generated_at: event.timestamp,
+      workflows: [
+        {
+          id: workflowId,
+          active_run: workflow.active_run,
+          last_run: workflow.last_run,
+          progress: workflow.progress,
+          can_run: workflow.can_run,
+        },
+      ],
+      import_timeline_months: monthUpdates,
+      active_import: activeImport,
+    });
+  };
+
+  const applyLiveProcessing = (live) => {
+    if (disposed || !live || !lastSnapshot) return;
+    const workflowById = new Map(
+      (live.workflows || []).map((workflow) => [workflow.id, workflow]),
+    );
+    if (pendingWorkflowId) {
+      const pending = workflowById.get(pendingWorkflowId);
+      const runId = pending?.active_run?.id || pending?.last_run?.id || "";
+      if (
+        pending?.active_run ||
+        (runId && runId !== pendingWorkflowBaselineRunId)
+      ) {
+        pendingWorkflowId = "";
+        pendingWorkflowBaselineRunId = "";
+      }
+    }
+    for (const workflow of lastSnapshot.workflows || []) {
+      const update = workflowById.get(workflow.id);
+      if (!update) continue;
+      if ("active_run" in update) workflow.active_run = update.active_run;
+      if ("last_run" in update) workflow.last_run = update.last_run;
+      if (Array.isArray(update.recent_runs)) {
+        workflow.recent_runs = update.recent_runs;
+      }
+      if (update.progress) workflow.progress = update.progress;
+      if (typeof update.can_run === "boolean") {
+        workflow.can_run = update.can_run;
+      }
+    }
+    const patchTimeline = (timeline) => {
+      if (!timeline || !Array.isArray(live.import_timeline_months)) return;
+      const byMonth = new Map(
+        (timeline.months || []).map((month) => [
+          String(month.month),
+          month,
+        ]),
+      );
+      for (const update of live.import_timeline_months) {
+        const month = byMonth.get(String(update.month));
+        if (!month) continue;
+        month.import_stages = {
+          ...(month.import_stages || {}),
+          ...(update.import_stages || {}),
+        };
+        if (update.import_overall) {
+          month.import_overall = update.import_overall;
+        }
+      }
+      const summary = {
+        complete: 0,
+        incomplete: 0,
+        processing: 0,
+        empty: 0,
+      };
+      for (const month of timeline.months || []) {
+        const overall = String(month.import_overall || "empty");
+        summary[overall] = Number(summary[overall] || 0) + 1;
+      }
+      timeline.stage_summary = summary;
+    };
+    patchTimeline(lastSnapshot.import_timeline);
+    for (const workflow of lastSnapshot.workflows || []) {
+      if (workflow.id === "judgment_import") {
+        patchTimeline(workflow.import_timeline);
+      }
+    }
+    if (live.active_import) {
+      lastSnapshot.active_import = live.active_import;
+    }
+    if (live.mode) lastSnapshot.mode = live.mode;
+    if (live.generated_at) lastSnapshot.generated_at = live.generated_at;
+    const navMarkup = workflowNavMarkup(lastSnapshot, activeWorkflowId);
+    if (navMarkup !== lastNavMarkup) {
+      morphMarkup(workflowNav, navMarkup);
+      lastNavMarkup = navMarkup;
+    }
+    const markup = panelMarkup(
+      lastSnapshot,
+      activeWorkflowId,
+      workflowContext(),
+      expandedStages,
+    );
+    if (markup !== lastMarkup) {
+      morphMarkup(content, markup);
+      lastMarkup = markup;
+    }
+    syncJudgmentDom();
+    syncOllamaDom();
+    syncEmbeddingStrip();
+    applySnapshotActiveImport(lastSnapshot);
+    syncControls(lastSnapshot);
+    const updatedAt = content.querySelector("[data-processing-updated-at]");
+    if (updatedAt && live.generated_at) {
+      const nextUpdatedAt = formatDateTime(live.generated_at);
+      if (updatedAt.textContent !== nextUpdatedAt) {
+        updatedAt.textContent = nextUpdatedAt;
+      }
+    }
+  };
+
+  const refresh = async ({ silent = false } = {}) => {
+    if (disposed || refreshing) return;
+    refreshing = true;
+    try {
+      const snapshot = await api.processing();
+      applySnapshot(snapshot, { silent });
     } catch (error) {
       if (disposed) return;
       const markup = errorMarkup(error.message, lastSnapshot);
       if (markup !== lastMarkup) {
-        content.innerHTML = markup;
+        morphMarkup(content, markup);
         lastMarkup = markup;
       }
       if (!silent) toast(error.message || "無法取得資料處理狀態。", "danger", 6000);
     } finally {
       refreshing = false;
-      if (!silent) setBusy(refreshButton, false);
-    }
-  };
-
-  const startUpdate = async (button) => {
-    if (actionBusy) return;
-    actionBusy = true;
-    setBusy(button, true, "啟動中…");
-    try {
-      const wantsIndex = Boolean(indexToggle && indexToggle.checked);
-      const result = await api.startProcessingUpdate(wantsIndex);
-      const indexNote = wantsIndex ? "，完成後接續 Qdrant 索引" : "";
-      toast(`已啟動資料更新${indexNote}。`, "ok", 6000);
-      if (result && result.run_id) {
-        console.info("processing update started", result);
-      }
-      window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
-      await refresh({ silent: true });
-    } catch (error) {
-      toast(error.message || "無法啟動資料更新。", "danger", 7000);
-    } finally {
-      actionBusy = false;
-      setBusy(button, false);
-      if (lastSnapshot) syncControls(lastSnapshot);
     }
   };
 
@@ -3504,21 +5407,72 @@ export async function render(root) {
     actionBusy = true;
     setBusy(button, true, "檢查中…");
     const source = DOWNLOAD_WORKFLOW_SOURCES[workflowId] || "";
+    const requested = String(button.dataset.sourceTypes || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const sources = requested.length ? requested : source ? [source] : [];
+    const stageId = button.dataset.stageId || "";
+    if (stageId) {
+      stageOperations.set(stageId, {
+        kind: "check",
+        phase: "updating",
+        startedAt: Date.now(),
+      });
+      repaintFromSnapshot();
+    }
     try {
-      const result = await api.checkUpdates(source ? [source] : []);
+      const result = await api.checkUpdates(sources);
       if (result && result.checking) {
+        if (stageId) {
+          stageOperations.delete(stageId);
+          repaintFromSnapshot();
+        }
         toast("已有更新檢查正在進行，請稍後重新整理。", "info", 6000);
-      } else if (source) {
-        const record = (result.sources || {})[source] || {};
-        const label = DOWNLOAD_WORKFLOW_LABELS[workflowId] || "資料";
+      } else if (sources.length === 1) {
+        const record = (result.sources || {})[sources[0]] || {};
+        const label =
+          DOWNLOAD_WORKFLOW_LABELS[workflowId] ||
+          (sources[0] === "judgment"
+            ? "判決"
+            : sources[0] === "law"
+              ? "法規"
+              : sources[0] === "order"
+                ? "命令"
+                : "資料");
         if (record.status === "error") {
-          toast(`${label}版本檢查失敗：${record.message || "無法取得線上版本"}`, "danger", 7000);
+          toast(
+            `${label}版本檢查失敗：${record.message || "無法取得線上版本"}`,
+            "danger",
+            7000,
+          );
         } else {
           toast(
             record.update_available
               ? `${label}線上已有更新版本。`
               : `${label}線上已是最新版本。`,
             record.update_available ? "warn" : "ok",
+            6000,
+          );
+        }
+      } else if (sources.length > 1) {
+        const records = result.sources || {};
+        const changed = sources.filter(
+          (key) => records[key]?.update_available,
+        );
+        const failed = sources.filter((key) => records[key]?.status === "error");
+        if (failed.length) {
+          toast(
+            `更新檢查完成，但有 ${failed.length} 項檢查失敗。`,
+            "danger",
+            7000,
+          );
+        } else {
+          toast(
+            changed.length
+              ? `更新檢查完成：${changed.length} 項有更新。`
+              : "更新檢查完成：目前皆為最新。",
+            changed.length ? "warn" : "ok",
             6000,
           );
         }
@@ -3532,9 +5486,21 @@ export async function render(root) {
           6000,
         );
       }
+      if (stageId) {
+        stageOperations.set(stageId, {
+          kind: "check",
+          phase: "updated",
+          startedAt: Date.now(),
+        });
+        repaintFromSnapshot();
+      }
       window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
       await refresh({ silent: true });
     } catch (error) {
+      if (stageId) {
+        stageOperations.delete(stageId);
+        repaintFromSnapshot();
+      }
       toast(error.message || "更新檢查失敗。", "danger", 7000);
     } finally {
       actionBusy = false;
@@ -3543,10 +5509,11 @@ export async function render(root) {
     }
   };
 
-  const precheckDownloadWorkflow = async (button, workflowId) => {
+  const precheckDownloadWorkflow = async (workflowId) => {
     const source = DOWNLOAD_WORKFLOW_SOURCES[workflowId] || "";
     if (!source) return true;
-    setBusy(button, true, "檢查版本…");
+    // The caller already locked the run button before this await.  Keep it
+    // locked while the version check runs so the click cannot be repeated.
     let result = null;
     try {
       result = await api.checkUpdates([source]);
@@ -3557,8 +5524,6 @@ export async function render(root) {
         7000,
       );
       return true;
-    } finally {
-      setBusy(button, false);
     }
     if (!result || result.checking) {
       if (result && result.checking) {
@@ -3590,26 +5555,73 @@ export async function render(root) {
   const startWorkflow = async (button, workflowId) => {
     if (actionBusy) return;
     actionBusy = true;
+    const currentWorkflow = (lastSnapshot?.workflows || []).find(
+      (item) => item.id === workflowId,
+    );
+    pendingWorkflowBaselineRunId =
+      currentWorkflow?.active_run?.id ||
+      currentWorkflow?.last_run?.id ||
+      "";
+    pendingWorkflowId = workflowId;
+    // Lock the actual button before the first await.  The same pending id
+    // also keeps repainted panels disabled while the start request is in
+    // flight.
+    setBusy(button, true, "執行中");
+    // Drop the previous run's progress card now; the new run's card is
+    // rendered from the next authoritative SSE snapshot.
+    content
+      .querySelectorAll("[data-workflow-progress]")
+      .forEach((card) => card.remove());
+    const stageId = button.dataset.stageId || "";
+    let started = false;
     try {
-      const proceed = await precheckDownloadWorkflow(button, workflowId);
-      if (!proceed) {
-        await refresh({ silent: true });
-        return;
+      const proceed = await precheckDownloadWorkflow(workflowId);
+      if (!proceed) return;
+      if (stageId) {
+        stageOperations.set(stageId, {
+          kind: "upgrade",
+          phase: "upgrading",
+          startedAt: Date.now(),
+        });
+        repaintFromSnapshot();
       }
-      setBusy(button, true, "啟動中…");
-      const result = await api.startProcessingWorkflow(workflowId);
-      toast("已啟動工作流程。", "ok", 6000);
+      let result;
+      try {
+        result = await api.startProcessingWorkflow(workflowId);
+      } catch (error) {
+        if (stageId) {
+          stageOperations.delete(stageId);
+          repaintFromSnapshot();
+        }
+        throw error;
+      }
+      started = true;
+      toast("已啟動升級工作流程。", "ok", 6000);
       if (result && result.run_id) {
         console.info("processing workflow started", result);
       }
       window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
-      await refresh({ silent: true });
     } catch (error) {
       toast(error.message || "無法啟動工作流程。", "danger", 7000);
     } finally {
       actionBusy = false;
-      setBusy(button, false);
-      if (lastSnapshot) syncControls(lastSnapshot);
+      if (!started || pendingWorkflowId !== workflowId) {
+        pendingWorkflowId = "";
+        pendingWorkflowBaselineRunId = "";
+        if (lastSnapshot) {
+          syncControls(lastSnapshot);
+          // Force the snapshot markup to win over the local spinner.  If an
+          // SSE refresh repainted the panel while the start request was in
+          // flight, setBusy(button, false) would leave an enabled button
+          // still labelled "執行中".
+          lastMarkup = "";
+          repaintFromSnapshot();
+        } else {
+          setBusy(button, false);
+        }
+      }
+      // On success, keep the button locked and the old progress hidden until
+      // the processing SSE snapshot confirms the new run.
     }
   };
 
@@ -3619,8 +5631,11 @@ export async function render(root) {
     setBusy(button, true, "停止中…");
     try {
       const result = await api.stopProcessingUpdate();
+      for (const [id, operation] of stageOperations) {
+        if (operation.kind === "upgrade") stageOperations.delete(id);
+      }
+      repaintFromSnapshot();
       toast(result.message || "已送出停止訊號。", "info", 6000);
-      await refresh({ silent: true });
     } catch (error) {
       toast(error.message || "無法停止資料更新。", "danger", 7000);
     } finally {
@@ -3633,9 +5648,17 @@ export async function render(root) {
   const onClick = (event) => {
     const button = event.target.closest("[data-processing-action]");
     if (!button || button.disabled) return;
+    if (button.closest(".processing-wf-rail")) {
+      // The action rail lives inside <summary>; keep its buttons from also
+      // toggling the stage details.
+      event.preventDefault();
+      event.stopPropagation();
+    }
     const action = button.dataset.processingAction;
     if (action === "refresh") refresh({ silent: false });
-    else if (action === "refresh-judgment-months") {
+    else if (action === "open-stage") {
+      openProcessingStage(button.dataset.stageId || "");
+    } else if (action === "refresh-judgment-months") {
       loadJudgmentStatus({ quiet: false });
     } else if (action === "refresh-index-storage") {
       loadIndexStorage({ quiet: false, force: true });
@@ -3645,6 +5668,12 @@ export async function render(root) {
       loadLawVersionCheck({ quiet: false, force: true, button });
     } else if (action === "refresh-ollama") {
       loadOllamaHosts({ quiet: false, button });
+    } else if (action === "refresh-embedding-models") {
+      loadOllamaHosts({ quiet: false, button });
+    } else if (action === "select-embedding-model") {
+      const hostId = button.dataset.hostId || "";
+      const model = button.dataset.model || "";
+      void switchEmbeddingModel(`${hostId}|${model}`);
     } else if (action === "move-ollama-host") {
       const hosts = ollamaHosts?.hosts || [];
       const index = hosts.findIndex(
@@ -3660,51 +5689,43 @@ export async function render(root) {
         hostIds[index],
       ];
       void persistOllamaOrder(hostIds);
-    } else if (action === "update") startUpdate(button);
-    else if (action === "check-updates")
+    } else if (action === "check-updates")
       checkUpdates(button, button.dataset.workflowId || "");
     else if (action === "run-workflow") {
       const workflowId = button.dataset.workflowId || "";
-      if (workflowId === "full_update") startUpdate(button);
-      else startWorkflow(button, workflowId);
+      startWorkflow(button, workflowId);
     } else if (action === "stop") stopUpdate(button);
   };
 
-  const onChange = (event) => {
-    if (event.target === indexToggle && lastSnapshot) {
-      syncControls(lastSnapshot);
-    }
-  };
-
-  const onWorkflowClick = (event) => {
-    const button = event.target.closest("[data-processing-workflow]");
-    if (!button) return;
-    activeWorkflowId = button.dataset.processingWorkflow || "overview";
+  const selectWorkflow = (workflowId, { scroll = false } = {}) => {
+    activeWorkflowId = workflowId || "overview";
     if (lastSnapshot) {
       const navMarkup = workflowNavMarkup(lastSnapshot, activeWorkflowId);
-      workflowNav.innerHTML = navMarkup;
+      morphMarkup(workflowNav, navMarkup);
       lastNavMarkup = navMarkup;
       const markup = panelMarkup(
         lastSnapshot,
         activeWorkflowId,
         workflowContext(),
+        expandedStages,
       );
-      content.innerHTML = markup;
+      morphMarkup(content, markup);
       lastMarkup = markup;
       syncJudgmentDom();
       syncOllamaDom();
-      if (
-        OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId) &&
-        !ollamaHostsLoading &&
-        Date.now() - ollamaCheckedAt >= OLLAMA_CHECK_INTERVAL_MS
-      ) {
-        loadOllamaHosts({ quiet: true });
-      }
+      syncEmbeddingStrip();
+      applySnapshotActiveImport(lastSnapshot);
       if (hoveredStageKey) {
         const next = findStageElement(hoveredStageKey);
         if (next) showStageTooltip(next);
         else clearStageHover();
       }
+      if (scroll) {
+        content.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+    if (OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId)) {
+      loadOllamaHosts({ quiet: true });
     }
     if (activeWorkflowId === "judgment_download") {
       loadJudgmentStatus({ quiet: true });
@@ -3720,35 +5741,60 @@ export async function render(root) {
     }
   };
 
+  const onWorkflowClick = (event) => {
+    const button = event.target.closest("[data-processing-workflow]");
+    if (!button) return;
+    selectWorkflow(button.dataset.processingWorkflow || "overview");
+  };
+
+  const onTimelineClick = (event) => {
+    const button = event.target.closest("[data-timeline-workflow]");
+    if (!button) return;
+    event.preventDefault();
+    selectWorkflow(button.dataset.timelineWorkflow || "", { scroll: true });
+  };
+
+  const onStageToggle = (event) => {
+    const details = event.target.closest?.(
+      ".processing-wf-stage[data-processing-stage]",
+    );
+    if (!details || !content.contains(details)) return;
+    const id = details.dataset.processingStage || "";
+    if (!id) return;
+    if (details.open) expandedStages.add(id);
+    else expandedStages.delete(id);
+  };
+
   page.addEventListener("click", onClick);
   workflowNav.addEventListener("click", onWorkflowClick);
+  content.addEventListener("click", onTimelineClick);
   content.addEventListener("pointerover", onStagePointerOver);
   content.addEventListener("pointerout", onStagePointerOut);
   content.addEventListener("pointerdown", onOllamaPointerDown);
+  content.addEventListener("toggle", onStageToggle, true);
   window.addEventListener("scroll", clearStageHover, {
     capture: true,
     passive: true,
   });
-  if (indexToggle) indexToggle.addEventListener("change", onChange);
 
-  await refresh({ silent: false });
-
-  timer = window.setInterval(() => {
-    if (!document.hidden) refresh({ silent: true });
-  }, POLL_INTERVAL_MS);
+  connectRefreshStream();
+  if (typeof EventSource === "undefined") {
+    await refresh({ silent: false });
+  }
 
   return () => {
     disposed = true;
-    if (timer !== null) window.clearInterval(timer);
+    disconnectRefreshStream();
     page.removeEventListener("click", onClick);
     workflowNav.removeEventListener("click", onWorkflowClick);
+    content.removeEventListener("click", onTimelineClick);
     cleanupOllamaPointerDrag();
     content.removeEventListener("pointerover", onStagePointerOver);
     content.removeEventListener("pointerout", onStagePointerOut);
     content.removeEventListener("pointerdown", onOllamaPointerDown);
+    content.removeEventListener("toggle", onStageToggle, true);
     window.removeEventListener("scroll", clearStageHover, {
       capture: true,
     });
-    if (indexToggle) indexToggle.removeEventListener("change", onChange);
   };
 }

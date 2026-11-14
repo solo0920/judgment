@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, subscribeRefresh } from "../api.js";
 import {
   addHistory,
   clearHistory,
@@ -33,6 +33,7 @@ const EXAMPLES = [
   "金融消費者保護法如何處理金融消費爭議？",
   "證券交易法對內線交易有什麼規範？",
   "銀行法對吸收存款與授信有哪些限制？",
+  "銀行法對從業人員有那些規定？",
   "保險法對於業務員不當招攬的責任規定？",
   "銀行法有多少條文？",
   "證券營業員常觸犯什麼法規或命令？",
@@ -409,6 +410,23 @@ function lawChipMarkup(lawName, { lawKey = "", sourceType = "", label = "" } = {
     )}</button>`;
 }
 
+function lawCitationChipMarkup(citation) {
+  const lawName = String(citation?.law_name || "").trim();
+  const articleNo = String(citation?.article_no || "").replace(/\s+/g, "");
+  if (!lawName || !articleNo) return "";
+  const paragraphs = (Array.isArray(citation?.paragraphs) ? citation.paragraphs : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const label = `${lawName}${articleNo}${paragraphs.join("、")}`;
+  return `<button class="chip chip-action" type="button"
+    data-action="open-law-source"
+    data-law-key="${escapeHtml(lawName)}"
+    data-source-type=""
+    data-article-no="${escapeHtml(articleNo)}"
+    title="點擊查看 ${escapeHtml(label)} 的完整條文"
+    aria-label="開啟 ${escapeHtml(label)} 的完整條文">${escapeHtml(label)}</button>`;
+}
+
 function judgmentCard(judgment, index) {
   const score =
     judgment.score === null || judgment.score === undefined
@@ -418,10 +436,23 @@ function judgmentCard(judgment, index) {
     .filter(Boolean)
     .map((value) => `<span>${escapeHtml(value)}</span>`)
     .join("");
-  const laws = (Array.isArray(judgment.matched_laws) ? judgment.matched_laws : [])
-    .slice(0, 5)
-    .map((law) => lawChipMarkup(law))
+  const lawCitations = (Array.isArray(judgment.law_citations)
+    ? judgment.law_citations
+    : []
+  )
+    .map((citation) => lawCitationChipMarkup(citation))
+    .filter(Boolean)
+    .slice(0, 12)
     .join("");
+  const laws =
+    lawCitations ||
+    (Array.isArray(judgment.matched_laws) ? judgment.matched_laws : [])
+      .slice(0, 5)
+      .map((law) => lawChipMarkup(law))
+      .join("");
+  const lawCitationLabel = lawCitations
+    ? `<div class="citation-meta"><span>判決引用法規／命令</span></div>`
+    : "";
   const headAttributes = judgment.jid
     ? ` data-action="open-parquet-judgment"
         data-jid="${escapeHtml(judgment.jid)}"
@@ -448,6 +479,7 @@ function judgmentCard(judgment, index) {
             : ""
         }
       </div>
+      ${lawCitationLabel}
       ${laws ? `<div class="chips" style="margin-top:8px">${laws}</div>` : ""}
       ${
         judgment.snippet
@@ -864,6 +896,15 @@ function renderAnswerBody(payload) {
   const partial = Boolean(payload.partial);
   const streaming = Boolean(payload.streaming);
   const showSources = Boolean(payload.show_sources) || !partial;
+  const structuredAnswer = payload.answer_source === "structured";
+  const lawAnswer = String(payload.law_answer || "").trim();
+  const framework = payload.law_framework || null;
+  const frameworkRows = Array.isArray(framework?.rows) ? framework.rows : [];
+  const frameworkSources = Array.isArray(framework?.sources)
+    ? framework.sources
+    : [];
+  const hasFramework = frameworkRows.length > 0;
+  const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer && !hasFramework;
 
   const judgmentSection = judgments.length
     ? `<div class="answer-divider"></div>
@@ -875,7 +916,7 @@ function renderAnswerBody(payload) {
         .map((judgment, index) => judgmentCard(judgment, index))
         .join("")}</div>`
     : "";
-  const lawSection = lawSources.length
+  const lawSection = lawSources.length && !showLawAnswer
     ? `<div class="answer-divider"></div>
       <div class="answer-section-label">
         <span>引用法規／命令 · ${lawSources.length} 筆</span>
@@ -898,7 +939,7 @@ function renderAnswerBody(payload) {
   let citationSection = showSources
     ? judgmentSection + lawSection + metadataSection
     : "";
-  if (!citationSection && !partial) {
+  if (!citationSection && !partial && !showLawAnswer && !hasFramework) {
     citationSection = `<div class="answer-divider"></div>
       ${emptyState({
         iconName: "file",
@@ -923,15 +964,6 @@ function renderAnswerBody(payload) {
   ]
     .filter(Boolean)
     .join(" · ");
-  const structuredAnswer = payload.answer_source === "structured";
-  const lawAnswer = String(payload.law_answer || "").trim();
-  const framework = payload.law_framework || null;
-  const frameworkRows = Array.isArray(framework?.rows) ? framework.rows : [];
-  const frameworkSources = Array.isArray(framework?.sources)
-    ? framework.sources
-    : [];
-  const hasFramework = frameworkRows.length > 0;
-  const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer && !hasFramework;
   const llmBlockTitle =
     streaming || payload.answer_source === "llm"
       ? "LLM 綜合回答"
@@ -1391,7 +1423,7 @@ export async function render(root) {
   };
   judgmentDialog?.addEventListener("close", syncDialogScrollLock);
   lawDialog?.addEventListener("close", syncDialogScrollLock);
-  let flowPollTimer = null;
+  let flowStream = null;
   let activeTestFlow = null;
   let lastTestFlowSignature;
   let openHistoryMenuId = null;
@@ -1462,7 +1494,7 @@ export async function render(root) {
     const turns = Array.isArray(entry.turns) ? entry.turns : [];
     if (!turns.length) return false;
     requestSeq += 1;
-    stopFlowPoll();
+    stopFlowUpdates();
     paintTestFlow(null);
     currentConversationId = entry.id ?? null;
     conversationTurns = turns.map((turn) => ({ ...turn }));
@@ -1648,7 +1680,7 @@ export async function render(root) {
 
   const newChat = () => {
     requestSeq += 1;
-    stopFlowPoll();
+    stopFlowUpdates();
     paintTestFlow(null);
     lastQuestion = "";
     currentConversationId = null;
@@ -2269,30 +2301,32 @@ export async function render(root) {
       : "";
   };
 
-  const stopFlowPoll = () => {
-    if (flowPollTimer) {
-      window.clearTimeout(flowPollTimer);
-      flowPollTimer = null;
+  const stopFlowUpdates = () => {
+    if (!flowStream) return;
+    flowStream();
+    flowStream = null;
+  };
+
+  const loadCurrentTestFlowUpdate = async (payload = null) => {
+    if (disposed) return;
+    try {
+      const data = payload || (await api.testRunCurrent());
+      if (disposed) return;
+      const run = data.run;
+      if (run && run.status === "running") paintTestFlow(run);
+    } catch (error) {
+      /* keep the RAG request alive even if the test flow update fails */
     }
   };
 
-  const startFlowPoll = () => {
-    stopFlowPoll();
-    const poll = async () => {
-      if (disposed) return;
-      try {
-        const data = await api.testRunCurrent();
-        if (disposed) return;
-        const run = data.run;
-        if (run && run.status === "running") paintTestFlow(run);
-      } catch (error) {
-        /* keep the RAG request alive even if the test flow poll fails */
-      }
-      if (!disposed) {
-        flowPollTimer = window.setTimeout(poll, 1500);
-      }
-    };
-    poll();
+  const startFlowUpdates = () => {
+    if (disposed || flowStream) return;
+    loadCurrentTestFlowUpdate();
+    flowStream = subscribeRefresh(
+      "test-runs",
+      (_topic, payload) =>
+        loadCurrentTestFlowUpdate(payload?.snapshot || null),
+    );
   };
 
   const loadExactTestFlow = async (runId) => {
@@ -2318,7 +2352,7 @@ export async function render(root) {
       if (disposed) return;
       if (data.run?.status === "running") {
         paintTestFlow(data.run);
-        startFlowPoll();
+        startFlowUpdates();
       }
     } catch (error) {
       /* the RAG page remains usable even if the test flow endpoint fails */
@@ -2338,9 +2372,15 @@ export async function render(root) {
   <div class="judgment-dialog-body">${body}</div>`;
 
   const renderParquetJudgment = (detail) => {
-    const laws = (Array.isArray(detail.matched_laws) ? detail.matched_laws : [])
-      .map((law) => lawChipMarkup(law))
+    const lawCitations = (Array.isArray(detail.citations) ? detail.citations : [])
+      .map((citation) => lawCitationChipMarkup(citation))
+      .filter(Boolean)
       .join("");
+    const laws =
+      lawCitations ||
+      (Array.isArray(detail.matched_laws) ? detail.matched_laws : [])
+        .map((law) => lawChipMarkup(law))
+        .join("");
     const meta = [
       detail.court,
       detail.jdate,
@@ -2376,6 +2416,11 @@ export async function render(root) {
         )}</span>
         ${meta}
       </div>
+      ${
+        lawCitations
+          ? `<div class="citation-meta" style="margin-top:8px"><span>判決引用法規／命令</span></div>`
+          : ""
+      }
       ${laws ? `<div class="chips" style="margin:8px 0 10px">${laws}</div>` : ""}
       <div class="judgment-dialog-source">${generated}</div>
       <pre class="judgment-dialog-text">${escapeHtml(
@@ -2730,9 +2775,9 @@ export async function render(root) {
       : createProcessController(answerElement);
     if (testMode) {
       paintTestFlow(null);
-      startFlowPoll();
+      startFlowUpdates();
     } else {
-      stopFlowPoll();
+      stopFlowUpdates();
       paintTestFlow(null);
     }
     setBusy(submit, true, "檢索中…");
@@ -2778,7 +2823,7 @@ export async function render(root) {
             onTokenReset: resetPartialTokens,
           });
       if (isStale()) return;
-      stopFlowPoll();
+      stopFlowUpdates();
       const processHtml = processController?.finish(true) || "";
       answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
       if (!payload.pipeline_flow) {
@@ -2803,14 +2848,14 @@ export async function render(root) {
       showFollowup();
     } catch (error) {
       if (isStale()) return;
-      stopFlowPoll();
+      stopFlowUpdates();
       const processHtml = processController?.finish(false) || "";
       answerElement.innerHTML = renderAnswerError(error, processHtml);
       showFollowup();
       toast(error.message || "檢索失敗。", "danger");
     } finally {
       if (!isStale()) {
-        stopFlowPoll();
+        stopFlowUpdates();
         setBusy(submit, false);
         setBusy(followupSubmit, false);
       }
@@ -2990,7 +3035,7 @@ export async function render(root) {
 
   return () => {
     disposed = true;
-    stopFlowPoll();
+    stopFlowUpdates();
     closeHistoryMenu();
     document.removeEventListener("click", onDocumentClick);
     document.removeEventListener("keydown", onDocumentKeydown);

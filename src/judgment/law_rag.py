@@ -626,6 +626,64 @@ def _dense_article_scores(
     return normalized
 
 
+def _rrf_fuse(
+    candidates: Sequence[Dict[str, Any]],
+    *,
+    dense_weight: float = 0.2,
+    rrf_k: int = 60,
+) -> None:
+    """Assign Reciprocal Rank Fusion scores to article candidates in place.
+
+    BM25/concept scores and Qdrant dense scores live on different scales, so
+    fusing their raw values lets one signal dominate by accident.  RRF uses
+    each candidate's rank instead: an article that is consistently near the
+    top of both lists wins over one that is only strong in a single list.
+    Candidates with no positive signal are left at zero and filtered later.
+    """
+
+    k = max(1, int(rrf_k))
+    weight = max(0.0, float(dense_weight))
+    bm25_ranked = sorted(
+        (
+            item
+            for item in candidates
+            if float(item.get("bm25_score") or 0) > 0
+        ),
+        key=lambda item: (
+            -float(item.get("bm25_score") or 0),
+            len(str(item.get("article_content") or "")),
+            str(item.get("article_no") or ""),
+        ),
+    )
+    dense_ranked = sorted(
+        (
+            item
+            for item in candidates
+            if float(item.get("dense_score") or 0) > 0
+        ),
+        key=lambda item: (
+            -float(item.get("dense_score") or 0),
+            len(str(item.get("article_content") or "")),
+            str(item.get("article_no") or ""),
+        ),
+    )
+    bm25_ranks = {
+        id(item): rank for rank, item in enumerate(bm25_ranked, start=1)
+    }
+    dense_ranks = {
+        id(item): rank for rank, item in enumerate(dense_ranked, start=1)
+    }
+    for item in candidates:
+        score = 0.0
+        bm25_rank = bm25_ranks.get(id(item))
+        if bm25_rank:
+            score += 1.0 / (k + bm25_rank)
+        dense_rank = dense_ranks.get(id(item))
+        if dense_rank:
+            score += weight / (k + dense_rank)
+        item["score"] = score
+
+
 def select_law_articles(
     articles: Sequence[Dict[str, Any]],
     question: str,
@@ -635,6 +693,7 @@ def select_law_articles(
     budget: int = 3000,
     dense_scores: Optional[Mapping[str, float]] = None,
     dense_weight: float = 0.2,
+    rrf_k: int = 60,
 ) -> List[Dict[str, str]]:
     usable = [
         article
@@ -670,6 +729,7 @@ def select_law_articles(
                 "bm25_score": relevance[index] if index < len(relevance) else 0.0,
                 "dense_score": dense_score,
                 "score": 0.0,
+                "relevance": 0.0,
             }
         )
     if explicit_refs:
@@ -680,8 +740,22 @@ def select_law_articles(
         ]
         if explicit_candidates:
             candidates = explicit_candidates
-    best_bm25 = max((item["bm25_score"] for item in candidates), default=0.0)
-    best_dense = max((item["dense_score"] for item in candidates), default=0.0)
+    _rrf_fuse(
+        candidates,
+        dense_weight=dense_weight,
+        rrf_k=rrf_k,
+    )
+    # RRF ranks candidates, but its scores are tightly clustered, so they are
+    # not a reliable relevance floor on their own.  Keep the normalized
+    # BM25/dense blend as a separate floor to avoid padding an answer with
+    # dozens of weakly related sections from a 200+ article statute.
+    best_bm25 = max(
+        (item["bm25_score"] for item in candidates), default=0.0
+    )
+    best_dense = max(
+        (item["dense_score"] for item in candidates), default=0.0
+    )
+    dense_weight = max(0.0, float(dense_weight))
     for item in candidates:
         bm25_part = (
             item["bm25_score"] / best_bm25 if best_bm25 > 0 else 0.0
@@ -689,19 +763,22 @@ def select_law_articles(
         dense_part = (
             item["dense_score"] / best_dense if best_dense > 0 else 0.0
         )
-        item["score"] = bm25_part + max(0.0, float(dense_weight)) * dense_part
+        item["relevance"] = bm25_part + dense_weight * dense_part
+    best_relevance = max(
+        (item["relevance"] for item in candidates), default=0.0
+    )
+    threshold = best_relevance * 0.2
     candidates.sort(
         key=lambda item: (
             0 if item["is_priority"] else 1,
             item["priority_rank"],
             -item["score"],
             -item["bm25_score"],
+            -item["dense_score"],
             len(item["article_content"]),
             item["article_no"],
         )
     )
-    best_score = max((item["score"] for item in candidates), default=0.0)
-    threshold = best_score * 0.2
     selected: List[Dict[str, str]] = []
     total = 0
     for item in candidates:
@@ -711,7 +788,7 @@ def select_law_articles(
         # are always kept.  Otherwise avoid padding the answer with unrelated
         # articles just because a law has 200+ sections.
         if not item["is_priority"] and (
-            item["score"] <= 0 or item["score"] < threshold
+            item["relevance"] <= 0 or item["relevance"] < threshold
         ):
             continue
         content = item["article_content"]
@@ -813,6 +890,8 @@ def build_law_source(
     article_limit: int = 4,
     article_budget: int = 3000,
     dense_scores: Optional[Mapping[str, float]] = None,
+    dense_weight: float = 0.2,
+    rrf_k: int = 60,
 ) -> Dict[str, Any]:
     content = content or {}
     histories = str(
@@ -827,6 +906,8 @@ def build_law_source(
         limit=article_limit,
         budget=article_budget,
         dense_scores=dense_scores,
+        dense_weight=dense_weight,
+        rrf_k=rrf_k,
     )
     promulgation = parse_first_promulgation(histories)
     return {
@@ -1274,6 +1355,8 @@ def law_sources_for_question(
     article_limit: int = 4,
     article_budget: int = 3000,
     vector_hits: Optional[Sequence[Dict[str, Any]]] = None,
+    dense_weight: float = 0.2,
+    rrf_k: int = 60,
 ) -> List[Dict[str, Any]]:
     dense_by_law, dense_law_scores = _dense_hits_by_law(vector_hits)
     effective_limit = limit
@@ -1404,6 +1487,8 @@ def law_sources_for_question(
                 article_limit=article_limit,
                 article_budget=article_budget,
                 dense_scores=dense_by_law.get(record.law_name),
+                dense_weight=dense_weight,
+                rrf_k=rrf_k,
             )
         )
     return sources

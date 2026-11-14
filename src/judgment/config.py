@@ -82,6 +82,8 @@ class Settings:
     rag_law_vector_enabled: bool = False
     rag_law_vector_candidates: int = 30
     rag_law_score_threshold: float = 0.25
+    rag_law_rrf_k: int = 60
+    rag_law_dense_weight: float = 0.2
     rag_law_article_limit: int = 4
     rag_law_article_limit_law_first: int = 6
     rag_law_candidate_article_limit: int = 8
@@ -250,6 +252,8 @@ class Settings:
             rag_law_score_threshold=_env_float(
                 "RAG_LAW_SCORE_THRESHOLD", 0.25
             ),
+            rag_law_rrf_k=_env_int("RAG_LAW_RRF_K", 60),
+            rag_law_dense_weight=_env_float("RAG_LAW_DENSE_WEIGHT", 0.2),
             rag_law_article_limit=_env_int("RAG_LAW_ARTICLE_LIMIT", 4),
             rag_law_article_limit_law_first=_env_int(
                 "RAG_LAW_ARTICLE_LIMIT_LAW_FIRST", 6

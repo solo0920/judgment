@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from judgment import judgment_import as judgment_import_module
 from judgment.config import Settings
 from judgment.db import init_db
 from judgment.judgment_import import (
@@ -24,6 +25,7 @@ from judgment.judgment_import import (
     parse_court,
 )
 from judgment.judgment_backup import apply_raw_deltas_backwards
+from judgment.judgment_raw_parquet import find_reusable_raw_parquets
 from judgment.judgment_versioning import (
     judgment_history,
     list_snapshot_dicts,
@@ -256,6 +258,62 @@ def test_import_filters_and_stores_only_matching_judgments(tmp_path: Path) -> No
     assert performance.module == "judgment.judgment_import.import_judgments"
     assert performance.status == "success"
     assert performance.details["stored_count"] == 2
+    engine.dispose()
+
+
+def test_import_strips_nul_bytes_before_postgres_insert(
+    tmp_path: Path,
+) -> None:
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    archive = tmp_path / "202601--(20260101Update).rar"
+    _write_archive(
+        archive,
+        [
+            _judgment(
+                "NUL-1",
+                "臺灣臺北地方法院民事判決\n依銀行法第1條。\x00",
+                title="金融\x00爭議",
+            )
+        ],
+    )
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+
+    summary = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        batch_size=1,
+        replace=True,
+        session_factory=session_factory,
+    )
+
+    assert summary["stored_count"] == 1
+    with session_factory() as session:
+        row = session.scalars(select(JudgmentDocument)).one()
+    assert "\x00" not in row.full_text
+    assert "\x00" not in row.title
+    assert row.full_text.endswith("。")
     engine.dispose()
 
 
@@ -517,8 +575,14 @@ def test_import_tracks_archive_progress_state(tmp_path: Path, monkeypatch) -> No
     assert run["meta"]["parent_run_id"] == "parent-run-1"
     assert run["stages"]["extract"]["status"] == "success"
     assert run["stages"]["extract"]["current"] == expected_bytes
+    assert run["stages"]["extract"]["message"] == (
+        "完成檢查 1 個壓縮檔：0 個沿用原始 Parquet、1 個解壓縮並新建備份。"
+    )
     assert run["stages"]["raw_parquet"]["status"] == "success"
     assert run["stages"]["raw_parquet"]["current"] == 2
+    assert run["stages"]["raw_parquet"]["message"] == (
+        "原始資料檢查完成：2 筆（0 個沿用、1 個新建備份）。"
+    )
     assert run["stages"]["postgres"]["current"] == 1
     archive_state = run["archives"][archive.name]
     assert archive_state["status"] == "success"
@@ -529,13 +593,168 @@ def test_import_tracks_archive_progress_state(tmp_path: Path, monkeypatch) -> No
     assert archive_state["stages"]["extract"]["total"] == expected_bytes
     assert archive_state["stages"]["raw_parquet"]["status"] == "success"
     assert archive_state["stages"]["raw_parquet"]["current"] == 2
+    assert archive_state["stages"]["raw_parquet"]["message"] == (
+        "已建立 2026-01 原始 Parquet 備份（2 筆）。"
+    )
+    assert "2026-01" in archive_state["stages"]["filter"]["message"]
+    assert "2026-01" in archive_state["stages"]["postgres"]["message"]
     assert archive_state["stages"]["filter"]["status"] == "success"
     assert archive_state["stages"]["postgres"]["status"] == "success"
     engine.dispose()
 
 
 @pytest.mark.skipif(shutil.which("bsdtar") is None, reason="bsdtar not installed")
-def test_raw_only_backs_up_without_filtering_or_database(tmp_path: Path) -> None:
+def test_import_creates_processing_state_before_archive_scan(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    archive = tmp_path / "202601--scan-order.rar"
+    _write_archive(
+        archive,
+        [_judgment("S1", "臺灣臺北地方法院民事判決\n依銀行法第1條規定。")],
+    )
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+    original = judgment_import_module.archive_uncompressed_bytes
+    observed: dict[str, object] = {}
+
+    def guarded_scan(path: Path):
+        run = ProcessingStateStore().read()["runs"][0]
+        observed["run_status"] = run["status"]
+        observed["archive_names"] = sorted(run["archives"])
+        observed["extract_status"] = run["stages"]["extract"]["status"]
+        observed["archive_status"] = run["archives"][path.name]["status"]
+        return original(path)
+
+    monkeypatch.setattr(
+        judgment_import_module, "archive_uncompressed_bytes", guarded_scan
+    )
+
+    summary = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        batch_size=1,
+        session_factory=session_factory,
+        track_state=True,
+    )
+
+    assert summary["stored_count"] == 1
+    assert observed == {
+        "run_status": "running",
+        "archive_names": [archive.name],
+        "extract_status": "running",
+        "archive_status": "pending",
+    }
+    engine.dispose()
+
+
+def test_second_import_resumes_successful_archives(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    archive = tmp_path / "202601--resume.rar"
+    _write_archive(
+        archive,
+        [_judgment("R1", "臺灣臺北地方法院民事判決\n依銀行法第1條規定。")],
+    )
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+
+    first = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        batch_size=1,
+        session_factory=session_factory,
+        track_state=True,
+    )
+    assert first["stored_count"] == 1
+
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        judgment_import_module,
+        "candidate_count",
+        lambda path: calls.append(path) or 0,
+    )
+
+    def fail_filter(*args, **kwargs):
+        raise AssertionError("resumed archive must not be filtered again")
+
+    monkeypatch.setattr(
+        judgment_import_module, "iter_candidate_batches", fail_filter
+    )
+    second = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        batch_size=1,
+        session_factory=session_factory,
+        track_state=True,
+    )
+
+    assert calls == []
+    assert second["stored_count"] == 1
+    run = ProcessingStateStore().read()["runs"][0]
+    archive_state = run["archives"][archive.name]
+    assert archive_state["status"] == "success"
+    assert archive_state["stages"]["extract"]["status"] == "skipped"
+    assert archive_state["stages"]["filter"]["status"] == "success"
+    assert archive_state["stages"]["postgres"]["status"] == "success"
+    assert run["stages"]["extract"]["message"] == (
+        "完成檢查 1 個壓縮檔：1 個沿用原始 Parquet、0 個解壓縮並新建備份。"
+    )
+    engine.dispose()
+
+
+def test_raw_only_backs_up_without_filtering_or_database(
+    tmp_path: Path, monkeypatch
+) -> None:
     law_list = tmp_path / "laws.md"
     law_list.write_text("銀行法\n", encoding="utf-8")
     archive = tmp_path / "202603--raw-only.rar"
@@ -583,6 +802,18 @@ def test_raw_only_backs_up_without_filtering_or_database(tmp_path: Path) -> None
         "R1",
         "R2",
     ]
+    def fail_scan(_path: Path):
+        raise AssertionError("existing raw Parquet must not be scanned again")
+
+    def fail_write(*_args, **_kwargs):
+        raise AssertionError("existing raw Parquet must not be rebuilt")
+
+    monkeypatch.setattr(
+        judgment_import_module, "archive_uncompressed_bytes", fail_scan
+    )
+    monkeypatch.setattr(
+        judgment_import_module, "write_archive_raw_parquet", fail_write
+    )
     second = import_judgments(
         settings=settings,
         data_dir=tmp_path,
@@ -593,10 +824,98 @@ def test_raw_only_backs_up_without_filtering_or_database(tmp_path: Path) -> None
     )
     assert second["raw_parquet_reused"] == 1
     assert second["raw_parquet_paths"] == summary["raw_parquet_paths"]
+    assert archive in find_reusable_raw_parquets(tmp_path, [archive])
+
+    # A newly downloaded archive no longer matches the manifest record, so
+    # it must be checked and backed up again instead of reusing stale data.
+    archive.write_bytes(archive.read_bytes() + b"\x00")
+    assert find_reusable_raw_parquets(tmp_path, [archive]) == {}
 
     with session_factory() as session:
         assert session.scalar(select(func.count()).select_from(JudgmentDocument)) == 0
         assert session.scalar(select(func.count()).select_from(JudgmentImportRun)) == 0
+    engine.dispose()
+
+
+def test_import_reuses_raw_backup_before_filter_without_rescanning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    archive = tmp_path / "202604--reuse-raw.rar"
+    _write_archive(
+        archive,
+        [_judgment("F1", "臺灣臺北地方法院民事判決\n依銀行法第1條規定。")],
+    )
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(
+        bind=engine, autoflush=False, expire_on_commit=False, future=True
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+
+    first = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        raw_only=True,
+        session_factory=session_factory,
+        track_state=True,
+    )
+    assert first["status"] == "raw_only"
+
+    def fail_scan(_path: Path):
+        raise AssertionError("reusable raw Parquet must not be scanned again")
+
+    def fail_write(*_args, **_kwargs):
+        raise AssertionError("reusable raw Parquet must not be rebuilt")
+
+    monkeypatch.setattr(
+        judgment_import_module, "archive_uncompressed_bytes", fail_scan
+    )
+    monkeypatch.setattr(
+        judgment_import_module, "write_archive_raw_parquet", fail_write
+    )
+    second = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        archives=[archive],
+        session_factory=session_factory,
+        track_state=True,
+    )
+
+    assert second["stored_count"] == 1
+    run = ProcessingStateStore().read()["runs"][0]
+    assert run["stages"]["extract"]["message"] == (
+        "完成檢查 1 個壓縮檔：1 個沿用原始 Parquet、0 個解壓縮並新建備份。"
+    )
+    assert run["stages"]["raw_parquet"]["message"] == (
+        "原始資料檢查完成：1 筆（1 個沿用、0 個新建備份）。"
+    )
+    archive_state = run["archives"][archive.name]
+    assert archive_state["stages"]["extract"]["status"] == "skipped"
+    assert archive_state["stages"]["raw_parquet"]["status"] == "success"
+    assert "沿用 2026-04" in archive_state["stages"]["raw_parquet"]["message"]
+    assert archive_state["stages"]["filter"]["status"] == "success"
+    assert archive_state["stages"]["postgres"]["status"] == "success"
     engine.dispose()
 
 

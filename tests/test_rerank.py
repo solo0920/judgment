@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -278,6 +279,137 @@ def test_law_rerank_orders_articles_per_source(monkeypatch) -> None:
     assert [
         article["article_no"] for article in reranked[0]["articles"]
     ] == ["第 35 條", "第 125-2 條"]
+
+
+def test_law_rerank_separates_law_and_order_groups(monkeypatch) -> None:
+    calls = []
+
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def rerank(self, query, documents, *, top_n):
+            calls.append(list(documents))
+            return RerankOutcome(
+                status="ok",
+                results=[
+                    RerankResult(index=1, score=9.0),
+                    RerankResult(index=0, score=1.0),
+                ],
+                model="bge-reranker-v2-m3",
+                candidate_count=len(documents),
+                selected_count=len(documents),
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    sources = [
+        {
+            "law_name": "銀行法",
+            "source_type": "law",
+            "source_label": "法規",
+            "articles": [
+                {"article_no": "第 35 條", "article_content": "法規條文一"},
+                {"article_no": "第 125-2 條", "article_content": "法規條文二"},
+            ],
+        },
+        {
+            "law_name": "銀行法施行細則",
+            "source_type": "order",
+            "source_label": "命令",
+            "articles": [
+                {"article_no": "第 1 條", "article_content": "命令條文一"},
+                {"article_no": "第 2 條", "article_content": "命令條文二"},
+            ],
+        },
+    ]
+
+    reranked, outcome = _rerank_law_sources(
+        settings=replace(_law_settings(), rag_law_rerank_weight=0.9),
+        question="銀行法對從業人員有那些規定？",
+        law_sources=sources,
+        article_limit=1,
+    )
+
+    assert calls == [
+        ["法規條文一", "法規條文二"],
+        ["命令條文一", "命令條文二"],
+    ]
+    assert [
+        source["articles"][0]["article_no"] for source in reranked
+    ] == ["第 125-2 條", "第 2 條"]
+    assert outcome.status == "ok"
+    assert [group["source_type"] for group in outcome.groups] == [
+        "law",
+        "order",
+    ]
+    assert all(group["status"] == "ok" for group in outcome.groups)
+
+
+def test_law_rerank_keeps_order_group_when_law_group_degrades(
+    monkeypatch,
+) -> None:
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def rerank(self, query, documents, *, top_n):
+            if "命令" in documents[0]:
+                return RerankOutcome(
+                    status="degraded",
+                    model="bge-reranker-v2-m3",
+                    candidate_count=len(documents),
+                    errors=["order reranker unavailable"],
+                )
+            return RerankOutcome(
+                status="ok",
+                results=[
+                    RerankResult(index=1, score=9.0),
+                    RerankResult(index=0, score=1.0),
+                ],
+                model="bge-reranker-v2-m3",
+                candidate_count=len(documents),
+                selected_count=len(documents),
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    sources = [
+        {
+            "law_name": "銀行法",
+            "source_type": "law",
+            "source_label": "法規",
+            "articles": [
+                {"article_no": "第 35 條", "article_content": "法規條文一"},
+                {"article_no": "第 125-2 條", "article_content": "法規條文二"},
+            ],
+        },
+        {
+            "law_name": "銀行法施行細則",
+            "source_type": "order",
+            "source_label": "命令",
+            "articles": [
+                {"article_no": "第 1 條", "article_content": "命令條文一"},
+                {"article_no": "第 2 條", "article_content": "命令條文二"},
+            ],
+        },
+    ]
+
+    reranked, outcome = _rerank_law_sources(
+        settings=replace(_law_settings(), rag_law_rerank_weight=0.9),
+        question="銀行法對從業人員有那些規定？",
+        law_sources=sources,
+        article_limit=1,
+    )
+
+    assert reranked[0]["articles"][0]["article_no"] == "第 125-2 條"
+    # The failed group keeps its pre-rerank order instead of losing articles.
+    assert reranked[1]["articles"][0]["article_no"] == "第 1 條"
+    assert outcome.status == "degraded"
+    assert outcome.groups[1]["status"] == "degraded"
+    assert outcome.groups[1]["errors"] == ["order reranker unavailable"]
 
 
 def test_law_rerank_keeps_explicit_article_reference(monkeypatch) -> None:

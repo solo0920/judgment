@@ -20,6 +20,7 @@ from ..models import (
     LawSource,
 )
 from ..update_records import record_update
+from ..version_codes import version_code_for_datetime
 from .types import (
     ApplyResult,
     FetchedArchive,
@@ -160,6 +161,7 @@ class LawRepository:
                     source_type=source.source_type.value,
                     source_url=source.url,
                     update_date=parsed.update_date,
+                    version_code=version_code_for_datetime(now),
                     content_sha256=parsed.semantic_sha256,
                     raw_json_sha256=fetched.raw_json_sha256,
                     zip_sha256=fetched.zip_sha256,

@@ -27,6 +27,7 @@ from .models import (
 )
 from .observability import clear_flow, start_flow
 from .performance_test import available_test_models
+from .rag_gate import evaluate_regression_gate
 from .question_bank import (
     QuestionBankError,
     _item_benchmark_ready,
@@ -832,6 +833,7 @@ class BenchmarkManager:
                     "human_overall": _mean(human_scores),
                 },
             }
+            summary["gate"] = evaluate_regression_gate(summary)
             run.summary = summary
             run.finished_at = _now()
             if run.status == "running":

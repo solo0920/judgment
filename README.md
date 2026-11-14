@@ -117,7 +117,7 @@ uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 
 開啟 <http://127.0.0.1:9200/>，預設進入 RAG 提問頁。主控台是純靜態的 Vanilla JS SPA，由 FastAPI 直接服務，原始碼模式不需要 Node.js 建置步驟。若要以 `file://` 直接開啟，或部署到 Cloudflare Pages，請先產生 `frontend/`，見〈靜態前端與部署〉。
 
-`judgment-web` 啟動時會自動在 `127.0.0.1:9201` 建立本機電源控制器，供 `./up.sh`／`./down.sh` 與電源 API 使用。header 右上角只有 `Style` 風格選單；測試模式與 API 連線設定位於 `#/status` 左側的「系統測試」分類，也可直接開啟 `#/tests`。設定 `JUDGMENT_POWER_AGENT=0` 可停用控制器。
+`judgment-web` 啟動時會自動在 `127.0.0.1:9201` 建立本機電源控制器，供 `./up.sh`／`./down.sh` 與電源 API 使用。header 右上角有齒輪「設定選項」，介面風格移至設定 sidebar；測試模式與 API 連線設定位於 `#/status` 左側的「系統測試」分類，也可直接開啟 `#/tests`。設定 `JUDGMENT_POWER_AGENT=0` 可停用控制器。
 
 ### 完整環境備份與還原
 
@@ -226,6 +226,8 @@ cd /Volumes/USB/judgment-backup-20261108
 | `RAG_LAW_VECTOR_ENABLED` | `false` | 啟用法規／命令條文向量檢索；alias 不存在時自動退回 BM25（`.env.example` 預設開啟） |
 | `RAG_LAW_VECTOR_CANDIDATES` | `30` | 法規條文向量候選數 |
 | `RAG_LAW_SCORE_THRESHOLD` | `0.25` | 法規條文向量相似度下限 |
+| `RAG_LAW_RRF_K` | `60` | RRF 排名平滑常數；越大越平緩 |
+| `RAG_LAW_DENSE_WEIGHT` | `0.2` | dense 排名在 RRF 中的投票權重 |
 | `RAG_LAW_ARTICLE_LIMIT` | `4` | 判決優先題每部法規最多保留幾條條文 |
 | `RAG_LAW_ARTICLE_LIMIT_LAW_FIRST` | `6` | 法規優先題每部法規最多保留幾條條文 |
 | `RAG_LAW_CANDIDATE_ARTICLE_LIMIT` | `8` | 啟用 reranker 時每部法規先取幾條候選條文 |
@@ -233,6 +235,12 @@ cd /Volumes/USB/judgment-backup-20261108
 | `RAG_LAW_RERANK_MAX_CHARS` | `600` | 每條法規條文送 law reranker 的字數上限 |
 | `RAG_RERANK_ENABLED` | `false` | 啟用 BGE reranker；需先啟動 `scripts/rerank_server.sh` |
 | `RAG_RERANK_CANDIDATES` | `30` | 啟用 reranker 時先向 Qdrant 取得的候選判決數 |
+| `RAG_GATE_LAW_RECALL_MIN` | `0.75` | Benchmark regression gate 的法規 recall 下限 |
+| `RAG_GATE_ARTICLE_RECALL_MIN` | `0.70` | Benchmark regression gate 的條文 recall 下限 |
+| `RAG_GATE_JUDGMENT_RECALL_MIN` | `0.65` | Benchmark regression gate 的判決 recall 下限 |
+| `RAG_GATE_CITATION_VALID_RATE_MIN` | `0.95` | Benchmark regression gate 的 citation 合法率下限 |
+| `RAG_GATE_REFUSAL_ACCURACY_MIN` | `0.90` | Benchmark regression gate 的拒答正確率下限 |
+| `RAG_GATE_DURATION_P95_MAX_MS` | `15000` | Benchmark regression gate 的 P95 延遲上限 |
 | `RERANK_URL` | `http://x570:11435` | 主要 reranker 服務；llama.cpp 使用 `/v1/rerank` |
 | `RERANK_FALLBACK_URL` | `http://127.0.0.1:11435` | x570 不可用時的本機 reranker fallback |
 | `RERANK_MODEL` | `bge-reranker-v2-m3` | reranker 模型名稱，會記錄在 Flow |
@@ -254,7 +262,11 @@ cd /Volumes/USB/judgment-backup-20261108
 | `JUDGMENT_RAW_RAR_KEEP_VERSIONS` | `true` | 判決下載新版本時將舊 RAR/7z/zip 移到 `raw_rar/history/`，不直接刪除；設為 `false` 才刪除舊容器（record-level 舊資料仍由 delta/DB 保存）。 |
 | `JUDGMENT_RAW_PARQUET_KEEP_VERSIONS` | `false` | 混合備份預設只保留 current full raw Parquet；變更/移除的舊 raw JSON 寫入 delta。設為 `true` 可保留舊 full Parquet 供比對。 |
 | `JUDGMENT_VECTOR_HISTORY_COLLECTION` | `judgment_documents_history` | Qdrant 中被取代/移除的舊向量 history collection；不屬於 `judgments_current` alias。 |
-| `JUDGMENT_PROCESSING_STATE` | `.run/processing_state.json` | 資料處理共用狀態檔；Web、匯入、Parquet、索引與 `workflow_runner` 都會寫入同一個檔案。測試會以環境變數隔離，不會覆寫正式狀態。 |
+| `JUDGMENT_PROCESSING_STATE` | `.run/processing_state.db` | 資料處理共用 SQLite WAL checkpoint；Web、匯入、Parquet、索引與 `workflow_runner` 都會讀寫同一個 DB。舊 `.json` 會自動遷移為 `.json.migrated`。測試會以環境變數隔離，不會覆寫正式狀態。 |
+| `JUDGMENT_EVENT_SOCKET` | 依 state 路徑產生暫存 socket | Importer 推送即時 progress event 的 Unix domain socket；預設為 `judgment-pe-<hash>.sock`，避免 macOS 路徑長度限制。 |
+| `JUDGMENT_EVENT_JOURNAL` | `.run/processing_events.db` | Web server 保存 importer progress event 的 SQLite WAL 事件 journal；支援 `Last-Event-ID` replay。 |
+| `JUDGMENT_EVENT_RETENTION` | `200000` | SQLite event journal 保留筆數上限；超過後自動修剪最舊事件。 |
+| `JUDGMENT_STATE_MAX_COMPLETED` | `20` | SQLite state checkpoint 保留的已完成 run 數；避免 state 無限成長。 |
 | `TEST_EMBEDDING_MODELS` | 空 | 測試模式要跑的 embedding 模型（逗號分隔）；空值自動從 Ollama 偵測 |
 | `TEST_LLM_MODELS` | 空 | 測試模式要跑的 LLM 模型（逗號分隔）；空值自動從 Ollama 偵測 |
 
@@ -505,8 +517,8 @@ uv run judgment-normalize-courts --all
 | `#/data` | 資料庫查詢 | 左側 sidebar：查詢法規命令、查詢判決、資料庫 Schema。法規命令與判決查詢支援 fuzzy 多條件（AND）與 suggestion，選取後立即查詢；可展開進階 metadata 條件。Schema 模式可切換法規命令／判決與資料庫，列出資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
 | `#/quality` | 資料品質 | 左側 sidebar：品質總覽、題庫新增、題庫管理、Benchmark 題庫、題庫人工驗收批注。品質總覽以 DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。題庫工作區支援法規／條文／判決驗證、版本、JSON 匯入匯出、suite 凍結與人工批注。 |
 | `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Pipeline、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Pipeline 依執行順序接續繪製 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response waterfall，上一階段結束位置即下一階段開始位置；顯示各 span 的開始／結束時間、Token、TTFT、模型與來源數量，滑鼠移到 bar 上會顯示該 span 的詳細資訊；使用模型的階段會標註「主機:模型」，Embedding／LLM bar 的藍色前段為 Model Load，後段為扣除載入後的推論時間，展開明細會分成兩段並各自顯示開始／結束時間；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
-| `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 9 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。含 embedding 的流程會在「執行資訊」卡片列出已知 Ollama 主機與模型，可用拖移或箭頭調整優先順序；綠色代表可用、灰色代表離線或不可用，第一優先失敗時會依序改用下一台。另含判決、法規、命令三條即時流程圖、判決壓縮檔逐檔進度、各階段子進度與顏色、整體時間堆疊圖；「資料更新」會檢查線上法規／命令與本機未處理 `.rar`，必要時自動接續處理。 |
-| `#/status` | 系統狀態 | 左側分類依序為服務總覽、系統測試、系統資料使用、Model Provider、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康（含 Reranker 服務）、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。Model Provider 可管理 Ollama 主機與模型、切換使用中的主機；每個模型會顯示 Chat／Embedding／Vision／Tools／Thinking／Speech／Reranker 能力標籤，並可手動「檢查模型能力」更新尚未測試的模型。embedding 主機優先順序可在資料處理頁拖移調整。 |
+| `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 9 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。含 embedding 的流程（法規／命令索引、判決匯入、Qdrant 版本建置）在執行資訊卡片提供「Embedding 主機／模型」按鈕列，與 RAG model strip 使用相同的可點選按鈕；按鈕以「主機:模型」顯示，例如 `x570:bge-m3:latest`、`mbp:bge-m3:latest`，列出線上具備 embedding 能力的模型。選擇後會儲存該主機的 embedding model、把該主機設為第一優先，其餘主機依序作為備援，切換前警告既有索引可能需要重建；不再顯示主機卡片、拖移把手或上下箭頭。處理總覽分為「法規」「命令」「判決」三個時間表卡片，沿用「匯入檔案時間表」框架：年份×月份表格、完成／未完成／處理中／有更新統計、目前版本或目前匯入列、可水平捲動的月份表。每個月份橫向切成四格，依序代表下載、Parquet、PostgreSQL、Qdrant；綠色完成、紅色未完成、灰色處理中、空白無資料。法規／命令以來源版本月份顯示，判決以 1996-01–2026-08 的 368 個月顯示；判決四階段分別依本機 `.rar`、raw Parquet manifest、PostgreSQL `issue_month` 與 Qdrant 月份覆蓋率判定。完整資料更新仍可由 `judgment.processing_update`／`POST /api/processing/update`／排程腳本執行；頁首僅保留執行中的「停止更新」按鈕。`YYYYMMDDHHMM` 版本編號仍持久化，法規／命令時間表的目前版本列與 tooltip 會顯示版本編號。 |
+| `#/status` | 系統狀態 | 左側分類依序為服務總覽、系統測試、系統資料使用、Model Provider、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康（含 Reranker 服務）、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。Model Provider 可管理 Ollama 主機與模型、切換使用中的主機；每個模型會顯示 Chat／Embedding／Vision／Tools／Thinking／Speech／Reranker 能力標籤，並可手動「檢查模型能力」更新尚未測試的模型。embedding 主機與模型可在資料處理頁以「主機:模型」按鈕選擇，選取後設為第一優先。 |
 | `#/tests` | 系統測試 | 獨立路由，內容與 `#/status` 的「系統測試」分類相同：API 連線設定、測試模式開關、LLM 服務測試與測試 Flow。header 不直接列出此頁；未設定 API Base 的 standalone 前端會自動導向此頁。 |
 
 ### HTTP API
@@ -569,12 +581,15 @@ uv run judgment-normalize-courts --all
 | `POST` | `/api/performance/client` | 接收前端回報的 total／render 時間，合併到同一個 request_id 的 Flow。 |
 | `GET` | `/api/updates/status` | 回傳法規／命令／判決的 current 線上檢查狀態、`update_count` 與 `any_update`。 |
 | `POST` | `/api/updates/check` | 檢查法規、命令、判決三類線上資料並寫入更新紀錄；body 可帶 `{"source_types": ["law"]}` 只檢查指定來源；`up.sh` 啟動後會呼叫。 |
-| `GET` | `/api/processing` | 資料處理快照：三條流程、各階段進度、逐檔壓縮檔狀態、階段耗時堆疊、`index_versions` 的 `index_runtime`（Ollama 測試／選用主機、索引月份檔案進度、目前 JID）、外部程序偵測、更新能力與注意事項。 |
+| `GET` | `/api/processing` | 資料處理快照：`file_timelines`（法規／命令／判決三張年份×月份時間表，每格四階段狀態與 summary）、處理 summary、branch 流程、workflow catalog 與最近執行、逐檔壓縮檔狀態、階段耗時堆疊、`index_versions` 的 `index_runtime`（Ollama 測試／選用主機、索引月份檔案進度、目前 JID）、外部程序偵測、更新能力與注意事項。 |
+| `GET` | `/api/processing/active` | 只讀 processing state 的目前 import archive／月份／階段；供需要一次性查詢的用戶端使用。 |
+| `GET` | `/api/processing/active/stream` | 相容用 SSE，推送目前 import archive／月份／階段；`#/processing` 已改由 `/api/events/stream` 的 `processing` topic 單一來源取得，不再使用此流。 |
+| `GET` | `/api/events/stream?topic=...` | 全站通用 SSE refresh stream，`topic` 可用逗號合併 `processing`、`judgment-download`、`test-runs`、`benchmark`、`updates`、`status`、`system-usage`、`ollama`、`court-check`、`law-version-check`。後端在 state／manifest／progress 檔或 DB 資料變更時推送 `refresh` event，外部服務狀態類 topic 由後端每 30–60 秒主動推送；前端不再以固定 timer 輪詢資料。 |
 | `GET` | `/api/processing/plan` | 更新前檢查結果：未處理壓縮檔、索引待補筆數與建議步驟；不會啟動任何程序。 |
 | `GET` | `/api/courts/check` | 唯讀檢查各月份法院名稱正規化覆蓋率：總筆數、已檢查、未檢查、無效值、需正規化筆數與有效比例。 |
 | `GET` | `/api/law-versions/check` | 唯讀檢查各月份法規／命令版本與條文歷史狀態：版本數、已建立／未建立版本、需建立／可建立／缺原始檔版本、條文列與預期條文數。 |
 | `POST` | `/api/processing/update` | 啟動可中斷續跑的資料更新；body 為 `{"index": false}`。已在執行中，或外部法規／命令下載、判決匯入、資料更新程序佔用時回傳 409。 |
-| `POST` | `/api/processing/workflows/{workflow_id}/run` | 啟動白名單中的單一工作流程。白名單共 9 個，包含 `full_update`（資料更新（完整））、法規下載、命令下載、判決下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、建立條文歷史。`full_update` 會轉呼叫 `start_update(index=False)`；若要更新後接續索引，使用 `POST /api/processing/update` 並帶 `{"index": true}`。同一時間僅允許一個處理程序，衝突或外部程序佔用時回傳 409。 |
+| `POST` | `/api/processing/workflows/{workflow_id}/run` | 啟動白名單中的單一工作流程。白名單共 9 個，包含法規下載、命令下載、法規／命令索引、判決下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、建立條文歷史。完整資料更新請使用 `POST /api/processing/update` 並帶 `{"index": true}` 以在完成後接續索引。同一時間僅允許一個處理程序，衝突或外部程序佔用時回傳 409。 |
 | `POST` | `/api/processing/stop` | 對由 Web 啟動的資料更新或工作流程送出 SIGINT；外部程序不會被強制停止。 |
 | `GET` | `/api/judgment-download/status` | 回傳司法院判決下載的月份狀態、統計、manifest 資訊、待補齊／驗證進度與目前執行中的下載進度。 |
 | `GET` | `/api/judgment-download/files/{fileset_id}` | 以 Bearer Token 代理下載指定 fileset；預設非 API 時段也可使用，一次僅處理一個下載。 |
@@ -608,33 +623,34 @@ uv run judgment-normalize-courts --all
 
 ### 資料處理頁與資料更新
 
-`#/processing` 會讀取 `.run/processing_state.json`（可用 `JUDGMENT_PROCESSING_STATE` 覆寫），並同時查詢 PostgreSQL、Qdrant 與本機 `.rar`，因此畫面只顯示可驗證的數值：
+`#/processing` 會讀取 `.run/processing_state.db`（SQLite WAL，可用 `JUDGMENT_PROCESSING_STATE` 覆寫），並同時查詢 PostgreSQL、Qdrant 與本機 `.rar`，因此畫面只顯示可驗證的數值；舊 `.run/processing_state.json` 會自動遷移為 `.json.migrated`。Phase 1 低延遲事件通道已啟用：importer 子程序在 archive／月份／階段變更時，透過 Unix domain socket 立即發布 progress event；web server 接收後寫入 `.run/processing_events.jsonl` journal，並以 SSE `progress` event 立即推送。state 仍保留作 resume、stop、稽核與重啟恢復的 checkpoint，但即時進度不再依賴 web server 讀取 state：
 
-- **流程圖**：判決、法規、命令三條分支。判決分支依序為 RAR 解壓縮 → 原始 Parquet 備份 → 金融法規篩選 → PostgreSQL metadata → Qdrant；DuckDB 候選筆數顯示在原始備份階段的統計中。法規／命令分支為下載 → 原始 Parquet → 解析 → PostgreSQL。每個階段都有獨立顏色、筆數、百分比與進度條；無法計算總量時顯示「進度未知」，不以猜測值代替。
+- **處理總覽時間表**：分為「法規」「命令」「判決」三張 `import-files-card`，沿用「匯入檔案時間表」框架（年份×月份、完成／未完成／處理中／有更新統計、目前版本或目前匯入列、可水平捲動表格）。每格四段依序為下載／Parquet／PostgreSQL／Qdrant，綠色完成、紅色未完成、灰色處理中、空白無資料。法規／命令以來源版本月份（`update_date`）顯示，目前列與 tooltip 顯示 `version_code`；舊來源版本的 Qdrant 階段顯示「已取代」空白，不列為未完成，只有最新 current 版本需要 Qdrant 索引。判決以 manifest／本機檔／DB 的 368 個月顯示，四個階段分別由本機 `.rar`、raw Parquet manifest、PostgreSQL `issue_month`、Qdrant 月份覆蓋率判定；目前匯入 archive 會以灰色標示所在階段。紅色未完成階段可點選，會切換到對應 workflow 面板（下載→該來源下載、Parquet／PostgreSQL→下載或判決匯入、Qdrant→法規索引或 Qdrant 版本建置），只切換面板、不會自動啟動流程。判決時間表標頭另顯示 Embedding 與 Rerank 使用的主機與模型（例如 `x570 bge-m3:latest`、`x570 bge-reranker-v2-m3`），滑鼠移入可查看端點。後端以 SSE `/api/events/stream` 的 `processing` topic 作為唯一即時進度來源：初次連線推送完整 snapshot，後續推送由 processing state 直接組成的 live payload（`active_import`、workflow 階段訊息／進度、import timeline 月份更新）；前端只套用 payload 並就地更新 DOM，不再 GET `/api/processing` 取得進度，也不重建時間表或重設捲動位置；沒有固定前端 polling timer。
+- **NUL 位元組清理**：判決全文、標題、法院、引用與其他 metadata 寫入 PostgreSQL 前會移除 NUL（0x00）位元組；PostgreSQL text／JSONB 不接受 NUL，未清理會造成整個匯入 batch 失敗。原始 Parquet 與 `raw_json` 仍保留原始內容，不影響備份。
 - **原始備份**：判決壓縮檔會先將每個 JSON 物件以原始文字寫入 `JUDGMENT_DATA_DIR/parquet/raw_judgments/.../raw.parquet`；`raw_json` 保留未修改的原始文字，另外附加案號、法院、案由、裁判日期、命中法規與引用等查詢欄位。這個階段在金融法規篩選之前完成。法規／命令則在解析前寫入 `LAW_DATA_DIR/raw_parquet/.../laws.parquet`，原始 ZIP 仍保留在 `raw/`。
   - 2026-11-08 已補建既有 24 個判決 RAR：2,485,151 筆原始 JSON，Parquet 約 6.2 GB；既有法規／命令也補建原始 Parquet（法規 1,351、命令 10,454）。
-- **逐檔進度**：從狀態檔的 `archives` 讀取每個壓縮檔的解壓縮、原始備份、篩選與 PostgreSQL 進度，直接顯示在檔名後方。沒有狀態檔時，改用 PostgreSQL 的 `source_archive` 顯示哪些壓縮檔已處理。
 - **整體時間**：以各階段實際耗時比例組成堆疊長條，而非用筆數推估。
-- **外部程序**：後端以 `ps` 偵測直接在 terminal 啟動的 `judgment-index-vectors`、`judgment-import-judgments`、`judgment-law-download` 與 `judgment.processing_update`。這些程序若沒有寫入狀態檔，只會標示「外部程序」與可驗證的整體覆蓋率；不會替它們產生假的逐階段百分比。外部法規／命令下載、判決匯入或資料更新執行中時，資料更新按鈕會停用；外部索引執行中時，仍可更新但不可勾選接續索引。
-- **工作流程 sidebar**：左側列出「處理總覽」與 9 個白名單流程（資料更新（完整）、法規下載、命令下載、判決下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、建立條文歷史）。右側面板顯示該流程使用的 Python 程式、Shell／入口腳本與實際命令，並提供「執行此流程」按鈕；結果寫入共用狀態檔，面板顯示最近一次 run 的狀態、開始時間、耗時、訊息與日誌路徑。
-- **流程進度**：每個 workflow 面板依實際狀態檔顯示各階段獨立進度條、狀態、筆數／bytes、耗時與訊息；下方再以相同階段的顏色組成整體進度堆疊條與 legend。滑鼠移到任一階段、色塊或 legend 時，只保留該項目並顯示階段名稱、進度、整體占比、耗時與訊息。法規／命令流程的實際階段為「線上比對／下載 → 原始 Parquet → 解析 → PostgreSQL」；下載後若 raw JSON／語意內容未變更，會略過解析與 PostgreSQL。流程不包含 Qdrant 或 IndexedDB；判決下載只下載 RAR，匯入與向量索引需另執行對應流程或完整資料更新。
+- **外部程序**：後端以 `ps` 偵測直接在 terminal 啟動的 `judgment-index-vectors`、`judgment-index-legal-articles`、`judgment-import-judgments`、`judgment-law-download` 與 `judgment.processing_update`。這些程序若沒有寫入狀態檔，只會標示「外部程序」與可驗證的整體覆蓋率；不會替它們產生假的逐階段百分比。外部法規／命令下載、判決匯入或資料更新執行中時，各 workflow 的執行按鈕會停用，避免重疊處理。
+- **工作流程 sidebar**：左側列出「處理總覽」與 9 個白名單流程（法規下載、命令下載、法規／命令索引、判決下載、判決匯入、判決 Parquet 匯出、Qdrant 版本建置、法院名稱正規化、建立條文歷史）。完整資料更新由 CLI／API／排程腳本執行；sidebar 只列出可獨立操作的階段 workflow。右側面板顯示該流程使用的 Python 程式、Shell／入口腳本與實際命令，並提供「執行此流程」按鈕；按下後會同步停用並顯示「執行中」，不等待版本檢查或啟動 API 回應；版本檢查、啟動期間與後端 snapshot 確認新 run 後都維持停用，SSE 重繪不會讓按鈕恢復可按，只有啟動失敗或 run 結束才恢復；按下後也會立即隱藏上一次 run 的「流程進度」卡片，啟動期間重繪保持隱藏，等新 run 的 snapshot 抵達才顯示新流程進度；結果寫入共用狀態檔，面板顯示最近一次 run 的狀態、開始時間、耗時、訊息與日誌路徑。
+- **流程進度**：每個 workflow 面板依實際狀態檔顯示各階段獨立進度條、狀態、筆數／bytes、耗時與訊息；判決匯入會先建立處理狀態 run 與逐檔清單，再逐檔檢查可沿用的 Parquet 備份與解壓縮，不會先掃描全部壓縮檔大小而延後狀態顯示；stage 訊息與月份時間表會立即標示目前處理的 archive／月份；RAR 檢查與 raw Parquet 階段會顯示目前檢查的 `.rar` 檔名與 `N/M` 進度。原始資料階段缺少可用 Parquet 時會明確顯示「建立 YYYY-MM 原始 Parquet 備份」，完成後顯示「已建立 YYYY-MM 原始 Parquet 備份」；可沿用時顯示「沿用 YYYY-MM 既有原始 Parquet、未重新備份」。金融法規篩選與 PostgreSQL 階段會顯示目前處理的 `YYYY-MM` 與 archive，例如「目前篩選 2026-01（202601.rar，1/2）」。篩選階段重新走訪較早 archive 時，時間表外框仍維持最高已啟動且未完成的月份，目前列另顯示「處理中 YYYY-MM archive」，且不會把外框月份的階段 cell 標成灰色。若金融法規清單 SHA 與先前 run 相同且 raw Parquet 仍可沿用，會跳過先前 run 已完成（filter／postgres 均成功）的 archive，從最新中斷或未完成的 archive 接續；中斷／失敗的 archive 會重新處理，不會從第一個 archive 重跑已完成月份。接續判斷只使用先前 state 與 PostgreSQL snapshot，不會逐檔重新檢查已完成 archive；RAR 檢查階段只處理實際需要解壓縮或沿用的未完成 archive。重新執行時會先一次掃描 raw Parquet manifest，批次比對 archive 路徑、大小與 mtime；相符的月份直接標記 extract skipped／raw_parquet success 並排除 extraction 排程，不再逐檔重讀 manifest 或重複更新 state。若判決下載替換了 archive（路徑、大小或 mtime 改變），舊 manifest 即不再相符，該月份會重新解壓縮並建立新備份；舊備份依混合版本備份政策保留。「RAR 檢查／解壓縮」「原始資料檢查／Parquet 備份」「金融法規篩選」「PostgreSQL metadata」在最終總筆數未知時，會以已完成／執行中的壓縮檔數推算實際百分比；可沿用原始 Parquet 的壓縮檔會標示「沿用、略過解壓縮」，不算重新解壓縮（例如 `157 / 344` → `45.6%`），且本次 run 重新檢查時 RAR 與原始資料階段會維持綠色，不會因短暫確認而轉紅或轉灰；只有缺少或無法沿用、需要重建備份時才顯示處理中。不顯示動畫或閃爍的不確定進度條。下方再以相同階段的顏色組成整體進度堆疊條與 legend。失敗階段的「失敗」badge 可 hover／focus 顯示失敗原因與建議解法；原因取自 run 錯誤訊息並移除 SQL 參數與 traceback，解法依錯誤類型提供（例如 NUL 位元組→重新執行、連線失敗→檢查服務）。滑鼠移到任一階段、色塊或 legend 時，只保留該項目並顯示階段名稱、進度、整體占比、耗時與訊息。法規／命令流程的實際階段為「線上版本比對／下載更新 → 原始 Parquet → 解析 → PostgreSQL → 法規／命令索引」；下載後若 raw JSON／語意內容未變更，會略過解析與 PostgreSQL，索引階段再以 `--if-changed` 判斷是否重建。判決下載只下載 RAR，匯入與向量索引需另執行對應流程或完整資料更新。
 - **法院名稱檢查**：法院名稱正規化分頁提供「檢查法院名稱」，呼叫 `/api/courts/check` 後以年份×月份表格顯示：綠色全部已正規化、紅色完全未檢查、灰色部分未正規化或有無效值；tooltip 顯示總筆數、已檢查、未檢查、無效值與有效比例。進入分頁會自動檢查，也可手動重新檢查。
 - **條文歷史狀態檢查**：建立條文歷史分頁最上方提供「檢查條文歷史／檢查是否需建立」，呼叫 `/api/law-versions/check` 後以年份×月份表格顯示：綠色該月所有版本都有歷史條文、紅色完全未建立、灰色部分版本已建立；目前版本以靜態外框標示。tooltip 顯示法規／命令版本數、版本 ID、已建立／未建立版本與條文列／預期條文數。下方另列出需建立歷史的版本，區分「可建立（找到原始 Parquet）」與「缺原始檔（無法建立）」，避免直接執行長時間流程才發現缺少快照。
-- **判決匯入面板**：比照判決下載顯示「年份列 × 月份欄」時間表，依 `download_manifest.json` 的 368 個月與 PostgreSQL `source_archive` 比對：綠色已匯入、紅色未匯入、灰色有新檔或遠端新版本待匯入；目前匯入月份有脈動框。滑鼠移到月份可查看本機壓縮檔、已匯入檔案、manifest latest／local fileset 與目前匯入檔名。
+- **判決匯入面板**：顯示「年份列 × 月份欄」四階段時間表，依 `download_manifest.json` 的 368 個月、本機 `.rar`、PostgreSQL `source_archive` 與目前 import run 的 archive 狀態判定。每個月份橫向切成四格，依序為 RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata；綠色已完成（含先前 run 已匯入、本次尚未重跑）、紅色尚未完成或本次有待匯入檔案、灰色本次處理中、空白無資料。先前已匯入的月份在本次 run 尚未重跑前維持綠色；輪到它時依階段轉灰，完成後回綠。可沿用原始 Parquet 的 archive 會在 RAR 與原始資料階段維持綠色，並標示「沿用、略過解壓縮」，不會重新解壓縮；即使本次 run 重新確認備份，前兩格也不會再次轉紅或轉灰。缺少或無法沿用備份時，原始資料階段才會顯示「建立 YYYY-MM 原始 Parquet 備份」，完成後顯示「已建立 YYYY-MM 原始 Parquet 備份」。篩選與 PostgreSQL 階段的訊息會顯示目前處理的月份與 archive；建立版本快照／DuckDB 候選統計的準備階段只更新階段訊息，不會逐檔移動月份圈選，只有實際進入 filter／postgres 的 archive 才逐月顯示目前月份與灰色階段。summary 顯示完成／未完成／處理中／有更新；目前匯入月份以靜態外框與 `aria-current` 標示，目前階段會顯示灰色方格，目前列標示外框月份、archive 與階段名稱。當篩選階段重新處理較早月份時，外框維持最高已啟動且未完成的月份，目前列另顯示「處理中 YYYY-MM archive」；只有實際處理中的月份 cell 標灰，外框月份的 cell 不會被誤標為處理中。紅色未完成階段可點選回到判決匯入流程，不會自動啟動流程；方格、階段訊息、目前匯入外框與 processing month 由兩層 SSE 更新：importer 先透過 Unix socket 發送 `progress` event，web server 立即轉發，前端第一時間套用；processing topic 的 0.5 秒 live payload 依 state checkpoint 作 reconciliation，補齊 workflow progress 與 timeline month updates。前端不再另開 active stream，也不重新 GET snapshot。初次連線仍由同一 topic 推送完整 snapshot 作為頁面初始資料。判決下載月份表的 `.rar` 狀態、manifest 與下載進度也由 `judgment-download` topic 推送，不再由前端輪詢。滑鼠移到月份可查看四階段狀態、本機壓縮檔與已匯入檔名。
+- **低延遲處理事件（Phase 4 本機）**：importer 子程序在 run／archive／filter／postgres 狀態變更時，透過本機 Unix domain socket 立即發布 `progress` event；web server 接收後寫入 SQLite WAL event journal（`.run/processing_events.db`），並以 SSE `event: progress` 立即 fan-out。Socket 無法連線時 importer 會 fallback 直接寫 journal，lifecycle event 不會因 web server 離線遺失；`(run_id, seq)` 具唯一約束，重送不會重複。每個 event 有持久化 `event_id` 與 SSE `id:`；瀏覽器重連時以 `Last-Event-ID` 只補送缺少事件，若超出 journal 保留範圍才改送完整 snapshot。多個同機 web instance 共用 journal tailer，各自 fan-out 且去重。Processing state checkpoint 也改為 SQLite WAL per-run rows（`.run/processing_state.db`），只更新有變更的 run；舊 JSON 自動遷移。前端以 requestAnimationFrame 批次套用 event，直接更新階段訊息、目前月份與時間表，不查詢 `/api/processing`；0.5 秒的 processing live payload 僅作 checkpoint reconciliation。State 仍保留作 resume、stop、稽核與重啟恢復。Event latency／append error／tail error／subscriber 數可從 `/api/processing/events/status` 查看。Socket／journal／保留筆數可用 `JUDGMENT_EVENT_SOCKET`／`JUDGMENT_EVENT_JOURNAL`／`JUDGMENT_EVENT_RETENTION` 覆寫；Phase 1 JSONL 會自動遷移為 `.migrated`。完整規格見 [`specs/008-realtime-event-stream/spec.md`](specs/008-realtime-event-stream/spec.md)。
 - **Qdrant 索引面板**：Qdrant 版本建置開始前會測試主要／備援 Ollama 的 `/api/tags` 與 embedding 模型，記錄每台主機的 URL、host、port、可用模型、最後選用主機與執行中實際使用主機。索引期間會顯示與判決下載相同的「年份列 × 月份欄」時間表：綠色代表索引完成、紅色代表已開始但未完成、灰色代表新檔／尚未索引、空白代表沒有該月份資料；目前索引月份會有脈動框。滑鼠移到月份可查看來源檔案、已處理／總筆數、進度、重用、新 embedding 與目前案號。若尚無本次索引 run，會以 active collection 的實際月份覆蓋率顯示同一張表（每 60 秒快取）。面板另顯示 Qdrant 的 Docker context、container、image、容器內 `/qdrant/storage`、volume 名稱、volume 容量、host 實際來源路徑、collection／points／segments；資料由 `/api/system-usage` 取得並可手動重新整理。
 - **下載前版本確認**：法規下載、命令下載與判決下載按「執行此流程」時，會先以 `POST /api/updates/check` 只檢查該來源。若線上檢查為 `up_to_date`，顯示「已是最新版本，仍要強制重新下載？」確認；取消即不啟動，確認後才重新下載並依 SHA／UpdateDate 再比對。檢查失敗時顯示警告，但允許直接執行下載。
 - **判決下載**：使用 `.env` 的 `OPENDATA_JUDICIAL_GOV_TW_ACCOUNT`／`OPENDATA_JUDICIAL_GOV_TW_PASSWORD` 取得 Token，讀取司法院裁判書分類（預設 `051`）的 resources，下載到 `JUDGMENT_DATA_DIR/raw_rar`。預設任何時段都可執行（`JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS=true`，批次仍一次一個檔案）；設為 `false` 時僅在 Asia/Taipei 00:00–06:00 執行。流程優先處理「待補齊」月份（缺少或舊版，依月份由舊到新）；待補齊清單、續傳月份／fileset 與上次停止原因會寫入 manifest 的 `backfill` 區塊，因此中斷後下一次只會續傳剩下月份，不會先重驗已完成的綠色月份。待補齊清單清空後，才由最新月份往回驗證綠色月份是否有遠端內容變更；驗證游標同樣持久化，當日已完成驗證會跳過重複驗證。以 HEAD（若 405 則 GET stream 只讀 headers）比對 `Content-Length`／`Last-Modified`／`ETag`，未變更檔案不重新下載；有更新時下載到 `.part`，驗證後原子取代；同月份舊檔預設移到 `raw_rar/history/`（`JUDGMENT_RAW_RAR_KEEP_VERSIONS=false` 才刪除），manifest 以 `history_files` 保留舊檔 metadata。下載中斷時保留 `.part` 與 validator sidecar；伺服器支援時以 HTTP Range／If-Range 續傳，validator 改變或回 200 時從零重新下載（目前官方端點忽略 Range，會回 200，因此實際會重新下載）。每個檔案的下載錯誤會隔離並重試，失敗月份留在待補齊清單，不會中止其他月份；嚴格時段模式（`JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS=false`）下，接近 06:00 時會依近期吞吐量估算，不再開始無法在時段內完成的檔案。月份範圍由 resources 動態決定（本次資料快照為 1996-01 到 2026-08，共 368 個月；月份數會隨官方資料變動）；任何非 `YYYYMM` 命名或非 rar/7z/zip 的 fileset（例如 `Delete-Infor.csv`）都會被視為非判決壓縮檔並停止往後探測。`raw_rar/download_manifest.json` 記錄 `files`（以 fileset ID 為鍵）、validators、SHA-256、baseline、`months` 月份狀態與 `backfill` 續傳／驗證進度。執行中的暫存進度寫在 `raw_rar/download_progress.json`，狀態 API 會讀取並在程序結束或進度失效後清除。處理頁的判決下載面板會顯示動態月份表：綠色最新版、灰色舊版、紅色缺失；表格上方顯示待補齊月份數、續傳起點、驗證狀態與上次停止原因。表格的「重新整理」會重新掃描 `raw_rar`，手動放入的檔案也會立即反映；滑鼠移到月份會出現下載圖示，點擊後由後端帶 Token proxy 下載該月份 fileset；預設非 API 時段也可用，且 proxy 一次只允許一個下載。執行中會在月份表標示目前檢查／下載的月份，並在執行按鈕下方顯示檔名、進度條、百分比與已下載／總大小。快速檢查既有檔案可用 `judgment-download --incremental`；只更新月份狀態可用 `--refresh-status`；強制只在 00:00–06:00 下載可用 `--require-window`。
 - **混合版本備份**：判決新版檔案出現時，系統建立不可變 `judgment_snapshots`，只把被修改/移除的舊內容寫入 `judgment_document_versions` 與 `judgment_change_events`；新增判決只留在 current `judgment_documents`，不重複占歷史空間。Raw Parquet 保留 current full snapshot，舊 raw 變更寫入 `parquet/raw_judgment_deltas/`，delta 驗證成功後才移除舊 full snapshot；`JUDGMENT_RAW_PARQUET_KEEP_VERSIONS=true` 可保留舊 full 版本。Qdrant 新索引版本會把 changed/removed 的舊向量寫入 `JUDGMENT_VECTOR_HISTORY_COLLECTION`，current 仍由 `judgments_current` alias 提供；舊完整 index collection 仍保留供 rollback，可用 `judgment-index-vectors --discard-version` 依保留政策清除。IndexedDB 新增 `audit_events` store，從 `/api/versioning/audit` 同步版本變更 metadata。一般查詢與 RAG 只使用 `is_current=true`；歷史全文、snapshot、delta 與 vector metadata 由 `/api/versioning/*` 查詢。完整資料模型與 acceptance criteria 見 [`specs/006-hybrid-backup-versioning/spec.md`](specs/006-hybrid-backup-versioning/spec.md)。
-- **線上更新通知**：`up.sh` 在後端就緒後呼叫 `POST /api/updates/check`，檢查法規、命令 ZIP headers 與判決 resources／本機月份狀態，結果寫入 `download_update_records`（同一來源保留一筆 current）。法規／命令以遠端 Content-Length 與本地 ZIP 大小快速判斷；長度相同但內容變更時，實際下載 workflow 仍會以 ZIP/JSON hash 與 UpdateDate 再確認。判決以待補齊月份數判斷。Header 的「資料處理」導覽右下角會顯示 1–3 的橘色更新 badge；processing sidebar 的 `law_download`／`order_download`／`judgment_download` 在無執行中 run 且有更新時，右側狀態改為橘色「更新」。每個 workflow 面板新增「執行紀錄」與「版本檢查紀錄」，並提供「檢查更新」按鈕；按鈕只檢查目前面板對應的來源，執行此流程前也會先做同來源檢查，`up_to_date` 時要求確認是否強制更新。法規／命令 ZIP 存到 `LAW_DATA_DIR/raw/{source}/{YYYYMMDD}/{原始檔名}`；同一天同檔名但內容不同時以 hash suffix 保留兩份。`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過啟動檢查。完整規格見 [`specs/007-update-notifications/spec.md`](specs/007-update-notifications/spec.md)。
-- **執行與停止**：單一流程由 `judgment.workflow_runner` 在背景啟動，可執行命令只來自 `src/judgment/workflows.py` 白名單；「資料更新（完整）」仍走 `ProcessingManager.start_update`，可勾選接續索引。所有長流程共用「停止」與可續跑機制；已有 Web 或 terminal 程序執行時，按鈕停用或回傳 409，不會同時啟動第二個處理程序。判決下載 CLI 的結束碼為 `0` 完成、`3` 部分完成且可續傳（無檔案錯誤）、`1` 失敗、`2` 嚴格時段模式下不在 API 時段；`workflow_runner` 會把 `3` 記為「部分完成」而非「失敗」，處理頁以黃色標示並保留待補齊進度。
+- **線上更新通知**：導覽列更新 badge 由 SSE `/api/events/stream` 的 `updates` topic 推送，DB 更新紀錄變更時立即更新，不再每 60 秒從前端查詢。`up.sh` 在後端就緒後呼叫 `POST /api/updates/check`，檢查法規、命令 ZIP headers 與判決 resources／本機月份狀態，結果寫入 `download_update_records`（同一來源保留一筆 current）。法規／命令以遠端 Content-Length 與本地 ZIP 大小快速判斷；長度相同但內容變更時，實際下載 workflow 仍會以 ZIP/JSON hash 與 UpdateDate 再確認。判決以待補齊月份數判斷。Header 的「資料處理」導覽右下角會顯示 1–3 的橘色更新 badge；processing sidebar 的 `law_download`／`order_download`／`judgment_download` 在無執行中 run 且有更新時，右側狀態改為橘色「更新」。每個 workflow 面板新增「執行紀錄」與「版本檢查紀錄」，並提供「檢查更新」按鈕；按鈕只檢查目前面板對應的來源，執行此流程前也會先做同來源檢查，`up_to_date` 時要求確認是否強制更新。法規／命令 ZIP 存到 `LAW_DATA_DIR/raw/{source}/{YYYYMMDD}/{原始檔名}`；同一天同檔名但內容不同時以 hash suffix 保留兩份。`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過啟動檢查。完整規格見 [`specs/007-update-notifications/spec.md`](specs/007-update-notifications/spec.md)。
+- **執行與停止**：單一流程由 `judgment.workflow_runner` 在背景啟動，可執行命令只來自 `src/judgment/workflows.py` 白名單；完整更新 API 走 `ProcessingManager.start_update`，可用 `index:true` 接續索引。所有長流程共用「停止」與可續跑機制；已有 Web 或 terminal 程序執行時，按鈕停用或回傳 409，不會同時啟動第二個處理程序。判決下載 CLI 的結束碼為 `0` 完成、`3` 部分完成且可續傳（無檔案錯誤）、`1` 失敗、`2` 嚴格時段模式下不在 API 時段；`workflow_runner` 會把 `3` 記為「部分完成」而非「失敗」，處理頁以黃色標示並保留待補齊進度。
 
-「資料更新」按鈕會依序：
+完整資料更新（`judgment.processing_update`）會依序：
 
 1. 下載並比對線上法規與命令 ZIP（以 SHA-256 判斷是否變更）。
 2. 掃描 `JUDGMENT_DATA_DIR` 與 `raw_rar/`，找出 PostgreSQL 尚未處理的 `.rar`。
 3. 將未處理壓縮檔解壓縮為原始 Parquet 備份（同時補齊查詢欄位）。
 4. 依金融法規清單篩選，將命中判決的 metadata 寫入 PostgreSQL。
-5. 若勾選「完成後接續 Qdrant 索引」，執行可中斷續跑的向量索引；預設不勾選。
+5. 若以 `--index` 或 API `index:true` 執行，接續可中斷續跑的向量索引；預設不執行。
 
 也可直接從 terminal 執行同一個流程：
 
@@ -647,7 +663,7 @@ uv run python -m judgment.processing_update --index  # 完成後接續 Qdrant
 
 ### 本機電源控制器
 
-header 右上角只有 `Style` 選單；系統測試與 API 連線設定位於 `#/status` 的「系統測試」分類，或直接開啟 `#/tests`。後端電源仍由 `./up.sh`、`./down.sh` 或本機電源控制器管理。
+header 右上角有齒輪「設定選項」，介面風格移至設定 sidebar；系統測試與 API 連線設定位於 `#/status` 的「系統測試」分類，或直接開啟 `#/tests`。後端電源仍由 `./up.sh`、`./down.sh` 或本機電源控制器管理。
 
 控制器是獨立程序，因此後端停止後仍能把它重新啟動。`judgment-web` 預設會自動啟動控制器；若後端已經停止且控制器也不在執行，可手動啟動：
 
@@ -822,7 +838,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 - 依階段分組：Embedding、Qdrant 檢索、PostgreSQL 取文、LLM 生成、引用驗證。
 - 每個階段有幾個模型，就顯示幾條子程序進度條；模型失敗以紅色、略過以灰色、執行中以藍色 animated bar 顯示。
 - 最下方先顯示總流程進度條，再顯示**總流程時間（依階段）** stacked bar：每個階段依耗時比例顯示不同顏色，下方 legend 標記階段名稱、耗時與百分比；LLM 生成通常占最大比例，執行中會即時估算。
-- 系統測試頁每 2.5 秒 poll `/api/test-runs/current`；效能報表與 RAG 頁的測試 Flow panel 每 1.5 秒 poll，自動綁定進度；完成後停止更新。
+- 系統測試頁、效能報表與 RAG 頁的測試 Flow panel 訂閱 SSE `/api/events/stream` 的 `test-runs` topic；`performance_test_runs`／`performance_test_steps` 變更時由後端推送，前端收到後才查詢 `/api/test-runs/current` 並更新，完成後取消訂閱。
 - 「歷史」下拉選單可載入 `performance_test_runs` 的歷史紀錄，還原當時的 flowchart。
 - 測試步驟與結果保存在 PostgreSQL，後端重啟後仍可查詢。
 
@@ -865,7 +881,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 
 
 
-header 右上角的 `Style` 選單提供十種科技網站風格，對應 <https://getdesign.md/> 的公開設計參考：
+「設定選項」→「介面風格」提供十種科技網站風格，對應 <https://getdesign.md/> 的公開設計參考。每個項目直接套用該風格在 header 的底色、文字顏色、品牌線、邊角與陰影，作為即時預覽：
 
 | # | 風格 | 特色 |
 | --- | --- | --- |
@@ -881,6 +897,43 @@ header 右上角的 `Style` 選單提供十種科技網站風格，對應 <https
 | 10 | OpenAI | 暖灰畫布、黑色行動、綠色訊號 |
 
 主題只改變 CSS 設計 token，不會重新載入頁面；選擇會存在 `localStorage` 的 `judgment.theme`，下次開啟時自動套用。選單支援鍵盤操作（方向鍵、Home／End、Esc）。
+
+header 右上角的齒輪按鈕會開啟右側「設定選項」sidebar，並把 header、主內容與 footer 往左推，而不是覆蓋頁面。Sidebar 上方是設定分類按鈕，分隔線下方是對應功能表：
+
+- 「字型大小」列出目前頁面實際出現的文字區塊，例如頁面標題、區塊標題、內文、表格、標籤、按鈕、表單、程式碼與法規條文。
+- 每個區塊都有滑桿、可直接輸入的 px 數值與即時預覽；拉動或輸入後會立即套用到頁面對應 elements。
+- 滑鼠移到某個區塊列或列內控制項取得焦點時，頁面上所有對應的文字 elements 會以固定紅色 `#ef4444` outline 與主題 accent 半透明背景標示，列本身也會顯示預覽中狀態；紅色外框可與各主題 accent 色明顯區別，移出後立即恢復。
+- 「儲存」會寫入 `localStorage` 的 `judgment.fontSizes.v1`，重新載入或切換頁面後仍會套用；「取消」回到上次儲存值；「回復預設值」清除尚未儲存的覆寫。
+- 「介面風格」分類重用同一個 10 種主題清單；每個項目的名稱不變，但底色、文字色、品牌線、邊角與陰影直接採用該主題 header 的樣式，並在名稱與右側色票之間顯示該主題 header 作用中按鈕的迷你預覽（背景色、文字色、pill 圓角與 badge），讓第一個色票能直接對應作用中按鈕。
+- 介面風格標頭右側提供「亮／暗／系統」明暗配置，切換後立即套用至頁面、header、sidebar、卡片、表格與表單；「亮」不覆寫主題顏色，直接使用目前主題的原始設計（例如 Linear 仍是深色），「暗」套用共用暗色 palette；選擇儲存在 `localStorage` 的 `judgment.appearance`，系統模式會跟隨 `prefers-color-scheme` 即時更新。
+- 390px 行動版 sidebar 改為全寬，避免水平溢出。
+
+### Phase 4：資料生命週期與 RAG 品質 gate
+
+Phase 4 將資料更新、索引重建、狀態與品質檢查串成閉環：
+
+- 完整資料更新現在依序執行 `download → legal_qdrant → postgres → qdrant`：
+  - 法規／命令下載後自動執行 `judgment-index-legal-articles --incremental --if-changed`。
+  - 條文未變時跳過；有變更時建立新版本、驗證 points／維度後才切換 `legal_articles_current`，失敗保留舊 alias。
+  - 判決索引改用 stale 偵測：missing／content hash changed／removed points 任一存在時，走 `build-index-version` blue-green 流程，驗證後才切換 `judgments_current`。
+- Processing workflow catalog 新增「法規／命令索引」workflow（stage `legal_qdrant`）。
+- `/api/status` 新增：
+  - `data.legal_index`：alias／collection／version／points／dimensions／law/article counts／freshness／reasons。
+  - `judgment_index_missing`、`judgment_index_changed`、`judgment_index_stale`、`judgment_index_pending`、`judgment_index_fresh`。
+- `/api/processing/plan` 新增 `legal_index` 與 `recommended.legal_index`。
+- Benchmark summary 新增 `gate`，固定檢查 law recall、article recall、judgment recall、citation valid rate、refusal accuracy、P95 latency；可用 `RAG_GATE_*` 環境變數覆寫門檻。`scripts/rag_regression_gate.py` 可直接用 exit code 做 CI／排程 gate。
+- `scripts/run_scheduled_update.sh` 提供 cron／launchd／systemd timer 使用的單次更新入口，內建 lock 避免重疊執行。
+
+目前資料現況（2026-11-13）：
+
+- 法規／命令：1,351 部法規、10,454 筆命令、222,124 條文；`legal_articles_v001`／`legal_articles_current` 為 222,124 points、1,024 維，freshness `fresh`。
+- 判決：`raw_rar` 368 個月皆為 green，但 PostgreSQL／Qdrant 目前只涵蓋 **2024-09 至 2026-08 共 24 個月、738,743 筆**。其餘 344 個月尚未匯入與索引，這是 Phase 4 最後的資料 backfill 工作，不是索引程式問題。
+- 待 backfill 完成後，執行：
+  ```bash
+  uv run judgment-import-judgments --data-dir data/judgments
+  uv run judgment-index-vectors --build-version --activate
+  ```
+  或直接使用 `scripts/run_scheduled_update.sh`，讓完整更新流程接續處理。
 
 ### 靜態前端與部署
 
@@ -1051,7 +1104,7 @@ curl "http://127.0.0.1:9200/api/index-alias/reconcile"
 - 驗證失敗不得切換；第一階段保留 active＋前一個成功版本，不自動刪除舊 collection。
 - `JUDGMENT_VECTOR_ALIAS` 預設 `judgments_current`，`JUDGMENT_VECTOR_COLLECTION_PREFIX` 預設 `judgments`。
 - 目前本機可將 `EMBEDDING_URL` 指向 x570 Ollama、`EMBEDDING_FALLBACK_URL` 指向 MBP `http://127.0.0.1:11434`；x570 關機或查詢 embedding 超過 2 秒未回應時自動改用本機，兩端必須使用同一個 `bge-m3` digest。
-- 在「系統狀態 → Model Provider」新增多台 Ollama 後，可到「資料處理」的「執行資訊」卡片拖移主機順序；第一台設為目前主機，embedding 會依序嘗試後續主機，直到成功或全部失敗。
+- 在「系統狀態 → Model Provider」新增多台 Ollama 後，可到「資料處理」的「執行資訊」卡片點選「主機:模型」按鈕；選取的主機會設為第一優先，embedding 會依序嘗試後續主機，直到成功或全部失敗。
 
 #### 全量索引腳本
 
@@ -1135,6 +1188,7 @@ RAG 現在會區分「法規條文題」與「判決檢索題」：
   - 法規 citation 編號從 `[1]` 開始，判決接續在後。
   - 預設最多只保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT`（預設 1）筆判決作為輔助，避免判決壓過條文。
   - LLM system prompt 會要求以現行法規／命令條文為主要依據，判決僅作實務補充。
+  - 判決卡的引用 chips 以判決實際 `citations` 顯示「法規＋條號＋項次」（例如 `銀行法第125條第1項、第3項`）；點擊可開啟該條完整條文。上方已顯示法規檢索結果時，不再重複下方的法規來源卡。
 - 「銀行法對從業人員有那些規定？」這類問句不再被誤判為「列出相關法規」；`那些規定` 不會觸發 related-laws 清單，也不會提前清空已選出的法規 articles。
 - 銀行法加入從業人員概念擴展：銀行負責人、銀行職員、負責人、職員、兼職、佣金、酬金、不當利益、資格條件、利益衝突、違背職務，以及第 18、35、35-1、35-2、125-2、127-2 條等概念索引。
 
@@ -1186,9 +1240,9 @@ uv run judgment-index-legal-articles --discard-version 3
 → bge-m3 查詢向量（只算一次）
 ├─ 判決：judgments_current → 候選判決
 └─ 法規：legal_articles_current → 候選條文
-→ 法規：BM25／概念展開 + dense 分數融合
+→ 法規：BM25／概念排名與 dense 排名以 RRF 融合
 → 每部法規取候選條文
-→ BGE-reranker-v2-m3 單獨 rerank 法規條文（與判決分開）
+→ BGE-reranker-v2-m3 分開 rerank 法規與命令條文（與判決分開）
 → law-first 或 judgment-first quota
 → LLM（法規優先題以條文為主、判決為輔）
 ```
@@ -1196,10 +1250,12 @@ uv run judgment-index-legal-articles --discard-version 3
 重點：
 
 - 判決與法規共用同一個查詢向量，避免重複 embedding。
-- 法規候選以 `select_law_articles()` 的 BM25／概念分數與 Qdrant dense 分數融合；dense 可在關鍵字完全找不到時補上法規。
+- 法規候選以 `select_law_articles()` 的 BM25／概念排名與 Qdrant dense 排名做 RRF（Reciprocal Rank Fusion）；`RAG_LAW_RRF_K` 控制排名平滑，`RAG_LAW_DENSE_WEIGHT` 控制 dense 的投票權重。dense 可在關鍵字完全找不到時補上法規。
+- RRF 只負責排序；為避免 200+ 條的法規被大量弱相關條文灌滿，仍保留 BM25／dense 正規化分數作為相關性下限。
 - 若問題已明確指名法規（例如「銀行法對從業人員有那些規定？」），該法規是 anchor；其他 dense 法規不會蓋過它，dense 只用來排序該法規的條文。
+- 法規與命令的 rerank 分成不同批次執行，`retrieval.law_rerank.groups` 會分別記錄 `law`／`order` 的狀態、候選數、top score 與錯誤；一組失敗時另一組仍會套用 rerank，失敗組保留原順序。
 - 法規 rerank 與判決 rerank 分開執行；法規候選先取 `RAG_LAW_CANDIDATE_ARTICLE_LIMIT` 條，再以 `RAG_LAW_RERANK_WEIGHT` 將 rerank 排名與 BM25／dense 前置排名融合，最後縮到 `RAG_LAW_ARTICLE_LIMIT`／`RAG_LAW_ARTICLE_LIMIT_LAW_FIRST`。這樣可保留最強關鍵字／概念條文，不會被 cross-encoder 的單一偏好蓋掉。
-- `retrieval.law_vector` 記錄 alias、collection、候選數、top score 與命中的法規；`retrieval.law_rerank` 記錄法規 rerank 狀態、provider、延遲與分數。
+- `retrieval.law_vector` 記錄 alias、collection、候選數、top score 與命中的法規；`retrieval.law_fusion` 記錄 RRF 參數；`retrieval.law_rerank` 記錄法規 rerank 狀態、provider、延遲、分數與分組結果。
 - 條文數、沿革、相關法規清單與引用統計等結構化題型不呼叫法規向量與法規 rerank，維持原本的快速回應路徑。
 - alias 不存在、Qdrant 失敗或 embedding 失敗時，法規檢索會退回 PostgreSQL／Parquet + BM25，不中斷 RAG；判決向量檢索維持原本的 fallback 行為。
 - 不使用 Qwen 系列模型；embedding 固定 `bge-m3`、reranker 固定 `BGE-reranker-v2-m3`。
@@ -1365,6 +1421,8 @@ RAG_RERANK_CANDIDATES=30
 RAG_LAW_VECTOR_ENABLED=true
 RAG_LAW_VECTOR_CANDIDATES=30
 RAG_LAW_SCORE_THRESHOLD=0.25
+RAG_LAW_RRF_K=60
+RAG_LAW_DENSE_WEIGHT=0.2
 RAG_LAW_ARTICLE_LIMIT=4
 RAG_LAW_ARTICLE_LIMIT_LAW_FIRST=6
 RAG_LAW_CANDIDATE_ARTICLE_LIMIT=8
@@ -1389,7 +1447,7 @@ RERANK_MAX_CHARS=1200
 - 兩台都失敗時保留原本 Qdrant 排序，只取 `RAG_TOP_K` 筆，回答不會失敗；`retrieval.rerank.status` 會標示 `degraded`。
 - `rag.rerank` Flow 會記錄 model、provider、候選數、選用數、top score、fallback 與錯誤。
 - `RERANK_MAX_CHARS` 控制每個候選送進 cross-encoder 的長度；BGE v2-m3 實務上建議控制在約 1024–1200 字元/tokens 的量級，避免過長輸入拖慢並降低排序品質。
-- 第一輪先只 rerank 判決候選，法規檢索與 citation 編號維持原流程。
+- 判決候選與法規／命令候選分開 rerank；法規與命令再依 `source_type` 分組，一組失敗不影響另一組，citation 編號維持原流程。
 
 實測 MBP 使用 llama.cpp BGE Q8：
 
@@ -1483,13 +1541,13 @@ ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh --uninstall'
 
 ### 本階段驗證
 
-- `uv run pytest`：265 passed（含靜態資源、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：326 passed（含靜態資源、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料（2026-11-11）：1,351 筆法規、10,454 筆命令、222,124 條文；法規／命令原始 Parquet 2 個檔案，約 87 MB。
 - 法規／命令條文向量索引：11,805 部法規／命令、222,124 條可檢索條文，`bge-m3` 1,024 維；Qdrant `legal_articles_v001` 由 `legal_articles_current` alias 提供，索引不含 14,840 筆章節標題。判決索引仍為 `judgments_v002`（738,743 筆），兩個 collection 完全分開。
 - 法規／命令混合檢索實測（2026-11-13）：「銀行法對從業人員有那些規定？」為 `law_first`，`retrieval.law_vector.status=ok`（30 個候選）、`law_rerank.status=ok`（x570），選出銀行法第 35、35-2、125-2、35-1、127-2、18 條與 1 筆輔助判決；「證券交易法對內線交易有什麼規範？」先取第 157-1、171 條；「損害賠償責任如何認定？」在沒有明確法規名稱時由 dense 找到民法與國家賠償法；「有哪些法規和壽險及產險相關？」維持結構化清單，`law_vector`／`law_rerank` 為 `skipped`，約 0.35 秒。
 - 判決原始檔：`data/judgments/raw_rar/` 目前有 368 個月份壓縮檔，約 52 GB；`download_manifest.json` 以執行時掃描結果為準，不固定月份數。欄位包含 `files`（以 fileset ID 為鍵）、`months` 陣列、`backfill`（待補齊月份、續傳起點、驗證游標、失敗紀錄與上次停止原因）與 `history_files`（移至 `raw_rar/history/` 的舊版容器 metadata）。
-- 判決匯入：24 個原始 archive 共掃描 2,485,151 筆，命中 99 項金融法規清單並寫入 738,743 筆判決、1,578,718 筆引用；`judgment_documents` 約 4.6 GB。新增 16 個月份掃描 1,655,684 筆、寫入 494,413 筆，耗時 858.6 秒（歷史匯入紀錄）。
+- 判決匯入：24 個原始 archive 共掃描 2,485,151 筆，命中 99 項金融法規清單並寫入 738,743 筆判決、1,578,718 筆引用；`judgment_documents` 約 4.6 GB。新增 16 個月份掃描 1,655,684 筆、寫入 494,413 筆，耗時 858.6 秒（歷史匯入紀錄）。**目前只匯入 2024-09 至 2026-08 共 24 個月；raw_rar 的其餘 344 個月尚未匯入與索引。**
 - 原始判決 Parquet：24 個壓縮檔共 2,485,151 筆，約 6.23 GB；以 `jid` filter 單筆讀取後解析 `raw_json`，點擊 RAG 引用卡標題可開啟完整判決 dialog，並保留 PDF 連結。
 - 判決法院正規化：738,743 筆全部有 `court_normalized`，目前資料對應 37 個標準法院，0 筆未解析，原始 `court` 保留；程式定義 40 個標準名稱（含歷史法院）。
 - 判決向量索引：已完成全量 738,743 筆（1,024 維、`bge-m3`）；Qdrant `judgments_v002`（`judgments_current` alias）與 PostgreSQL `judgment_vector_index` coverage 738,743 / 738,743＝100%。正式查詢使用 `judgments_current` alias，後續版本以 Blue-Green collection 建置。
@@ -1507,19 +1565,21 @@ ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh --uninstall'
 - LLM RAG 回答會先顯示「法規／命令檢索結果」，再顯示「LLM 綜合回答」；`/api/rag/query` 與串流結果都包含 `law_answer`，避免 LLM 回答掩蓋實際檢索到的法規／命令。
 - 保險業務員招攬責任類問題會額外先列「相關法規的責任架構」表（法規、條文、規範重點）與法規來源，再顯示 LLM 回答；目前規則涵蓋保險業務員管理規則第 15、19 條與金融消費者保護法第 8、9、10、11、11-3 條。
 - 以 Playwright 驗證法規／命令卡 dialog：點擊 `證券交易法` 卡可從本地 Parquet 一次讀取並列出 229 條原文，顯示來源快照、法規沿革與來源網站；沒有分頁控制，對話框內可連續捲動全部條文，並可以 X／返回回答／點擊外部關閉。點擊卡內的單一條文預覽（例如 `保險法` 第 163 條）只顯示該條完整內容（1 條），標題為「法規 · 條號」，不顯示其他條文與法規沿革；390px 無水平溢出、無 console error。
-- 以 Playwright 驗證內線交易問題：法規／命令檢索結果列出 `證券交易法` 第 157-1 條與第 171 條，點擊任一條文會開啟該條完整內容；點擊「命中詞彙」的 `證券交易法` 會開啟 229 條全文 dialog；下方來源卡同步顯示第 157-1、171 條，390px 無水平溢出、0 console error。
-- 以 Playwright 驗證全站法規跳轉一致性：RAG 判決卡只在標題／metadata 區開啟判決，點擊摘要不再觸發；判決卡與判決 dialog 內的 `公司法`、`洗錢防制法`、`證券交易法` chips 均可開啟對應法規全文；法規 dialog 提供「跳至第幾條」輸入，實測可跳至並標示第 171 條。資料頁判決報表的命中法規名稱也可點擊開啟完整法規報表，該報表同樣具備條文跳轉與標示。
+- 以 Playwright 驗證內線交易問題：法規／命令檢索結果列出 `證券交易法` 第 157-1 條與第 171 條，點擊任一條文會開啟該條完整內容；點擊「命中詞彙」的 `證券交易法` 會開啟 229 條全文 dialog；上方已顯示法規結果時不再重複下方的法規來源卡，390px 無水平溢出、0 console error。
+- 以 Playwright 驗證全站法規跳轉一致性：RAG 判決卡只在標題／metadata 區開啟判決，點擊摘要不再觸發；判決卡以判決實際引用顯示 `公司法第8條第3項`、`銀行法第125條第1項、第3項` 等 chips，點擊可開啟對應條文；判決 dialog 內的引用 chips 同樣可開啟法規全文；法規 dialog 提供「跳至第幾條」輸入，實測可跳至並標示第 171 條。資料頁判決報表的命中法規名稱也可點擊開啟完整法規報表，該報表同樣具備條文跳轉與標示。
 - 以 Playwright 驗證 Qdrant 資料頁：語意查詢、Top K、相似度門檻、相似度／案號／法院／案由／裁判日期／命中法規欄位、點選案號開啟判決原文，以及返回後查詢條件保留；RAG 頁驗證索引覆蓋率、4 筆判決引用與引用編號，狀態頁驗證 Qdrant／Embedding／RAG／LLM 均為正常；390px 無水平溢出、無 console error。
 - 以 Playwright 驗證狀態頁 sidebar：8 個分類切換（服務總覽、系統測試、系統資料使用、Model Provider、前後端架構、資料版本、API 端點、最近下載）；系統資料使用顯示 CPU／RAM／Swap、Docker 2 個容器、PostgreSQL／Qdrant 資源與磁碟空間；390px 無水平溢出、無 console error。
 - 效能 Flow 實測：快速 profile 的 RAG 請求產生約 20 段 Flow，包含 `http.request`、`rag.answer_question`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm`、`rag.validate_citations` 與 `client.render`；`summary.models` 為 `bge-m3`、`gemma3:4b`。伺服器端 LLM 區段約 1–4 秒，前端 client 全流程與伺服器總耗時接近。時間軸以每個點位的 `started_at` 顯示開始時間，主要數字為「本點到下一點」區間；「累計」採流水線累加，例如 `http.request` 顯示 1 ms 並累計 1 ms，`rag.coverage` 顯示 30 ms 並累計 32 ms，`rag.llm_request` 顯示 2.9 s，最後 `client.render` 才累計到整體 3.9–4.0 秒。
 - 以 Playwright 驗證效能 Flow 頁：模型篩選、21 段巢狀時間軸、每點實際開始時間、點到點區間、流水線累計、module／function／params、時間軸比例條、模型統計、最慢區段、Flow JSON 展開、390px 無水平溢出與 0 console error。
-- 以 Playwright 驗證十種主題切換與持久化、四個頁面、法規／判決類別切換、判決命中法規查詢、匯入紀錄查詢、查詢報表、法規明細、判決原文與返回流程、服務狀態與 390px 行動版；無 console error、無失敗請求、無水平溢出。
-- 以 Playwright 驗證資料處理頁工作流程 sidebar：10 個項目（總覽＋9 個流程）、選取「判決下載」顯示程式 `judgment-download`、Shell／入口 `src/judgment/judgment_download.py`、實際命令與執行按鈕；桌面 1300px 與行動版 390px 均無水平溢出、0 console error。
+- 以 Playwright 驗證設定選項 sidebar：桌機開啟後 sidebar 寬 380px，header／main／footer 右緣同步內縮；「字型大小」只列出目前頁面出現的區塊，滑桿與數字輸入會即時改變頁面 font size；滑鼠移到「表格內容」時所有表格 cell 出現紅色 `#ef4444` outline 與半透明背景，移出後完全移除；儲存後重新載入仍保留，取消與直接關閉會回到上次儲存值，回復預設值後儲存會清除本機覆寫；切換「暗」後 body 背景為 `#0b0f14`、文字為 `#eef3f8`，切換「亮」後 NVIDIA 回到 `#ffffff`、Linear 回到主題原始的 `#010102`，切換「系統」在 dark color scheme 下解析為 dark 並保留 `system`；390px 開啟 sidebar 無水平溢出、無 console error。
+- 以 Playwright 驗證十種主題切換與持久化、介面風格項目以各主題 header 樣式呈現、每個項目包含對應的作用中按鈕預覽（NVIDIA 綠底黑字、IBM 藍底白字、Linear 深灰底白字）、header 無獨立調色盤按鈕、四個頁面、法規／判決類別切換、判決命中法規查詢、匯入紀錄查詢、查詢報表、法規明細、判決原文與返回流程、服務狀態與 390px 行動版；無 console error、無失敗請求、無水平溢出。
+- 以 Playwright 驗證資料處理頁工作流程 sidebar：10 個項目（總覽＋9 個流程，含法規／命令索引）、不再顯示重複的「資料更新（完整）」、選取「判決下載」顯示程式 `judgment-download`、Shell／入口 `src/judgment/judgment_download.py`、實際命令與執行按鈕；桌面 1300px 與行動版 390px 均無水平溢出、0 console error。
+- 以 Playwright 驗證處理總覽：三張時間表（法規、命令、判決）、法規／命令顯示 2026-10 與 2026-11 的四階段狀態、判決顯示 368 個月與四段格子、綠／紅／灰／空白語意、目前版本與目前匯入列、390px 無水平溢出、0 console error；「判決匯入」面板月份表顯示四階段方格（RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata）、目前月份灰色階段與 summary；「法規／命令索引」「判決匯入」「Qdrant 版本建置」面板的 Embedding 主機／模型按鈕列列出 `x570:bge-m3:latest`、`mbp:bge-m3:latest`，且不再顯示主機卡片或拖移箭頭。
 - 以 Playwright 驗證判決法院正規化：下拉選單只有 37 個標準法院＋全部、無重複或髒值，以標準名稱篩選／排序／開啟原文皆一致，返回查詢結果後條件與資料列保留。
 - 以 Playwright 驗證 `file://frontend/index.html`、系統測試頁的 API 連線測試／儲存流程，以及靜態主機（含 `?api=` 覆寫）的跨來源 API 呼叫。
 - 以 Playwright 驗證系統測試：`#/status` 的「系統測試」分類與 `#/tests` 路由、API 表單、測試模式 ON/OFF 切換、模型清單、測試 Flow、RAG 頁測試模式提示，以及 `/api/test-mode` 狀態一致；後端電源改由 `./up.sh`／`./down.sh` 管理。
 - 以 Playwright 驗證測試模式 RAG：4 個 LLM 全數執行、耗時 149 秒、無前端 timeout，回答卡顯示 `test_run` 與「查看測試 Flow」連結。
-- 以 Playwright 驗證測試流程圖表：問題、RAG 答案、每步驟 module／function、即時 poll 更新、11 個子程序進度條（1 embedding + 1 retrieval + 1 context + 4 LLM + 4 validation）、失敗模型紅色 bar、總流程進度與依階段時間 bar、歷史選單還原舊 Flow、390px 與 0 console error。
+- 以 Playwright 驗證測試流程圖表：問題、RAG 答案、每步驟 module／function、`test-runs` SSE 即時推送更新、11 個子程序進度條（1 embedding + 1 retrieval + 1 context + 4 LLM + 4 validation）、失敗模型紅色 bar、總流程進度與依階段時間 bar、歷史選單還原舊 Flow、390px 與 0 console error。
 - 以 Playwright 驗證 RAG 提問頁下方的即時測試 Flow panel：測試模式提問時顯示問題、答案、module／function、5 個階段、子進度條與總時間 bar。
 
 ## Case Assessment 文件（未來）

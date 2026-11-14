@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, subscribeRefresh } from "../api.js";
 import {
   escapeHtml,
   formatDateTime,
@@ -63,7 +63,26 @@ function metricCard(label, value, note = "") {
 
 function scoreSummary(summary = {}) {
   const components = summary.score_components || summary;
-  return `<div class="bench-metrics">
+  const gate = summary.gate || {};
+  const gateStatus = String(gate.status || "");
+  const gateLabel =
+    gateStatus === "pass"
+      ? "Gate 通過"
+      : gateStatus === "fail"
+        ? "Gate 失敗"
+        : gateStatus === "no_data"
+          ? "Gate 無資料"
+          : "";
+  const gateBadge = gateLabel
+    ? `<span class="badge ${
+        gateStatus === "pass"
+          ? "badge-ok"
+          : gateStatus === "fail"
+            ? "badge-danger"
+            : "badge-neutral"
+      }">${escapeHtml(gateLabel)}</span>`
+    : "";
+  return `${gateBadge}<div class="bench-metrics">
     ${metricCard("Law Recall", percent(components.law_recall))}
     ${metricCard("Article Recall", percent(components.article_recall))}
     ${metricCard("Citation Valid", percent(components.citation_valid_rate))}
@@ -421,7 +440,7 @@ export function createBenchmarkPanel(root, { onNavigate = null } = {}) {
     loadAgain: false,
     pendingRefreshAll: false,
     activeRunId: "",
-    pollTimer: null,
+    refreshStream: null,
     tickTimer: null,
     renderSignature: "",
     forcedCaseIds: new Set(),
@@ -697,7 +716,7 @@ export function createBenchmarkPanel(root, { onNavigate = null } = {}) {
     syncDynamic();
   };
 
-  const load = async ({ refreshAll = false } = {}) => {
+  const load = async ({ refreshAll = false, runs = null } = {}) => {
     if (state.loading) {
       state.loadAgain = true;
       state.pendingRefreshAll = state.pendingRefreshAll || refreshAll;
@@ -730,7 +749,7 @@ export function createBenchmarkPanel(root, { onNavigate = null } = {}) {
             ) || "";
         }
       }
-      const runsResult = await api.benchmarkRuns(30);
+      const runsResult = runs ? { runs } : await api.benchmarkRuns(30);
       state.runs = runsResult.runs || [];
       const previousActiveId = state.activeRunId;
       const active =
@@ -777,28 +796,26 @@ export function createBenchmarkPanel(root, { onNavigate = null } = {}) {
         state.loadAgain = false;
         state.pendingRefreshAll = false;
         load({ refreshAll: nextRefreshAll });
-      } else {
-        schedulePoll();
       }
     }
   };
 
-  const schedulePoll = () => {
-    if (state.pollTimer) window.clearTimeout(state.pollTimer);
-    state.pollTimer = null;
-    if (!(state.runs || []).some((run) => isActiveStatus(run.status))) {
-      return;
-    }
-    state.pollTimer = window.setTimeout(() => {
-      load();
-    }, 2500);
+  const startRefreshStream = () => {
+    if (state.refreshStream) return;
+    state.refreshStream = subscribeRefresh(
+      "benchmark",
+      (_topic, payload) => {
+        if (!state.loading) {
+          load({ runs: payload?.snapshot?.runs || null });
+        }
+      },
+    );
   };
 
   const openRun = async (runId) => {
     try {
       state.selectedRun = await api.benchmarkRun(runId, true);
       render();
-      schedulePoll();
     } catch (error) {
       toast(error.message || "讀取 benchmark run 失敗。", "danger");
     }
@@ -948,9 +965,11 @@ export function createBenchmarkPanel(root, { onNavigate = null } = {}) {
         const input = panel()?.querySelector('input[name="label"]');
         if (input) input.value = state.config.label;
       }
+      startRefreshStream();
       load({ refreshAll: !state.referenceLoaded });
     },
     refresh() {
+      startRefreshStream();
       return load({ refreshAll: true });
     },
     destroy() {
@@ -958,7 +977,8 @@ export function createBenchmarkPanel(root, { onNavigate = null } = {}) {
       root.removeEventListener("submit", onSubmit);
       root.removeEventListener("input", onFormInput);
       root.removeEventListener("change", onFormInput);
-      if (state.pollTimer) window.clearTimeout(state.pollTimer);
+      if (state.refreshStream) state.refreshStream();
+      state.refreshStream = null;
       if (state.tickTimer) window.clearInterval(state.tickTimer);
     },
   };

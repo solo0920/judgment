@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from .config import Settings
 from .embeddings import EmbeddingError, OllamaEmbedder
+from .judgment_citations import law_citations_for_record
 from .judgment_index import index_coverage
 from .index_versions import active_version
 from .law_rag import (
@@ -30,7 +31,7 @@ from .law_rag import (
 )
 from .models import JudgmentDocument
 from .observability import trace_segment, traced
-from .rerank import RerankOutcome, RerankerClient
+from .rerank import RerankOutcome, RerankResult, RerankerClient
 from .vector_store import QdrantError, QdrantStore
 
 logger = logging.getLogger(__name__)
@@ -302,7 +303,13 @@ def _rerank_law_sources(
     law_sources: Sequence[Dict[str, Any]],
     article_limit: int,
 ) -> Tuple[List[Dict[str, Any]], RerankOutcome]:
-    """Rerank law/order article candidates separately from judgments."""
+    """Rerank law and order article candidates in separate groups.
+
+    Law articles and order articles have different citation conventions and
+    are retrieved from different source records.  Sending them through one
+    cross-encoder batch lets a long order outrank a directly applicable
+    statute, so each ``source_type`` gets its own rerank request and metadata.
+    """
 
     fallback = _trim_law_sources(law_sources, article_limit)
     client = RerankerClient(
@@ -318,80 +325,198 @@ def _rerank_law_sources(
             candidate_count=0,
         )
 
-    documents: List[str] = []
-    positions: List[Tuple[int, int]] = []
-    law_max_chars = max(200, int(settings.rag_law_rerank_max_chars))
+    groups: Dict[str, List[int]] = {}
     for source_index, source in enumerate(law_sources):
-        for article_index, article in enumerate(source.get("articles") or []):
-            # Score the provision text itself.  Repeating the law name in
-            # every document makes the cross-encoder over-weight generic
-            # articles that merely mention the statute.
-            text = str(article.get("article_content") or "").strip()
-            if not text:
-                text = (
-                    f"{source.get('law_name') or ''} "
-                    f"{article.get('article_no') or ''}"
-                ).strip()
-            if not text:
-                continue
-            documents.append(text[:law_max_chars])
-            positions.append((source_index, article_index))
-    if not documents:
-        return fallback, RerankOutcome(
-            status="empty",
-            model=settings.rerank_model,
-            candidate_count=0,
-        )
+        source_type = str(source.get("source_type") or "law").strip() or "law"
+        groups.setdefault(source_type, []).append(source_index)
 
-    outcome = client.rerank(
-        question,
-        documents,
-        top_n=len(documents),
-    )
-    if outcome.status != "ok":
-        return fallback, outcome
-
-    rerank_rank: Dict[Tuple[int, int], int] = {}
-    for rank, result in enumerate(outcome.results):
-        if 0 <= result.index < len(positions):
-            rerank_rank[positions[result.index]] = rank
+    law_max_chars = max(200, int(settings.rag_law_rerank_max_chars))
     explicit_refs = _extract_article_refs(question)
     weight = max(0.0, min(1.0, float(settings.rag_law_rerank_weight)))
-    rank_span = max(1, len(documents) - 1)
-    reranked: List[Dict[str, Any]] = []
-    for source_index, source in enumerate(law_sources):
-        articles = list(source.get("articles") or [])
-        ordered = sorted(
-            enumerate(articles),
-            key=lambda pair: (
-                0
-                if _article_ref_key(pair[1].get("article_no")) in explicit_refs
-                else 1,
-                # Blend normalized pre-rerank and rerank ranks.  The BM25 /
-                # hybrid order remains an anchor so the cross-encoder can
-                # improve the order without dropping the strongest matches.
-                (1.0 - weight) * (pair[0] / rank_span)
-                + weight
-                * (
-                    rerank_rank.get(
-                        (source_index, pair[0]),
-                        len(documents) + pair[0],
-                    )
-                    / rank_span
-                ),
-                pair[0],
-            ),
+    reranked_articles: Dict[int, List[Dict[str, Any]]] = {}
+    group_metadata: List[Dict[str, Any]] = []
+    merged_results: List[RerankResult] = []
+    merged_errors: List[str] = []
+    merged_usage: Dict[str, Any] = {}
+    statuses: List[str] = []
+    merged_candidates = 0
+    merged_selected = 0
+    merged_latency = 0
+    merged_model = ""
+    provider = ""
+    url = ""
+    fallback_used = False
+    flat_offset = 0
+
+    for source_type, source_indexes in groups.items():
+        documents: List[str] = []
+        positions: List[Tuple[int, int]] = []
+        for source_index in source_indexes:
+            source = law_sources[source_index]
+            for article_index, article in enumerate(
+                source.get("articles") or []
+            ):
+                # Score the provision text itself.  Repeating the law name in
+                # every document makes the cross-encoder over-weight generic
+                # articles that merely mention the statute.
+                text = str(article.get("article_content") or "").strip()
+                if not text:
+                    text = (
+                        f"{source.get('law_name') or ''} "
+                        f"{article.get('article_no') or ''}"
+                    ).strip()
+                if not text:
+                    continue
+                documents.append(text[:law_max_chars])
+                positions.append((source_index, article_index))
+
+        if not documents:
+            statuses.append("empty")
+            group_metadata.append(
+                {
+                    "source_type": source_type,
+                    "status": "empty",
+                    "model": settings.rerank_model,
+                    "provider": "",
+                    "url": "",
+                    "candidate_count": 0,
+                    "selected_count": 0,
+                    "latency_ms": 0,
+                    "fallback_used": False,
+                    "top_score": None,
+                    "errors": [],
+                }
+            )
+            for source_index in source_indexes:
+                reranked_articles[source_index] = list(
+                    law_sources[source_index].get("articles") or []
+                )[: max(0, int(article_limit))]
+            continue
+
+        outcome = client.rerank(
+            question,
+            documents,
+            top_n=len(documents),
         )
-        reranked.append(
+        statuses.append(outcome.status)
+        merged_candidates += outcome.candidate_count
+        merged_selected += outcome.selected_count
+        merged_latency += outcome.latency_ms
+        merged_errors.extend(outcome.errors)
+        if outcome.usage:
+            merged_usage.update(outcome.usage)
+        if not merged_model and outcome.model:
+            merged_model = outcome.model
+        if not provider and outcome.provider:
+            provider = outcome.provider
+        if not url and outcome.url:
+            url = outcome.url
+        fallback_used = fallback_used or outcome.fallback_used
+        for result in outcome.results:
+            merged_results.append(
+                RerankResult(
+                    index=flat_offset + result.index,
+                    score=result.score,
+                )
+            )
+        flat_offset += len(documents)
+        group_top_score = max(
+            (result.score for result in outcome.results),
+            default=None,
+        )
+        group_metadata.append(
             {
-                **source,
-                "articles": [
-                    article
-                    for _, article in ordered[: max(0, int(article_limit))]
-                ],
+                "source_type": source_type,
+                "status": outcome.status,
+                "model": outcome.model,
+                "provider": outcome.provider,
+                "url": outcome.url,
+                "candidate_count": outcome.candidate_count,
+                "selected_count": outcome.selected_count,
+                "latency_ms": outcome.latency_ms,
+                "fallback_used": outcome.fallback_used,
+                "top_score": (
+                    round(float(group_top_score), 4)
+                    if group_top_score is not None
+                    else None
+                ),
+                "errors": list(outcome.errors),
             }
         )
-    return reranked, outcome
+
+        if outcome.status != "ok":
+            for source_index in source_indexes:
+                reranked_articles[source_index] = list(
+                    law_sources[source_index].get("articles") or []
+                )[: max(0, int(article_limit))]
+            continue
+
+        rerank_rank: Dict[Tuple[int, int], int] = {}
+        for rank, result in enumerate(outcome.results):
+            if 0 <= result.index < len(positions):
+                rerank_rank[positions[result.index]] = rank
+        rank_span = max(1, len(documents) - 1)
+        for source_index in source_indexes:
+            articles = list(law_sources[source_index].get("articles") or [])
+            ordered = sorted(
+                enumerate(articles),
+                key=lambda pair: (
+                    0
+                    if _article_ref_key(pair[1].get("article_no"))
+                    in explicit_refs
+                    else 1,
+                    # Blend normalized pre-rerank and rerank ranks.  The BM25
+                    # / hybrid order remains an anchor so the cross-encoder
+                    # can improve the order without dropping the strongest
+                    # matches.
+                    (1.0 - weight) * (pair[0] / rank_span)
+                    + weight
+                    * (
+                        rerank_rank.get(
+                            (source_index, pair[0]),
+                            len(documents) + pair[0],
+                        )
+                        / rank_span
+                    ),
+                    pair[0],
+                ),
+            )
+            reranked_articles[source_index] = [
+                article
+                for _, article in ordered[: max(0, int(article_limit))]
+            ]
+
+    reranked: List[Dict[str, Any]] = [
+        {
+            **source,
+            "articles": reranked_articles.get(
+                source_index,
+                list(source.get("articles") or [])[: max(0, int(article_limit))],
+            ),
+        }
+        for source_index, source in enumerate(law_sources)
+    ]
+    if all(status == "empty" for status in statuses):
+        status = "empty"
+    elif any(status == "degraded" for status in statuses):
+        status = "degraded"
+    else:
+        status = "ok"
+    merged_results.sort(key=lambda result: (-result.score, result.index))
+    return reranked, RerankOutcome(
+        status=status,
+        results=merged_results,
+        model=merged_model or settings.rerank_model,
+        provider=provider,
+        url=url,
+        fallback_used=fallback_used,
+        latency_ms=merged_latency,
+        candidate_count=merged_candidates,
+        selected_count=merged_selected,
+        errors=merged_errors,
+        usage=merged_usage,
+        groups=group_metadata,
+    )
 
 
 def _embed_question(
@@ -673,6 +798,14 @@ def _build_citations(
             "score": round(float(hit.get("score") or 0), 4),
             "snippet": excerpt[:420],
             "matched_laws": list(record.matched_laws or []),
+            "law_citations": [
+                {
+                    "law_name": item["law_name"],
+                    "article_no": item["article_no"],
+                    "paragraphs": list(item.get("paragraphs") or []),
+                }
+                for item in law_citations_for_record(record)
+            ],
             "citation_count": int(record.citation_count or 0),
             "pdf_url": record.pdf_url or "",
         }
@@ -1149,6 +1282,11 @@ def answer_question(
         if rerank_law_articles
         else law_article_limit
     )
+    law_fusion = {
+        "method": "rrf",
+        "rrf_k": settings.rag_law_rrf_k,
+        "dense_weight": settings.rag_law_dense_weight,
+    }
     query_vector: Optional[List[float]] = None
     law_vector_hits: List[Dict[str, Any]] = []
     law_vector: Dict[str, Any] = {
@@ -1221,6 +1359,9 @@ def answer_question(
                     "stat_entity": stat_entity or None,
                     "article_limit": law_candidate_limit,
                     "law_vector_hits": len(law_vector_hits),
+                    "fusion": "rrf",
+                    "rrf_k": settings.rag_law_rrf_k,
+                    "dense_weight": settings.rag_law_dense_weight,
                 },
             ):
                 if stat_entity:
@@ -1234,6 +1375,8 @@ def answer_question(
                     stats=law_stats,
                     article_limit=law_candidate_limit,
                     vector_hits=law_vector_hits,
+                    dense_weight=settings.rag_law_dense_weight,
+                    rrf_k=settings.rag_law_rrf_k,
                 )
         except Exception as exc:
             logger.warning("law/order retrieval failed: %s", exc)
@@ -1270,9 +1413,18 @@ def answer_question(
                             "provider_name": law_rerank_outcome.provider,
                             "base_url": law_rerank_outcome.url,
                             "candidates": law_rerank_outcome.candidate_count,
-                            "selected": len(law_rerank_outcome.results),
+                            "selected": law_rerank_outcome.selected_count,
                             "fallback_used": law_rerank_outcome.fallback_used,
                             "errors": law_rerank_outcome.errors,
+                            "groups": [
+                                {
+                                    "source_type": group.get("source_type"),
+                                    "status": group.get("status"),
+                                    "candidates": group.get("candidate_count"),
+                                    "selected": group.get("selected_count"),
+                                }
+                                for group in law_rerank_outcome.groups
+                            ],
                         }
                     )
         except Exception as exc:
@@ -1344,6 +1496,7 @@ def answer_question(
                     "law_stats": law_stats or None,
                     "law_vector": law_vector,
                     "law_rerank": law_rerank,
+                    "law_fusion": law_fusion,
                     "hits": 0,
                 },
                 "coverage": coverage,
@@ -1403,6 +1556,7 @@ def answer_question(
         "law_article_limit": law_article_limit,
         "law_vector": law_vector,
         "law_rerank": law_rerank,
+        "law_fusion": law_fusion,
     }
     rerank_active = bool(
         settings.rag_rerank_enabled
@@ -1434,6 +1588,7 @@ def answer_question(
                 "law_hits": len(law_sources),
                 "law_vector": law_vector,
                 "law_rerank": law_rerank,
+                "law_fusion": law_fusion,
             }
             if not law_sources:
                 return _preview_fallback(
@@ -1453,6 +1608,7 @@ def answer_question(
                     "law_hits": len(law_sources),
                     "law_vector": law_vector,
                     "law_rerank": law_rerank,
+                    "law_fusion": law_fusion,
                 }
                 if not law_sources:
                     return _preview_fallback(
@@ -1506,6 +1662,7 @@ def answer_question(
             retrieval["law_article_limit"] = law_article_limit
             retrieval["law_vector"] = law_vector
             retrieval["law_rerank"] = law_rerank
+            retrieval["law_fusion"] = law_fusion
             retrieval["candidate_k"] = candidate_k
         except (EmbeddingError, QdrantError) as exc:
             retrieval = {
@@ -1514,6 +1671,7 @@ def answer_question(
                 "law_hits": len(law_sources),
                 "law_vector": law_vector,
                 "law_rerank": law_rerank,
+                "law_fusion": law_fusion,
             }
             if not law_sources:
                 return _preview_fallback(

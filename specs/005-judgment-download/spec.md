@@ -63,7 +63,7 @@
 
 判決下載頁面顯示 1996-01 到最新月份的月曆表。第一列是最新年度，最後一列是 1996；每列有 1–12 月。綠色表示最新版已下載到 `/data`，灰色表示本機仍是舊版，紅色表示缺少該月份判決資料。表格旁顯示三色統計與重新整理按鈕。執行流程時，目前正在檢查或下載的月份必須即時標示，執行按鈕區塊下方顯示該月份、檔名、進度條、百分比與已下載／總大小。
 
-**Independent Test**: 以目前 manifest 開啟判決下載頁，確認年度列由最新年份到 1996、每列 12 個月；2026 年 1–8 月可顯示狀態，9–12 月為空白；三色統計與 `download_manifest.json`／`raw_rar` 掃描結果一致。下載新月份後重新整理，確認該月份由紅轉綠。執行流程時確認月份表格會標示目前月份，進度區顯示檔名與大小變化，且輪詢期間表格不會被重繪或跳動。
+**Independent Test**: 以目前 manifest 開啟判決下載頁，確認年度列由最新年份到 1996、每列 12 個月；2026 年 1–8 月可顯示狀態，9–12 月為空白；三色統計與 `download_manifest.json`／`raw_rar` 掃描結果一致。下載新月份後重新整理，確認該月份由紅轉綠。執行流程時確認月份表格會標示目前月份，進度區顯示檔名與大小變化，且 SSE 進度推送期間表格不會被重繪或跳動。
 
 **Acceptance Scenarios**:
 
@@ -75,9 +75,9 @@
 6. **Given** 使用者手動把某月份檔案放入 raw_rar，**When** 按表格的重新整理，**Then** 系統重新掃描 raw_rar，最新檔變綠色、舊版變灰色，不需重跑下載流程。
 7. **Given** 下載流程更新 manifest，**When** 使用者按重新整理，**Then** 表格數字顏色與統計更新。
 8. **Given** 使用者將滑鼠移到某個月份，**When** 該月份有 fileset，**Then** 顯示該月份檔案下載連結；下載連結使用 manifest 記錄的 fileset ID，不需要自行輸入；預設非 API 時段也可使用，但 proxy 一次只允許一個下載。
-9. **Given** 判決下載正在檢查或下載某月份，**When** 處理頁輪詢狀態，**Then** 該月份儲存格加上處理中標示，執行按鈕區塊顯示月份、檔名、進度條、百分比與已下載／總大小。
+9. **Given** 判決下載正在檢查或下載某月份，**When** 處理頁收到後端 SSE 進度推送，**Then** 該月份儲存格加上處理中標示，執行按鈕區塊顯示月份、檔名、進度條、百分比與已下載／總大小。
 10. **Given** 流程完成、中止或進度資料已失效，**When** 處理頁更新，**Then** 清除處理中標示與進度區，不顯示過期的下載進度。
-11. **Given** 使用者在流程執行中檢視月份表，**When** 狀態每 2 秒更新，**Then** 只更新月份狀態與進度節點，不重繪整個工作流程面板，表格捲動位置保持不變。
+11. **Given** 使用者在流程執行中檢視月份表，**When** 後端透過 SSE 推送狀態，**Then** 只更新月份狀態與進度節點，不重繪整個工作流程面板，表格捲動位置保持不變。
 
 ### User Story 5 - 可追溯的 manifest 與跨日續傳 (Priority: P1)
 
@@ -138,13 +138,13 @@
 - **FR-019**: 月份下載連結必須使用 `months[].latest_fileset_id`，經後端帶 Token 的 proxy 下載，不得把密碼或 Token 暴露給前端。
 - **FR-020**: 月份表 hover 連結預設在非 API 時段也可用；只有在 `JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS=false` 時才限制 00:00–06:00，非時段顯示明確錯誤。手動 proxy 一次只允許一個作用中的下載，第二個請求回 409。
 - **FR-021**: 下載流程必須將目前階段、月份、檔名、fileset、已下載位元組、總位元組與百分比寫入可讀取的進度狀態；狀態 API 必須回傳該進度，且不得包含帳密或 Token。
-- **FR-022**: 處理頁輪詢時必須以區域更新方式維護月份表與進度區，不得因進度或月份狀態變更而重繪整個工作流程面板或重設表格捲動位置。
+- **FR-022**: 處理頁收到後端 SSE 進度推送時必須以區域更新方式維護月份表與進度區，不得因進度或月份狀態變更而重繪整個工作流程面板或重設表格捲動位置。前端 MUST NOT 以 timer 或定期查詢取得下載進度。
 - **FR-023**: 進度狀態必須在流程正常結束或中止後清除；程序已不存在或進度逾時時，狀態 API 不得回傳過期進度。
 - **FR-024**: 下載佇列必須優先處理 pending／gray 月份（依月份由舊到新）；`backfill` 必須記錄 `pending_months`、`pending_count`、`resume_from_month`、`resume_from_fileset_id`、`complete` 與上次停止原因；每次完成或失敗一個月份後立即持久化。
 - **FR-025**: 待補齊月份清空後才可驗證綠色月份，驗證順序由最新 fileset 往回；`backfill.verification` 必須記錄 `status`、`next_fileset_id`、`next_month`、`cycle_started_at`、`verified_count`、`completed_at` 與 `last_error`。部分完成保留游標；同日已完成則跳過。
 - **FR-026**: 單一 fileset 的 metadata 或下載錯誤必須隔離，最多重試 `2` 次；失敗月份留在 pending 並記錄於 `backfill.failures`（fileset、檔名、嘗試次數、錯誤、時間），其他月份繼續處理，run 標記 partial。
 - **FR-027**: 下載中斷時必須保留 `.part` 與 `<檔名>.part.json` validator sidecar；下次下載若 fileset、`Content-Length`、ETag／Last-Modified 相符，使用 `Range` 與 `If-Range` 續傳。伺服器回 206 時附加並驗證長度；回 200 或 validator 不符時丟棄 `.part` 從零下載；成功後才原子取代正式檔並清除 sidecar。2026-11-11 實測官方端點忽略 Range 並回 200，因此目前實際行為是重新下載。
-- **FR-028**: 狀態 API 必須回傳 `backfill` 摘要（待補齊數量、續傳月份／fileset、驗證狀態、上次停止原因、失敗數），並以即時掃描 `raw_rar` 的結果修正 pending；處理頁必須顯示這些資訊且輪詢時只局部更新，不重繪月份表。
+- **FR-028**: 狀態 API 必須回傳 `backfill` 摘要（待補齊數量、續傳月份／fileset、驗證狀態、上次停止原因、失敗數），並以即時掃描 `raw_rar` 的結果修正 pending；處理頁必須顯示這些資訊，且收到後端 SSE 推送時只局部更新，不重繪月份表。
 - **FR-029**: CLI 結束碼必須區分完成（`0`）、可續傳的部分完成（`3`，無檔案錯誤）、失敗（`1`）與嚴格時段模式下不在 API 時段（`2`）；`workflow_runner` 必須把 `3` 記為 `partial`，不得記為 `failed`。
 - **FR-030**: `JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS` 預設 `true`；狀態 API 必須回傳 `off_hours_enabled`，處理頁據此顯示下載時段提示。`--require-window` 必須能覆寫設定，強制只在 00:00–06:00 下載。
 - **FR-016**: log 不得輸出密碼或完整 Token。
@@ -193,6 +193,6 @@
 ## Out of Scope
 
 - 自動依 Delete-Infor CSV 刪除 PostgreSQL、Parquet 或 Qdrant 中的判決。
-- 將下載流程加入「資料更新（完整）」的自動步驟；目前為獨立 workflow。
+- 將下載流程加入頁首「資料更新」的自動步驟；目前為獨立 workflow。
 - 非裁判書分類的下載。
 - PDF 中另一套 `data.judicial.gov.tw/jdg/api` 的 JList／JDoc 流程。

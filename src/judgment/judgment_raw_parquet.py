@@ -95,6 +95,82 @@ def _manifest_matches(
     )
 
 
+def find_reusable_raw_parquets(
+    data_dir: Path,
+    archives: Iterable[Path],
+) -> Dict[Path, Dict[str, Any]]:
+    """Return reusable raw Parquet backups from one manifest scan.
+
+    The scan compares each manifest's recorded archive path, size and mtime
+    with the current archive.  A newly downloaded archive therefore misses
+    the match and is processed again, while unchanged archives are returned
+    for the caller to skip.
+    """
+
+    archive_list = [Path(item).expanduser().resolve() for item in archives]
+    if not archive_list:
+        return {}
+    root = raw_judgment_root(data_dir)
+    if not root.is_dir():
+        return {}
+    by_path = {str(archive): archive for archive in archive_list}
+    latest: Dict[str, Tuple[float, Dict[str, Any], Path, Path]] = {}
+    for manifest_path in root.glob("*/*/*/manifest.json"):
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        try:
+            if int(payload.get("version") or 0) < RAW_SCHEMA_VERSION:
+                continue
+        except (TypeError, ValueError):
+            continue
+        archive_path = str(payload.get("archive_path") or "")
+        archive = by_path.get(archive_path)
+        if archive is None:
+            continue
+        try:
+            stat = archive.stat()
+        except OSError:
+            continue
+        if not _manifest_matches(
+            payload,
+            archive=archive,
+            size_bytes=int(stat.st_size),
+            mtime_ns=int(stat.st_mtime_ns),
+        ):
+            continue
+        raw_path = manifest_path.parent / "raw.parquet"
+        if not raw_path.is_file():
+            continue
+        try:
+            manifest_mtime = manifest_path.stat().st_mtime
+        except OSError:
+            manifest_mtime = 0.0
+        current = latest.get(archive_path)
+        if current is None or manifest_mtime > current[0]:
+            latest[archive_path] = (
+                manifest_mtime,
+                payload,
+                raw_path,
+                manifest_path,
+            )
+    reusable: Dict[Path, Dict[str, Any]] = {}
+    for archive_path, (_, payload, raw_path, manifest_path) in latest.items():
+        reusable[by_path[archive_path]] = {
+            "path": raw_path,
+            "manifest_path": manifest_path,
+            "rows": int(payload.get("row_count") or 0),
+            "size_bytes": int(payload.get("compressed_bytes") or 0),
+            "reused": True,
+            "duration_ms": 0,
+            "write_ms": 0,
+        }
+    return reusable
+
+
 def find_reusable_raw_parquet(
     data_dir: Path,
     archive: Path,
@@ -494,6 +570,7 @@ __all__ = [
     "RAW_SCHEMA_VERSION",
     "count_raw_manifests",
     "find_reusable_raw_parquet",
+    "find_reusable_raw_parquets",
     "iter_raw_judgment_json",
     "latest_raw_manifest",
     "latest_raw_manifests",

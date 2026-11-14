@@ -14,6 +14,8 @@ from judgment.config import Settings
 from judgment.embeddings import EmbeddingError
 from judgment.legal_index import (
     _embed_texts,
+    _processing_progress_callback,
+    assess_legal_index_freshness,
     build_legal_article_index,
     build_source_snapshot,
     legal_index_status,
@@ -21,6 +23,7 @@ from judgment.legal_index import (
     read_legal_articles,
 )
 from judgment.models import Base
+from judgment.processing_state import ProcessingStateStore
 
 
 def _settings(**overrides) -> Settings:
@@ -325,6 +328,66 @@ def test_build_legal_index_full_then_incremental(tmp_path: Path) -> None:
     assert unchanged["version"]["version_id"] == second["version"]["version_id"]
 
 
+def test_legal_index_progress_callback_updates_parent_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    store = ProcessingStateStore()
+    run_id = store.start_run(
+        branch="law",
+        kind="legal_index",
+        title="法規／命令索引",
+        stages=["legal_qdrant"],
+        pid=1,
+    )
+    store.start_stage(run_id, "legal_qdrant", total=10)
+    callback = _processing_progress_callback(run_id)
+    assert callback is not None
+
+    callback(4, 10)
+    stage = store.read()["runs"][0]["stages"]["legal_qdrant"]
+    assert stage["current"] == 4
+    assert stage["total"] == 10
+    assert stage["message"] == "索引建置中：4 / 10 條。"
+
+    callback(10, 10)
+    stage = store.read()["runs"][0]["stages"]["legal_qdrant"]
+    assert stage["current"] == 10
+    assert stage["total"] == 10
+
+
+def test_build_legal_index_reports_copy_progress(tmp_path: Path) -> None:
+    _write_laws(tmp_path, _laws())
+    session_factory = _session_factory()
+    settings = _settings(law_data_dir=tmp_path)
+    store = FakeLegalStore()
+    embedder = FakeLegalEmbedder()
+    build_legal_article_index(
+        session_factory=session_factory,
+        settings=settings,
+        store=store,
+        embedder=embedder,
+        records=read_legal_articles(tmp_path),
+    )
+    _write_laws(tmp_path, _laws("銀行負責人及職員不得收受佣金、酬金。"))
+    progress = []
+    build_legal_article_index(
+        session_factory=session_factory,
+        settings=settings,
+        store=store,
+        embedder=embedder,
+        records=read_legal_articles(tmp_path),
+        mode="incremental",
+        on_progress=lambda current, total: progress.append((current, total)),
+    )
+
+    assert progress
+    assert progress[0][1] == 3
+    assert progress[-1] == (3, 3)
+
+
 def test_embed_texts_splits_on_context_length_error() -> None:
     class SplittingEmbedder:
         configured = True
@@ -392,6 +455,57 @@ def test_legal_index_status_reports_alias_and_summary(tmp_path: Path) -> None:
     snapshot = status["active_version"]["source_snapshot"]
     assert snapshot["article_count"] == 3
     assert "laws" not in snapshot
+
+
+def test_legal_index_freshness_detects_counts_and_newer_source(tmp_path: Path) -> None:
+    _write_laws(tmp_path, _laws())
+    session_factory = _session_factory()
+    settings = _settings(law_data_dir=tmp_path)
+    store = FakeLegalStore()
+    build_legal_article_index(
+        session_factory=session_factory,
+        settings=settings,
+        store=store,
+        embedder=FakeLegalEmbedder(),
+        records=read_legal_articles(tmp_path),
+    )
+    status = legal_index_status(
+        session_factory=session_factory,
+        settings=settings,
+        store=store,
+    )
+    active = status["active_version"]
+    captured = active["source_snapshot"]["captured_at"]
+
+    fresh = assess_legal_index_freshness(
+        active_version=active,
+        points_count=status["points_count"],
+        current_law_count=2,
+        current_article_count=3,
+        latest_source_at=captured,
+    )
+    assert fresh["status"] == "fresh"
+    assert fresh["stale"] is False
+
+    stale = assess_legal_index_freshness(
+        active_version=active,
+        points_count=status["points_count"],
+        current_law_count=3,
+        current_article_count=3,
+        latest_source_at=captured,
+    )
+    assert stale["status"] == "stale"
+    assert "law_count_mismatch" in stale["reasons"]
+
+    newer = assess_legal_index_freshness(
+        active_version=active,
+        points_count=status["points_count"],
+        current_law_count=2,
+        current_article_count=3,
+        latest_source_at="2099-01-01T00:00:00+00:00",
+    )
+    assert newer["status"] == "stale"
+    assert "newer_source_version" in newer["reasons"]
 
 
 def test_next_collection_name_avoids_qdrant_orphans() -> None:

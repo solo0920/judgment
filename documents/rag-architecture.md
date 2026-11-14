@@ -35,6 +35,7 @@ RAG **不是**直接把問題丟給 LLM。LLM 只會看到法規／命令條文�
 | 04a | RAG | 法規／命令名稱比對 | `find_law_records()`／`law_sources_for_question()`：`law_documents`、簡稱 alias、概念展開 |
 | 04b | RAG | 讀取法規條文與沿革 | `load_law_contents()`：最新法規 `raw_parquet` 的 `law_articles`、`law_histories` |
 | 04c | RAG | 結構化問題或引用統計 | 條文數／制定日期／相關法規／引用統計 → 直接回傳 `answer_source=structured`、`retrieval.status=law_only` |
+| 04d | RAG | 法規／命令向量檢索 | `_embed_question()` 共用查詢向量、`_search_legal_articles()`：alias `legal_articles_current`；BM25／概念排名與 dense 排名以 RRF 融合，再分 `law`／`order` 群組 rerank |
 | 05 | RAG | 讀取索引覆蓋率 | `index_coverage()`：以 active physical collection／version 過濾 `judgment_vector_index` |
 | 06 | RAG | Qdrant 前置檢查 | `QdrantStore.collection_info()`：只檢查 active alias／collection；沒有法規來源且 Qdrant 不可用時才進 `preview` |
 | 07 | RAG | 將問題轉為查詢向量 | `OllamaEmbedder.embed_query()` → `POST /api/embed` |
@@ -45,7 +46,7 @@ RAG **不是**直接把問題丟給 LLM。LLM 只會看到法規／命令條文�
 | 12 | RAG | LLM 生成 | Ollama `POST /api/chat`；一般模式 `stream=true` 逐 token 回傳，測試模式依模型逐一生成 |
 | 13 | RAG | 引用驗證 | `_valid_citation_markers()`：`[n]` 必須在 `1..N`；失敗時以 strict prompt 重試一次，再失敗才降級 |
 | 14 | 前端 | 顯示回答 | `renderAnswer()`：狀態徽章、回答、notice、耗時 |
-| 15 | 前端 | 顯示引用卡 | 判決卡：案號、法院、裁判日期、相似度、命中法規、片段、PDF；法規／命令卡：條文數、制定日期、條文、引用統計、來源 |
+| 15 | 前端 | 顯示引用卡 | 判決卡：案號、法院、裁判日期、相似度、實際引用法規／條號／項次、片段、PDF；法規／命令卡：條文數、制定日期、條文、引用統計、來源。上方已顯示法規檢索結果時，不再重複下方法規來源卡。 |
 | 16 | RAG | 組裝回應 JSON 或 SSE | `status`、`answer`、`notice`、`judgments`、`law_sources`、`law_answer`、`law_framework`、`retrieval`、`coverage`、`duration_ms`；串流另有 `partial`／`token`／`result` |
 | — | 前端 | 側欄與歷史 | `GET /api/status` 取 hero 索引資訊；IndexedDB 存最近提問 |
 
@@ -104,6 +105,13 @@ Accept: text/event-stream
       "score": 0.6123,
       "snippet": "原告主張……",
       "matched_laws": ["銀行法"],
+      "law_citations": [
+        {
+          "law_name": "銀行法",
+          "article_no": "第125條",
+          "paragraphs": ["第1項", "第3項"]
+        }
+      ],
       "citation_count": 3,
       "pdf_url": "https://data.judicial.gov.tw/..."
     }
@@ -157,6 +165,7 @@ Accept: text/event-stream
 補充：
 
 - `judgments` 是 RAG 的判決引用；`law_sources` 是法規／命令引用，包含 metadata、條文、制定日期與引用統計；`law_answer` 與 `law_framework` 是法規摘要與責任架構。一般 RAG 模式的最終回應 `citations` 固定為空陣列；只有 `preview` fallback 會放法規 metadata。
+- `judgments[].law_citations` 是該判決 `citations` 欄位的實際引用明細，包含 `law_name`、`article_no` 與判決全文中緊接的 `paragraphs`（例如 `第125條`＋`第1項、第3項`）；前端據此顯示可點擊的「法規＋條號＋項次」chips，而不是只顯示法規名稱。
 - `answer_source` 為 `structured` 時，回答由法規／命令 metadata、條文與判決引用統計直接整理；為 `llm` 時由模型生成；為 `retrieval` 時只顯示檢索結果。SSE partial 事件另外使用 `partial`／`streaming`。
 - `retrieval.hits` 是 Qdrant 原始命中數；`unique_judgments` 是去重後的 Qdrant 命中數，計算時尚未扣掉 PostgreSQL 已不存在的判決。
 - `judgments[].snippet` 是 `extract_excerpt()` 從 PostgreSQL 全文挑出的片段（最多 420 字），不是 Qdrant payload 的索引預覽。
@@ -456,7 +465,7 @@ sequenceDiagram
 
 1. **全量索引已完成**：目前 `judgment_vector_index` 與 Qdrant 為 738,743／738,743（100%）；正式查詢使用 `judgments_current` alias，新版本以 Blue-Green collection 建置。
 2. **文件級向量而非片段級**：每筆判決只取 head/tail 1,600 字作為 embedding，判決中段的細節可能不會被檢索到。
-3. **沒有 reranker**：Qdrant cosine 分數直接決定候選順序；沒有 cross-encoder 或 bge-reranker 重新排序。
+3. **Reranker 只覆蓋候選排序**：判決候選與法規／命令候選由 `bge-reranker-v2-m3` 重新排序，法規與命令再依 `source_type` 分組；關閉、逾時或服務失敗時保留檢索原順序。檢索本身仍是 BM25／dense（RRF）與 Qdrant cosine，不是端到端學習式檢索。
 4. **引用驗證是結構驗證**：只檢查 `[n]` 是否落在範圍內、拒答是否含案號；不驗證每個句子是否真的由對應片段支持。
 5. **LLM 生成速度與品質權衡**：快速 profile（`gemma3:4b`、top_k=4、4,000 字上下文、num_ctx=4096）實測整體 RAG 約 2–5 秒；切回 `gemma3:27b` 約 30–50 秒。一般模式前端等待上限為 300 秒，測試模式則對 embedding 與 LLM 使用無 timeout。4B 的複雜推理品質可能低於 27B，可透過 `LLM_MODEL` 切換。
 6. **串流回應**：API 使用 SSE `partial`／`token`／`result`，前端先顯示法規結果，再逐字顯示 LLM 回答。

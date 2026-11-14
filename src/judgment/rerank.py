@@ -34,6 +34,7 @@ class RerankOutcome:
     selected_count: int = 0
     errors: List[str] = field(default_factory=list)
     usage: Dict[str, Any] = field(default_factory=dict)
+    groups: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         top_scores = [round(result.score, 4) for result in self.results[:10]]
@@ -50,6 +51,7 @@ class RerankOutcome:
             "scores": top_scores,
             "errors": list(self.errors),
             "usage": dict(self.usage),
+            "groups": [dict(group) for group in self.groups],
         }
 
 

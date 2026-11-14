@@ -15,6 +15,7 @@ from judgment.index_versions import activate_version, recipe_version, rollback_v
 from judgment.judgment_index import (
     build_index_version,
     history_point_id,
+    index_staleness,
     vector_point_id,
 )
 from judgment.models import (
@@ -230,6 +231,62 @@ def _seed_legacy_version(session_factory, settings):
             )
         )
         session.commit()
+
+
+def test_index_staleness_detects_missing_changed_and_stale(tmp_path: Path) -> None:
+    session_factory = _session_factory()
+    settings = _settings(tmp_path)
+    _seed_legacy_version(session_factory, settings)
+    with session_factory() as session:
+        version_id = session.scalar(
+            select(JudgmentIndexVersion.version_id).order_by(
+                JudgmentIndexVersion.version_id.desc()
+            )
+        )
+
+    initial = index_staleness(
+        session_factory,
+        collection="judgments_v001",
+        model=settings.embedding_model,
+        version_id=version_id,
+    )
+    assert initial["missing_judgments"] == 1
+    assert initial["changed_judgments"] == 0
+    assert initial["stale_judgments"] == 0
+    assert initial["pending_judgments"] == 1
+
+    with session_factory() as session:
+        first = session.scalars(
+            select(JudgmentDocument).where(JudgmentDocument.jid == "J-1")
+        ).one()
+        first.content_hash = "x" * 64
+        session.commit()
+
+    changed = index_staleness(
+        session_factory,
+        collection="judgments_v001",
+        model=settings.embedding_model,
+        version_id=version_id,
+    )
+    assert changed["changed_judgments"] == 1
+    assert changed["missing_judgments"] == 1
+    assert changed["pending_judgments"] == 2
+
+    with session_factory() as session:
+        first = session.scalars(
+            select(JudgmentDocument).where(JudgmentDocument.jid == "J-1")
+        ).one()
+        first.is_current = False
+        session.commit()
+
+    stale = index_staleness(
+        session_factory,
+        collection="judgments_v001",
+        model=settings.embedding_model,
+        version_id=version_id,
+    )
+    assert stale["stale_judgments"] == 1
+    assert stale["changed_judgments"] == 0
 
 
 def test_build_version_reuses_unchanged_and_embeds_new(tmp_path: Path) -> None:

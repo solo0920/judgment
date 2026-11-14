@@ -37,6 +37,18 @@
           if (theme && allowed.indexOf(theme) !== -1) {
             document.documentElement.dataset.theme = theme;
           }
+          var appearance = localStorage.getItem("judgment.appearance");
+          if (["light", "dark", "system"].indexOf(appearance) === -1) {
+            appearance = "light";
+          }
+          var resolvedAppearance =
+            appearance === "system"
+              ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+              : appearance;
+          document.documentElement.dataset.appearance = resolvedAppearance;
+          document.documentElement.dataset.appearanceMode = appearance;
         } catch (error) {
           /* localStorage may be unavailable */
         }
@@ -111,26 +123,20 @@
         </nav>
 
         <div class="header-actions">
-          <div class="style-picker" id="style-picker">
-            <button
-              type="button"
-              class="style-trigger"
-              id="style-trigger"
-              aria-label="選擇介面風格"
-              title="選擇介面風格"
-              aria-haspopup="true"
-              aria-expanded="false"
-              aria-controls="style-menu"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h4a5 5 0 0 0 0-10h-4Z"/>
-                <circle cx="7.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/>
-                <circle cx="10" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
-                <circle cx="14.5" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
-              </svg>
-            </button>
-            <div class="style-menu" id="style-menu" role="menu" aria-label="選擇首頁風格" hidden></div>
-          </div>
+          <button
+            type="button"
+            class="settings-trigger"
+            id="settings-trigger"
+            aria-label="設定選項"
+            title="設定選項"
+            aria-expanded="false"
+            aria-controls="settings-sidebar"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-2.8-2.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2.8-2.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 2.8 2.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4h-.1a1.7 1.7 0 0 0-1.6 1Z"/>
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -181,6 +187,40 @@
         </div>
       </footer>
     </div>
+
+    <aside
+      class="settings-sidebar"
+      id="settings-sidebar"
+      aria-labelledby="settings-sidebar-title"
+      aria-hidden="true"
+      inert
+    >
+      <div class="settings-sidebar-head">
+        <div>
+          <div class="eyebrow">PREFERENCES</div>
+          <h2 id="settings-sidebar-title">設定選項</h2>
+        </div>
+        <button
+          class="settings-close"
+          id="settings-close"
+          type="button"
+          aria-label="關閉設定選項"
+          title="關閉設定選項"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 6 12 12M18 6 6 18"/>
+          </svg>
+        </button>
+      </div>
+      <div
+        class="settings-options"
+        id="settings-options"
+        role="tablist"
+        aria-label="設定分類"
+      ></div>
+      <div class="settings-divider" role="separator"></div>
+      <div class="settings-panel" id="settings-panel" role="tabpanel"></div>
+    </aside>
 
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="./assets/js/app.js"></script>

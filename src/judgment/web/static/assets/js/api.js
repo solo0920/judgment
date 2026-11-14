@@ -142,6 +142,60 @@ export function apiUrl(path, base = getApiBase()) {
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+export function subscribeRefresh(
+  topics,
+  onRefresh,
+  { onError = null, onProgress = null } = {},
+) {
+  const list = (Array.isArray(topics) ? topics : [topics])
+    .map((topic) => String(topic || "").trim())
+    .filter(Boolean);
+  if (!list.length || typeof EventSource === "undefined") {
+    return () => {};
+  }
+  const source = new EventSource(
+    apiUrl(`/api/events/stream?topic=${encodeURIComponent(list.join(","))}`),
+  );
+  let opened = 0;
+  source.onopen = () => {
+    opened += 1;
+  };
+  const handleRefresh = (event) => {
+    let payload = {};
+    try {
+      payload = JSON.parse(event.data || "{}");
+    } catch (error) {
+      payload = {};
+    }
+    // The initial event can carry the authoritative snapshot.  Topics that
+    // only send a refresh notification still skip the first event after the
+    // page's initial load, as before.
+    if (payload.initial && opened <= 1 && !payload.snapshot) return;
+    onRefresh?.(payload.topic || list[0], payload);
+  };
+  const handleProgress = (event) => {
+    let payload = {};
+    try {
+      payload = JSON.parse(event.data || "{}");
+    } catch (error) {
+      payload = {};
+    }
+    onProgress?.(payload.topic || list[0], payload);
+  };
+  source.addEventListener("refresh", handleRefresh);
+  source.addEventListener("progress", handleProgress);
+  source.onerror = () => {
+    // EventSource reconnects automatically and the backend resends the
+    // current refresh events as soon as the stream is re-established.
+    onError?.();
+  };
+  return () => {
+    source.removeEventListener("refresh", handleRefresh);
+    source.removeEventListener("progress", handleProgress);
+    source.close();
+  };
+}
+
 function networkErrorMessage(base) {
   const where = base ? `（${base}）` : "";
   return `無法連線到伺服器${where}，請確認後端是否啟動，或到「系統測試」頁設定後端位址。`;
@@ -624,6 +678,13 @@ export const api = {
   processing() {
     return request("/api/processing", {
       timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  processingActive() {
+    return request("/api/processing/active", {
+      timeout: 3000,
       trackClient: false,
     });
   },

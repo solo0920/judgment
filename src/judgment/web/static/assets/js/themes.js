@@ -1,5 +1,3 @@
-import { escapeHtml, icon } from "./utils.js";
-
 const STORAGE_KEY = "judgment.theme";
 export const DEFAULT_THEME = "nvidia";
 
@@ -8,14 +6,14 @@ export const THEMES = [
     id: "vercel",
     name: "Vercel",
     description: "黑白精準 · Geist · 幾何留白",
-    swatches: ["#171717", "#0070f3", "#fafafa"],
+    swatches: ["#0070f3", "#171717", "#fafafa"],
     metaColor: "#ffffff",
   },
   {
     id: "apple",
     name: "Apple",
     description: "SF Pro · 大圓角 · 沉浸留白",
-    swatches: ["#1d1d1f", "#0071e3", "#f5f5f7"],
+    swatches: ["#0066cc", "#1d1d1f", "#f5f5f7"],
     metaColor: "#fbfbfd",
   },
   {
@@ -50,21 +48,21 @@ export const THEMES = [
     id: "linear",
     name: "Linear",
     description: "深空黑 · 靛紫 · 極簡線條",
-    swatches: ["#5e6ad2", "#010102", "#e8e8ec"],
+    swatches: ["#17171d", "#5e6ad2", "#e8e8ec"],
     metaColor: "#010102",
   },
   {
     id: "figma",
     name: "Figma",
     description: "多彩色塊 · 協作感 · 藍色焦點",
-    swatches: ["#f24e1e", "#a259ff", "#0acf83"],
+    swatches: ["#0d99ff", "#a259ff", "#0acf83"],
     metaColor: "#ffffff",
   },
   {
     id: "notion",
     name: "Notion",
     description: "暖白紙張 · 襯線標題 · 知識庫",
-    swatches: ["#191918", "#0075de", "#f7f6f3"],
+    swatches: ["#0075de", "#191918", "#f7f6f3"],
     metaColor: "#ffffff",
   },
   {
@@ -117,102 +115,4 @@ export function applyTheme(id, { persist = true } = {}) {
 
   window.dispatchEvent(new CustomEvent("judgment:theme", { detail: { theme: theme.id } }));
   return theme;
-}
-
-function renderThemeMenu(menu) {
-  const options = THEMES.map((theme, index) => {
-    const swatches = theme.swatches
-      .map((color) => `<i style="--swatch:${escapeHtml(color)}"></i>`)
-      .join("");
-    return `<button class="theme-option" type="button" role="menuitemradio"
-        data-theme-id="${theme.id}" aria-checked="false">
-        <span class="theme-option-index">${String(index + 1).padStart(2, "0")}</span>
-        <span class="theme-option-body">
-          <span class="theme-option-name">${escapeHtml(theme.name)}</span>
-          <span class="theme-option-desc">${escapeHtml(theme.description)}</span>
-        </span>
-        <span class="theme-option-swatches" aria-hidden="true">${swatches}</span>
-        <span class="theme-option-check" aria-hidden="true">${icon("check", 14)}</span>
-      </button>`;
-  }).join("");
-
-  menu.innerHTML = `<div class="style-menu-head">
-      <strong>選擇介面風格</strong>
-      <span>10 種科技品牌語言</span>
-    </div>${options}`;
-}
-
-export function initThemePicker() {
-  const picker = document.getElementById("style-picker");
-  const trigger = document.getElementById("style-trigger");
-  const menu = document.getElementById("style-menu");
-  if (!picker || !trigger || !menu) return;
-
-  renderThemeMenu(menu);
-  applyTheme(getStoredTheme(), { persist: false });
-
-  const options = () => Array.from(menu.querySelectorAll(".theme-option"));
-
-  const open = () => {
-    menu.hidden = false;
-    trigger.setAttribute("aria-expanded", "true");
-    const active = menu.querySelector(".theme-option.is-active") || options()[0];
-    if (active) active.focus();
-  };
-
-  const close = ({ restoreFocus = false } = {}) => {
-    if (menu.hidden) return;
-    menu.hidden = true;
-    trigger.setAttribute("aria-expanded", "false");
-    if (restoreFocus) trigger.focus();
-  };
-
-  trigger.addEventListener("click", () => {
-    if (menu.hidden) open();
-    else close({ restoreFocus: true });
-  });
-
-  trigger.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      open();
-    }
-  });
-
-  menu.addEventListener("click", (event) => {
-    const option = event.target.closest(".theme-option");
-    if (!option) return;
-    applyTheme(option.dataset.themeId);
-    close({ restoreFocus: true });
-  });
-
-  menu.addEventListener("keydown", (event) => {
-    const items = options();
-    const index = items.indexOf(document.activeElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close({ restoreFocus: true });
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const delta = event.key === "ArrowDown" ? 1 : -1;
-      const next = items[(index + delta + items.length) % items.length];
-      if (next) next.focus();
-      return;
-    }
-    if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      const next = event.key === "Home" ? items[0] : items[items.length - 1];
-      if (next) next.focus();
-    }
-  });
-
-  document.addEventListener("pointerdown", (event) => {
-    if (!picker.contains(event.target)) close();
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") close();
-  });
 }

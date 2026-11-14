@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Status**: Implemented (MVP, standalone deployment, law/judgment detail, performance Flow report, test-mode multi-model runs, live test flowchart, processing workflows and live download progress, law/judgment data categories, judgment court normalization, versioned judgment vector index/RAG with law/order sources, question bank and benchmark management, Ollama host management, judgment raw-Parquet full-text link, NVIDIA default theme)
+**Status**: Implemented (MVP, standalone deployment, law/judgment detail, performance Flow report, test-mode multi-model runs, live test flowchart, processing workflows and live download progress, law/judgment data categories, judgment court normalization, versioned judgment vector index/RAG with law/order sources, RRF law/order hybrid retrieval and grouped rerank, Ollama boot preload and llama-server reranker deployment baseline, settings sidebar with persisted font sizing, Phase 4 data lifecycle automation and RAG regression gates, question bank and benchmark management, Ollama host management, judgment raw-Parquet full-text link, NVIDIA default theme)
 
 **Input**: 使用者提供之需求（原文摘要）：
 
@@ -79,20 +79,20 @@
 
 ### User Story 4 - 以十種科技品牌風格個人化介面 (Priority: P2)
 
-使用者可從 header 右上角的 `Style` 選單選擇十種科技網站風格。選擇後整份介面立即套用對應的顏色、字體、圓角與元件質感，並在下次開啟時保留。
+使用者可從 header 右上角齒輪「設定選項」sidebar 的「介面風格」分類選擇十種科技網站風格。選擇後整份介面立即套用對應的顏色、字體、圓角與元件質感，並在下次開啟時保留。
 
 **Why this priority**: 這是明確的視覺需求，能讓同一個工具符合不同展示或品牌情境，但不影響資料正確性。
 
-**Independent Test**: 逐一選擇十種風格，確認選單項目、啟用狀態、頁面色彩與 header 標籤都改變；重新整理後仍維持上次選擇；以鍵盤操作也能完成選擇。
+**Independent Test**: 逐一選擇十種風格，確認介面風格項目、啟用狀態、頁面色彩與項目外觀都改變；重新整理後仍維持上次選擇；以滑鼠與鍵盤操作也能完成選擇。
 
 **Acceptance Scenarios**:
 
-1. **Given** 使用者開啟 `Style` 選單，**When** 選單展開，**Then** 顯示十種風格名稱、說明、色票與目前選取狀態。
+1. **Given** 使用者開啟「設定選項」並切換到「介面風格」，**When** 功能表顯示，**Then** 顯示十種風格名稱、說明、色票與目前選取狀態，且每個項目以該風格在 header 的底色、文字色、邊角與品牌線呈現。
 2. **Given** 使用者選擇任一種風格，**When** 選擇完成，**Then** 介面立即套用該風格，不需要重新載入頁面。
 3. **Given** 使用者已選擇風格，**When** 重新整理或再次開啟主控台，**Then** 自動套用上次選擇的風格。
-4. **Given** 使用者以鍵盤操作選單，**When** 使用方向鍵、Home、End、Esc 或 Enter，**Then** 可移動焦點、選擇風格或關閉選單。
+4. **Given** 使用者以鍵盤操作介面風格項目，**When** 使用 Tab 移動並按 Enter，**Then** 可選擇風格。
 5. **Given** 使用者選擇深色風格，**When** 瀏覽主要頁面，**Then** 文字、背景、表格與狀態標籤仍保持可讀且對比足夠。
-6. **Given** 瀏覽器沒有儲存任何風格選擇，**When** 使用者首次開啟主控台，**Then** 預設套用 NVIDIA 風格，且 `Style` 選單標示 NVIDIA 為目前選擇。
+6. **Given** 瀏覽器沒有儲存任何風格選擇，**When** 使用者首次開啟主控台，**Then** 預設套用 NVIDIA 風格，且「介面風格」項目標示 NVIDIA 為目前選擇。
 
 ---
 
@@ -110,7 +110,7 @@
 2. **Given** Qdrant、Embedding、RAG 或 LLM 未設定，**When** 檢視服務卡片，**Then** 狀態為「未設定」或「降級」，並說明缺少的設定或尚未建立的 collection。
 3. **Given** PostgreSQL 或 Parquet 無法使用，**When** 檢視狀態頁，**Then** 對應服務顯示降級或離線，整體狀態不標示為正常。
 4. **Given** 使用者按下重新整理，**When** 請求完成，**Then** 頁面更新檢查時間、服務狀態與資料量。
-5. **Given** 使用者啟用 30 秒自動更新，**When** 停留在狀態頁，**Then** 頁面定期更新；離開頁面後停止計時器。
+5. **Given** 使用者啟用 30 秒自動更新，**When** 停留在狀態頁，**Then** 後端 `status` topic 每 30 秒推送含最新狀態的 SSE payload 並更新頁面；離開頁面或取消勾選後關閉 SSE，前端不以固定 timer 查詢。
 6. **Given** 使用者查看架構圖，**When** 檢視節點，**Then** 已接入且正常的節點與尚未設定的節點有明顯區別。
 7. **Given** 使用者查看最近下載執行，**When** 有成功、無變更或失敗紀錄，**Then** 可看到狀態、時間、耗時、法規數、條文數與錯誤訊息。
 
@@ -233,13 +233,34 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 測試模式已開啟且 RAG 正在執行，**When** 使用者開啟效能報表頁，**Then** 上方顯示測試流程圖表，並以 1.5 秒 polling 更新。
+1. **Given** 測試模式已開啟且 RAG 正在執行，**When** 使用者開啟效能報表頁，**Then** 上方顯示測試流程圖表，並由 `test-runs` SSE topic 在 DB run／step 變更時推送更新。
 2. **Given** 一個測試包含 1 個 embedding、1 個 retrieval、1 個 context、4 個 LLM、4 個 validation，**When** 圖表渲染，**Then** 顯示 5 個階段群組與 11 條子程序進度條。
 3. **Given** 某個模型失敗，**When** 圖表更新，**Then** 該子進度條以紅色與錯誤訊息顯示；執行中的子進度條以 animated bar 顯示。
 4. **Given** 測試完成，**When** 使用者查看最下方，**Then** 總流程進度為 100%，並顯示測試狀態（success／partial／failed）。
 5. **Given** 多筆歷史測試，**When** 使用者從「歷史」選單選擇一筆，**Then** 載入該測試的 stages、models、status、duration 與 step 結果。
 6. **Given** 後端重啟，**When** 使用者重新開啟效能報表，**Then** 仍可從 PostgreSQL 讀取歷史測試並還原 flowchart。
 7. **Given** 390px 行動版，**When** 檢視測試流程圖表，**Then** 不得有水平溢出，階段與進度條仍可閱讀。
+
+---
+
+### User Story 13 - 以設定選項 sidebar 調整字型與介面風格 (Priority: P2)
+
+使用者可從 header 右上角齒輪開啟右側「設定選項」sidebar。Sidebar 將 header、主要內容與 footer 向左推，上方提供設定分類按鈕，分隔線下方顯示目前分類的功能表。「字型大小」列出目前頁面出現的文字區塊，讓使用者以滑桿或數值輸入即時調整，並在 hover／focus 時標示受影響範圍；「介面風格」以各主題 header 的外觀呈現十個選項，選取後立即套用。
+
+**Why this priority**: 不同頁面與資料密度需要不同的文字大小；使用者需要在同一個工作區快速確認調整範圍、儲存偏好，並在不離開頁面的情況下切換品牌風格。
+
+**Independent Test**: 在資料庫頁開啟設定 sidebar，確認頁面左移、字型清單只列出目前頁面區塊；調整頁面標題並觀察即時變化與 hover highlight；儲存後重新載入確認保留；取消、關閉與回復預設值確認回到正確狀態；切換到介面風格並套用 Apple，確認頁面立即變化且 header 沒有獨立調色盤按鈕。
+
+**Acceptance Scenarios**:
+
+1. **Given** 使用者在任一主要頁面，**When** 點擊 header 右上角齒輪，**Then** 右側出現設定 sidebar，header／main／footer 同步向左推，且 header 不再有獨立的 Style／調色盤按鈕。
+2. **Given** 使用者開啟「字型大小」，**When** 功能表載入，**Then** 只列出目前頁面實際出現的文字區塊，每列包含名稱、滑桿、可輸入的 px 數值與即時預覽。
+3. **Given** 使用者拖動滑桿或輸入數值，**When** 數值改變，**Then** 頁面對應文字立即更新；滑鼠移到列上或列內控制項取得焦點時，所有對應的可見文字以 outline 與半透明背景標示，移出後立即移除。
+4. **Given** 使用者調整多個區塊，**When** 按「儲存」，**Then** 設定寫入瀏覽器本機，重新載入或切換頁面後仍套用；按「取消」或直接關閉 sidebar 回復上次儲存值；按「回復預設值」清除尚未儲存的覆寫。
+5. **Given** 使用者切換到「介面風格」，**When** 功能表顯示，**Then** 十個項目保留原名稱，但各自呈現該主題 header 的底色、文字色、品牌線、邊角與陰影；選取後全站立即套用並保留。
+6. **Given** 使用者在「介面風格」右上角切換「亮／暗／系統」，**When** 選擇完成，**Then** 「亮」回到目前主題原本的配色定義、「暗」套用共用暗色配置，整體頁面、header 與 sidebar 立即更新；「系統」模式跟隨 `prefers-color-scheme`，重新載入後仍保留選擇。
+7. **Given** 使用者以鍵盤操作，**When** 按 Tab 移動、Enter 選取或按 Esc 關閉，**Then** 焦點順序正確，關閉後回到 header 齒輪按鈕。
+8. **Given** 390px 行動版，**When** 開啟設定 sidebar，**Then** sidebar 改為全寬、頁面無水平溢出，所有控制項仍可操作。
 
 ---
 
@@ -254,7 +275,9 @@
 - 瀏覽器停用 IndexedDB、進入無痕模式或儲存空間不足時，歷史與設定如何處理？
 - 使用行動裝置或窄視窗時，表格、篩選側欄與 header 是否仍可操作？
 - 同一使用者在多個分頁同時操作時，主題、查詢歷史與設定是否會互相覆蓋？
-- 服務狀態在兩次自動更新之間發生變化時，畫面是否可能顯示過期資料？
+- 瀏覽器停用 `localStorage` 或儲存空間不足時，字型設定是否仍能在本次工作階段生效，且不影響頁面操作？
+- 設定 sidebar 開啟時切換路由、載入動態表格或開啟法規／判決 dialog，字型設定與 hover highlight 是否仍能正確套用且不造成無限重繪？
+- 服務狀態在兩次後端推送之間發生變化時，畫面是否可能顯示過期資料？
 
 ## Requirements *(mandatory)*
 
@@ -277,13 +300,13 @@
 - **FR-015**: 查詢報表 MUST 支援 CSV 與 JSON 匯出，且只匯出目前頁面的資料。
 - **FR-016**: 查詢報表 MUST 在無資料、警告、降級或錯誤時顯示對應訊息，不得以空白畫面取代。
 - **FR-017**: 查詢歷史與頁面設定 MUST 儲存在瀏覽器本機；IndexedDB 不可用時 MUST 退回記憶體暫存並明確標示。
-- **FR-018**: `Style` 選單 MUST 提供十種科技網站風格，套用時不得重新載入頁面。
+- **FR-018**: 設定選項 sidebar 的「介面風格」分類 MUST 提供十種科技網站風格；每一項目 MUST 以該風格在 header 的呈現方式顯示（header 底色、文字色、品牌線、邊角與陰影），但項目名稱不變；套用時不得重新載入頁面。
 - **FR-019**: 使用者選擇的風格 MUST 在重新開啟主控台後保留。
-- **FR-020**: `Style` 選單 MUST 支援滑鼠與鍵盤操作，並在關閉後恢復焦點。
+- **FR-020**: 「介面風格」分類 MUST 支援滑鼠與鍵盤（Tab／Enter）操作；header MUST NOT 另設 Style／調色盤按鈕。
 - **FR-021**: 狀態頁 MUST 顯示前端、API、PostgreSQL、Parquet、Qdrant、Embedding、RAG 與 LLM 的狀態。
 - **FR-022**: 狀態頁 MUST 將未設定的服務標示為 `not_configured`、降級的服務標示為 `degraded`，不得以正常或推測數據呈現。
 - **FR-023**: 狀態頁 MUST 顯示實際資料筆數、Parquet 快照數、最新版本與最近下載執行。
-- **FR-024**: 狀態頁 MUST 支援手動重新整理與可選的 30 秒自動更新，離開頁面後停止自動更新。
+- **FR-024**: 狀態頁 MUST 支援手動重新整理與可選的 30 秒自動更新；啟用時前端 MUST 訂閱 SSE `status` topic，由後端每 30 秒推送含最新狀態的 payload，離開頁面或取消勾選後 MUST 關閉訂閱，MUST NOT 使用前端 `setInterval` 或定期 GET `/api/status`。
 - **FR-025**: 架構圖 MUST 區分已接入且正常的節點與尚未設定或尚未接入的節點。
 - **FR-026**: 查詢頁（`#/data`）的 PostgreSQL／Parquet／Qdrant 查詢 MUST 為唯讀；`#/processing`、題庫、benchmark 與 Ollama 主機管理屬於獨立的管理介面，可執行寫入與啟動程序。
 - **FR-027**: API MUST 對未知資料庫、未知資料表、無效分頁與空白問題回傳明確的 4xx 錯誤。
@@ -294,7 +317,7 @@
 - **FR-042**: 法規條文 MUST 一次載入全部條文，不得使用上一頁／下一頁分頁；MUST 提供「跳至第幾條」輸入，跳轉不得影響法規 metadata 或其他查詢狀態。
 - **FR-043**: `GET /api/law` MUST 唯讀查詢，對未知法規回傳 404、對不支援的 `source_type` 回傳 400，且不得因缺少 Parquet 條文而回傳虛構內容。
 - **FR-044**: 法規報表的「法規沿革」MUST 預設收合，使用者點擊後展開／收合；跳轉條文時 MUST 保留目前的展開狀態。
-- **FR-045**: `#/status` 的「系統測試」分類（或 `#/tests`）MUST 提供可點擊的測試模式開關；開關 MUST 為無外框膠囊；測試模式 ON 時 MUST 顯示綠色「ON」與右側白色旋鈕，OFF 時 MUST 顯示紅色「OFF」與左側白色旋鈕。header 只保留 Style 選單與六個主要導覽。
+- **FR-045**: `#/status` 的「系統測試」分類（或 `#/tests`）MUST 提供可點擊的測試模式開關；開關 MUST 為無外框膠囊；測試模式 ON 時 MUST 顯示綠色「ON」與右側白色旋鈕，OFF 時 MUST 顯示紅色「OFF」與左側白色旋鈕。header 只保留齒輪「設定選項」與六個主要導覽。
 - **FR-046**: 測試模式狀態 MUST 儲存在 PostgreSQL `app_settings`，並由 `/api/test-mode` 讀取／切換；ON 時 RAG 提問 MUST 執行所有可用 embedding 與 LLM 模型，OFF 時回到一般 RAG。
 - **FR-047**: 電源控制器 MUST 綁定 `127.0.0.1:9201`，由 `judgment-web` 預設自動啟動，且 MUST 在後端停止後繼續存活；`JUDGMENT_POWER_AGENT=0` MUST 可停用。
 - **FR-048**: 啟動與停止請求 MUST 要求 `X-Judgment-Power: 1`，且控制器 MUST 只接受本機、localhost 或 `file://`（Origin `null`）來源；非本機 API Base MUST 不提供遠端電源控制。
@@ -339,7 +362,7 @@
 - **FR-088**: `/api/test-mode` MUST 提供測試模式讀取與切換；模型清單 MUST 從 Ollama 自動偵測，排除 reranker，並以 `TEST_EMBEDDING_MODELS`／`TEST_LLM_MODELS` 支援覆寫。
 - **FR-089**: 測試模式 ON 時，RAG 請求 MUST 依序執行所有可用 embedding 模型（embedding、Qdrant 檢索）與所有可用 LLM 模型（生成、引用驗證）；前端與後端模型呼叫 MUST 不設 timeout。
 - **FR-090**: 每次測試 MUST 寫入 `performance_test_runs` 與 `performance_test_steps`，包含 run id、request id、問題、主要答案、狀態、stage、model、module、function、progress、duration、error 與 summary；後端重啟後 MUST 可查詢。
-- **FR-091**: 效能報表頁上方與 RAG 提問頁下方 MUST 顯示測試流程圖表；圖表 MUST 標記 RAG 問題、RAG 答案、每步驟 module／function；每個階段依模型數量顯示子程序進度條，最下方顯示總流程進度與依階段耗時比例的 stacked time bar（含 legend 的階段、耗時、百分比），執行中 MUST 以 polling 更新。
+- **FR-091**: 效能報表頁上方與 RAG 提問頁下方 MUST 顯示測試流程圖表；圖表 MUST 標記 RAG 問題、RAG 答案、每步驟 module／function；每個階段依模型數量顯示子程序進度條，最下方顯示總流程進度與依階段耗時比例的 stacked time bar（含 legend 的階段、耗時、百分比），執行中 MUST 由 SSE `test-runs` topic 在 `performance_test_runs`／`performance_test_steps` 變更時推送更新。
 - **FR-092**: 測試流程圖表 MUST 提供歷史選單，可依 run id 載入過去的 stages／steps／status／duration，還原歷史 flowchart。
 - **FR-093**: 測試模式的主要回答 MUST 優先使用 `LLM_MODEL`，其次使用第一個通過引用驗證的模型；全部失敗時 MUST 降級為 `retrieval_only`。
 - **FR-094**: 測試模式中的個別模型失敗（例如 HTTP 400）MUST 記錄為 failed step，不得中斷其他模型；測試狀態 MAY 為 `partial`。
@@ -350,7 +373,7 @@
 - **FR-099**: RAG 回答標頭 MUST 在狀態與耗時旁顯示實際使用的 LLM 模型名稱；測試模式 MUST 顯示 `test_run.primary_model`，tooltip MUST 同時提供 LLM 與 embedding 模型資訊。
 - **FR-100**: 法規／命令／判決下載 workflow 的「執行此流程」MUST 先以 `POST /api/updates/check` 只檢查該來源；若結果為 `up_to_date`，MUST 顯示「已是最新版本，仍要強制重新下載？」確認，取消時不得啟動流程。檢查失敗 MAY 顯示警告後允許執行。
 - **FR-101**: 每個 workflow 面板 MUST 顯示實際階段的獨立進度條、狀態、筆數／bytes、耗時與訊息，並以不同顏色標記；下方 MUST 顯示由各階段加總的整體進度堆疊條與 legend。滑鼠移到階段、色塊或 legend 時 MUST 只保留該項目並以浮動提示顯示名稱、進度、整體占比、耗時與訊息。不得顯示流程未實際執行或不存在的階段（例如法規／命令下載不得虛構 Qdrant／IndexedDB 階段）。
-- **FR-102**: Qdrant 版本建置 workflow MUST 在開始前測試主要／備援 Ollama 的 `/api/tags` 與 embedding 模型可用性，記錄每台主機 URL／host／port／模型清單、最後選用主機與執行中實際使用主機；若無可用主機 MUST 明確失敗。索引期間 MUST 顯示與判決下載相同的「年份列 × 月份欄」時間表；完成索引為綠色、已開始但未完成為紅色、新檔／尚未索引為灰色、無資料為空白，目前索引月份 MUST 有動態標示。月份 tooltip MUST 包含來源檔案、已處理／總筆數、進度、重用、新 embedding 與目前案號。若尚無本次索引 run，系統 MUST 以 active collection 的實際月份覆蓋率顯示同一張表，並可快取避免每次 poll 重算。
+- **FR-102**: Qdrant 版本建置 workflow MUST 在開始前測試主要／備援 Ollama 的 `/api/tags` 與 embedding 模型可用性，記錄每台主機 URL／host／port／模型清單、最後選用主機與執行中實際使用主機；若無可用主機 MUST 明確失敗。索引期間 MUST 顯示與判決下載相同的「年份列 × 月份欄」時間表；完成索引為綠色、已開始但未完成為紅色、新檔／尚未索引為灰色、無資料為空白，目前索引月份 MUST 有動態標示。月份 tooltip MUST 包含來源檔案、已處理／總筆數、進度、重用、新 embedding 與目前案號。若尚無本次索引 run，系統 MUST 以 active collection 的實際月份覆蓋率顯示同一張表，並可快取避免每次 refresh event 重算。
 - **FR-103**: 判決匯入 workflow MUST 顯示與判決下載相同的「年份列 × 月份欄」時間表，依下載 manifest 與 PostgreSQL `source_archive` 比對：已匯入為綠色、未匯入為紅色、有新檔或遠端新版本待匯入為灰色，無資料為空白；目前匯入月份 MUST 有動態標示。月份 tooltip MUST 包含本機壓縮檔、已匯入檔案、manifest latest／local fileset 與目前匯入檔名。
 - **FR-104**: 法院名稱正規化分頁 MUST 提供「檢查法院名稱」並以年份列 × 月份欄顯示檢查結果：全部已正規化為綠色、完全未檢查為紅色、部分未正規化或有無效值為灰色、無資料為空白。結果 MUST 包含每月總筆數、已檢查、未檢查、無效值、需正規化與有效比例；進入分頁 MAY 自動檢查，並 MUST 可手動重新檢查。
 - **FR-105**: 建立條文歷史分頁最上方 MUST 提供「檢查條文歷史／檢查是否需建立」，以年份列 × 月份欄顯示：該月所有版本都有歷史條文為綠色、完全未建立為紅色、部分版本已建立為灰色、無資料為空白；目前版本 MUST 有可辨識外框。結果 MUST 包含版本數、法規／命令版本數、版本 ID、已建立／未建立版本、需建立／可建立／缺原始檔版本、條文列與預期條文數。需建立版本 MUST 逐筆標示是否能找到原始 Parquet；缺原始檔者 MUST 標示無法建立。進入分頁 MAY 自動檢查，並 MUST 可手動重新檢查。面板 MUST 顯示 Qdrant Docker context、container、image、容器內儲存路徑、volume 名稱／容量、host 來源路徑與 collection points／segments。
@@ -366,14 +389,14 @@
 - **FR-109**: 法規報表 MUST 一次載入並顯示全部條文，不得使用條文上一頁／下一頁分頁；MUST 提供「跳至第幾條」輸入框，接受 `100`、`第100條`、`37-1` 等格式，按 Enter 或按鈕後 MUST 捲動至該條並醒目提示；條文超過 100 條時 SHOULD 提供浮動跳轉控制。
 - **FR-110**: 全站 sticky／fixed 的 header 與導覽列 MUST 使用不透明背景，MUST NOT 依賴 `backdrop-filter` 即時模糊背景；連續滾動時 MUST NOT 閃爍、消失或重新播放進場動畫。
 - **FR-111**: 所有 `scroll` 事件處理器 MUST 在沒有實際可見狀態變更時提前返回，不得在每次 scroll 重建、清空或查詢與滾動無關的 DOM；此類 listener SHOULD 以 passive 模式註冊。查詢報表的換頁、排序與每頁筆數切換 MUST 保留目前內容並以低調的更新狀態呈現，不得先替換為骨架或重播進場動畫；表格、報表卡片與其內部資料呈現元素（例如分布條）MUST NOT 套用會隨資料重繪而重播的 animation 或 transition。
-- **FR-112**: 全站所有頁面（`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`）凡因自動更新、polling、手動重新整理、換頁、排序、每頁筆數切換、篩選、分類切換或 dialog 內容替換而重新繪製的區塊，MUST 直接以最終樣式呈現；MUST NOT 套用進場動畫、淡入／淡出、`opacity` transition、位移 transform、會重播的 keyframes、半透明 refreshing 覆蓋或先替換為骨架。表格、報表卡片、分布條、時間表、清單、統計卡與 dialog MUST 在新資料抵達前保留目前內容，抵達後一次更新。
-- **FR-113**: 僅表達實際執行狀態的視覺回饋 MAY 使用動畫：進度條、spinner、串流游標、狀態脈動、toast、展開／收合與 hover／focus 效果。這些效果 MUST NOT 因資料輪詢、重新整理或區塊重繪而從頭播放，且 MUST NOT 以淡出、變透明或遮罩方式隱藏目前資料。全站 MUST NOT 使用 `backdrop-filter` 或類似的即時背景模糊裝飾 sticky／fixed 導覽列（依 FR-110）。
+- **FR-112**: 全站所有頁面（`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`）凡因自動更新、後端推送、手動重新整理、換頁、排序、每頁筆數切換、篩選、分類切換或 dialog 內容替換而重新繪製的區塊，MUST 直接以最終樣式呈現；MUST NOT 套用進場動畫、淡入／淡出、`opacity` transition、位移 transform、會重播的 keyframes、半透明 refreshing 覆蓋或先替換為骨架。表格、報表卡片、分布條、時間表、清單、統計卡與 dialog MUST 在新資料抵達前保留目前內容，抵達後一次更新。
+- **FR-113**: 僅表達實際執行狀態的視覺回饋 MAY 使用動畫：進度條、spinner、串流游標、狀態脈動、toast、展開／收合與 hover／focus 效果。這些效果 MUST NOT 因後端推送、重新整理或區塊重繪而從頭播放，且 MUST NOT 以淡出、變透明或遮罩方式隱藏目前資料。全站 MUST NOT 使用 `backdrop-filter` 或類似的即時背景模糊裝飾 sticky／fixed 導覽列（依 FR-110）。
 - **FR-114**: 路由切換時舊頁面 MUST 保持顯示直到新頁面內容同步就緒，不得先插入整頁 skeleton、白屏或重播頁面進場動畫。裝飾性固定背景 MUST 使用獨立固定圖層或等效方式呈現，不得讓主要捲動容器在每次 scroll 時重繪固定背景。
-- **FR-115**: `#/processing` 中含 embedding 的流程執行資訊 MUST 顯示已知 Ollama 主機與模型清單；可用主機與模型 MUST 以綠色呈現，無回應、斷線或不可用者 MUST 以灰色呈現。主機清單 MUST 支援拖移或等效控制以調整優先順序並持久化；第一優先主機無法提供 embedding 時，系統 MUST 依序自動嘗試下一台，直到成功或全部失敗。調整順序後 MUST 同步更新目前主機與 embedding fallback 設定。
+- **FR-115**: `#/processing` 中含 embedding 的流程執行資訊 MUST 顯示「Embedding 主機／模型」按鈕列，按鈕文字 MUST 為「主機:模型」，列出所有線上且已確認具備 `embedding` 能力的模型；目前使用中的模型 MUST 以 active 按鈕標示。點選按鈕 MUST 以 `role=embedding` 儲存該主機的模型、將該主機設為第一優先並持久化，其餘主機依序作為備援；第一優先主機無法提供 embedding 時，系統 MUST 依序自動嘗試下一台，直到成功或全部失敗。MUST NOT 再顯示拖移主機卡片或上下箭頭作為主要選擇方式。離線主機與未確認 embedding 能力的模型 MUST NOT 出現在按鈕列。
 - **FR-116**: `#/performance` MUST 提供 RAG Pipeline waterfall，且每次 `#/rag` 回答的最下方 MUST 以相同規格與相同視覺格式嵌入該次請求的 waterfall；二者 MUST 共用同一套階段、摘要、時間軸與展開明細。Waterfall MUST 將單次 RAG Trace 的 Parsing、Embedding、Qdrant、Reranker、Context、LLM 與 Response 依執行順序由左至右緊密排列，每一階段 bar MUST 從上一階段 bar 的結束位置接續開始，不得留下未追蹤空隙或互相重疊；實際 `started_at`／`finished_at`／`offset_ms`／`end_offset_ms` MUST 保留在展開明細與 hover 資訊中。每個 span SHOULD 記錄模組、函式、參數與階段監控欄位：Parsing 輸入長度、Embedding Model／Token／Batch、Qdrant Collection／Filter／Top K、Reranker Model／候選數、Context Chunk／Token、LLM Model／Input／Output Token／TTFT、Response 總耗時／引用數／Abstain。點選階段 MUST 可查看上述欄位與開始／結束時間。
 - **FR-117**: `#/rag` 首頁狀態區 MUST 彙整所有可用主機已確認支援 chat 的模型按鈕，按鈕名稱 MUST 使用「主機名稱:模型名稱」（例如 `mbp:gemma3:4b`、`x570:gemma3:4b`）；可用模型 MUST 以綠色呈現，目前使用中的 provider／模型 MUST 有明確標示，點選其他模型 MUST 切換並持久化，且下一次提問 MUST 立即使用新模型。切換 LLM provider MUST NOT 改變 embedding 主機的優先順序。若模型尚未測試 chat 能力，介面 MUST 提供重新檢查入口；不得把未測試或確定不支援 chat 的模型標示為可用。
 - **FR-118**: `#/status` 的 Model Provider 主機模型清單 MUST 顯示每個模型已測試的能力標籤（至少 Chat、Embedding、Vision、Tools、Thinking、Speech、Reranker 中適用的項目）；尚未測試的模型 MUST 明確標示「未測試」，不得推測其能力。介面 MUST 提供「檢查模型能力」動作，檢查所有可用主機並更新快取。
-- **FR-119**: 全站所有「以時間呈現執行流程」的視圖 MUST 共用同一套 waterfall 元件與視覺規格（axis、階段列、bar、可展開明細、hover 資訊卡）；至少涵蓋 `#/rag` 回答底部、`#/rag` 後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow 紀錄與測試 Flow。RAG Pipeline MUST 採依執行順序接續的水平排列；效能 Flow 與測試 Flow MAY 依實際 offset 呈現平行 span。靜態架構圖、資料流程圖與處理頁的 pipeline canvas 不屬於時間軸流程，可維持原呈現，但不得另外發明不同的時間軸視覺。
+- **FR-119**: 全站所有「以時間呈現執行流程」的視圖 MUST 共用同一套 waterfall 元件與視覺規格（axis、階段列、bar、可展開明細、hover 資訊卡）；至少涵蓋 `#/rag` 回答底部、`#/rag` 後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow 紀錄與測試 Flow。RAG Pipeline MUST 採依執行順序接續的水平排列；效能 Flow 與測試 Flow MAY 依實際 offset 呈現平行 span。靜態架構圖與資料流程圖不屬於時間軸流程，可維持原呈現。`#/processing` 的處理總覽 MUST NOT 使用 waterfall；改用 FR-142 的「法規」「命令」「判決」三張四階段月份時間表。
 - **FR-120**: waterfall 中任何使用模型的 span（Embedding、LLM、Reranker 等）與其 Model Load 區段 MUST 在階段列、明細與 hover 資訊中標註「主機名稱:模型名稱」；主機名稱取自 Model Provider 設定，舊資料找不到名稱時才退回 URL hostname。
 - **FR-121**: 使用模型的 span SHOULD 記錄 Ollama `load_duration`，並在對應 Embedding／LLM 階段的 bar 內，以獨立的藍色前段呈現 Model Load；不得把不同來源的載入合併，也不得另列成與來源階段未對齊的子階段。展開明細 MUST 將 Model Load 與推論分成兩個區塊，各自顯示實際開始／結束時間與耗時，且 Model Load 的結束時間 MUST 等於推論的開始時間。該區段 MUST 分開呈現冷啟動載入耗時、模型呼叫總耗時、扣除載入後（熱啟動）流程時間與載入占比，讓冷啟動與熱啟動可直接比較。載入時間為 0 或低於門檻時 MUST 標示為熱啟動。
 - **FR-122**: 滑鼠移到任一 waterfall bar 上時 MUST 顯示該 span 的資訊卡，內容與該階段展開明細一致，至少包含開始／結束時間、耗時、模型／主機與可用監控欄位；資訊卡 MUST 跟隨指標並避開視窗邊界，離開 bar 或捲動時 MUST 隱藏。
@@ -382,14 +405,99 @@
 - **FR-125**: `#/rag` 的模型狀態區 MUST 另列 Rerank models，顯示主要與 fallback reranker 的「主機:模型」；可用者 MUST 以綠色呈現，離線、degraded 或未啟用者 MUST 以灰色呈現，並標示目前實際使用的 reranker。區塊 MUST 提供重新檢查健康狀態的動作；reranker 設定未啟用時 MUST 顯示「未啟用」，不得把離線模型標示為可用。
 - **FR-126**: RAG MUST 區分法規優先（law-first）與判決優先（judgment-first）。問題含明確法規名稱或法規導向詞彙（規定、條文、義務、責任、限制、罰則、從業人員、負責人、職員等）時 MUST 採 law-first；含判決、案例、法院、實務等詞彙時 MUST 採 judgment-first。law-first 時法規／命令 context MUST 排在判決前、法規 citation MUST 從 `[1]` 開始、判決最多保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT` 筆；LLM prompt MUST 要求以現行法規／命令條文為主要依據，判決僅作實務補充。`那些規定`／`有哪些規定` 不得被誤判為「列出相關法規」，且未實際回傳結構化清單前 MUST NOT 清空已選出的法規 articles。
 - **FR-127**: 法規／命令條文 MUST 使用獨立於判決的 Qdrant collection 與 alias（預設 `legal_articles_vNNN`／`legal_articles_current`），MUST NOT 寫入判決 collection。索引 MUST 使用 `bge-m3`，只收錄有條號與內容的現行條文，payload MUST 包含 `source_type`、`law_key`、`law_name`、`article_no`、`article_content`、`content_hash` 與版本 metadata。CLI MUST 支援全量建置、`--incremental`、`--if-changed`、`--dry-run`、`--status`、`--list-versions`、`--rollback`、`--no-activate` 與 `--discard-version`；建置 MUST 驗證 Qdrant 筆數、維度與取樣 payload 後才切換 alias，舊版本 MUST 保留供 rollback。
-- **FR-128**: RAG 的法規／命令檢索 MUST 與判決檢索共用同一個查詢 embedding，MUST NOT 為兩邊重複呼叫 embedding。法規候選 MUST 以 BM25／概念分數與 dense 分數融合；問題明確指名法規時，該法規 MUST 作為 anchor，dense 分數只用於排序其條文。法規條文 rerank MUST 與判決 rerank 分開執行；`retrieval.law_vector` 與 `retrieval.law_rerank` MUST 記錄 alias／collection、候選數、top score、provider、延遲與 fallback。alias 不存在、Qdrant 或 embedding 失敗時 MUST 退回 PostgreSQL／Parquet + BM25，不得讓 RAG 中斷。
+- **FR-128**: RAG 的法規／命令檢索 MUST 與判決檢索共用同一個查詢 embedding，MUST NOT 為兩邊重複呼叫 embedding。法規候選 MUST 以 BM25／概念排名與 dense 排名做 RRF（Reciprocal Rank Fusion）融合，`RAG_LAW_RRF_K` 與 `RAG_LAW_DENSE_WEIGHT` MUST 可調整；問題明確指名法規時，該法規 MUST 作為 anchor，dense 分數只用於排序其條文。法規與命令條文 MUST 分組 rerank，且法規條文 rerank MUST 與判決 rerank 分開執行；`retrieval.law_vector`、`retrieval.law_fusion` 與 `retrieval.law_rerank` MUST 記錄 alias／collection、候選數、top score、provider、延遲、fallback 與各 `source_type` 分組結果。alias 不存在、Qdrant 或 embedding 失敗時 MUST 退回 PostgreSQL／Parquet + BM25，不得讓 RAG 中斷。
+- **FR-129**: Ollama MUST 以 systemd 服務管理；x570 的 `ollama.service` MUST 開機啟動，`judgment-ollama-preload.service` MUST 在 Ollama 就緒後以 `keep_alive=-1` 預載 `gemma3:4b`，並以 `/api/ps` 驗證模型已載入且 `size_vram` 等於 `size`。預載服務 MUST 可重啟、查詢 journal 與解除安裝，且 MUST NOT 以假造狀態通過驗證。應用端 `LLM_KEEP_ALIVE` 預設 `30m`；設為 `-1` 時後續請求 MUST NOT 縮短預載模型的保留時間。
+- **FR-130**: BGE reranker MUST 以獨立的 `llama-server` systemd 服務提供，MUST NOT 由 Ollama 載入或與 Ollama 共用 process。服務 MUST 開機啟動，啟動參數 MUST 以 `--model` 載入 `bge-reranker-v2-m3` GGUF 並啟用 `--reranking`；模型 MUST 在 process 生命週期內常駐，沒有 Ollama 式 `keep_alive` 或閒置卸載。`/health`、`/props`、`/v1/models`、`/slots` MUST 可查詢；`/metrics` 未以 `--metrics` 啟動時回傳 501，MUST NOT 視為服務失敗。應用端 MUST 以 `RERANK_URL` 為主要端點、`RERANK_FALLBACK_URL` 為備援，主要端點失敗時 MUST 自動 fallback。
+- **FR-131**: RAG 判決引用卡 MUST 以該判決 `citations` 中實際引用的法規／命令顯示「法規名稱＋條號」；判決全文在條號後緊接「第 n 項」時 MUST 一併顯示項次，同一法規／條號／項次 MUST NOT 重複。點選任一引用 MUST 開啟該法規／命令的完整條文，且 `第136條之1` 與本地 Parquet 的 `第 136-1 條` MUST 視為同一條文。回答上方已顯示「法規／命令檢索結果」時，回答下方 MUST NOT 再重複整張法規來源卡；結構化 framework 或 structured answer 仍可保留法規來源區塊。
+- **FR-132**: Header MUST 在右上角提供齒輪「設定選項」按鈕，MUST NOT 另設 Style／調色盤按鈕；設定按鈕 MUST 使用 36px 圓形、與 header 一致的邊框與 accent 齒輪 icon，並以 `aria-expanded`／`aria-controls` 表示 sidebar 狀態。點擊後 MUST 從右側開啟設定 sidebar；桌機寬度 MUST 為 `380px`，`≤1100px` 時 MUST 縮為 `340px`，`≤760px` 時 MUST 改為全寬。Sidebar 開啟時 MUST 將 `.app-shell` 的 header、main、footer 與 toast 區域往左推，不得以覆蓋方式遮住目前頁面內容。Sidebar 上方 MUST 列出多個設定分類按鈕，按鈕區下方 MUST 有分隔線，分隔線下方 MUST 顯示目前分類的功能表；第一個分類 MUST 為「字型大小」。Sidebar MUST 支援齒輪再次點擊、右上角 X 與 Esc 關閉；關閉後 MUST 將焦點還給齒輪按鈕，隱藏時 MUST 使用 `inert`／`aria-hidden` 避免焦點進入。
+- **FR-133**: 「字型大小」功能表 MUST 只列出目前頁面實際有匹配元素的文字區塊，以及已有儲存覆寫的區塊；分類至少 MUST 涵蓋頁面標題、首頁主視覺標題、區塊標題、內文與說明、表格內容、標籤與輔助文字、按鈕與導覽、表單與輸入、程式碼與數值、法規條文（頁面）、法規條文（彈出視窗）與判決全文（彈出視窗）。每列 MUST 有區塊名稱、說明、滑桿、可直接輸入的 px 數值與即時預覽；數值 MUST 限制在該區塊的合法範圍內，並允許小數。拉動滑桿或輸入數值時 MUST 立即套用到頁面對應 elements，MUST NOT 需要重新載入或按儲存才預覽。
+- **FR-134**: 滑鼠移到字型區塊列上方，或列內控制項取得焦點時，MUST 以固定紅色（`#ef4444`）outline 與主題 accent 半透明背景標示所有對應的可見文字 elements，並在該列顯示預覽中狀態；紅色 outline MUST 與目前主題 accent 色有明顯區別。移出或失焦後 MUST 立即移除全部標示。Highlight MUST 只使用不影響 layout 的屬性（outline／background-color），MUST NOT 改變元素尺寸、位置或觸發頁面重排。Sidebar 內自身元素 MUST NOT 被列入 highlight 範圍。
+- **FR-135**: 字型大小功能表最下方 MUST 提供「儲存」、「取消」、「回復預設值」。儲存 MUST 將目前覆寫寫入 `localStorage` 的 `judgment.fontSizes.v1`，重新載入、切換路由與動態新增內容後 MUST 繼續套用；取消 MUST 回到上次儲存值；直接關閉 sidebar MUST 視同取消未儲存變更；回復預設值 MUST 清除目前工作階段的覆寫，並在使用者再次按下儲存後清除本機設定。`localStorage` 不可用時，變更 MUST 仍在本次工作階段生效，且 MUST NOT 讓設定介面或頁面失敗。
+- **FR-136**: 「介面風格」分類 MUST 重用既有 10 種主題，且分類按鈕 icon MUST 使用調色盤。每個主題項目 MUST 保留原名稱，但 MUST 以該主題 header 的呈現方式顯示：header 底色、header 文字色、muted 說明色、品牌頂部漸層線、header 邊框、主題圓角與 header 陰影；目前選取項目 MUST 有明確 active 狀態與 check。每個項目 MUST 在名稱／說明與右側色票之間顯示一個「作用中按鈕」預覽，使用該主題 header 作用中導覽項目的背景色、文字色、icon 色、pill 圓角與 notification badge 樣式，讓右側三色票的第一色能直接對應作用中按鈕。選取任一項目 MUST 立即套用該主題並寫入 `judgment.theme`，MUST NOT 重新載入頁面。Header MUST NOT 再顯示獨立的主題預覽按鈕或下拉選單。
+- **FR-137**: 「介面風格」功能表標頭右側 MUST 提供「亮／暗／系統」三種明暗配置切換，預設為「亮」。切換 MUST 立即套用整體頁面、header、sidebar、卡片、表格與表單，不得重新載入頁面；「亮」MUST 使用目前主題原本的設計 token 與配色，MUST NOT 額外覆寫主題的 `--bg`／`--surface`／`--ink` 等顏色；「暗」MUST 套用共用暗色 palette；「系統」模式 MUST 跟隨 `prefers-color-scheme`，亮色系統偏好使用主題原始配色、暗色系統偏好使用暗色 palette，並在作業系統明暗改變時即時更新。選擇 MUST 寫入 `localStorage` 的 `judgment.appearance`，重新載入與切換頁面後仍保留；三個選項 MUST 有 active／`aria-pressed` 狀態且支援鍵盤操作。暗色模式 MUST 保持文字與背景對比、主題 accent 與品牌線可辨識，且不得出現大面積白色元件。
+- **FR-138**: 完整資料更新（`POST /api/processing/update` 或 `judgment.processing_update`）MUST 在法規／命令下載後自動執行法規／命令條文索引更新，順序 MUST 為 `download → legal_qdrant → postgres → qdrant`；法規索引 MUST 使用 `judgment-index-legal-articles --incremental --if-changed` 語意，內容未變更時 MUST 跳過，變更時 MUST 建立新版本、驗證 points／維度後才切換 `legal_articles_current`，失敗時 MUST 保留舊 alias。`#/processing` 頁首 MUST NOT 顯示「資料更新」按鈕或「完成後接續 Qdrant 索引」checkbox；各階段 MUST 由 sidebar workflow 面板獨立操作。Processing workflow catalog MUST 提供可獨立執行的「法規／命令索引」workflow，且 MUST NOT 再提供 `full_update` workflow。
+- **FR-139**: `/api/status` MUST 回傳法規／命令索引的 alias、physical collection、active version、points、維度、法規數、條文數、最後建置時間與 freshness；freshness MUST 比對目前 PostgreSQL 法規數／條文數、最新資料版本時間與 active snapshot，並回傳 `fresh`／`stale`／`not_indexed`／`unknown` 與 reasons。`/api/status` 同時 MUST 回傳判決索引的 missing／changed／stale／pending 數量；`/api/processing/plan` MUST 包含 `legal_index` 狀態與 `recommended.legal_index`。
+- **FR-140**: 判決索引更新 MUST 先偵測 missing、content hash changed 與 removed／non-current 的 stale points；任一 pending 大於 0 時 MUST 使用 `build-index-version` 的 blue-green 流程建立新版本、重用未變更向量、刪除 stale points、驗證後才切換 `judgments_current`。建置或驗證失敗時 MUST 保留舊 alias，MUST NOT 直接修改 active collection。
+- **FR-141**: RAG Benchmark MUST 在 summary 計算 regression gate，固定檢查 law recall、article recall、judgment recall、citation valid rate、refusal accuracy 與 P95 latency；門檻 MUST 可由 `RAG_GATE_*` 環境變數覆寫。Benchmark API MUST 回傳 `summary.gate`，且 `scripts/rag_regression_gate.py` MUST 以 exit code 0 表示 pass／no_data、1 表示 fail、2 表示沒有完成的 run。`scripts/run_scheduled_update.sh` MUST 提供可給 cron／launchd／systemd timer 使用的單次更新入口，並以 lock 避免重疊執行。
+- **FR-142**: `#/processing` 處理總覽 MUST 分為「法規」「命令」「判決」三個 section，每個 section MUST 使用 `import-files-card` 時間表框架：`side-card-head` 顯示標題與資料月份數、`judgment-months-meta` 顯示完成／未完成／處理中／有更新統計、目前版本或目前匯入列、可水平捲動的年份×月份表格。每個月份 cell MUST 橫向切成四格，依序代表下載、Parquet、PostgreSQL、Qdrant；綠色代表完成、紅色代表未完成、灰色代表處理中、空白代表無資料。法規／命令 MUST 以來源版本月份（`update_date`）建立月份，目前列與月份 tooltip MUST 顯示 `version_code`；判決 MUST 以 1996-01–2026-08 的 368 個月建立月份，四階段分別由本機 `.rar`、raw Parquet manifest、PostgreSQL `issue_month`、Qdrant 月份覆蓋率判定，執行中的 archive MUST 以灰色標示目前階段。判決時間表標頭 MUST 在標題右方顯示 Embedding 與 Rerank 使用的主機與模型，格式為「主機 模型」（例如 `x570 bge-m3:latest`、`x570 bge-reranker-v2-m3`）；hover 資訊 MUST 包含對應端點。法規／命令僅最新 current 來源版本的 Qdrant 階段需要索引；舊版本 Qdrant MUST 顯示「已取代」空白樣式，MUST NOT 標示為紅色未完成，也不得要求重建舊月份索引。紅色未完成階段 cell MUST 可點選並切換到對應 workflow 面板：下載→法規／命令下載或判決下載；Parquet／PostgreSQL→法規／命令下載或判決匯入；Qdrant→法規／命令索引或 Qdrant 版本建置。點選 MUST 只切換面板，不得自動啟動流程。時間表 MUST 訂閱 SSE `/api/events/stream` 的 `processing` topic；初次連線 MUST 收到完整 snapshot，後續 MUST 收到由 processing state 直接組成的 live payload（active import、workflow 階段訊息與進度、import timeline 月份更新），前端 MUST 直接套用 payload 並就地更新，不得再 GET `/api/processing` 取得進度。狀態變更時後端應在 0.5 秒內推送，不得重建表格或重設捲動位置，前端 MUST NOT 使用固定 timer 查詢進度。 `#/processing` 頁首 MUST 只保留標題、位於 h1 右側的副標題與執行中的停止按鈕；MUST NOT 顯示重新整理、資料更新或接續 Qdrant 索引控制項。
+- **FR-143**: 時間表月份 cell MUST 顯示四階段 tooltip（下載／Parquet／PostgreSQL／Qdrant）與該月份檔案／版本資訊；目前處理月份 MUST 以靜態外框標示，MUST NOT 使用脈動、閃爍或滑動動畫。時間表 MUST 顯示四階段順序與四種顏色 legend；切換 workflow 或後端推送更新時，時間表、目前列與捲動位置 MUST 保持穩定。
+- **FR-144**: 時間表的 hover／focus MUST 顯示該月份四階段狀態與檔案／版本資訊；workflow 流程進度的 hover MUST 顯示階段名稱、狀態、進度、筆數／耗時／訊息；tooltip MUST 避開視窗邊界，離開或捲動時 MUST 隱藏。
+- **FR-145**: 法規／命令下載建立新 `law_dataset_versions` 版本時 MUST 產生以本地下載時間（Asia/Taipei）為基礎的單一版本編號 `YYYYMMDDHHMM`（例如 `2026/11/13 18:21` → `202611131821`），並持久化於 `version_code`；舊資料 MUST 由 `downloaded_at` 回填。法規／命令時間表的目前版本列與月份 tooltip MUST 顯示 `version_code`；下載、raw Parquet、解析、PostgreSQL 與法規／命令索引 MUST 使用同一版本編號，不得顯示空白版本編號。
+- **FR-146**: `#/processing` MUST 在「法規／命令索引」「判決匯入」「Qdrant 版本建置」workflow 面板提供 Embedding 主機／模型選擇器，不得放在頁面標頭；選擇器 MUST 使用可點選的 model 按鈕（與 RAG model strip 相同的視覺語言），列出所有線上且已確認具備 `embedding` 能力的模型，按鈕文字 MUST 為「主機:模型」（例如 `x570:bge-m3:latest`、`mbp:bge-m3:latest`）。選擇後 MUST 以 `role=embedding` 儲存該模型、將該主機設為第一優先，並在切換前警告既有向量索引可能需要重建。選擇器 MUST 可手動重新檢查線上主機；目前使用中的模型 MUST 以 active 按鈕標示，且 MUST NOT 列出離線主機或未確認 embedding 能力的模型。面板 MUST NOT 再顯示舊的 Ollama 主機卡片、拖移把手或上下箭頭。
+- **FR-147**: `#/processing` 的 workflow 面板 MUST 以實際完成百分比顯示各階段進度，不得使用動畫、脈動或滑動的不確定進度條。「執行此流程」按下後 MUST 同步停用並顯示「執行中」，不得等待版本檢查或啟動 API 回應；版本檢查與啟動期間的 SSE 重繪 MUST 維持停用。後端 snapshot 確認新 run 執行中後 MUST 繼續停用並顯示「執行中」，不得因 snapshot 重繪恢復可按；只有啟動失敗或 run 結束且可再次執行時才恢復。按下後 MUST 立即隱藏上一次 run 的流程進度卡片；啟動期間的 SSE／panel 重繪 MUST 保持隱藏，直到新 run 的 snapshot 抵達後才顯示新流程進度。判決匯入 MUST 在開始掃描壓縮檔前建立處理狀態 run 與逐檔清單；stage 訊息與月份時間表 MUST 立即顯示目前處理的 archive／月份，不得先對全部壓縮檔做大小掃描而延後狀態建立。判決匯入階段若尚無最終總筆數（例如原始 Parquet 與 PostgreSQL metadata），MUST 以已完成／執行中的壓縮檔數推算百分比，並保留累計筆數作為輔助資訊；尚未開始的階段 MUST 顯示 `0%`，已完成階段 MUST 顯示 `100%`。失敗階段的「失敗」badge MUST 支援 hover／focus 顯示失敗原因與建議解法；原因 MUST 從 run 錯誤訊息擷取並移除 SQL 參數／traceback，解法 MUST 依錯誤類型提供（例如 NUL 位元組→重新執行、連線失敗→檢查服務）。失敗 tooltip MUST 不被一般 stage hover 資訊卡遮蓋。
+- **FR-148**: `#/processing` 的「判決匯入」workflow 面板月份時間表 MUST 使用四階段 cell：橫向依序為 RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata；綠色已完成（含先前 run 已匯入、本次尚未重跑）、紅色尚未完成或本次有待匯入檔案、灰色本次處理中、空白無資料。可沿用原始 Parquet 的 archive，其 RAR 階段 MUST 標示為完成並註明「沿用、略過解壓縮」。「原始資料檢查／Parquet 備份」階段 MUST 先檢查既有原始 Parquet；可沿用時 MUST NOT 重新建立備份，只有缺少可用備份時才解壓縮並寫入新備份，stage 訊息 MUST 明確區分「沿用既有備份」與「缺少備份而新建」。缺少備份時，執行中訊息 MUST 顯示「建立 YYYY-MM 原始 Parquet 備份」，完成訊息 MUST 顯示「已建立 YYYY-MM 原始 Parquet 備份」；沿用時 MUST 顯示「沿用 YYYY-MM 既有原始 Parquet、未重新備份」，不得只顯示「檢查」或「沿用」。金融法規篩選與 PostgreSQL metadata 的 stage 訊息 MUST 顯示目前處理的 `YYYY-MM` 與 archive 檔名。建立版本快照與 DuckDB 候選統計屬準備階段，MUST NOT 以 `current_archive` 逐檔移動時間表月份圈選；只有實際進入 filter／postgres 的 archive 才 MUST 更新目前月份、processing month 與灰色階段，確保逐月執行時逐月顯示。已由先前 run 匯入且本次尚未重跑的月份 MUST 保持綠色；本次 run 開始處理時，尚無可用備份的 RAR／原始資料階段 MUST 依實際進度轉灰，完成後回綠；若 archive 的既有原始 Parquet 仍可沿用，RAR 與原始資料階段 MUST 維持綠色（可顯示「沿用」訊息），不得因重新檢查而轉紅或轉灰。summary MUST 顯示完成／未完成／處理中／有更新。目前匯入月份 MUST 以靜態外框與 `aria-current="true"` 標示，目前執行階段 MUST 顯示灰色；但可沿用的 RAR／原始資料階段 MUST 維持綠色。目前列 MUST 顯示外框月份、archive、階段名稱，以及實際處理中的月份與 archive；當外框月份與處理中月份不同時，目前列 MUST 另顯示「處理中 YYYY-MM archive」。同一 run 的四個階段會重新走訪所有 archive，外框 MUST 維持在最高已啟動且尚未完成的月份，不得在後續階段退回較早月份；篩選階段從較早月份重新開始時，只有實際處理中且尚未完成的階段 cell MUST 標示灰色，外框月份的 cell MUST NOT 被標成該階段的處理中。月份 tooltip MUST 包含四階段狀態、本機壓縮檔與已匯入檔名。紅色未完成階段 MUST 可點選並切換到判決匯入 workflow 面板，但 MUST NOT 自動啟動流程；表格 MUST 隨 SSE `processing` topic 推送就地更新（狀態變更時後端應在 0.5 秒內推送），不得重建表格或重設捲動位置，前端 MUST NOT 使用固定 timer 輪詢。
+- **FR-149**: 判決匯入重新執行時，若目前金融法規清單 SHA 與最近一次 import run 相同，且 archive 的 raw Parquet 仍可沿用，系統 MUST 跳過先前 run 已完成（filter 與 postgres 均成功）或 PostgreSQL 已有 current 資料的 archive，從最新中斷／失敗／未完成的 archive 接續；MUST NOT 從第一個 archive 重跑已完成月份。中斷或失敗的 archive MUST 重新處理；金融法規清單 SHA 不同時 MUST NOT 跳過任何 archive。跳過狀態 MUST 寫入目前 run 的 archive 階段（extract skipped、raw_parquet／filter／postgres success），並在進度訊息標示「接續上次進度」。接續判斷 MUST NOT 對已完成 archive 逐檔重新掃描 RAR／raw Parquet；MUST 以先前 state 與 PostgreSQL snapshot 建立跳過清單。重新執行時 MUST 在開始階段一次掃描 raw Parquet manifest，批次比對 archive 路徑、大小與 mtime；相符的 archive MUST 直接標記 extract skipped／raw_parquet success，並排除於 extraction 排程，不得逐檔呼叫 manifest 查詢或逐檔更新 state。尚未完成 filter／postgres 但有可沿用備份的月份 MUST 只跳過 RAR／raw 階段，仍 MUST 進入 filter／postgres 排程。若判決下載替換 archive，導致路徑、大小或 mtime 改變，舊 manifest MUST NOT 再用於沿用；該月份 MUST 重新解壓縮並建立新備份，舊備份 MUST 依混合版本備份政策保留。RAR 檢查與 raw Parquet 階段訊息 MUST 顯示目前實際處理的 archive 檔名與已檢查／總數，讓使用者可判斷目前處理到哪個 `.rar`。
+- **FR-150**: `#/processing` 的「判決匯入」目前月份外框、`processing_month` 與目前列 MUST 由 SSE `/api/events/stream` 的 `processing` topic 單一來源更新。初次連線 MUST 推送完整 snapshot；後續 MUST 由 processing state 直接產生 live payload，包含 `active_import`、workflow 階段訊息／進度與 import timeline 月份更新。前端 MUST 直接套用 payload，不得另開 `/api/processing/active/stream` 作為第二進度來源，也不得為了更新外框或階段訊息重新 GET `/api/processing`。`/api/processing/active/stream` MAY 保留給相容 API 用戶端，但 `#/processing` MUST NOT 使用。SSE 斷線時 MUST 自動重連，並由重新連線的初始 snapshot 補齊目前狀態。
+- **FR-151**: 全站即時資料 MUST 使用後端推送，前端 MUST NOT 以 `setInterval`／自迴圈 `setTimeout` 定期查詢 API。後端 MUST 提供通用 SSE `/api/events/stream?topic=...`，支援 `processing`、`judgment-download`、`test-runs`、`benchmark`、`updates`、`status`、`system-usage`、`ollama`、`court-check`、`law-version-check`；檔案／DB 類 topic MUST 在 state、manifest、progress 檔 mtime／size 或 DB 聚合簽章變更時推送 `refresh` event，外部服務狀態類 topic MUST 由後端每 30–60 秒推送。進度／流程類 topic MUST 在 event 中直接附帶完整 snapshot 或增量 payload，前端 MUST 直接套用並渲染，MUST NOT 因 event 再查詢進度 API。非進度類輔助資料 MAY 以 refresh event 觸發一次載入，但 MUST NOT 形成週期性查詢。SSE MUST 每 15 秒送出 heartbeat，斷線時 MUST 自動重連並補送目前 topic 的初始 event；初始 event MUST 提供目前進度 payload，第一次連線 MUST NOT 觸發重複的進度查詢。判決下載月份表、更新 badge、測試 Flow、benchmark run、processing 時間表、系統狀態／資源與 Ollama 主機 MUST 全部改用此推送機制。
+- **FR-152**: 全站所有進度與流程狀態 MUST 以後端執行狀態為唯一來源，並只由後端 SSE 發布；涵蓋 processing workflow 的階段／訊息／百分比、判決下載月份與檔案進度、Qdrant 索引進度、測試 Flow、benchmark run、更新檢查／下載進度、系統資源與服務狀態。前端 MUST NOT 使用 `setInterval`、自迴圈 `setTimeout`、固定延遲重試、`requestAnimationFrame` timer 或任何週期性 fetch/XHR 取得進度；MUST NOT 在收到進度 event 後再 GET 進度 API。後端 MUST 在 event 中直接提供完整 snapshot 或增量 payload，前端只負責套用 payload 並更新既有 DOM。初次連線 MUST 收到目前進度 payload；斷線重連 MUST 補送目前 payload。EventSource 不可用時 MAY 執行一次性 fallback GET 顯示目前狀態或錯誤，但 MUST NOT 轉為輪詢。執行中的進度事件 SHOULD 在 state 變更後 0.5 秒內推送；閒置且狀態未變時 MUST NOT 推送週期性進度事件。
 - **FR-050**: 文件 MUST 說明電源控制器的啟動方式、日誌位置、停用設定，以及由後端提供頁面時停止後重新整理的限制。
+
+### Runtime Deployment Baseline（2026-11-13）
+
+以下為 2026-11-13 以 x570 API 與 `.env` 驗證的建置值；systemd 的 enable／active 狀態若未登入主機確認，會標示為待 shell 驗證。變更主機、模型、版本或啟動參數時 MUST 同步更新本節與相關 FR／SC。
+
+#### Ollama
+
+| 項目 | 目前值 |
+|---|---|
+| 主機／API | x570 · `http://x570:11434` |
+| Ollama 版本 | `0.40.2` |
+| systemd | `ollama.service`（API 正提供服務；enable／active 待 shell 驗證） |
+| 開機預載 | `judgment-ollama-preload.service`（oneshot；`After`／`Requires` `ollama.service`；部署腳本預設 enable；enable 狀態待 shell 驗證） |
+| 預載模型 | `gemma3:4b` |
+| 模型格式 | GGUF · Q4_K_M · 3.9B |
+| 模型大小 | `2,876,191,538` bytes |
+| VRAM | `size_vram = 2,876,191,538`（100% GPU） |
+| Context | `4096` |
+| Runner | `llamacpp` |
+| 預載 keep_alive | `-1`（`expires_at` 為長期） |
+| 應用端 keep_alive | `30m`（`.env` 目前值） |
+| 其他模型 | `gemma3:12b`、`gpt-oss:20b`、`bge-m3:latest`、`nomic-embed-text-v2-moe:latest`、`qllama/bge-reranker-v2-m3:latest` |
+| Embedding | `bge-m3` · 1024 維 · primary x570、fallback `http://127.0.0.1:11434` |
+| 部署腳本 | `scripts/deploy_ollama_preload_systemd.sh` |
+
+應用端相關設定：
+
+```dotenv
+EMBEDDING_URL=http://x570:11434
+EMBEDDING_FALLBACK_URL=http://127.0.0.1:11434
+EMBEDDING_MODEL=bge-m3
+LLM_MODEL=gemma3:4b
+LLM_NUM_CTX=4096
+LLM_NUM_PREDICT=384
+LLM_KEEP_ALIVE=30m
+```
+
+`LLM_URL` 依實際回答主機設定；x570 為 `http://x570:11434`，MBP 本機為 `http://127.0.0.1:11434`。
+
+#### llama-server reranker
+
+| 項目 | 目前值 |
+|---|---|
+| 主機／API | x570 · `http://x570:11435` |
+| systemd | `judgment-reranker.service`（`Type=simple`；API 正提供服務；`Restart=on-failure`、`RestartSec=3`；enable／active 待 shell 驗證） |
+| 服務使用者 | `solo` |
+| 模型路徑 | `/opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf` |
+| 模型 | `bge-reranker-v2-m3` · Q8_0 · 567,753,729 params |
+| 模型大小 | `628,831,364` bytes |
+| Context | `8192`（`/props` 的 `default_generation_settings.n_ctx`；`/v1/models` meta `n_ctx=8192`、`n_ctx_train=8192`） |
+| Slots | `4`（`total_slots=4`、`is_sleeping=false`） |
+| 啟動參數 | `--reranking --pooling rank --gpu-layers all --ctx-size 8192 --batch-size 2048 --ubatch-size 1024 --no-webui` |
+| 監聽 | `0.0.0.0:11435` |
+| Build | `b1-631109b34` |
+| Metrics | `/metrics` 未啟用（`endpoint_metrics=false`；回傳 501） |
+| 常駐行為 | 啟動時載入模型，process 存活期間常駐；停止服務或 crash 重啟才重新載入 |
+| 應用端設定 | `RAG_RERANK_ENABLED=true`、`RERANK_URL=http://x570:11435`、`RERANK_FALLBACK_URL=http://127.0.0.1:11435`、`RERANK_MODEL=bge-reranker-v2-m3` |
+| 法規 rerank | `RAG_LAW_RERANK_WEIGHT=0.15`、`RAG_LAW_CANDIDATE_ARTICLE_LIMIT=8` |
+| 部署腳本 | `scripts/deploy_rerank_systemd.sh` |
 
 ### Key Entities
 
 - **Console Route**: 主控台的主要頁面與 URL 片段，包含 RAG、資料庫、資料品質、效能報表、資料處理、系統狀態，以及獨立的 `#/tests` 系統測試路由。
 - **Service Status**: 單一服務元件的識別、名稱、類型、狀態、延遲與說明；狀態必須來自實際檢查或明確設定。
 - **Legal Article Index**: 法規／命令條文的版本化 Qdrant collection、alias、embedding／recipe 版本、法規數、條文數、驗證結果與增量建置 snapshot；不得與判決索引共用 collection。
+- **Ollama Runtime**: x570 上由 systemd 管理的 Ollama 服務、開機預載 service、模型清單、keep_alive、VRAM／context 與 embedding／LLM 設定。
+- **Reranker Service**: x570 上獨立的 `llama-server` process，包含模型路徑、量化格式、context、slots、啟動參數、常駐行為與 health／props／models 端點。
 - **Database Catalog**: 可用資料來源、狀態、說明與動態 metadata 欄位定義。
 - **Query Report**: 一次查詢的資料庫、資料表、條件、摘要、分布、查詢語句、資料列、分頁、警告與耗時。
 - **Law Detail Report**: 單一法規的 metadata、狀態、沿革、附件、條文、資料來源與 Parquet 快照資訊，以及返回原查詢報表的狀態。
@@ -409,6 +517,12 @@
 - **Judgment Parquet Snapshot**: 原始判決 Parquet，包含 jid、法院、日期、案由、全文、命中法規、引用、PDF 與來源；`/api/judgment?source=parquet`、資料頁與 RAG 引用卡連結都讀取 `parquet/raw_judgments/.../raw.parquet`。過濾後的 `judgments.parquet` 是另一個可選匯出產物，不用於查詢。
 - **Client Timing**: 前端回報的 request 總等待與 render 時間，透過 request id 合併到同一筆 Performance Record 的 `client` 與 `client.render` segment。
 - **Theme**: 一種視覺風格的識別、名稱、說明、色票與設計 token。
+- **Settings Sidebar**: 從 header 齒輪開啟的右側設定面板，包含分類按鈕、分隔線、目前分類功能表、開關狀態與焦點管理；開啟時將主要頁面左推。
+- **Settings Category**: Settings sidebar 上方的分類，例如「字型大小」與「介面風格」；每個分類有獨立 icon、名稱、說明與下方功能表。
+- **Font Size Group**: 一組具有共同語意的文字 elements（例如頁面標題、表格、法規條文），包含名稱、selector 集合、預設值、合法範圍與目前顯示值；用於滑桿、數值輸入、即時套用與 hover highlight。
+- **Font Size Preference**: 使用者儲存在 `localStorage` `judgment.fontSizes.v1` 的字型覆寫，包含 group id 與 px 值；另有目前草稿值、上次儲存值與回復預設狀態。
+- **Theme Preview Item**: 「介面風格」中的單一主題項目，保留主題名稱，但以該主題 header 的底色、文字色、品牌線、邊框、圓角與陰影呈現，並顯示 active／check 狀態。
+- **Appearance Mode**: 全站明暗配置，分為 `light`、`dark`、`system`；`light` 不覆寫主題 token，直接使用目前主題的原始配色；`dark` 以 `data-appearance="dark"` 套用共用暗色 palette；`system` 依 `prefers-color-scheme` 解析，並以 `judgment.appearance` 持久化。
 - **Local History Entry**: 儲存在瀏覽器的提問或查詢紀錄，包含類型、標題、摘要、參數與建立時間。
 - **Architecture Layer**: 系統架構中的一層節點，例如 Client、Application、Data 與 Intelligence。
 
@@ -418,7 +532,7 @@
 
 - **SC-001**: 使用者可在 3 次點擊內從任一主要頁面切換到其他 header 頁面。
 - **SC-002**: 六個主要頁面與 `#/tests` 在桌面與 390px 行動版皆無水平溢位，且 header 導覽仍可操作。
-- **SC-003**: 十種風格皆可從 `Style` 選單套用，重新整理後仍保留上次選擇。
+- **SC-003**: 十種風格皆可從「設定選項」→「介面風格」套用；每個項目 MUST 以該風格 header 的底色、文字色、品牌線與邊角顯示，重新整理後仍保留上次選擇。
 - **SC-004**: RAG 回答的每一筆判決引用都能在 PostgreSQL 中找到對應案號；法規／命令引用的每一筆都能在現行法規資料中找到對應名稱與條文。
 - **SC-005**: 沒有相似度足夠的判決且沒有法規來源時回傳零筆引用，且回答明確說明無法產生有依據的答案；有法規來源時仍使用法規內容回答。
 - **SC-006**: 四種資料來源都能產生查詢報表或明確的未設定／錯誤狀態，且沒有虛構資料列。
@@ -431,7 +545,7 @@
 - **SC-017**: 從 PostgreSQL 與 Parquet 的法規查詢結果皆可開啟法規完整報表，並以「返回查詢結果」回到原本的查詢頁碼與資料列。
 - **SC-018**: 從 `#/status` 的「系統測試」或 `#/tests` 可切換測試模式 ON／OFF，狀態顏色、標籤與 `aria-checked` 和 `/api/test-mode` 一致；後端電源仍由本機腳本／控制器管理。
 - **SC-028**: 測試模式 ON 時，一次 RAG 請求會執行所有可用 embedding／LLM 模型；實際 4 個 LLM 的測試產生 11 個 steps，總耗時約 82–149 秒，前端不得因 45 秒 timeout 中止。
-- **SC-029**: 測試流程圖表在執行中會 polling 更新進度；完成後顯示問題、答案、每個步驟的 module／function、5 個階段、每個模型一條子進度條、100% 總進度與依階段耗時比例的總流程時間 bar；失敗模型顯示紅色與錯誤訊息。
+- **SC-029**: 測試流程圖表在執行中會由 `test-runs` SSE topic 推送更新進度；完成後顯示問題、答案、每個步驟的 module／function、5 個階段、每個模型一條子進度條、100% 總進度與依階段耗時比例的總流程時間 bar；失敗模型顯示紅色與錯誤訊息。
 - **SC-030**: 重新載入效能報表後，可從歷史選單載入先前的 test run，還原相同的 stages、models、status、duration 與 step 狀態。
 - **SC-031**: 原始判決 Parquet 目前有 2,485,151 筆、約 6.23 GB；以 `jid` 讀取單筆全文可在 1 秒內完成，RAG 引用卡的 Parquet dialog 顯示的案號與全文與原始 `raw.parquet` 一致。過濾後的 `judgments.parquet` 只能由「判決 Parquet 匯出」workflow 選擇性產生，不是查詢來源。
 - **SC-032**: 快速 profile（`.env.example` 的 `gemma3:4b`、top_k=4、4,000 字上下文、num_ctx=4096、num_predict=384）在實際金融法規問題上 MUST 於 10 秒內完成一般 RAG 回答；實測約 2–5 秒。
@@ -439,9 +553,9 @@
 - **SC-035**: 「證券營業員常觸犯什麼法規或命令?」MUST 依判決引用統計列出法規／命令並標示次數；「有哪些法規是和壽險及產險相關的?」MUST 回傳含保險法、簡易人壽保險法與財產保險相關命令的法規清單。
 - **SC-036**: 判決分類的 Schema 模式 MUST 顯示 `judgment_documents` 與 `judgment_import_runs`；切換 Parquet 後 MUST 顯示原始判決 Parquet 資料表，點選後 MUST 在右側顯示欄位、前 10 筆資料與目前總數（2026-11-11 為 2,485,151 筆）；表頭排序與逐欄搜尋建議 MUST 正常，並可開啟 Parquet 原判決。
 - **SC-037**: 以滑鼠或觸控板在所有主要頁面連續上下滾動至少 10 秒時，header MUST 保持不透明且不得出現可視閃爍、消失或重新進場；資料頁切換每頁 10／25／50／100 筆、上／下一頁與排序時，表格 MUST 維持顯示直到新結果抵達，不得先閃成骨架，且表格、報表卡片與分布條不得重播進場動畫或淡入淡出效果。
-- **SC-038**: 在 `#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 分別連續觸發自動更新、重新整理、換頁、排序、每頁筆數切換、篩選與分類切換至少三次時，畫面 MUST NOT 出現可視閃爍、白屏、淡入淡出、透明度變化或進場動畫重播；表格、報表卡片、分布條、時間表、清單與統計卡 MUST 保持穩定並直接更新為最終狀態。
+- **SC-038**: 在 `#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 分別連續觸發自動更新、後端推送、重新整理、換頁、排序、每頁筆數切換、篩選與分類切換至少三次時，畫面 MUST NOT 出現可視閃爍、白屏、淡入淡出、透明度變化或進場動畫重播；表格、報表卡片、分布條、時間表、清單與統計卡 MUST 保持穩定並直接更新為最終狀態。
 - **SC-039**: 連續在七個主要頁面之間切換路由至少 10 次時，不得先出現整頁 skeleton、白屏或頁面進場動畫；header 與固定背景 MUST 保持穩定，舊頁面 MUST 直接由新頁面內容取代。
-- **SC-040**: 在 `#/processing` 的 `full_update`、`judgment_import` 或 `index_versions` 執行資訊中，至少三台 Ollama 主機（含一台離線）時，離線主機 MUST 顯示灰色、可用主機與模型 MUST 顯示綠色；拖移或箭頭調整順序後重新整理頁面，順序 MUST 保持；將第一優先設為離線主機時，embedding MUST 自動改由下一台可用主機完成，且不得回傳模擬向量。
+- **SC-040**: 在 `#/processing` 的 `legal_index_versions`、`judgment_import` 或 `index_versions` 執行資訊中，至少兩台線上主機各具備 `bge-m3:latest` 時，MUST 顯示 `x570:bge-m3:latest`、`mbp:bge-m3:latest` 按鈕，目前使用中的模型 MUST 為 active；點選另一台按鈕後 MUST 儲存該主機 embedding model、將該主機移到第一優先，重新整理後仍保持。MUST NOT 顯示主機卡片、拖移把手或上下箭頭；離線主機與未確認 embedding 能力的模型 MUST NOT 出現在按鈕列。第一優先主機無法提供 embedding 時，系統 MUST 依序自動嘗試下一台，且不得回傳模擬向量。
 - **SC-041**: 在 `#/performance` 的 RAG Pipeline 分頁選擇任一含 Flow 的 RAG Trace 時，以及 `#/rag` 每次完成回答後，waterfall MUST 依序顯示 Parsing、Embedding、Qdrant、Reranker、Context、LLM、Response；每列 MUST 顯示耗時，且 bar MUST 依執行順序接續排列，上一階段 bar 的結束位置 MUST 等於下一階段 bar 的開始位置。Embedding／LLM 的 bar MUST 以藍色前段標示 Model Load。點選階段後 MUST 顯示該 span 的實際開始／結束時間、module／function 與可用監控欄位。RAG 回答中的 waterfall MUST 位於回答內容與來源清單之後，且與效能頁使用相同階段與摘要格式。
 - **SC-042**: 在 `#/rag` 首頁至少有兩台主機、每台各有一個已確認支援 chat 的模型時，模型按鈕 MUST 以「主機:模型」顯示並全部為綠色，目前 provider／模型 MUST 標示使用中；點選另一台主機的模型後，按鈕選取狀態與「目前」文字 MUST 更新，重新整理頁面後仍保持，且 `/api/status` 的 LLM model／URL 與下一次 RAG 請求使用的 provider 模型 MUST 一致，embedding 主機順序 MUST 不變。
 - **SC-043**: Model Provider 至少兩台可用主機時，主機模型清單 MUST 顯示各模型已測試能力標籤；Chat、Embedding、Vision、Tools、Speech、Reranker 範例各自出現於對應模型，未測試模型 MUST 顯示「未測試」。按下「檢查模型能力」後，新安裝但尚未快取的模型 MUST 更新為其實際能力，且重新載入頁面後仍保留。
@@ -454,6 +568,26 @@
 - **SC-050**: 當使用者詢問「銀行法對從業人員有那些規定？」時，RAG MUST 判定為 law-first、保留銀行法已選出的 articles、將法規 source 編號為 `[1]`，並讓判決從 `[2]` 開始；`retrieval.mode` MUST 為 `law_first`，判決 context 數 MUST 不超過 `RAG_LAW_FIRST_JUDGMENT_LIMIT`。同時，「有哪些法規和壽險及產險相關？」仍 MUST 觸發 related-laws 結構化清單；「銀行法有哪些規定？」MUST NOT 被當成相關法規清單。
 - **SC-051**: 以現行法規／命令 Parquet 建置時，`legal_articles_current` MUST 指向新版本 collection，索引筆數 MUST 等於可檢索條文數（目前 222,124），維度 MUST 為 1,024，且判決 collection `judgments_v002` 的 points 數 MUST 不變。第二次以未變更來源執行 `--incremental --if-changed` MUST 回傳 `unchanged` 且不新增 collection；變更一部法規後執行 `--incremental` MUST 只替換該法規的 points，未變動法規的 points 與向量 MUST 保留。
 - **SC-052**: 啟用法規向量檢索時，同一次 RAG 查詢 MUST 只呼叫一次 `bge-m3` embedding；`retrieval.law_vector.status` MUST 為 `ok` 並包含命中的法規，`retrieval.law_rerank` MUST 獨立記錄法規 rerank。把 `legal_articles_current` alias 移除後，同一題 MUST 仍能由 PostgreSQL／Parquet + BM25 產出法規來源，且不得回傳 5xx。
+- **SC-053**: 同一題同時有法規與命令候選時，`retrieval.law_fusion.method` MUST 為 `rrf` 並包含 `rrf_k`／`dense_weight`；`retrieval.law_rerank.groups` MUST 至少包含 `law` 與 `order` 兩組。兩組 MUST 使用不同的 rerank 批次；其中一組失敗時，另一組 MUST 仍套用 rerank，失敗組 MUST 保留原順序，整體 `status` MUST 標示 `degraded`。
+- **SC-054**: x570 開機後 `systemctl is-enabled judgment-ollama-preload` MUST 為 `enabled`；`/api/ps` MUST 顯示 `gemma3:4b`、`size_vram == size`、`context_length=4096`，且 `keep_alive=-1` 時 `expires_at` 為長期。應用端 `LLM_KEEP_ALIVE=30m` 時模型 MAY 在閒置後卸載；設為 `-1` 時 MUST 保持載入。
+- **SC-055**: `systemctl is-enabled judgment-reranker` MUST 為 `enabled`；`/health` MUST 回傳 200；`/props` MUST 顯示 `/opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf`、`default_generation_settings.n_ctx=8192`、`total_slots=4`、`is_sleeping=false`；`/v1/models` meta MUST 顯示 `n_ctx=8192`、`n_ctx_train=8192`、567,753,729 params、628,831,364 bytes、Q8_0。`/metrics` 在未加 `--metrics` 時回傳 501 MUST NOT 被判定為服務失敗；停止服務後 MUST 不再提供 rerank，重啟後 MUST 重新載入模型。
+- **SC-056**: 詢問「銀行法對從業人員有那些規定？」時，判決卡 MUST 顯示該判決實際引用的 `銀行法第125條第1項、第3項`、`銀行法第29條第1項`、`銀行法第136條之1`、`公司法第8條第3項` 等條號，且不得只顯示「銀行法」、「公司法」；點選 `銀行法第136條之1` MUST 成功開啟本地 Parquet 的 `第 136-1 條` 完整條文。同一回答上方已有法規檢索結果時，下方 MUST NOT 再出現「引用法規／命令」的重複來源卡。
+- **SC-057**: 在資料庫頁打開「設定選項」後，sidebar MUST 佔用右側 `380px`，`.app-header`、`.app-main`、`.app-footer` 的右緣 MUST 位於 sidebar 左緣；字型大小清單 MUST 只包含目前頁面有匹配元素的區塊。將「頁面標題」滑桿改為 `32px` 時，頁面 h1 MUST 立即變成 `32px`；滑鼠移到「表格內容」列時，所有 `.data-table th/td` MUST 出現固定紅色 `#ef4444` outline 與半透明背景，移出後 MUST 全部移除；按「儲存」後重新載入 MUST 維持 `32px`；按「取消」或直接關閉 sidebar MUST 回到上次儲存值；按「回復預設值」後再儲存 MUST 清除本機覆寫。390px viewport 開啟 sidebar MUST 無水平溢出，且 MUST NOT 出現 console error。
+- **SC-058**: Header MUST 只有齒輪「設定選項」，不得有 `#style-trigger`、`#style-menu` 或獨立調色盤按鈕；「介面風格」分類按鈕 MUST 使用調色盤 icon。十個主題項目 MUST 保留名稱，但分別呈現該主題 header 的底色、文字色、品牌線、邊框、圓角與陰影；每個項目 MUST 顯示該主題 header 作用中導覽按鈕的迷你預覽（背景色、文字色、pill 圓角與 badge），且該預覽的第一色 MUST 與右側第一個色票一致。NVIDIA 項目 MUST 為黑底白字、0px 圓角與綠色作用中按鈕；Apple 項目 MUST 為淺色底、深色字與主題圓角。只有 active 項目 MUST 顯示 check；點選 Apple 後 `document.documentElement.dataset.theme`、`localStorage.judgment.theme`、`theme-color` meta 與 active 狀態 MUST 同步更新，且不得重新載入頁面。
+- **SC-059**: 齒輪按鈕 MUST 具備 `aria-expanded` 與 `aria-controls`；sidebar 關閉時 MUST 為 `aria-hidden="true"` 且不可聚焦。開啟後焦點 MUST 落在目前分類按鈕；按 Esc、X 或再次點擊齒輪 MUST 關閉 sidebar 並將焦點還給齒輪。儲存字型設定後切換到另一頁，新頁面相同 group 的 elements MUST 套用同一設定；動態新增的表格列或 dialog 內容 MUST 也套用設定。停用 `localStorage` 時，字型變更 MUST 仍於本次工作階段生效，且 MUST NOT 產生未捕捉例外或 console error。
+- **SC-060**: 「介面風格」標頭右側 MUST 顯示「亮／暗／系統」三個按鈕，預設「亮」為 active。切換「暗」後 `<html data-appearance="dark">`、`localStorage.judgment.appearance="dark"`、body 背景 `#0b0f14`、body 文字 `#eef3f8`、header 與 sidebar 深色背景 MUST 立即生效且無需重新載入。切換「亮」後 MUST 移除暗色覆寫，直接回到目前主題的原始配色；以 NVIDIA 主題驗證時 body 背景為 `#ffffff`，以 Linear 主題驗證時 body 背景為 `#010102`，不得被強制改成白色。在 `prefers-color-scheme: dark` 環境選擇「系統」時，`data-appearance` MUST 解析為 `dark`、`data-appearance-mode` MUST 為 `system`，且 `localStorage` MUST 儲存 `system`。三個按鈕 MUST 只有一個 `aria-pressed="true"`，且不得出現 console error。
+- **SC-061**: 完成一次 `POST /api/processing/update`（或 `judgment.processing_update`）時，Flow／processing run MUST 包含 `download`、`legal_qdrant`、`postgres` 與 `qdrant` 階段。法規索引內容未變時 `legal_qdrant` MUST 標示 skipped／無變更；有變更時 MUST 回報新版本與條文數，且 `/api/status` 的 `data.legal_index.status` 為 `fresh`、`points_count` 等於 active snapshot `article_count`。模擬 legal index 失敗時，舊 alias MUST 保持可用，run MUST 標示 partial／failed 並保留錯誤訊息。
+- **SC-062**: 建立一個內容 hash 與索引不同的判決、一個缺少索引的判決與一個已移除但仍有 point 的判決後，`/api/status` MUST 回報 changed／missing／stale 均大於 0；執行完整更新且啟用索引時 MUST 走 `build-index-version`、建立新 collection、重用未變更向量、刪除 stale point，驗證後切換 `judgments_current`。若驗證失敗，alias MUST 仍指向舊 collection，`/api/status` 的 pending 數量 MUST 大於 0。
+- **SC-063**: 使用低於門檻的 law recall／article recall／citation valid rate／P95 latency 執行 benchmark 後，`summary.gate.status` MUST 為 `fail`，且 `scripts/rag_regression_gate.py` MUST 回傳 exit code 1；所有門檻通過時 MUST 為 `pass` 並回傳 0。`RAG_GATE_LAW_RECALL_MIN` 等環境變數 MUST 能覆寫預設門檻。
+- **SC-064**: `/api/processing.file_timelines` MUST 依序包含 `law`、`order`、`judgment` 三項；每項 MUST 有 `months`、`summary`、`current`，且每個 month 的四階段鍵為 download／parquet／postgres／qdrant。法規／命令在目前資料 MUST 顯示 2026-10 與 2026-11，2026-11 四階段全綠、2026-10 的 Qdrant MUST 為 `not_applicable`（已取代空白），summary 完成 2、未完成 0；判決 MUST 顯示 368 個月、24 個全綠月份、目前匯入 archive 所在月份有灰色階段。點選判決時間表的紅色 PostgreSQL cell MUST 切換到「判決匯入」workflow 面板，且 MUST NOT 自動啟動流程。390px viewport 表格 MUST 可水平捲動且頁面無水平溢出，console error 為 0。 頁首 MUST NOT 存在 `#processing-refresh`、`#processing-update` 或 `#processing-index-toggle`；`.processing-page-subtitle` MUST 與 h1 同列顯示。
+- **SC-065**: 以 `2026-11-13T10:21:00+00:00`（台北時間 18:21）建立法規下載版本後，`version_code` MUST 為 `202611131821`；`/api/processing.file_timelines.law.current.file` MUST 為 `202611131821`，該月份 tooltip MUST 顯示相同版本編號。舊資料沒有 `version_code` 時 MUST 由 `downloaded_at` 回填，不得顯示空白。
+- **SC-066**: 選取 `#/processing` sidebar 的「法規／命令索引」「判決匯入」或「Qdrant 版本建置」workflow 面板後，MUST 顯示 Embedding 主機／模型按鈕列；x570 與 mbp 均在線且各有 `bge-m3:latest` 時 MUST 同時列出 `x570:bge-m3:latest` 與 `mbp:bge-m3:latest` 按鈕，不得只顯示模型名稱或合併成單一選項。選擇 `mbp:bge-m3:latest` 後 MUST 儲存 mbp 的 embedding model、將 mbp 設為第一優先；切換前 MUST 顯示索引可能需要重建的警告。離線主機或未確認 embedding 能力的模型 MUST NOT 出現在選項中；面板 MUST NOT 顯示舊的主機卡片、拖移把手或上下箭頭；頁面標頭 MUST NOT 再顯示重複的 Embedding 選擇器。
+- **SC-067**: 判決匯入 run 失敗且錯誤訊息包含 `NUL (0x00)` 時，filter 與 postgres 的「失敗」badge MUST 在 hover／focus 顯示 `原因：...NUL...` 與 `建議：...重新執行...`；tooltip MUST 位於一般 stage hover 卡之上，390px 無水平溢出，console error 為 0。
+- **SC-068**: 判決匯入面板的月份表 MUST 每個月份橫向顯示四階段方格：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata；已完成 MUST 顯示綠色，尚未完成 MUST 顯示紅色，執行中且尚未完成的階段 MUST 顯示灰色。已有可用原始 Parquet 的 archive MUST 顯示「沿用 YYYY-MM 既有原始 Parquet、未重新備份」；缺少備份而新建時，執行中 MUST 顯示「建立 YYYY-MM 原始 Parquet 備份」，完成後 MUST 顯示「已建立 YYYY-MM 原始 Parquet 備份」，不得只顯示「檢查」或「沿用」，也不得讓使用者誤以為每次都在重新備份。金融法規篩選與 PostgreSQL metadata 訊息 MUST 包含目前處理的 `YYYY-MM` 與 archive。可沿用原始 Parquet 的 archive MUST 在 RAR 與原始資料階段顯示綠色並註明沿用／略過解壓縮，不得因本次重新檢查而標示為紅色或灰色，也不得標示為重新解壓縮。尚未匯入且無可用備份的階段開始處理時，顏色順序 MUST 為「紅色 → 灰色 → 綠色」；已由先前 run 匯入的月份在本次重跑前 MUST 維持綠色，開始重跑時依實際尚未完成的階段轉灰、完成後回綠。執行中的判決匯入 MUST 以靜態外框與 `aria-current="true"` 標示目前月份；若有實際執行中且尚未完成的階段，該階段 MUST 顯示灰色且 summary 處理中 MUST 為 1。若目前僅在沿用既有 Parquet 備份，RAR 與原始資料階段 MUST 保持綠色，不得為了顯示執行中而強制轉灰，summary 處理中可為 0；目前列 MUST 顯示月份、archive 與階段名稱。當篩選或 PostgreSQL 階段重新處理較早月份時，外框 MUST 維持在最高已啟動且未完成的月份，目前列 MUST 另顯示「處理中 YYYY-MM archive」，且不得把外框月份的階段 cell 標成灰色處理中。390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **SC-069**: 在相同金融法規清單 SHA 下重新執行判決匯入時，已完成且 raw Parquet 可沿用的 archive MUST 被標示為接續完成，第一個 active month MUST 是最新中斷／失敗／未完成的 archive，不得從 1996 或其他已完成月份重新開始；被跳過的 archive MUST NOT 再呼叫 candidate_count 或重新執行 filter/postgres。若中斷的 archive 已有部分 PostgreSQL 資料，該 archive MUST 重新處理，不得因 DB 已有資料而跳過。尚未完成 filter／postgres 而已有可沿用 raw Parquet 的 archive MUST 在啟動掃描時批次標記為 raw 完成，不再重新解壓縮或逐檔查詢 manifest；下載檔案改變而 manifest 不再相符時，該 archive MUST 重新建立備份。
+- **SC-070**: 判決匯入 active month 由 202601 切換到 202602 時，外框與 `aria-current="true"` MUST 在 1 秒內移動到 202602，舊月份 MUST 移除 `is-current`／`aria-current`；目前列 MUST 同步顯示 202602 的 archive 與階段，不得等待完整 snapshot 的 2 秒週期。390px viewport 無水平溢出，console error 為 0。
+- **SC-071**: 在 `#/processing`、`#/tests`、`#/performance`、`#/rag`、`#/status` 停留 10 秒且後端資料沒有變更時，瀏覽器 MUST NOT 發出重複的 `/api/processing`、`/api/judgment-download/status`、`/api/test-runs/current`、`/api/benchmark/runs` 或 `/api/status` 查詢；每個頁面只允許初始 snapshot／SSE 載入與使用者操作。變更 state／manifest／progress 檔或 DB run 資料後，後端 MUST 在 0.5 秒內透過 SSE 推送含最新進度的完整或增量 payload；前端 MUST 直接套用 payload 更新畫面，MUST NOT 再發出進度查詢。非進度類輔助資料 MAY 因 refresh event 載入一次，但 MUST NOT 形成週期性查詢。390px viewport 無水平溢出，console error 為 0。
+- **SC-072**: 判決匯入執行金融法規篩選或 PostgreSQL metadata 時，processing state 更新後 MUST 由 `/api/events/stream` 的 `processing` topic 推送 live payload；前端 MUST 在 1 秒內更新 workflow 階段訊息、目前處理月份與下方時間表，network log MUST NOT 出現重複的 `/api/processing` GET，且 MUST NOT 使用 `/api/processing/active/stream` 作為 UI 進度來源。初次連線 MUST 由同一 topic 的完整 snapshot 建立頁面；後續只套用 SSE payload。390px viewport 無水平溢出，console error 為 0。
 - **SC-034**: 點擊 `證券交易法` 法規卡 MUST 從本地 Parquet 開啟 229 條原文 dialog，一次列出全部條文並顯示 `Parquet 條文` 來源，不得出現分頁控制；X、「返回回答」與點擊外部 MUST 可關閉，且 390px 無水平溢出。
 - **SC-019**: 資料庫頁可在法規命令與判決間切換；判決分類可查詢已篩選的 `judgment_documents`，且未匯入或未命中時顯示 0 筆，不出現虛構資料。
 - **SC-020**: 從判決查詢結果可開啟判決原文，並以「返回查詢結果」回到原本的判決頁碼與資料列。

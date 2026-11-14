@@ -40,6 +40,6 @@
 - The month table refresh must re-scan `raw_rar`; manually downloaded files are detected without rerunning the download workflow.
 - Month hover downloads use an authenticated backend proxy keyed by fileset ID; passwords and Tokens are never exposed to the browser.
 - While a run is active, the current month is highlighted and the action area shows its filename, progress bar, percentage, and bytes written / total.
-- Progress updates patch only the month cells and progress DOM nodes, so polling does not re-render the workflow panel or reset table scroll.
+- Progress updates patch only the month cells and progress DOM nodes, so backend SSE pushes do not re-render the workflow panel or reset table scroll; the frontend does not poll download progress.
 - Stale progress is hidden when the downloader process is gone or the progress file is too old.
 - Delete-Infor application to existing judgments is explicitly out of scope.

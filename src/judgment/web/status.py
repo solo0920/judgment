@@ -14,7 +14,8 @@ from .. import __version__
 from ..config import Settings
 from ..embeddings import ollama_model_available, ollama_models_detail
 from ..index_versions import active_version
-from ..judgment_index import index_coverage
+from ..judgment_index import index_coverage, index_staleness
+from ..legal_index import assess_legal_index_freshness, legal_index_status
 from ..models import (
     DownloadRun,
     LawDatasetVersion,
@@ -22,6 +23,7 @@ from ..models import (
 )
 from ..observability import traced
 from ..vector_store import QdrantError, QdrantStore
+from ..version_codes import version_code_for_datetime
 
 SERVICE_LABELS = {
     "operational": "正常",
@@ -112,6 +114,8 @@ def _version_dict(version: Optional[LawDatasetVersion]) -> Optional[Dict[str, An
     return {
         "id": int(version.id),
         "source_type": version.source_type,
+        "version_code": version.version_code
+        or version_code_for_datetime(version.downloaded_at),
         "update_date": version.update_date,
         "law_count": int(version.law_count),
         "article_count": int(version.article_count),
@@ -496,6 +500,73 @@ def _rag_metrics(
 
 
 @traced("status.build", module=__name__, params_fn=lambda **_: {})
+def _legal_index_metrics(
+    *,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    postgres: Dict[str, Any],
+) -> Dict[str, Any]:
+    started = time.perf_counter()
+    try:
+        status = legal_index_status(
+            session_factory=session_factory,
+            settings=settings,
+            store=QdrantStore(
+                settings.qdrant_url,
+                api_key=settings.qdrant_api_key,
+                timeout=5.0,
+            ),
+        )
+        active = status.get("active_version") or {}
+        last_version = postgres.get("last_version") or {}
+        freshness = assess_legal_index_freshness(
+            active_version=active,
+            points_count=status.get("points_count"),
+            current_law_count=int(postgres.get("total_current") or 0),
+            current_article_count=int(postgres.get("article_count") or 0),
+            latest_source_at=last_version.get("downloaded_at"),
+        )
+        return {
+            "status": freshness.get("status"),
+            "stale": bool(freshness.get("stale")),
+            "reasons": list(freshness.get("reasons") or []),
+            "alias": status.get("alias"),
+            "alias_collection": status.get("alias_collection"),
+            "collection": status.get("collection"),
+            "points_count": status.get("points_count"),
+            "dimension": status.get("dimension"),
+            "version_id": active.get("version_id"),
+            "law_count": active.get("law_count"),
+            "article_count": active.get("article_count"),
+            "indexed_at": active.get("activated_at")
+            or active.get("validated_at")
+            or active.get("created_at"),
+            "snapshot_hash": (active.get("source_snapshot") or {}).get(
+                "snapshot_hash"
+            ),
+            "freshness": freshness,
+            "latency_ms": _ms(started),
+        }
+    except Exception as exc:
+        return {
+            "status": "unknown",
+            "stale": None,
+            "reasons": [f"{exc.__class__.__name__}: {exc}"],
+            "alias": settings.legal_article_vector_alias,
+            "alias_collection": None,
+            "collection": None,
+            "points_count": None,
+            "dimension": None,
+            "version_id": None,
+            "law_count": None,
+            "article_count": None,
+            "indexed_at": None,
+            "snapshot_hash": None,
+            "freshness": {},
+            "latency_ms": _ms(started),
+        }
+
+
 def build_status(
     *,
     session_factory: sessionmaker[Session],
@@ -546,6 +617,27 @@ def build_status(
             "model": embedding_model,
             "latest_indexed_at": None,
         }
+    try:
+        staleness = index_staleness(
+            session_factory,
+            collection=qdrant_collection,
+            model=embedding_model,
+            version_id=active_index["version_id"] if active_index else None,
+        )
+    except Exception:
+        staleness = {
+            "status": "unknown",
+            "fresh": None,
+            "pending_judgments": None,
+            "missing_judgments": None,
+            "changed_judgments": None,
+            "stale_judgments": None,
+        }
+    legal_index = _legal_index_metrics(
+        session_factory=session_factory,
+        settings=settings,
+        postgres=postgres,
+    )
 
     services = [
         {
@@ -581,6 +673,27 @@ def build_status(
             "name": "Qdrant",
             "kind": "vector",
             **qdrant,
+        },
+        {
+            "id": "legal_index",
+            "name": "法規／命令索引",
+            "kind": "vector",
+            "status": (
+                "operational"
+                if legal_index.get("status") == "fresh"
+                else "degraded"
+            ),
+            "latency_ms": legal_index.get("latency_ms"),
+            "detail": (
+                f"{legal_index.get('points_count') or 0:,} points · "
+                f"{legal_index.get('collection') or legal_index.get('alias') or '—'}"
+                if legal_index.get("status") == "fresh"
+                else "索引待更新：" + ", ".join(legal_index.get("reasons") or [])
+            ),
+            "points_count": legal_index.get("points_count"),
+            "collection": legal_index.get("collection"),
+            "version_id": legal_index.get("version_id"),
+            "stale": legal_index.get("stale"),
         },
         {
             "id": "embedding",
@@ -645,6 +758,20 @@ def build_status(
             "judgment_vector_model": coverage["model"],
             "judgment_vector_points": qdrant.get("points_count"),
             "judgment_indexed_at": coverage["latest_indexed_at"],
+            "judgment_index_fresh": staleness.get("fresh"),
+            "judgment_index_pending": staleness.get("pending_judgments"),
+            "judgment_index_missing": staleness.get("missing_judgments"),
+            "judgment_index_changed": staleness.get("changed_judgments"),
+            "judgment_index_stale": staleness.get("stale_judgments"),
+            "judgment_index_staleness": staleness,
+            "legal_index": legal_index,
+            "legal_article_vector_alias": legal_index.get("alias"),
+            "legal_article_vector_collection": legal_index.get("collection"),
+            "legal_article_vector_version_id": legal_index.get("version_id"),
+            "legal_article_indexed_count": legal_index.get("points_count"),
+            "legal_article_count": legal_index.get("article_count"),
+            "legal_article_indexed_at": legal_index.get("indexed_at"),
+            "legal_article_stale": legal_index.get("stale"),
         },
         "recent_runs": postgres["recent_runs"],
         "architecture": {

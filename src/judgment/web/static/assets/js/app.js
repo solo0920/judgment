@@ -1,5 +1,5 @@
-import { api, needsApiConfiguration } from "./api.js";
-import { initThemePicker } from "./themes.js";
+import { api, needsApiConfiguration, subscribeRefresh } from "./api.js";
+import { initSettings, refreshSettings } from "./settings.js";
 import { escapeHtml, icon, toast } from "./utils.js";
 import * as homePage from "./pages/home.js";
 import * as ragPage from "./pages/rag.js";
@@ -104,6 +104,7 @@ async function renderRoute() {
     // await. Keep the old page visible until then instead of flashing a
     // skeleton on every header navigation.
     const resultPromise = ROUTES[route].page.render(main, context);
+    refreshSettings();
     window.scrollTo({ top: 0, behavior: "auto" });
     main.focus({ preventScroll: true });
     const result = await resultPromise;
@@ -154,10 +155,10 @@ function initUpdateBadge() {
     badge.hidden = true;
     link.appendChild(badge);
   }
-  const refresh = async () => {
+  const refresh = async (data = null) => {
     try {
-      const data = await api.updatesStatus();
-      const count = Number(data.update_count) || 0;
+      const info = data || (await api.updatesStatus());
+      const count = Number(info.update_count) || 0;
       if (count > 0) {
         badge.textContent = String(count);
         badge.title = `法規／命令／判決有 ${count} 項更新`;
@@ -170,13 +171,14 @@ function initUpdateBadge() {
     }
   };
   refresh();
-  window.setInterval(refresh, 60000);
-  window.addEventListener("focus", refresh);
-  window.addEventListener("judgment:updates-changed", refresh);
+  subscribeRefresh("updates", (_topic, payload) =>
+    refresh(payload?.snapshot || null),
+  );
+  window.addEventListener("judgment:updates-changed", () => refresh());
 }
 
 function boot() {
-  initThemePicker();
+  initSettings();
   initGlobalShortcuts();
   initUpdateBadge();
   window.addEventListener("hashchange", renderRoute);

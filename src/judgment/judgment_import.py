@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Tuple
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 
 from .config import Settings
 from .courts import normalize_court
@@ -30,7 +30,7 @@ from .judgment_backup import (
     write_raw_delta,
 )
 from .judgment_raw_parquet import (
-    find_reusable_raw_parquet,
+    find_reusable_raw_parquets,
     write_archive_raw_parquet,
 )
 from .judgment_versioning import (
@@ -39,8 +39,9 @@ from .judgment_versioning import (
     create_snapshot,
     finalize_snapshot,
 )
-from .models import JudgmentDocument, JudgmentImportRun
+from .models import JudgmentDocument, JudgmentImportRun, JudgmentSnapshot
 from .observability import record_performance
+from .processing_events import publish_event
 from .processing_state import ProcessingStateStore, parent_run_id
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,15 @@ class LawList:
 class CitationResult:
     citations: Tuple[Dict[str, str], ...]
     matched_laws: Tuple[str, ...]
+
+
+def _archive_month_label(archive: Path) -> str:
+    """Return a readable YYYY-MM label for an archive filename."""
+
+    match = re.match(r"(\d{4})[-_]?(\d{2})", archive.name)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
+    return archive.stem or archive.name
 
 
 def _normalize_for_match(value: str) -> str:
@@ -558,28 +568,21 @@ def import_judgments(
 
     state: Optional[ProcessingStateStore] = None
     state_run_id: Optional[str] = None
-    archive_totals: Dict[Path, Optional[int]] = {}
-    extract_grand_total: Optional[int] = None
+    resume_archives: Dict[Path, Dict[str, Any]] = {}
+    resume_candidate_totals: Dict[Path, int] = {}
     if track_state and not dry_run:
         try:
             state = ProcessingStateStore()
             run_meta = {
                 "data_dir": str(source_dir),
                 "law_list": str(law_list.path),
+                "law_list_sha256": law_list.sha256,
                 "archive_count": len(archive_paths),
                 "limit": limit,
                 "replace": replace,
                 "raw_only": raw_only,
                 "parent_run_id": parent_run_id() or state_parent_run_id,
             }
-            for archive in archive_paths:
-                archive_totals[archive] = archive_uncompressed_bytes(archive)
-            if archive_totals and all(
-                value is not None for value in archive_totals.values()
-            ):
-                extract_grand_total = sum(
-                    int(value or 0) for value in archive_totals.values()
-                )
             state_run_id = state.start_run(
                 branch="judgment",
                 kind="import",
@@ -594,23 +597,289 @@ def import_judgments(
                 meta=run_meta,
                 message=f"準備處理 {len(archive_paths)} 個壓縮檔。",
             )
+            publish_event(
+                "run_started",
+                run_id=state_run_id,
+                status="running",
+                message=f"準備處理 {len(archive_paths)} 個壓縮檔。",
+                extra={"archive_count": len(archive_paths)},
+            )
+            archive_entries: List[Dict[str, Any]] = []
             for archive in archive_paths:
                 try:
                     size_bytes = archive.stat().st_size
                 except OSError:
                     size_bytes = 0
-                state.add_archive(
-                    state_run_id,
-                    archive.name,
-                    path=str(archive),
-                    size_bytes=size_bytes,
+                archive_entries.append(
+                    {
+                        "name": archive.name,
+                        "path": str(archive),
+                        "size_bytes": size_bytes,
+                    }
                 )
+            state.add_archives(state_run_id, archive_entries)
             state.start_stage(
                 state_run_id,
                 "extract",
-                total=extract_grand_total,
-                message=f"共 {len(archive_paths)} 個壓縮檔；逐檔解壓縮。",
+                total=None,
+                message="檢查可接續的先前進度…",
             )
+            if (
+                not raw_only
+                and session_factory is not None
+                and run_id is not None
+            ):
+                resume_allowed = False
+                with session_factory() as session:
+                    previous_run = session.scalars(
+                        select(JudgmentImportRun)
+                        .where(JudgmentImportRun.id != run_id)
+                        .order_by(
+                            JudgmentImportRun.started_at.desc(),
+                            JudgmentImportRun.id.desc(),
+                        )
+                        .limit(1)
+                    ).first()
+                    resume_allowed = bool(
+                        previous_run is not None
+                        and previous_run.law_list_sha256 == law_list.sha256
+                    )
+                if resume_allowed:
+                    prior_payload = state.read()
+                    latest_processed: Dict[str, Dict[str, Any]] = {}
+                    for prior_run in prior_payload.get("runs") or []:
+                        if not isinstance(prior_run, dict):
+                            continue
+                        if prior_run.get("id") == state_run_id:
+                            continue
+                        if prior_run.get("kind") != "import":
+                            continue
+                        for name, archive_state in (
+                            prior_run.get("archives") or {}
+                        ).items():
+                            if name in latest_processed:
+                                continue
+                            if not isinstance(archive_state, dict):
+                                continue
+                            if archive_state.get("status") in {
+                                "pending",
+                                "idle",
+                            }:
+                                continue
+                            latest_processed[str(name)] = archive_state
+                    prior_states: Dict[str, Dict[str, Any]] = {}
+                    blocked_resume: set[str] = set()
+                    for name, archive_state in latest_processed.items():
+                        stages = archive_state.get("stages") or {}
+                        if (
+                            archive_state.get("status") == "success"
+                            and (stages.get("filter") or {}).get("status")
+                            == "success"
+                            and (stages.get("postgres") or {}).get("status")
+                            == "success"
+                        ):
+                            prior_states[name] = archive_state
+                        else:
+                            blocked_resume.add(name)
+                    snapshot_by_archive: Dict[str, Tuple[str, int]] = {}
+                    if session_factory is not None:
+                        with session_factory() as session:
+                            existing_archives = session.execute(
+                                select(
+                                    JudgmentDocument.source_archive,
+                                    func.count(),
+                                )
+                                .where(
+                                    JudgmentDocument.source_archive != "",
+                                    JudgmentDocument.is_current.is_(True),
+                                )
+                                .group_by(JudgmentDocument.source_archive)
+                            ).all()
+                            snapshot_rows = session.execute(
+                                select(
+                                    JudgmentSnapshot.source_archive,
+                                    JudgmentSnapshot.raw_parquet_path,
+                                    JudgmentSnapshot.raw_row_count,
+                                ).where(
+                                    JudgmentSnapshot.is_current.is_(True),
+                                )
+                            ).all()
+                        for source_archive, raw_path, raw_rows in snapshot_rows:
+                            name = str(source_archive or "")
+                            if name:
+                                snapshot_by_archive[name] = (
+                                    str(raw_path or ""),
+                                    int(raw_rows or 0),
+                                )
+                        for archive_name, count in existing_archives:
+                            name = str(archive_name or "")
+                            if (
+                                not name
+                                or name in prior_states
+                                or name in blocked_resume
+                            ):
+                                continue
+                            count = int(count or 0)
+                            prior_states[name] = {
+                                "status": "success",
+                                "scanned": count,
+                                "matched": count,
+                                "stored": count,
+                                "stages": {
+                                    "extract": {"status": "success"},
+                                    "raw_parquet": {"status": "success"},
+                                    "filter": {
+                                        "status": "success",
+                                        "current": count,
+                                        "total": count,
+                                    },
+                                    "postgres": {
+                                        "status": "success",
+                                        "current": count,
+                                        "total": count,
+                                    },
+                                },
+                            }
+                    archive_by_name = {a.name: a for a in archive_paths}
+                    candidates = [
+                        (archive_by_name[name], previous_state)
+                        for name, previous_state in prior_states.items()
+                        if name in archive_by_name
+                    ]
+                    for archive, previous_state in candidates:
+                        snapshot = snapshot_by_archive.get(archive.name)
+                        raw_path = ""
+                        raw_rows = int(
+                            previous_state.get("scanned") or 0
+                        )
+                        if snapshot is not None:
+                            raw_path, snapshot_rows = snapshot
+                            if snapshot_rows:
+                                raw_rows = int(snapshot_rows)
+                        try:
+                            size_bytes = archive.stat().st_size
+                        except OSError:
+                            size_bytes = 0
+                        resume_archives[archive] = {
+                            "previous": previous_state,
+                            "reusable": {
+                                "path": Path(raw_path) if raw_path else "",
+                                "rows": raw_rows,
+                                "size_bytes": size_bytes,
+                                "reused": True,
+                                "duration_ms": 0,
+                                "write_ms": 0,
+                            },
+                        }
+                    resume_entries: List[Dict[str, Any]] = []
+                    for archive, info in resume_archives.items():
+                        previous_state = info["previous"]
+                        reusable = info["reusable"]
+                        previous_stages = previous_state.get("stages") or {}
+                        extract_previous = (
+                            previous_stages.get("extract") or {}
+                        )
+                        filter_previous = previous_stages.get("filter") or {}
+                        postgres_previous = (
+                            previous_stages.get("postgres") or {}
+                        )
+                        raw_rows = int(
+                            reusable.get("rows")
+                            or previous_state.get("scanned")
+                            or 0
+                        )
+                        extract_current = int(
+                            extract_previous.get("current") or 0
+                        )
+                        if not extract_current:
+                            try:
+                                extract_current = archive.stat().st_size
+                            except OSError:
+                                extract_current = int(
+                                    reusable.get("size_bytes") or 0
+                                )
+                        filter_current = int(
+                            filter_previous.get("current") or 0
+                        )
+                        filter_total = int(
+                            filter_previous.get("total") or 0
+                        )
+                        postgres_current = int(
+                            postgres_previous.get("current") or 0
+                        )
+                        matched_previous = int(
+                            previous_state.get("matched") or 0
+                        )
+                        stored_previous = int(
+                            previous_state.get("stored")
+                            or postgres_current
+                        )
+                        resume_entries.append(
+                            {
+                                "name": archive.name,
+                                "raw_rows": raw_rows,
+                                "extract_current": extract_current,
+                                "filter_current": filter_current,
+                                "filter_total": filter_total,
+                                "postgres_current": postgres_current,
+                                "matched": matched_previous,
+                                "stored": stored_previous,
+                            }
+                        )
+                        raw_result = dict(reusable)
+                        raw_result["bytes_read"] = extract_current
+                        raw_result["extract_ms"] = 0
+                        raw_result["write_ms"] = 0
+                        raw_results[archive] = raw_result
+                        raw_total_rows += raw_rows
+                        raw_total_bytes += extract_current
+                        raw_reused += 1
+                        scanned += filter_current
+                        matched += matched_previous
+                        stored += postgres_current
+                        resume_candidate_totals[archive] = filter_total
+                    if resume_entries:
+                        state.mark_archives_resumed(
+                            state_run_id, resume_entries
+                        )
+            if resume_archives:
+                first_unresumed = next(
+                    (
+                        archive
+                        for archive in archive_paths
+                        if archive not in resume_archives
+                    ),
+                    None,
+                )
+                state.update_run(
+                    state_run_id,
+                    meta={"current_archive": "", "current_phase": ""},
+                )
+                state.update_stage(
+                    state_run_id,
+                    "extract",
+                    current=raw_total_bytes,
+                    total=None,
+                    message=(
+                        f"接續上次進度：{len(resume_archives)} 個壓縮檔已完成"
+                        + (
+                            f"，從 {first_unresumed.name} 繼續。"
+                            if first_unresumed is not None
+                            else "。"
+                        )
+                    ),
+                )
+            else:
+                state.update_stage(
+                    state_run_id,
+                    "extract",
+                    current=raw_total_bytes,
+                    total=None,
+                    message=(
+                        f"共 {len(archive_paths)} 個壓縮檔；"
+                        "優先沿用既有原始 Parquet；只有缺少備份時才解壓縮並建立備份。"
+                    ),
+                )
         except Exception:
             logger.exception("無法建立判決匯入的處理狀態")
             state = None
@@ -621,251 +890,345 @@ def import_judgments(
             state.start_stage(
                 state_run_id,
                 "raw_parquet",
-                message="將解壓縮後的原始 JSON 寫入 Parquet 備份。",
+                message="檢查既有原始 Parquet；可沿用者不重新備份、不重新解壓縮。",
             )
-        for archive_index, archive in enumerate(archive_paths):
-            current_archive = archive
-            archive_total_bytes = archive_totals.get(archive)
-            if archive_total_bytes is None:
-                archive_total_bytes = archive_uncompressed_bytes(archive)
-            reusable = find_reusable_raw_parquet(raw_data_dir, archive)
-            if reusable is not None:
+            if resume_archives:
+                state.update_stage(
+                    state_run_id,
+                    "raw_parquet",
+                    current=raw_total_rows,
+                    message=(
+                        f"接續上次進度：{len(resume_archives)} 個"
+                        "原始 Parquet 已沿用。"
+                    ),
+                )
+        # One manifest scan for the whole run.  Archives whose backup still
+        # matches the downloaded file are marked complete in one state write
+        # and skipped by the extraction loop below.
+        reuse_candidates = [
+            archive
+            for archive in archive_paths
+            if archive not in resume_archives
+        ]
+        reused_backups = find_reusable_raw_parquets(
+            raw_data_dir, reuse_candidates
+        )
+        if reused_backups:
+            reuse_entries: List[Dict[str, Any]] = []
+            for archive, reusable in reused_backups.items():
                 raw_result = dict(reusable)
-                raw_result["bytes_read"] = int(archive_total_bytes or 0)
+                bytes_read = int(reusable.get("size_bytes") or 0)
+                if not bytes_read:
+                    try:
+                        bytes_read = archive.stat().st_size
+                    except OSError:
+                        bytes_read = 0
+                raw_result["bytes_read"] = bytes_read
                 raw_result["extract_ms"] = 0
                 raw_result["write_ms"] = 0
-                if state is not None and state_run_id is not None:
-                    state.update_archive(
-                        state_run_id,
-                        archive.name,
-                        status="running",
-                        current_stage="raw_parquet",
-                        scanned=int(raw_result["rows"]),
-                        matched=0,
-                        stored=0,
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "extract",
-                        status="skipped",
-                        current=int(raw_result["bytes_read"]),
-                        total=archive_total_bytes or raw_result["bytes_read"],
-                        message="沿用既有原始 Parquet 備份，略過重新解壓縮。",
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "raw_parquet",
-                        status="success",
-                        current=int(raw_result["rows"]),
-                        total=int(raw_result["rows"]),
-                        message=f"沿用原始 Parquet 備份（{int(raw_result['rows']):,} 筆）。",
-                    )
-                logger.info(
-                    "reusing raw parquet for %s (%s rows)",
+                raw_results[archive] = raw_result
+                rows = int(reusable.get("rows") or 0)
+                raw_total_rows += rows
+                raw_total_bytes += bytes_read
+                raw_reused += 1
+                reuse_entries.append(
+                    {
+                        "name": archive.name,
+                        "raw_rows": rows,
+                        "extract_current": bytes_read,
+                        "month_label": _archive_month_label(archive),
+                    }
+                )
+            if state is not None and state_run_id is not None:
+                state.mark_archives_raw_reused(state_run_id, reuse_entries)
+                remaining = len(archive_paths) - len(raw_results)
+                state.update_stage(
+                    state_run_id,
+                    "extract",
+                    current=raw_total_bytes,
+                    total=None,
+                    message=(
+                        f"已沿用 {raw_reused} 個原始 Parquet 備份；"
+                        f"檢查 {remaining} 個缺少備份的壓縮檔。"
+                    ),
+                )
+                state.update_stage(
+                    state_run_id,
+                    "raw_parquet",
+                    current=raw_total_rows,
+                    message=(
+                        f"已沿用 {raw_reused} 個原始 Parquet 備份；"
+                        f"剩餘 {remaining} 個待檢查。"
+                    ),
+                )
+        for archive_index, archive in enumerate(archive_paths):
+            if archive in raw_results:
+                continue
+            current_archive = archive
+            month_label = _archive_month_label(archive)
+            if state is not None and state_run_id is not None:
+                state.update_stage(
+                    state_run_id,
+                    "extract",
+                    message=(
+                        "檢查 RAR 壓縮檔 "
+                        f"{archive_index + 1}/{len(archive_paths)}："
+                        f"{archive.name}"
+                    ),
+                )
+                state.update_run(
+                    state_run_id,
+                    message=(
+                        "檢查 RAR 壓縮檔 "
+                        f"{archive_index + 1}/{len(archive_paths)}："
+                        f"{archive.name}"
+                    ),
+                    meta={
+                        "current_archive": archive.name,
+                        "current_phase": "extract",
+                    },
+                )
+            archive_total_bytes = archive_uncompressed_bytes(archive)
+            archive_bytes_read = 0
+            last_raw_state_at = 0.0
+            if state is not None and state_run_id is not None:
+                state.update_archive(
+                    state_run_id,
                     archive.name,
-                    raw_result["rows"],
+                    status="running",
+                    current_stage="extract",
+                    scanned=0,
+                    matched=0,
+                    stored=0,
+                    size_bytes=archive.stat().st_size
+                    if archive.exists()
+                    else None,
                 )
-            else:
-                archive_bytes_read = 0
-                last_raw_state_at = 0.0
-                if state is not None and state_run_id is not None:
-                    state.update_archive(
-                        state_run_id,
-                        archive.name,
-                        status="running",
-                        current_stage="extract",
-                        scanned=0,
-                        matched=0,
-                        stored=0,
-                        size_bytes=archive.stat().st_size
-                        if archive.exists()
-                        else None,
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "extract",
-                        status="running",
-                        current=0,
-                        total=archive_total_bytes,
-                        message="讀取壓縮檔並解壓縮 JSON。",
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "raw_parquet",
-                        status="running",
-                        current=0,
-                        total=None,
-                        message="寫入不含篩選、未修改內容的原始 Parquet。",
-                    )
-                    state.set_current_stage(state_run_id, "extract")
-
-                def on_raw_bytes(
-                    read_bytes: int,
-                    *,
-                    archive=archive,
-                    archive_total_bytes=archive_total_bytes,
-                ) -> None:
-                    nonlocal archive_bytes_read, last_raw_state_at
-                    archive_bytes_read = max(archive_bytes_read, int(read_bytes))
-                    if state is None or state_run_id is None:
-                        return
-                    now = time.perf_counter()
-                    if now - last_raw_state_at < 0.5:
-                        return
-                    last_raw_state_at = now
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "extract",
-                        current=archive_bytes_read,
-                        total=archive_total_bytes,
-                        status="running",
-                        message="解壓縮並讀取 JSON。",
-                    )
-                    state.update_stage(
-                        state_run_id,
-                        "extract",
-                        current=raw_total_bytes + archive_bytes_read,
-                        total=extract_grand_total,
-                        duration_ms=extract_total_ms,
-                        message=f"{archive.name}（{archive_index + 1}/{len(archive_paths)}）",
-                    )
-
-                def on_raw_rows(
-                    written_rows: int,
-                    *,
-                    archive=archive,
-                ) -> None:
-                    if state is None or state_run_id is None:
-                        return
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "raw_parquet",
-                        current=written_rows,
-                        total=None,
-                        status="running",
-                        message=f"已寫入 {written_rows:,} 筆原始 JSON。",
-                    )
-                    state.update_stage(
-                        state_run_id,
-                        "raw_parquet",
-                        current=raw_total_rows + written_rows,
-                        duration_ms=raw_total_ms,
-                        message=f"已寫入 {raw_total_rows + written_rows:,} 筆原始 JSON。",
-                    )
-
-                def on_match_progress(
-                    processed: int,
-                    total: int,
-                    *,
-                    archive=archive,
-                ) -> None:
-                    if state is None or state_run_id is None:
-                        return
-                    message = (
-                        f"DuckDB 候選 {processed:,}/{total:,}；"
-                        "Python 精析法規引用。"
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "raw_parquet",
-                        status="running",
-                        message=message,
-                    )
-                    state.update_stage(
-                        state_run_id,
-                        "raw_parquet",
-                        duration_ms=raw_total_ms,
-                        message=f"{archive.name}：{message}",
-                    )
-
-                raw_result = write_archive_raw_parquet(
-                    archive,
-                    raw_data_dir,
-                    iter_archive_json_with_raw(archive, progress=on_raw_bytes),
-                    run_token=str(run_id) if run_id else "",
-                    row_progress=on_raw_rows,
-                    entry_transform=lambda obj, archive=archive: _raw_base_fields(
-                        obj, archive=archive
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "extract",
+                    status="running",
+                    current=0,
+                    total=archive_total_bytes,
+                    message="讀取壓縮檔並解壓縮 JSON。",
+                )
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "raw_parquet",
+                    status="running",
+                    current=0,
+                    total=None,
+                    message=(
+                        f"缺少可用備份：建立 {month_label} 原始 Parquet 備份"
+                        f"（{archive.name}）。"
                     ),
-                    match_transform=lambda obj: _raw_match_fields(
-                        obj, pattern=pattern
+                )
+                state.set_current_stage(state_run_id, "extract")
+
+            def on_raw_bytes(
+                read_bytes: int,
+                *,
+                archive=archive,
+                archive_total_bytes=archive_total_bytes,
+            ) -> None:
+                nonlocal archive_bytes_read, last_raw_state_at
+                archive_bytes_read = max(archive_bytes_read, int(read_bytes))
+                if state is None or state_run_id is None:
+                    return
+                now = time.perf_counter()
+                if now - last_raw_state_at < 0.5:
+                    return
+                last_raw_state_at = now
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "extract",
+                    current=archive_bytes_read,
+                    total=archive_total_bytes,
+                    status="running",
+                    message="解壓縮並讀取 JSON。",
+                )
+                state.update_stage(
+                    state_run_id,
+                    "extract",
+                    current=raw_total_bytes + archive_bytes_read,
+                    total=None,
+                    duration_ms=extract_total_ms,
+                    message=(
+                        f"{month_label}（{archive.name}，"
+                        f"{archive_index + 1}/{len(archive_paths)}）"
                     ),
-                    candidate_regex=candidate_regex,
-                    match_progress=on_match_progress,
                 )
-                raw_result["bytes_read"] = archive_bytes_read or int(
-                    archive_total_bytes or 0
+
+            def on_raw_rows(
+                written_rows: int,
+                *,
+                archive=archive,
+            ) -> None:
+                if state is None or state_run_id is None:
+                    return
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "raw_parquet",
+                    current=written_rows,
+                    total=None,
+                    status="running",
+                    message=(
+                        f"建立 {month_label} 原始 Parquet 備份："
+                        f"已寫入 {written_rows:,} 筆。"
+                    ),
                 )
-                raw_result["extract_ms"] = max(
-                    0,
-                    int(raw_result["duration_ms"]) - int(raw_result["write_ms"]),
+                state.update_stage(
+                    state_run_id,
+                    "raw_parquet",
+                    current=raw_total_rows + written_rows,
+                    duration_ms=raw_total_ms,
+                    message=(
+                        f"建立 {month_label} 原始 Parquet 備份"
+                        f"（{archive.name}）："
+                        f"已寫入 {raw_total_rows + written_rows:,} 筆。"
+                    ),
                 )
-                if state is not None and state_run_id is not None:
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "extract",
-                        status="success",
-                        current=int(raw_result["bytes_read"]),
-                        total=archive_total_bytes or raw_result["bytes_read"],
-                        duration_ms=int(raw_result["extract_ms"]),
-                        message="解壓縮完成；原始內容已寫入 Parquet。",
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "raw_parquet",
-                        status="success",
-                        current=int(raw_result["rows"]),
-                        total=int(raw_result["rows"]),
-                        duration_ms=int(raw_result["write_ms"]),
-                        message=f"原始 Parquet 備份 {int(raw_result['rows']):,} 筆。",
-                    )
-                    state.update_archive(
-                        state_run_id,
-                        archive.name,
-                        scanned=int(raw_result["rows"]),
-                        matched=0,
-                        stored=0,
-                    )
+
+            def on_match_progress(
+                processed: int,
+                total: int,
+                *,
+                archive=archive,
+            ) -> None:
+                if state is None or state_run_id is None:
+                    return
+                message = (
+                    f"DuckDB 候選 {processed:,}/{total:,}；"
+                    "Python 精析法規引用。"
+                )
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "raw_parquet",
+                    status="running",
+                    message=f"建立 {month_label} 原始 Parquet 備份：{message}",
+                )
+                state.update_stage(
+                    state_run_id,
+                    "raw_parquet",
+                    duration_ms=raw_total_ms,
+                    message=(
+                        f"建立 {month_label} 原始 Parquet 備份"
+                        f"（{archive.name}）：{message}"
+                    ),
+                )
+
+            raw_result = write_archive_raw_parquet(
+                archive,
+                raw_data_dir,
+                iter_archive_json_with_raw(archive, progress=on_raw_bytes),
+                run_token=str(run_id) if run_id else "",
+                row_progress=on_raw_rows,
+                entry_transform=lambda obj, archive=archive: _raw_base_fields(
+                    obj, archive=archive
+                ),
+                match_transform=lambda obj: _raw_match_fields(
+                    obj, pattern=pattern
+                ),
+                candidate_regex=candidate_regex,
+                match_progress=on_match_progress,
+            )
+            raw_result["bytes_read"] = archive_bytes_read or int(
+                archive_total_bytes or 0
+            )
+            raw_result["extract_ms"] = max(
+                0,
+                int(raw_result["duration_ms"]) - int(raw_result["write_ms"]),
+            )
+            if state is not None and state_run_id is not None:
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "extract",
+                    status="success",
+                    current=int(raw_result["bytes_read"]),
+                    total=archive_total_bytes or raw_result["bytes_read"],
+                    duration_ms=int(raw_result["extract_ms"]),
+                    message="解壓縮完成；原始內容已寫入 Parquet。",
+                )
+                state.update_archive_stage(
+                    state_run_id,
+                    archive.name,
+                    "raw_parquet",
+                    status="success",
+                    current=int(raw_result["rows"]),
+                    total=int(raw_result["rows"]),
+                    duration_ms=int(raw_result["write_ms"]),
+                    message=(
+                        f"已建立 {month_label} 原始 Parquet 備份"
+                        f"（{int(raw_result['rows']):,} 筆）。"
+                    ),
+                )
+                state.update_archive(
+                    state_run_id,
+                    archive.name,
+                    scanned=int(raw_result["rows"]),
+                    matched=0,
+                    stored=0,
+                )
             raw_results[archive] = raw_result
             raw_total_rows += int(raw_result["rows"])
             raw_total_bytes += int(raw_result["bytes_read"])
             extract_total_ms += int(raw_result["extract_ms"])
             raw_total_ms += int(raw_result["write_ms"])
-            if raw_result.get("reused"):
-                raw_reused += 1
             if state is not None and state_run_id is not None:
+                state.update_archive(
+                    state_run_id,
+                    archive.name,
+                    status="pending",
+                    current_stage="",
+                )
+                processed_count = len(raw_results)
+                extracted_so_far = processed_count - raw_reused
                 state.update_stage(
                     state_run_id,
                     "extract",
                     current=raw_total_bytes,
-                    total=extract_grand_total or raw_total_bytes,
+                    total=None,
                     duration_ms=extract_total_ms,
-                    message=f"已完成 {archive_index + 1}/{len(archive_paths)} 個壓縮檔的解壓縮。",
+                    message=(
+                        f"已檢查 {processed_count}/{len(archive_paths)} 個壓縮檔："
+                        f"{raw_reused} 個沿用原始 Parquet、"
+                        f"{extracted_so_far} 個解壓縮。"
+                    ),
                 )
                 state.update_stage(
                     state_run_id,
                     "raw_parquet",
                     current=raw_total_rows,
                     duration_ms=raw_total_ms,
-                    message=f"已完成 {archive_index + 1}/{len(archive_paths)} 個原始 Parquet 備份。",
+                    message=(
+                        f"已確認 {processed_count}/{len(archive_paths)} 個原始 Parquet："
+                        f"{raw_reused} 個沿用、{extracted_so_far} 個新建備份；"
+                        f"目前 {month_label}。"
+                    ),
                 )
         if state is not None and state_run_id is not None:
+            state.update_run(
+                state_run_id,
+                meta={"current_archive": "", "current_phase": ""},
+            )
+            extracted_total = len(archive_paths) - raw_reused
             state.finish_stage(
                 state_run_id,
                 "extract",
                 current=raw_total_bytes,
-                total=extract_grand_total or raw_total_bytes,
+                total=raw_total_bytes,
                 duration_ms=extract_total_ms,
-                message=f"完成 {len(archive_paths)} 個壓縮檔的解壓縮。",
+                message=(
+                    f"完成檢查 {len(archive_paths)} 個壓縮檔："
+                    f"{raw_reused} 個沿用原始 Parquet、"
+                    f"{extracted_total} 個解壓縮並新建備份。"
+                ),
             )
             state.finish_stage(
                 state_run_id,
@@ -873,7 +1236,10 @@ def import_judgments(
                 current=raw_total_rows,
                 total=raw_total_rows,
                 duration_ms=raw_total_ms,
-                message=f"原始 Parquet 備份完成：{raw_total_rows:,} 筆。",
+                message=(
+                    f"原始資料檢查完成：{raw_total_rows:,} 筆"
+                    f"（{raw_reused} 個沿用、{extracted_total} 個新建備份）。"
+                ),
             )
         if raw_only:
             duration_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -894,14 +1260,28 @@ def import_judgments(
                     state_run_id,
                     status="success",
                     message=(
-                        f"原始 Parquet 備份完成：{raw_total_rows:,} 筆、"
-                        f"{len(raw_results)} 個壓縮檔。"
+                        f"原始資料檢查完成：{raw_total_rows:,} 筆、"
+                        f"{len(raw_results)} 個壓縮檔"
+                        f"（{raw_reused} 個沿用、"
+                        f"{len(raw_results) - raw_reused} 個新建備份）。"
                     ),
                     counts={
                         "raw_parquet_rows": raw_total_rows,
                         "raw_parquet_count": len(raw_results),
                         "archive_count": len(archive_paths),
                     },
+                )
+                publish_event(
+                    "run_finished",
+                    run_id=state_run_id,
+                    status="success",
+                    message=(
+                        f"原始資料檢查完成：{raw_total_rows:,} 筆、"
+                        f"{len(raw_results)} 個壓縮檔。"
+                    ),
+                    month_overall="complete",
+                    extra={"raw_only": True},
+                    workflow_id="judgment_import",
                 )
             return {
                 "status": "raw_only",
@@ -919,7 +1299,9 @@ def import_judgments(
                 ),
                 "raw_parquet_reused": raw_reused,
                 "raw_parquet_paths": [
-                    str(item.get("path")) for item in raw_results.values()
+                    str(item.get("path"))
+                    for item in raw_results.values()
+                    if item.get("path")
                 ],
                 "scanned_count": 0,
                 "matched_count": 0,
@@ -927,8 +1309,38 @@ def import_judgments(
                 "citation_count": 0,
                 "duration_ms": duration_ms,
             }
+        if state is not None and state_run_id is not None:
+            state.start_stage(
+                state_run_id,
+                "filter",
+                total=None,
+                message=(
+                    f"建立 {len(archive_paths)} 個壓縮檔的版本快照與候選統計。"
+                ),
+            )
+            state.set_current_stage(state_run_id, "filter")
         snapshots: Dict[Path, Dict[str, Any]] = {}
-        for archive in archive_paths:
+        for snapshot_index, archive in enumerate(archive_paths):
+            if archive in resume_archives:
+                continue
+            if state is not None and state_run_id is not None:
+                snapshot_month = _archive_month_label(archive)
+                state.update_import_progress(
+                    state_run_id,
+                    message=(
+                        f"建立版本快照 {snapshot_index + 1}/"
+                        f"{len(archive_paths)}：{archive.name}"
+                    ),
+                    stage_updates={
+                        "filter": {
+                            "message": (
+                                f"建立版本快照 {snapshot_index + 1}/"
+                                f"{len(archive_paths)}：{snapshot_month}"
+                                f"（{archive.name}）。"
+                            )
+                        }
+                    },
+                )
             if dry_run:
                 snapshots[archive] = {
                     "id": 0,
@@ -1016,17 +1428,51 @@ def import_judgments(
                     archive.name,
                     issue_month,
                 )
-        candidate_totals: Dict[Path, int] = {}
-        for archive in archive_paths:
+        candidate_totals: Dict[Path, int] = dict(resume_candidate_totals)
+        for candidate_index, archive in enumerate(archive_paths):
+            if archive in resume_archives:
+                continue
+            snapshot_info = snapshots.get(archive) or {}
+            if not dry_run and not snapshot_info.get("is_current", True):
+                candidate_totals[archive] = 0
+                continue
+            if state is not None and state_run_id is not None:
+                candidate_month = _archive_month_label(archive)
+                state.update_import_progress(
+                    state_run_id,
+                    message=(
+                        f"DuckDB 候選統計 {candidate_index + 1}/"
+                        f"{len(archive_paths)}：{archive.name}"
+                    ),
+                    stage_updates={
+                        "filter": {
+                            "message": (
+                                f"DuckDB 候選統計 {candidate_index + 1}/"
+                                f"{len(archive_paths)}：{candidate_month}"
+                                f"（{archive.name}）。"
+                            )
+                        }
+                    },
+                )
             raw_path = Path(str(raw_results[archive]["path"]))
             candidate_totals[archive] = candidate_count(raw_path)
-        candidate_total_all = sum(candidate_totals.values())
+        candidate_total_all = sum(
+            candidate_totals[archive]
+            for archive in archive_paths
+            if archive in resume_archives
+            or (snapshots.get(archive) or {}).get("is_current", True)
+        )
         logger.info(
             "duckdb candidates=%s raw_rows=%s",
             candidate_total_all,
             raw_total_rows,
         )
         if state is not None and state_run_id is not None:
+            state.update_run(
+                state_run_id,
+                message=f"DuckDB 已選出 {candidate_total_all:,} 筆候選。",
+                meta={"current_archive": "", "current_phase": ""},
+            )
             state.start_stage(
                 state_run_id,
                 "filter",
@@ -1041,9 +1487,28 @@ def import_judgments(
                 "postgres",
                 message="等待符合金融法規條件的判決。",
             )
+            if resume_archives:
+                state.update_stage(
+                    state_run_id,
+                    "filter",
+                    current=scanned,
+                    message=(
+                        f"接續上次進度：已處理 {scanned:,}/"
+                        f"{candidate_total_all:,} 筆候選。"
+                    ),
+                )
+                state.update_stage(
+                    state_run_id,
+                    "postgres",
+                    current=stored,
+                    message=f"接續上次進度：已寫入 {stored:,} 筆。",
+                )
         current_phase = "filter"
         for archive_index, archive in enumerate(archive_paths):
+            if archive in resume_archives:
+                continue
             current_archive = archive
+            month_label = _archive_month_label(archive)
             snapshot_info = snapshots.get(archive) or {}
             snapshot_id = int(snapshot_info.get("id") or 0)
             issue_month = str(snapshot_info.get("issue_month") or "")
@@ -1056,6 +1521,26 @@ def import_judgments(
                     issue_month,
                 )
                 continue
+            if state is not None and state_run_id is not None:
+                state.update_import_progress(
+                    state_run_id,
+                    message=(
+                        f"目前篩選 {month_label}（{archive.name}，"
+                        f"{archive_index + 1}/{len(archive_paths)}）。"
+                    ),
+                    meta={
+                        "current_archive": archive.name,
+                        "current_phase": "filter",
+                    },
+                    stage_updates={
+                        "filter": {
+                            "message": (
+                                f"目前篩選 {month_label}（{archive.name}，"
+                                f"{archive_index + 1}/{len(archive_paths)}）。"
+                            )
+                        }
+                    },
+                )
             archive_seen_jids: set[str] = set()
             raw_result = raw_results[archive]
             raw_path = Path(str(raw_result["path"]))
@@ -1074,37 +1559,71 @@ def import_judgments(
             archive_filter_s = 0.0
             archive_db_s = 0.0
             if state is not None and state_run_id is not None:
-                state.update_archive(
+                state.update_import_progress(
                     state_run_id,
-                    archive.name,
-                    status="running",
-                    current_stage="filter",
-                    scanned=0,
-                    matched=0,
-                    stored=0,
-                    size_bytes=archive.stat().st_size
-                    if archive.exists()
-                    else None,
+                    archive_name=archive.name,
+                    archive_fields={
+                        "status": "running",
+                        "current_stage": "filter",
+                        "scanned": 0,
+                        "matched": 0,
+                        "stored": 0,
+                        "size_bytes": (
+                            archive.stat().st_size if archive.exists() else None
+                        ),
+                    },
+                    archive_stage_updates={
+                        "filter": {
+                            "status": "running",
+                            "current": 0,
+                            "total": archive_candidates,
+                            "message": (
+                                f"{month_label}（{archive.name}）：DuckDB 選出 "
+                                f"{archive_candidates:,} 筆候選；"
+                                "Python 組裝 metadata。"
+                            ),
+                        },
+                        "postgres": {
+                            "status": "running",
+                            "current": 0,
+                            "total": None,
+                            "message": (
+                                f"{month_label}（{archive.name}）："
+                                "等待符合條件的判決。"
+                            ),
+                        },
+                    },
                 )
-                state.update_archive_stage(
-                    state_run_id,
-                    archive.name,
-                    "filter",
-                    status="running",
-                    current=0,
-                    total=archive_candidates,
-                    message=f"DuckDB 選出 {archive_candidates:,} 筆候選；Python 組裝 metadata。",
-                )
-                state.update_archive_stage(
-                    state_run_id,
-                    archive.name,
-                    "postgres",
-                    status="running",
-                    current=0,
-                    total=None,
-                    message="等待符合條件的判決。",
-                )
-                state.set_current_stage(state_run_id, "filter")
+            publish_event(
+                "archive_started",
+                run_id=state_run_id or "",
+                month=month_label,
+                archive=archive.name,
+                stage="filter",
+                status="running",
+                message=(
+                    f"目前篩選 {month_label}（{archive.name}，"
+                    f"{archive_index + 1}/{len(archive_paths)}）："
+                    f"DuckDB 選出 {archive_candidates:,} 筆候選。"
+                ),
+                current=0,
+                total=archive_candidates,
+                percent=0.0,
+                overall_percent=(
+                    round(scanned / candidate_total_all * 100, 1)
+                    if candidate_total_all
+                    else 0.0
+                ),
+                month_stages={
+                    "filter": "processing",
+                    "postgres": "processing",
+                },
+                month_overall="processing",
+                extra={
+                    "archive_index": archive_index + 1,
+                    "archive_count": len(archive_paths),
+                },
+            )
 
             def candidate_rows():
                 for batch in iter_candidate_batches(
@@ -1114,6 +1633,125 @@ def import_judgments(
                     yield from batch
 
             iterator = candidate_rows()
+            last_filter_state_at = 0.0
+
+            def publish_filter_progress(force: bool = False) -> None:
+                nonlocal last_filter_state_at
+                if state is None or state_run_id is None:
+                    return
+                now = time.perf_counter()
+                if not force and now - last_filter_state_at < 0.5:
+                    return
+                last_filter_state_at = now
+                state.update_import_progress(
+                    state_run_id,
+                    message=(
+                        f"目前篩選 {month_label}（{archive.name}）："
+                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選，"
+                        f"命中 {matched:,} 筆。"
+                    ),
+                    meta={
+                        "current_archive": archive.name,
+                        "current_phase": "filter",
+                    },
+                    stage_updates={
+                        "filter": {
+                            "status": "running",
+                            "current": scanned,
+                            "total": candidate_total_all,
+                            "duration_ms": int(filter_total_s * 1000),
+                            "message": (
+                                f"目前篩選 {month_label}（{archive.name}）："
+                                f"已處理 {scanned:,}/"
+                                f"{candidate_total_all:,} 筆候選，"
+                                f"命中 {matched:,} 筆。"
+                            ),
+                        },
+                        "postgres": {
+                            "status": "running",
+                            "current": stored,
+                            "duration_ms": int(db_total_s * 1000),
+                            "message": (
+                                f"目前寫入 {month_label}（{archive.name}）："
+                                f"已寫入 {stored:,} 筆。"
+                            ),
+                        },
+                    },
+                    archive_name=archive.name,
+                    archive_fields={
+                        "status": "running",
+                        "current_stage": "filter",
+                        "scanned": archive_scanned,
+                        "matched": archive_matched,
+                        "stored": archive_stored,
+                    },
+                    archive_stage_updates={
+                        "filter": {
+                            "status": "running",
+                            "current": archive_scanned,
+                            "total": archive_candidates,
+                            "message": (
+                                f"{month_label}：已處理 {archive_scanned:,}/"
+                                f"{archive_candidates:,} 筆候選，"
+                                f"命中 {archive_matched:,} 筆。"
+                            ),
+                        },
+                        "postgres": {
+                            "status": "running",
+                            "current": archive_stored,
+                            "message": (
+                                f"{month_label}：已寫入 "
+                                f"{archive_stored:,} 筆。"
+                            ),
+                        },
+                    },
+                )
+                filter_percent = (
+                    scanned / candidate_total_all * 100
+                    if candidate_total_all
+                    else 0.0
+                )
+                postgres_percent = (
+                    stored / matched * 100 if matched else 0.0
+                )
+                publish_event(
+                    "stage_progress",
+                    run_id=state_run_id,
+                    month=month_label,
+                    archive=archive.name,
+                    stage="filter",
+                    status="running",
+                    message=(
+                        f"目前篩選 {month_label}（{archive.name}）："
+                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選，"
+                        f"命中 {matched:,} 筆。"
+                    ),
+                    current=scanned,
+                    total=candidate_total_all,
+                    percent=filter_percent,
+                    overall_percent=filter_percent,
+                    month_stages={"filter": "processing"},
+                    month_overall="processing",
+                )
+                publish_event(
+                    "stage_progress",
+                    run_id=state_run_id,
+                    month=month_label,
+                    archive=archive.name,
+                    stage="postgres",
+                    status="running",
+                    message=(
+                        f"目前寫入 {month_label}（{archive.name}）："
+                        f"已寫入 {stored:,} 筆。"
+                    ),
+                    current=stored,
+                    total=matched or None,
+                    percent=postgres_percent,
+                    overall_percent=filter_percent,
+                    month_stages={"postgres": "processing"},
+                    month_overall="processing",
+                )
+
             while True:
                 read_started = time.perf_counter()
                 try:
@@ -1142,6 +1780,7 @@ def import_judgments(
                 archive_filter_s += filter_elapsed
                 if row is None:
                     failed += 1
+                    publish_filter_progress()
                     continue
                 matched += 1
                 archive_matched += 1
@@ -1182,42 +1821,12 @@ def import_judgments(
                     archive_db_s += db_elapsed
                     batch = []
                     batch_jids = set()
+                    publish_filter_progress()
                 if scanned % 10000 == 0:
                     logger.info(
                         "scanned=%s matched=%s stored=%s", scanned, matched, stored
                     )
-                if state is not None and state_run_id is not None and scanned % 10000 == 0:
-                    state.update_stage(
-                        state_run_id,
-                        "filter",
-                        current=scanned,
-                        total=candidate_total_all,
-                        duration_ms=int(filter_total_s * 1000),
-                        message=f"已處理 {scanned:,} 筆 DuckDB 候選，命中 {matched:,} 筆。",
-                    )
-                    state.update_stage(
-                        state_run_id,
-                        "postgres",
-                        current=stored,
-                        duration_ms=int(db_total_s * 1000),
-                        message=f"已寫入 {stored:,} 筆。",
-                    )
-                    state.update_archive_stage(
-                        state_run_id,
-                        archive.name,
-                        "filter",
-                        current=archive_scanned,
-                        total=archive_candidates,
-                        status="running",
-                        message=f"已處理 {archive_scanned:,} 筆候選，命中 {archive_matched:,} 筆。",
-                    )
-                    state.update_archive(
-                        state_run_id,
-                        archive.name,
-                        scanned=archive_scanned,
-                        matched=archive_matched,
-                        stored=archive_stored,
-                    )
+                publish_filter_progress()
             if not dry_run and batch:
                 db_started = time.perf_counter()
                 flushed, version_counts = _flush_batch(
@@ -1254,7 +1863,7 @@ def import_judgments(
                     total=archive_candidates,
                     duration_ms=int(archive_filter_s * 1000),
                     message=(
-                        f"DuckDB 候選 {archive_candidates:,} 筆；"
+                        f"{month_label}：DuckDB 候選 {archive_candidates:,} 筆；"
                         f"Python 命中 {archive_matched:,} 筆。"
                     ),
                 )
@@ -1266,7 +1875,10 @@ def import_judgments(
                     current=archive_stored,
                     total=archive_stored or archive_matched,
                     duration_ms=int(archive_db_s * 1000),
-                    message=f"寫入 {archive_stored:,} 筆（命中 {archive_matched:,} 筆）。",
+                    message=(
+                        f"{month_label}：寫入 {archive_stored:,} 筆"
+                        f"（命中 {archive_matched:,} 筆）。"
+                    ),
                 )
                 state.update_archive(
                     state_run_id,
@@ -1292,15 +1904,52 @@ def import_judgments(
                     current=scanned,
                     total=candidate_total_all,
                     duration_ms=int(filter_total_s * 1000),
-                    message=f"已處理 {scanned:,} 筆 DuckDB 候選，命中 {matched:,} 筆。",
+                    message=(
+                        f"目前篩選 {month_label}（{archive.name}）："
+                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選，"
+                        f"命中 {matched:,} 筆。"
+                    ),
                 )
                 state.update_stage(
                     state_run_id,
                     "postgres",
                     current=stored,
                     duration_ms=int(db_total_s * 1000),
-                    message=f"已寫入 {stored:,} 筆。",
+                    message=(
+                        f"目前寫入 {month_label}（{archive.name}）："
+                        f"已寫入 {stored:,} 筆。"
+                    ),
                 )
+            publish_event(
+                "archive_completed",
+                run_id=state_run_id or "",
+                month=month_label,
+                archive=archive.name,
+                stage="postgres",
+                status="success",
+                message=(
+                    f"{month_label} 完成：DuckDB 候選 "
+                    f"{archive_candidates:,} 筆，命中 {archive_matched:,} 筆，"
+                    f"寫入 {archive_stored:,} 筆。"
+                ),
+                current=archive_scanned,
+                total=archive_candidates,
+                percent=100.0,
+                overall_percent=(
+                    round(scanned / candidate_total_all * 100, 1)
+                    if candidate_total_all
+                    else 0.0
+                ),
+                month_stages={
+                    "filter": "complete",
+                    "postgres": "complete",
+                },
+                month_overall="complete",
+                extra={
+                    "archive_index": archive_index + 1,
+                    "archive_count": len(archive_paths),
+                },
+            )
             if not dry_run and snapshot_id:
                 try:
                     version_removed += finalize_snapshot(
@@ -1332,6 +1981,10 @@ def import_judgments(
                 break
 
         if state is not None and state_run_id is not None:
+            state.update_run(
+                state_run_id,
+                meta={"current_archive": "", "current_phase": ""},
+            )
             filter_total = scanned if stopped_early else candidate_total_all
             state.finish_stage(
                 state_run_id,
@@ -1370,6 +2023,21 @@ def import_judgments(
                     "version_unchanged": version_unchanged,
                     "delta_count": delta_count,
                 },
+            )
+            publish_event(
+                "run_finished",
+                run_id=state_run_id,
+                status="success",
+                message=(
+                    f"完成 {len(archive_paths)} 個壓縮檔："
+                    f"原始 Parquet {raw_total_rows:,} 筆、"
+                    f"DuckDB 候選 {scanned:,} 筆、"
+                    f"Python 命中 {matched:,} 筆、寫入 {stored:,} 筆。"
+                ),
+                current=scanned,
+                total=scanned,
+                percent=100.0,
+                month_overall="complete",
             )
 
         if not dry_run and run_id is not None:
@@ -1446,10 +2114,14 @@ def import_judgments(
                         status="interrupted",
                         message="使用者中止；已完成的原始備份與批次會保留。",
                     )
+            state.update_run(
+                state_run_id,
+                meta={"current_archive": "", "current_phase": ""},
+            )
             state.finish_run(
                 state_run_id,
                 status="interrupted",
-                message="判決匯入已中止；原始 Parquet 備份與已寫入批次會保留，下次可接續。",
+                message="判決匯入已中止；原始 Parquet 與已寫入批次會保留，下次可接續。",
                 counts={
                     "raw_parquet_rows": raw_total_rows,
                     "raw_parquet_count": len(raw_results),
@@ -1460,6 +2132,12 @@ def import_judgments(
                     "failed_count": failed,
                     "archive_count": len(archive_paths),
                 },
+            )
+            publish_event(
+                "run_finished",
+                run_id=state_run_id,
+                status="interrupted",
+                message="判決匯入已中止；已完成進度與原始備份會保留。",
             )
         if not dry_run and run_id is not None:
             with session_factory() as session:
@@ -1497,6 +2175,10 @@ def import_judgments(
                         status="failed",
                         message=f"{exc.__class__.__name__}: {exc}",
                     )
+            state.update_run(
+                state_run_id,
+                meta={"current_archive": "", "current_phase": ""},
+            )
             state.finish_run(
                 state_run_id,
                 status="failed",
@@ -1511,6 +2193,12 @@ def import_judgments(
                     "failed_count": failed,
                     "archive_count": len(archive_paths),
                 },
+            )
+            publish_event(
+                "run_finished",
+                run_id=state_run_id,
+                status="failed",
+                message=f"{exc.__class__.__name__}: {exc}",
             )
         if not dry_run and run_id is not None:
             with session_factory() as session:
@@ -1601,7 +2289,11 @@ def import_judgments(
         "raw_parquet_paths": (
             []
             if dry_run
-            else [str(item.get("path")) for item in raw_results.values()]
+            else [
+                str(item.get("path"))
+                for item in raw_results.values()
+                if item.get("path")
+            ]
         ),
         "candidate_count": scanned,
         "scanned_count": raw_total_rows,

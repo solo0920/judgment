@@ -256,6 +256,115 @@ def index_coverage(
     }
 
 
+def index_staleness(
+    session_factory,
+    *,
+    collection: str,
+    model: str,
+    version_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Return missing/changed/stale counts for a judgment vector index."""
+
+    index_filters = [
+        JudgmentVectorIndex.collection == collection,
+        JudgmentVectorIndex.model == model,
+    ]
+    if version_id is not None:
+        index_filters.append(
+            JudgmentVectorIndex.version_id == int(version_id)
+        )
+    join_condition = JudgmentVectorIndex.jid == JudgmentDocument.jid
+    if version_id is not None:
+        join_condition = join_condition & (
+            JudgmentVectorIndex.version_id == int(version_id)
+        )
+    current_doc = (
+        (JudgmentDocument.is_current.is_(True))
+        & (JudgmentDocument.full_text != "")
+    )
+    with session_factory() as session:
+        total = int(
+            session.scalar(
+                select(func.count())
+                .select_from(JudgmentDocument)
+                .where(current_doc)
+            )
+            or 0
+        )
+        indexed = int(
+            session.scalar(
+                select(func.count())
+                .select_from(JudgmentVectorIndex)
+                .where(*index_filters)
+            )
+            or 0
+        )
+        missing = int(
+            session.scalar(
+                select(func.count())
+                .select_from(JudgmentDocument)
+                .outerjoin(
+                    JudgmentVectorIndex,
+                    join_condition
+                    & (JudgmentVectorIndex.collection == collection)
+                    & (JudgmentVectorIndex.model == model),
+                )
+                .where(current_doc, JudgmentVectorIndex.jid.is_(None))
+            )
+            or 0
+        )
+        changed = int(
+            session.scalar(
+                select(func.count())
+                .select_from(JudgmentDocument)
+                .join(
+                    JudgmentVectorIndex,
+                    join_condition
+                    & (JudgmentVectorIndex.collection == collection)
+                    & (JudgmentVectorIndex.model == model),
+                )
+                .where(
+                    current_doc,
+                    JudgmentVectorIndex.content_hash
+                    != JudgmentDocument.content_hash,
+                )
+            )
+            or 0
+        )
+        stale = int(
+            session.scalar(
+                select(func.count())
+                .select_from(JudgmentVectorIndex)
+                .where(
+                    *index_filters,
+                    ~exists(
+                        select(1).where(
+                            JudgmentDocument.jid == JudgmentVectorIndex.jid,
+                            JudgmentDocument.is_current.is_(True),
+                        )
+                    ),
+                )
+            )
+            or 0
+        )
+    pending = missing + changed + stale
+    return {
+        "status": "fresh" if total and pending == 0 else (
+            "empty" if total == 0 else "stale"
+        ),
+        "fresh": bool(total and pending == 0),
+        "total_judgments": total,
+        "indexed_judgments": indexed,
+        "missing_judgments": missing,
+        "changed_judgments": changed,
+        "stale_judgments": stale,
+        "pending_judgments": pending,
+        "collection": collection,
+        "model": model,
+        "version_id": version_id,
+    }
+
+
 def _candidate_statement(
     *,
     collection: str,
@@ -1012,6 +1121,7 @@ def build_index_version(
     resume: bool = True,
     run_label: str = "",
     track_state: bool = False,
+    state_parent_run_id: str = "",
 ) -> Dict[str, Any]:
     """Build a complete blue-green index version.
 
@@ -1080,7 +1190,8 @@ def build_index_version(
                         stages=["ollama", "qdrant", "validate"],
                         meta={
                             "index_runtime": failed_runtime,
-                            "parent_run_id": parent_run_id(),
+                            "parent_run_id": parent_run_id()
+                            or state_parent_run_id,
                         },
                         message=message,
                     )
@@ -1273,7 +1384,8 @@ def build_index_version(
                 stages=["ollama", "qdrant", "validate"],
                 meta={
                     "index_runtime": runtime,
-                    "parent_run_id": parent_run_id(),
+                    "parent_run_id": parent_run_id()
+                    or state_parent_run_id,
                     "version_id": version_id,
                     "collection": collection,
                 },

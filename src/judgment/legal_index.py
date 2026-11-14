@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from .db import build_engine, build_session_factory, init_db
 from .embeddings import EmbeddingError, OllamaEmbedder
 from .law_rag import _latest_parquet_files
 from .models import LegalArticleIndexVersion
+from .processing_state import ProcessingStateStore, parent_run_id
 from .vector_store import QdrantError, QdrantStore
 
 logger = logging.getLogger(__name__)
@@ -1000,20 +1002,6 @@ def build_legal_article_index(
             )
             if expected_count is None:
                 expected_count = int(snapshot["article_count"])
-            store.copy_collection(
-                active_collection,
-                collection,
-                batch_size=256,
-            )
-            _ensure_payload_indexes(store, collection)
-            for key in list(changed) + list(removed):
-                source_type, law_key = _split_law_key_id(key)
-                if source_type and law_key:
-                    store.delete_points_by_filter(
-                        collection,
-                        _law_filter(source_type, law_key),
-                        wait=True,
-                    )
             changed_set = set(changed)
             records_to_index = [
                 record
@@ -1024,6 +1012,37 @@ def build_legal_article_index(
                 0,
                 expected_count - len(records_to_index),
             )
+
+            def copy_progress(copied: int, total: int) -> None:
+                if on_progress is None:
+                    return
+                # The copied collection still contains the changed laws that
+                # will be deleted and re-embedded.  Scale the copy progress to
+                # the points that will remain, so the bar never reaches 100%
+                # before the new embeddings have been written.
+                source_total = max(1, int(total))
+                remaining = round(
+                    indexed_so_far
+                    * min(max(0, int(copied)), source_total)
+                    / source_total
+                )
+                on_progress(min(indexed_so_far, remaining), expected_count)
+
+            store.copy_collection(
+                active_collection,
+                collection,
+                batch_size=256,
+                on_progress=copy_progress if on_progress is not None else None,
+            )
+            _ensure_payload_indexes(store, collection)
+            for key in list(changed) + list(removed):
+                source_type, law_key = _split_law_key_id(key)
+                if source_type and law_key:
+                    store.delete_points_by_filter(
+                        collection,
+                        _law_filter(source_type, law_key),
+                        wait=True,
+                    )
         elif (
             recreate
             and store.collection_info(collection) is not None
@@ -1108,6 +1127,83 @@ def build_legal_article_index(
             reason=f"{exc.__class__.__name__}: {exc}",
         )
         raise
+
+
+def assess_legal_index_freshness(
+    *,
+    active_version: Optional[Dict[str, Any]],
+    points_count: Optional[int],
+    current_law_count: int,
+    current_article_count: int,
+    latest_source_at: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Compare the active legal index with current PostgreSQL law metadata.
+
+    This is intentionally a cheap check used by status/plan endpoints.  It
+    compares counts and the latest source download time; the exact content
+    hash check remains part of ``--incremental --if-changed``.
+    """
+
+    def _moment(value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    active = active_version or {}
+    snapshot = active.get("source_snapshot") or {}
+    indexed_law_count = int(snapshot.get("law_count") or active.get("law_count") or 0)
+    indexed_article_count = int(
+        snapshot.get("article_count") or active.get("article_count") or 0
+    )
+    indexed_at = _moment(
+        active.get("activated_at")
+        or active.get("validated_at")
+        or active.get("created_at")
+        or snapshot.get("captured_at")
+    )
+    source_at = _moment(latest_source_at)
+    reasons: List[str] = []
+    if not active:
+        reasons.append("no_active_version")
+    if active and points_count is None:
+        reasons.append("qdrant_count_unavailable")
+    if active and points_count is not None and int(points_count) != indexed_article_count:
+        reasons.append("points_count_mismatch")
+    if active and current_law_count != indexed_law_count:
+        reasons.append("law_count_mismatch")
+    if active and current_article_count != indexed_article_count:
+        reasons.append("article_count_mismatch")
+    if active and source_at and indexed_at and source_at > indexed_at:
+        reasons.append("newer_source_version")
+
+    if not active:
+        status = "not_indexed"
+    elif "qdrant_count_unavailable" in reasons:
+        status = "unknown"
+    elif reasons:
+        status = "stale"
+    else:
+        status = "fresh"
+    return {
+        "status": status,
+        "stale": status == "stale",
+        "reasons": reasons,
+        "active_version_id": active.get("version_id"),
+        "indexed_law_count": indexed_law_count,
+        "current_law_count": int(current_law_count),
+        "indexed_article_count": indexed_article_count,
+        "current_article_count": int(current_article_count),
+        "indexed_points": points_count,
+        "indexed_at": indexed_at.isoformat() if indexed_at else None,
+        "latest_source_at": source_at.isoformat() if source_at else None,
+    }
 
 
 def legal_index_status(
@@ -1204,6 +1300,50 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--rollback", action="store_true", help="切回上一個法規索引版本")
     parser.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
     return parser.parse_args(argv)
+
+
+def _processing_progress_callback(
+    run_id: str,
+    *,
+    stage_key: str = "legal_qdrant",
+) -> Optional[Callable[[int, int], None]]:
+    """Publish index progress to the parent processing run.
+
+    Workflow upgrades run this module as a standalone subprocess, so there is
+    no shared Python object with the web process.  The parent run id is passed
+    through ``JUDGMENT_PROCESSING_PARENT``; writing the current/total counts to
+    the shared state file lets the dashboard show live progress.
+    """
+
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        return None
+    try:
+        state = ProcessingStateStore()
+    except Exception:
+        logger.debug("無法建立處理狀態寫入器", exc_info=True)
+        return None
+    last_write = [0.0]
+
+    def report(current: int, total: int) -> None:
+        current = max(0, int(current))
+        total = max(0, int(total))
+        now = time.monotonic()
+        if current < total and now - last_write[0] < 1.0:
+            return
+        last_write[0] = now
+        try:
+            state.update_stage(
+                run_id,
+                stage_key,
+                current=current,
+                total=total,
+                message=f"索引建置中：{current:,} / {total:,} 條。",
+            )
+        except Exception:
+            logger.debug("無法更新法規索引處理進度", exc_info=True)
+
+    return report
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -1304,6 +1444,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 limit=args.limit,
                 dry_run=args.dry_run,
                 recreate=args.recreate,
+                on_progress=_processing_progress_callback(parent_run_id()),
             )
     except Exception as exc:
         logger.error("法規索引失敗：%s", exc)

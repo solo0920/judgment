@@ -42,6 +42,7 @@ class LawDatasetVersion(Base):
     source_type = Column(String(16), nullable=False, index=True)
     source_url = Column(Text, nullable=False)
     update_date = Column(String(64), nullable=False, default="")
+    version_code = Column(String(12), nullable=False, default="", index=True)
     content_sha256 = Column(String(64), nullable=False)
     raw_json_sha256 = Column(String(64), nullable=False)
     zip_sha256 = Column(String(64), nullable=False)

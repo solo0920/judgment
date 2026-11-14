@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..embeddings import EmbeddingError, OllamaEmbedder
+from ..judgment_citations import article_match_key, law_citations_for_record
 from ..judgment_raw_parquet import raw_judgment_files
 from ..models import (
     DownloadRun,
@@ -1663,11 +1664,11 @@ def get_law_detail(
             articles = parquet_articles
             articles_source = "parquet"
     if requested_article:
-        article_key = re.sub(r"\s+", "", requested_article)
+        article_key = article_match_key(requested_article)
         articles = [
             article
             for article in articles
-            if re.sub(r"\s+", "", _text(article.get("article_no"))) == article_key
+            if article_match_key(_text(article.get("article_no"))) == article_key
         ]
         if not articles:
             raise LookupError(
@@ -1773,11 +1774,7 @@ def get_judgment_detail(
         ).first()
         if record is None:
             raise LookupError(f"找不到判決：{key}")
-        citations = [
-            dict(item)
-            for item in (record.citations or [])
-            if isinstance(item, dict)
-        ]
+        citations = law_citations_for_record(record)
         return {
             "status": "ok",
             "jid": record.jid,

@@ -1,4 +1,10 @@
-import { api, apiBaseLabel, apiUrl, getApiBaseSource } from "../api.js";
+import {
+  api,
+  apiBaseLabel,
+  apiUrl,
+  getApiBaseSource,
+  subscribeRefresh,
+} from "../api.js";
 import {
   emptyState,
   escapeHtml,
@@ -1299,7 +1305,7 @@ function renderError(error) {
 
 export async function render(root, ctx) {
   let disposed = false;
-  let autoTimer = null;
+  let autoStream = null;
   let latest = null;
   let activeTab = "overview";
   let usage = null;
@@ -1327,7 +1333,7 @@ export async function render(root, ctx) {
       <div class="page-actions">
         <label class="auto-refresh">
           <input type="checkbox" id="auto-refresh" />
-          自動更新 30s
+          自動更新 30s（推送）
         </label>
         <button class="btn btn-secondary" type="button" id="refresh-status">
           ${icon("refresh", 15)}<span>重新整理</span>
@@ -1480,13 +1486,16 @@ export async function render(root, ctx) {
     await loadStatus({ quiet: true });
   };
 
-  const loadStatus = async ({ quiet = false } = {}) => {
+  const loadStatus = async ({
+    quiet = false,
+    status: providedStatus = null,
+  } = {}) => {
     if (!quiet) {
       refreshButton.disabled = true;
       setBusy(refreshButton, true, "檢查中…");
     }
     try {
-      const status = await api.status();
+      const status = providedStatus || (await api.status());
       if (disposed) return;
       latest = status;
       paint();
@@ -1506,8 +1515,11 @@ export async function render(root, ctx) {
     }
   };
 
-  const refreshCurrent = async ({ quiet = false } = {}) => {
-    await loadStatus({ quiet });
+  const refreshCurrent = async ({
+    quiet = false,
+    status = null,
+  } = {}) => {
+    await loadStatus({ quiet, status });
     if (activeTab === "resources") {
       await loadUsage({ quiet });
     }
@@ -1663,17 +1675,25 @@ export async function render(root, ctx) {
 
   refreshButton.addEventListener("click", () => refreshCurrent());
 
+  const stopAutoRefresh = () => {
+    if (!autoStream) return;
+    autoStream();
+    autoStream = null;
+  };
+
   autoRefresh.addEventListener("change", () => {
-    if (autoTimer) {
-      window.clearInterval(autoTimer);
-      autoTimer = null;
-    }
+    stopAutoRefresh();
     if (autoRefresh.checked) {
-      autoTimer = window.setInterval(
-        () => refreshCurrent({ quiet: true }),
-        30000,
-      );
-      toast("已啟用每 30 秒自動更新。", "info", 2200);
+      autoStream = subscribeRefresh("status", (_topic, payload) => {
+        if (!disposed) {
+          refreshCurrent({
+            quiet: true,
+            status: payload?.snapshot || null,
+          });
+        }
+      });
+      refreshCurrent({ quiet: true });
+      toast("已啟用後端推送自動更新（每 30 秒）。", "info", 2200);
     }
   });
 
@@ -1686,6 +1706,6 @@ export async function render(root, ctx) {
   return () => {
     disposed = true;
     unmountTests();
-    if (autoTimer) window.clearInterval(autoTimer);
+    stopAutoRefresh();
   };
 }

@@ -10,8 +10,11 @@ from typing import Any, Dict, Optional, Sequence
 
 from .config import Settings
 from .db import build_engine, build_session_factory, init_db
+from .index_versions import active_version
 from .judgment_import import import_judgments
-from .judgment_index import index_coverage, index_judgments
+from .judgment_index import build_index_version, index_staleness
+from .legal_index import build_legal_article_index
+from .vector_store import QdrantStore
 from .processing_state import (
     ProcessingStateError,
     ProcessingStateStore,
@@ -187,6 +190,106 @@ def _run_imports(
     }
 
 
+def _run_legal_index(
+    store: ProcessingStateStore,
+    run_id: str,
+    *,
+    settings: Settings,
+    session_factory,
+) -> Dict[str, Any]:
+    started = time.perf_counter()
+    store.start_stage(
+        run_id,
+        "legal_qdrant",
+        message="比對法規／命令條文與目前索引版本；必要時增量重建。",
+    )
+    qdrant = QdrantStore(
+        settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        timeout=120.0,
+    )
+    last_progress_write = [0.0]
+
+    def report_progress(indexed: int, total: int) -> None:
+        current = max(0, int(indexed))
+        total = max(0, int(total))
+        now = time.monotonic()
+        if current < total and now - last_progress_write[0] < 1.0:
+            return
+        last_progress_write[0] = now
+        store.update_stage(
+            run_id,
+            "legal_qdrant",
+            current=current,
+            total=total,
+            message=f"索引建置中：{current:,} / {total:,} 條。",
+        )
+
+    try:
+        summary = build_legal_article_index(
+            session_factory=session_factory,
+            settings=settings,
+            store=qdrant,
+            mode="incremental",
+            auto_activate=True,
+            if_changed=True,
+            on_progress=report_progress,
+        )
+    except KeyboardInterrupt:
+        _stage_finish(
+            store,
+            run_id,
+            "legal_qdrant",
+            started,
+            status="interrupted",
+            message="法規／命令索引已中止；舊 alias 保持不動。",
+        )
+        raise
+    except Exception as exc:
+        _stage_finish(
+            store,
+            run_id,
+            "legal_qdrant",
+            started,
+            status="failed",
+            message=f"{exc.__class__.__name__}: {exc}",
+        )
+        logger.exception("legal article index failed")
+        return {"ok": False, "error": str(exc)}
+
+    status = str(summary.get("status") or "")
+    snapshot = summary.get("snapshot") or {}
+    version = summary.get("version") or {}
+    if status == "unchanged":
+        _stage_finish(
+            store,
+            run_id,
+            "legal_qdrant",
+            started,
+            status="skipped",
+            message="法規／命令條文與 active 索引版本相同，無需重建。",
+        )
+    else:
+        _stage_finish(
+            store,
+            run_id,
+            "legal_qdrant",
+            started,
+            current=int(snapshot.get("article_count") or 0),
+            total=int(snapshot.get("article_count") or 0),
+            message=(
+                f"法規／命令索引 {status or 'success'}："
+                f"v{int(version.get('version_id') or 0):03d}、"
+                f"{int(version.get('article_count') or snapshot.get('article_count') or 0):,} 條。"
+            ),
+        )
+    return {
+        "ok": True,
+        "status": status or "success",
+        "summary": summary,
+    }
+
+
 def _run_index(
     store: ProcessingStateStore,
     run_id: str,
@@ -195,44 +298,61 @@ def _run_index(
     session_factory,
     enabled: bool,
 ) -> Dict[str, Any]:
-    coverage = index_coverage(
+    active = active_version(
         session_factory,
-        collection=settings.judgment_vector_collection,
-        model=settings.embedding_model,
+        alias_name=settings.judgment_vector_alias,
     )
-    remaining = int(coverage.get("remaining_judgments") or 0)
+    version_id = int(active["version_id"]) if active else None
+    collection = (
+        str(active["physical_collection"])
+        if active
+        else settings.judgment_vector_collection
+    )
+    staleness = index_staleness(
+        session_factory,
+        collection=collection,
+        model=settings.embedding_model,
+        version_id=version_id,
+    )
+    pending = int(staleness.get("pending_judgments") or 0)
     if not enabled:
         store.finish_stage(
             run_id,
             "qdrant",
             status="skipped",
-            message=f"未勾選接續向量索引；目前尚餘 {remaining:,} 筆。",
+            message=f"未勾選接續向量索引；目前待處理 {pending:,} 筆。",
         )
-        return {"indexed": False, "remaining": remaining}
-    if remaining <= 0:
+        return {"indexed": False, "remaining": pending, "staleness": staleness}
+    if pending <= 0:
         store.finish_stage(
             run_id,
             "qdrant",
             status="skipped",
             current=0,
             total=0,
-            message="向量索引已完整，無需執行。",
+            message="向量索引已完整且無變更，無需重建。",
         )
-        return {"indexed": False, "remaining": 0}
+        return {"indexed": False, "remaining": 0, "staleness": staleness}
     started = time.perf_counter()
     store.start_stage(
         run_id,
         "qdrant",
-        total=remaining,
-        message=f"接續 Qdrant 向量索引，尚餘 {remaining:,} 筆。",
+        total=pending,
+        message=(
+            f"偵測到 {pending:,} 筆待處理判決"
+            f"（缺漏 {staleness.get('missing_judgments', 0):,}、"
+            f"變更 {staleness.get('changed_judgments', 0):,}、"
+            f"移除 {staleness.get('stale_judgments', 0):,}）；"
+            "建立新索引版本並驗證後切換 alias。"
+        ),
     )
     try:
-        summary = index_judgments(
+        summary = build_index_version(
             session_factory=session_factory,
             settings=settings,
-            limit=remaining,
-            batch_size=128,
+            batch_size=64,
             max_chars=settings.judgment_index_max_chars,
+            auto_activate=True,
             run_label="auto",
             track_state=True,
             state_parent_run_id=run_id,
@@ -244,7 +364,7 @@ def _run_index(
             "qdrant",
             started,
             status="interrupted",
-            message="向量索引已中止；下次執行會自動接續。",
+            message="向量索引版本建置已中止；舊 alias 保持不動。",
         )
         raise
     except Exception as exc:
@@ -256,19 +376,56 @@ def _run_index(
             status="failed",
             message=f"{exc.__class__.__name__}: {exc}",
         )
-        logger.exception("vector index failed")
-        return {"indexed": False, "error": str(exc), "remaining": remaining}
+        logger.exception("vector index version failed")
+        return {
+            "indexed": False,
+            "error": str(exc),
+            "remaining": pending,
+            "staleness": staleness,
+        }
     indexed = int(summary.get("indexed_count") or 0)
+    validation = summary.get("validation") or {}
+    activated = summary.get("activated") or {}
+    ok = (
+        summary.get("status") == "success"
+        and validation.get("status") == "ready"
+        and bool(activated)
+    )
     _stage_finish(
         store,
         run_id,
         "qdrant",
         started,
         current=indexed,
-        total=remaining,
-        message=f"本次索引 {indexed:,} 筆；總進度請見覆蓋率。",
+        total=pending,
+        status="success" if ok else "failed",
+        message=(
+            f"索引版本 v{int(summary.get('version_id') or 0):03d}："
+            f"本次 {indexed:,} 筆、重用 {int(summary.get('reused_count') or 0):,} 筆；"
+            + (
+                f"alias 已切換到 v{int(activated.get('version_id') or 0):03d}。"
+                if activated
+                else "alias 未切換。"
+            )
+        ),
     )
-    return {"indexed": True, "indexed_count": indexed, "summary": summary}
+    return {
+        "indexed": ok,
+        "indexed_count": indexed,
+        "remaining": 0 if ok else pending,
+        "summary": summary,
+        "staleness": staleness,
+        **(
+            {}
+            if ok
+            else {
+                "error": (
+                    "索引版本驗證或 alias 切換失敗："
+                    f"{validation.get('status') or summary.get('status') or 'unknown'}"
+                )
+            }
+        ),
+    }
 
 
 def run_update(*, run_id: Optional[str], index: bool) -> int:
@@ -288,7 +445,7 @@ def run_update(*, run_id: Optional[str], index: bool) -> int:
             branch="system",
             kind="update",
             title="資料更新",
-            stages=["download", "postgres", "qdrant"],
+            stages=["download", "legal_qdrant", "postgres", "qdrant"],
             pid=os.getpid(),
             meta={"index": bool(index), "manual": True},
             message="手動執行資料更新。",
@@ -309,6 +466,15 @@ def run_update(*, run_id: Optional[str], index: bool) -> int:
                 message="法規／命令下載失敗；未繼續處理判決壓縮檔。",
             )
             return 1
+
+        logger.info("update %s: refreshing legal article index", root_id)
+        legal_index = _run_legal_index(
+            store,
+            root_id,
+            settings=settings,
+            session_factory=session_factory,
+        )
+        result["legal_index"] = legal_index
 
         logger.info("update %s: scanning judgement archives", root_id)
         imported = _run_imports(
@@ -336,20 +502,37 @@ def run_update(*, run_id: Optional[str], index: bool) -> int:
         )
         result["index"] = indexing
 
+        problems = []
+        if not legal_index.get("ok"):
+            problems.append(
+                f"法規索引失敗：{legal_index.get('error') or 'unknown'}"
+            )
+        if indexing.get("error"):
+            problems.append(f"判決索引失敗：{indexing.get('error')}")
         message = (
-            f"資料更新完成：未處理壓縮檔 {imported.get('pending', 0)} 個、"
-            f"寫入判決 {imported.get('stored_count', 0):,} 筆。"
+            f"資料更新{'部分完成' if problems else '完成'}：未處理壓縮檔 "
+            f"{imported.get('pending', 0)} 個、寫入判決 "
+            f"{imported.get('stored_count', 0):,} 筆。"
         )
+        if legal_index.get("ok"):
+            message += (
+                f" 法規索引 {legal_index.get('status') or 'success'}。"
+            )
         if indexing.get("indexed"):
-            message += f" 本次索引 {indexing.get('indexed_count', 0):,} 筆。"
+            message += f" 本次判決索引 {indexing.get('indexed_count', 0):,} 筆。"
+        if problems:
+            message += " " + "；".join(problems)
         store.finish_run(
             root_id,
-            status="success",
+            status="partial" if problems else "success",
             message=message,
             counts={
                 "imported_archives": imported.get("pending", 0),
                 "stored_count": imported.get("stored_count", 0),
                 "indexed_count": indexing.get("indexed_count", 0),
+                "legal_indexed": (
+                    (legal_index.get("summary") or {}).get("snapshot") or {}
+                ).get("article_count", 0),
             },
         )
         logger.info("update %s: finished", root_id)

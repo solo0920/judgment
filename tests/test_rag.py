@@ -29,6 +29,7 @@ from judgment.rerank import RerankOutcome, RerankResult
 from judgment.law_rag import (
     _article_ref_key,
     _extract_article_refs,
+    _rrf_fuse,
     build_insurance_responsibility_framework,
     is_law_first_question,
     is_related_laws_question,
@@ -670,6 +671,53 @@ def test_select_law_articles_uses_dense_scores_when_bm25_is_empty() -> None:
     )
 
     assert selected[0]["article_no"] == "第 99 條"
+
+
+def test_rrf_fuse_uses_ranks_and_dense_weight() -> None:
+    def candidates():
+        return [
+            {
+                "article_no": "第 1 條",
+                "article_content": "keyword anchor",
+                "bm25_score": 1.0,
+                "dense_score": 0.1,
+                "score": 0.0,
+            },
+            {
+                "article_no": "第 2 條",
+                "article_content": "dense anchor",
+                "bm25_score": 0.99,
+                "dense_score": 0.99,
+                "score": 0.0,
+            },
+            {
+                "article_no": "第 3 條",
+                "article_content": "runner up",
+                "bm25_score": 0.98,
+                "dense_score": 0.98,
+                "score": 0.0,
+            },
+        ]
+
+    weak_dense = candidates()
+    _rrf_fuse(weak_dense, dense_weight=0.2, rrf_k=60)
+    ranked = sorted(
+        weak_dense, key=lambda item: (-item["score"], item["article_no"])
+    )
+    # Rank 1 in the keyword list still wins when dense is only a weak vote.
+    assert [item["article_no"] for item in ranked] == [
+        "第 1 條",
+        "第 2 條",
+        "第 3 條",
+    ]
+
+    equal_dense = candidates()
+    _rrf_fuse(equal_dense, dense_weight=1.0, rrf_k=60)
+    ranked = sorted(
+        equal_dense, key=lambda item: (-item["score"], item["article_no"])
+    )
+    # With equal voting power, the article ranked first by dense wins.
+    assert ranked[0]["article_no"] == "第 2 條"
 
 
 def test_law_sources_adds_dense_law_when_keyword_lookup_finds_none(

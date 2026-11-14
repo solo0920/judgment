@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -124,8 +124,14 @@ from ..runtime_settings import (
 from .catalog import build_catalog
 from .performance import performance_options, query_performance
 from .power_agent import ensure_power_agent
+from .events import build_event_broker
+from .processing_events import ProcessingEventServer
 from .processing import (
     ProcessingManager,
+    active_import_event_stream,
+    build_active_import,
+    build_processing_bootstrap,
+    build_processing_live,
     build_processing_plan,
     build_processing_snapshot,
 )
@@ -429,9 +435,41 @@ def create_app(
                     )
             except Exception:
                 logger.warning("question bank startup revalidation failed", exc_info=True)
+        warm_task: Optional[asyncio.Task] = None
+
+        async def warm_processing_snapshots() -> None:
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    snapshot = await asyncio.to_thread(
+                        build_processing_snapshot,
+                        settings=app.state.settings,
+                        session_factory=app.state.session_factory,
+                    )
+                    app.state.event_broker.publish_snapshot(
+                        "processing", snapshot
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "processing snapshot warm refresh failed",
+                        exc_info=True,
+                    )
+
         try:
+            await app.state.processing_event_server.start()
+            warm_task = asyncio.create_task(warm_processing_snapshots())
             yield
         finally:
+            if warm_task is not None:
+                warm_task.cancel()
+                try:
+                    await warm_task
+                except asyncio.CancelledError:
+                    pass
+            await app.state.processing_event_server.stop()
+            await app.state.event_broker.close()
             if engine is not None:
                 engine.dispose()
 
@@ -456,6 +494,62 @@ def create_app(
         settings=settings,
         session_factory=session_factory,
     )
+    app.state.event_broker = build_event_broker(
+        settings_provider=lambda: app.state.settings,
+        session_factory_provider=lambda: app.state.session_factory,
+        processing_snapshot_provider=lambda: build_processing_snapshot(
+            settings=app.state.settings,
+            session_factory=app.state.session_factory,
+        ),
+        processing_bootstrap_provider=lambda: build_processing_bootstrap(
+            settings=app.state.settings,
+            session_factory=app.state.session_factory,
+        ),
+        processing_live_provider=build_processing_live,
+        processing_replay_provider=lambda last_id: (
+            app.state.processing_event_server.replay_after(last_id)
+        ),
+        processing_latest_event_id_provider=lambda: (
+            app.state.processing_event_server.latest_event_id()
+        ),
+        updates_payload_provider=lambda: update_status(
+            app.state.session_factory
+        ),
+        status_payload_provider=lambda: build_status(
+            session_factory=app.state.session_factory,
+            data_dir=app.state.data_dir,
+            settings=runtime_settings(
+                app.state.settings, app.state.session_factory
+            ),
+        ),
+        judgment_download_payload_provider=lambda: download_status(
+            app.state.settings
+        ),
+        system_usage_payload_provider=lambda: build_system_usage(
+            session_factory=app.state.session_factory,
+            data_dir=app.state.data_dir,
+            settings=app.state.settings,
+        ),
+        ollama_payload_provider=lambda: list_hosts(
+            app.state.session_factory
+        ),
+        court_check_payload_provider=lambda: check_court_normalization(
+            app.state.session_factory
+        ),
+        law_version_payload_provider=lambda: check_law_version_status(
+            app.state.session_factory,
+            data_dir=app.state.data_dir,
+        ),
+        test_runs_payload_provider=lambda: {
+            "run": get_latest_test_run(app.state.session_factory)
+        },
+        benchmark_payload_provider=lambda: {
+            "runs": app.state.benchmark_manager.list_runs(limit=30)
+        },
+    )
+    app.state.processing_event_server = ProcessingEventServer(
+        broker=app.state.event_broker,
+    )
 
     if settings.cors_allow_origins:
         app.add_middleware(
@@ -475,6 +569,7 @@ def create_app(
             not path.startswith("/api/")
             or path.startswith("/api/performance")
             or path.startswith("/api/processing")
+            or path.startswith("/api/events")
             or path.startswith("/api/quality")
             or path.startswith("/api/question-bank")
             or path.startswith("/api/benchmark")
@@ -801,6 +896,52 @@ def create_app(
                 settings=settings,
                 session_factory=app.state.session_factory,
             )
+
+    @app.get("/api/processing/active")
+    def processing_active() -> Dict[str, Any]:
+        return build_active_import()
+
+    @app.get("/api/processing/active/stream")
+    async def processing_active_stream() -> StreamingResponse:
+        return StreamingResponse(
+            active_import_event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/events/stream")
+    async def events_stream(
+        topic: str = Query(""),
+        last_event_id: Optional[str] = Header(
+            None, alias="Last-Event-ID"
+        ),
+    ) -> StreamingResponse:
+        topics = [part.strip() for part in topic.split(",") if part.strip()]
+        broker = app.state.event_broker
+        if not topics or any(item not in broker.topics for item in topics):
+            raise HTTPException(
+                status_code=400,
+                detail="未知的事件 topic；請使用 processing、judgment-download、"
+                "test-runs、benchmark、updates、status、system-usage、ollama、"
+                "court-check 或 law-version-check。",
+            )
+        return StreamingResponse(
+            broker.stream(topics, last_event_id=last_event_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/processing/events/status")
+    def processing_events_status() -> Dict[str, Any]:
+        return app.state.processing_event_server.stats()
 
     @app.get("/api/processing/plan")
     def processing_plan() -> Dict[str, Any]:

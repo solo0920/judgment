@@ -9,6 +9,7 @@ import {
   needsApiConfiguration,
   normalizeApiBase,
   setApiBase,
+  subscribeRefresh,
   testApiConnection,
 } from "../api.js";
 import { escapeHtml, formatDateTime, icon, setBusy, toast } from "../utils.js";
@@ -135,7 +136,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
   let testRun = null;
   let testRuns = [];
   let selectedRunId = "";
-  let flowTimer = null;
+  let flowStream = null;
   let lastFlowSignature = "";
 
   const actionsMarkup = `<div class="page-actions">
@@ -586,11 +587,13 @@ export async function render(root, ctx, { embedded = false } = {}) {
     }
   };
 
-  const refreshFlow = async () => {
+  const refreshFlow = async (payload = null) => {
     try {
-      const data = selectedRunId
-        ? await api.testRun(selectedRunId)
-        : await api.testRunCurrent();
+      const data =
+        payload ||
+        (selectedRunId
+          ? await api.testRun(selectedRunId)
+          : await api.testRunCurrent());
       if (disposed) return;
       testRun = data.run || null;
       if (
@@ -702,10 +705,10 @@ export async function render(root, ctx, { embedded = false } = {}) {
   ]);
   await refreshFlow();
 
-  flowTimer = window.setInterval(async () => {
+  flowStream = subscribeRefresh("test-runs", async (_topic, payload) => {
     if (disposed || document.hidden || selectedRunId) return;
-    await refreshFlow();
-  }, 2500);
+    await refreshFlow(payload?.snapshot || null);
+  });
 
   if (!embedded && typeof ctx?.setTitle === "function") {
     ctx.setTitle("系統測試 · Judgment RAG Console");
@@ -713,7 +716,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
 
   return () => {
     disposed = true;
-    if (flowTimer) window.clearInterval(flowTimer);
+    if (flowStream) flowStream();
     window.removeEventListener("judgment:test-mode", onTestModeChange);
   };
 }

@@ -310,6 +310,21 @@ def _add_event(
         existing_keys.add(key)
 
 
+def _sanitize_pg_value(value: Any) -> Any:
+    """Remove NUL bytes, which PostgreSQL text and JSONB cannot store."""
+
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_sanitize_pg_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_pg_value(key): _sanitize_pg_value(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def apply_versioned_batch(
     session_factory: sessionmaker[Session],
     *,
@@ -330,7 +345,10 @@ def apply_versioned_batch(
         existing = {str(item.jid): item for item in existing_rows}
         event_keys = _existing_event_keys(session, snapshot_id)
         for raw_row in rows:
-            row = dict(raw_row)
+            row = {
+                _sanitize_pg_value(key): _sanitize_pg_value(value)
+                for key, value in raw_row.items()
+            }
             jid = str(row["jid"])
             row["issue_month"] = issue_month
             document = existing.get(jid)
