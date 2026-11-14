@@ -13,6 +13,7 @@ RERANK_LOG="${RUN_DIR}/rerank_server.log"
 PID_FILE="${RUN_DIR}/web.pid"
 AGENT_PID_FILE="${RUN_DIR}/agent.pid"
 RERANK_PID_FILE="${RUN_DIR}/rerank_server.pid"
+TMUX_SESSION="${JUDGMENT_WEB_TMUX_SESSION:-judgment-web}"
 
 mkdir -p "${RUN_DIR}"
 
@@ -79,6 +80,67 @@ cleanup_stale_pid() {
 cleanup_stale_pid "${PID_FILE}"
 cleanup_stale_pid "${AGENT_PID_FILE}"
 cleanup_stale_pid "${RERANK_PID_FILE}"
+
+port_is_listening() {
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+wait_for_port_close() {
+  local port="$1"
+  local attempts="${2:-20}"
+  for _ in $(seq 1 "${attempts}"); do
+    if ! port_is_listening "${port}"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+tmux_session_exists() {
+  command -v tmux >/dev/null 2>&1 \
+    && tmux has-session -t "${TMUX_SESSION}" 2>/dev/null
+}
+
+stop_web_tmux_session() {
+  if tmux_session_exists; then
+    echo "停止舊的 tmux session ${TMUX_SESSION}…"
+    tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null || true
+    wait_for_port_close "${PORT}" 20 || true
+  fi
+}
+
+write_web_pid() {
+  local pid
+  pid="$(lsof -nP -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  if [[ -n "${pid}" ]]; then
+    echo "${pid}" >"${PID_FILE}"
+  fi
+}
+
+start_backend_detached() {
+  local uv_bin
+  uv_bin="$(command -v uv || true)"
+  if [[ -z "${uv_bin}" ]]; then
+    echo "錯誤：找不到 uv。"
+    return 1
+  fi
+
+  if command -v tmux >/dev/null 2>&1; then
+    local command_line
+    printf -v command_line \
+      'exec %q run judgment-web --host %q --port %q >> %q 2>&1' \
+      "${uv_bin}" "${HOST}" "${PORT}" "${WEB_LOG}"
+    tmux new-session -d -s "${TMUX_SESSION}" -c "${PWD}" "${command_line}"
+    echo "後端以 detached tmux session ${TMUX_SESSION} 啟動。"
+    return 0
+  fi
+
+  echo "警告：找不到 tmux，改用 nohup；若啟動端 shell 被終止，後端可能一起結束。"
+  nohup "${uv_bin}" run judgment-web --host "${HOST}" --port "${PORT}" \
+    >>"${WEB_LOG}" 2>&1 &
+  echo $! >"${PID_FILE}"
+}
 
 if [[ ! -f .env ]]; then
   export LAW_DATA_DIR="${LAW_DATA_DIR:-./data/laws}"
@@ -274,16 +336,19 @@ fi
 health="$(curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/health" 2>/dev/null || true)"
 if [[ "${health}" == *'"status":"ok"'* ]]; then
   echo "後端已在執行：http://${HOST}:${PORT}/"
+  write_web_pid
 else
-  if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  # A tmux session may be left over after a crash or port conflict. Stop only
+  # the session this script owns, then verify the port is actually free.
+  stop_web_tmux_session
+  if port_is_listening "${PORT}"; then
     echo "錯誤：連接埠 ${PORT} 已被其他程式占用。"
     lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN || true
     exit 1
   fi
 
   echo "啟動後端（http://${HOST}:${PORT}）…"
-  nohup uv run judgment-web --host "${HOST}" --port "${PORT}" >"${WEB_LOG}" 2>&1 &
-  echo $! >"${PID_FILE}"
+  start_backend_detached
 
   for _ in {1..60}; do
     health="$(curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/health" 2>/dev/null || true)"
@@ -299,8 +364,10 @@ else
   if [[ "${health}" != *'"status":"ok"'* ]]; then
     echo "錯誤：後端啟動失敗，最近日誌："
     tail -n 30 "${WEB_LOG}" || true
+    stop_web_tmux_session
     exit 1
   fi
+  write_web_pid
 fi
 
 if [[ "${JUDGMENT_SKIP_UPDATE_CHECK:-0}" == "1" ]]; then

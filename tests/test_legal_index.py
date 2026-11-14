@@ -20,9 +20,11 @@ from judgment.legal_index import (
     build_source_snapshot,
     legal_index_status,
     next_collection_name,
+    parse_args as parse_legal_index_args,
     read_legal_articles,
+    resolve_legal_index_settings,
 )
-from judgment.models import Base
+from judgment.models import Base, OllamaHost
 from judgment.processing_state import ProcessingStateStore
 
 
@@ -521,3 +523,46 @@ def test_next_collection_name_avoids_qdrant_orphans() -> None:
     )
 
     assert name == "legal_articles_v008"
+
+
+def test_resolve_legal_index_settings_applies_active_embedding_host() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        session.add(
+            OllamaHost(
+                name="ui-host",
+                base_url="http://ui-host:11434",
+                port=11434,
+                is_active=True,
+                priority=0,
+                embedding_model="ui-embedding:latest",
+            )
+        )
+        session.commit()
+
+    base = _settings(
+        embedding_url="http://env-host:11434",
+        embedding_model="env-embedding",
+    )
+    resolved = resolve_legal_index_settings(
+        parse_legal_index_args([]),
+        session_factory=session_factory,
+        base_settings=base,
+    )
+    assert resolved.embedding_url == "http://ui-host:11434"
+    assert resolved.embedding_model == "ui-embedding:latest"
+
+    cli = resolve_legal_index_settings(
+        parse_legal_index_args(
+            [
+                "--embedding-url",
+                "http://cli-host:11434",
+                "--embedding-model",
+                "cli-embedding",
+            ]
+        ),
+        session_factory=session_factory,
+        base_settings=base,
+    )
+    assert cli.embedding_url == "http://cli-host:11434"
+    assert cli.embedding_model == "cli-embedding"

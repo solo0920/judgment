@@ -825,6 +825,104 @@ def _index_runtime_view(
     return payload
 
 
+def _merge_prior_index_runtime(
+    runtime: Dict[str, Any],
+    runs: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Restore R/E counters lost when an index version resumes.
+
+    ``_month_runtime_rows`` starts resumed months with processed counts from
+    PostgreSQL but zero R/E counters because the per-version rows do not carry
+    a reused/embedded flag.  The previous run's runtime payload has those
+    counters, so merge the most complete one for the same version.
+    """
+
+    if not isinstance(runtime, dict):
+        return runtime
+    if runtime.get("build_mode") != "reuse":
+        return runtime
+    try:
+        version_id = int(runtime.get("version_id") or 0)
+    except (TypeError, ValueError):
+        return runtime
+    if version_id <= 0:
+        return runtime
+    current_run_id = str(runtime.get("run_id") or "")
+    best: Dict[tuple[str, str], Dict[str, Any]] = {}
+    best_scores: Dict[tuple[str, str], tuple[int, int, str]] = {}
+    for run in runs or []:
+        if current_run_id and str(run.get("id") or "") == current_run_id:
+            continue
+        prior = (run.get("meta") or {}).get("index_runtime") or {}
+        if not isinstance(prior, dict):
+            continue
+        try:
+            prior_version = int(prior.get("version_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if prior_version != version_id:
+            continue
+        updated_at = str(
+            prior.get("updated_at") or run.get("started_at") or ""
+        )
+        for item in prior.get("months") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("month") or ""),
+                str(item.get("archive") or ""),
+            )
+            processed = int(item.get("processed") or 0)
+            coverage = int(item.get("reused") or 0) + int(
+                item.get("embedded") or 0
+            )
+            score = (processed, coverage, updated_at)
+            if score <= best_scores.get(key, (-1, -1, "")):
+                continue
+            best_scores[key] = score
+            best[key] = item
+    if not best:
+        return runtime
+    for item in runtime.get("months") or []:
+        if not isinstance(item, dict):
+            continue
+        previous = best.get(
+            (
+                str(item.get("month") or ""),
+                str(item.get("archive") or ""),
+            )
+        )
+        if not previous:
+            continue
+        processed = int(item.get("processed") or 0)
+        if processed <= 0:
+            continue
+        prior_reused = int(previous.get("reused") or 0)
+        prior_embedded = int(previous.get("embedded") or 0)
+        merged_reused = min(
+            processed,
+            int(item.get("reused") or 0) + prior_reused,
+        )
+        merged_embedded = min(
+            max(0, processed - merged_reused),
+            int(item.get("embedded") or 0) + prior_embedded,
+        )
+        item["reused"] = merged_reused
+        item["embedded"] = merged_embedded
+    months = [
+        item for item in runtime.get("months") or [] if isinstance(item, dict)
+    ]
+    summary = runtime.get("summary")
+    if isinstance(summary, dict):
+        summary["reused"] = sum(
+            int(item.get("reused") or 0) for item in months
+        )
+        summary["embedded"] = sum(
+            int(item.get("embedded") or 0) for item in months
+        )
+    return runtime
+
+
 _INDEX_MONTH_CACHE: Dict[str, Any] = {
     "key": None,
     "expires_at": 0.0,
@@ -4471,6 +4569,10 @@ def build_processing_snapshot(
         index_runtime = None
         if definition["id"] == "index_versions":
             index_runtime = _index_runtime_view(progress_run)
+            if index_runtime.get("available"):
+                index_runtime = _merge_prior_index_runtime(
+                    index_runtime, runs
+                )
             if not index_runtime.get("available"):
                 coverage = _index_month_coverage_runtime(
                     settings, session_factory, index
@@ -4516,7 +4618,7 @@ def build_processing_snapshot(
             update_mechanism = (
                 "司法院 resources 月份／fileset 與本機 raw_rar／下載 manifest 比對"
                 if download_source == "judgment"
-                else "線上 ZIP 的 Content-Length／Last-Modified／ETag 與本機版本 ZIP 大小比對"
+                else "線上 ZIP 的 Content-Length 與本機版本 ZIP 大小比對；Last-Modified／ETag 僅記錄供追蹤"
             )
             update_message = str(update_record.get("message") or "")
         if court_pending:
@@ -4820,6 +4922,13 @@ def _live_workflow_entries(
             or workflow_active
             or (history_runs[0] if history_runs else workflow_latest)
         )
+        index_runtime = None
+        if definition["id"] == "index_versions":
+            index_runtime = _index_runtime_view(progress_run)
+            if index_runtime.get("available"):
+                index_runtime = _merge_prior_index_runtime(
+                    index_runtime, runs
+                )
         entries.append(
             {
                 "id": definition["id"],
@@ -4827,11 +4936,7 @@ def _live_workflow_entries(
                 "last_run": _public_run(workflow_latest),
                 "recent_runs": [_public_run(run) for run in history_runs],
                 "progress": _workflow_progress(progress_run),
-                "index_runtime": (
-                    _index_runtime_view(progress_run)
-                    if definition["id"] == "index_versions"
-                    else None
-                ),
+                "index_runtime": index_runtime,
                 "can_run": can_run,
             }
         )

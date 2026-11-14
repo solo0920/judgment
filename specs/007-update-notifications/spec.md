@@ -65,8 +65,8 @@ Header 的「資料處理」導覽項目右下角顯示橘色 badge，數字為�
 - **FR-006**: `GET /api/updates/status` MUST 回傳 law/order/judgment 的 current 狀態、`update_count` 與 `any_update`。
 - **FR-007**: `POST /api/updates/check` MUST 執行三類檢查並回傳最新狀態；同一時間只允許一個檢查，重疊時回傳目前狀態。
 - **FR-008**: `up.sh` MUST 在後端就緒後呼叫檢查；失敗只顯示警告，不阻止服務啟動；`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過。
-- **FR-009**: `/api/processing` 的 workflow entries MUST 包含 `update_available`、`update_status`、`update_count`、`update_origin`、`update_mechanism` 與 `update_message`，供 sidebar 顯示 refresh icon 加數量的橘色 numeric badge，並供 notice 標示線上來源或 PostgreSQL／本機、偵測機制、檢查時間與訊息。法院名稱正規化的 count MUST 為 current 且 `court_normalized` 空值的筆數。
-- **FR-010**: Header「資料處理」導覽項目 MUST 顯示 1–3 的橘色更新 badge；無更新時隱藏；每 60 秒與視窗 focus 時重新取得狀態。
+- **FR-009**: `/api/processing` 的 workflow entries MUST 包含 `update_available`、`update_status`、`update_count`、`update_origin`、`update_mechanism` 與 `update_message`，供 sidebar 顯示 refresh icon 加數量的橘色 numeric badge，並供 notice 標示線上來源或 PostgreSQL／本機、偵測機制、檢查時間與訊息。法規／命令的 mechanism MUST 明確標示以遠端 Content-Length 與本機 ZIP 大小比對；Last-Modified／ETag MAY 記錄於 update record，但 MUST NOT 宣稱用於更新判斷。法院名稱正規化的 count MUST 為 current 且 `court_normalized` 空值的筆數。
+- **FR-010**: Header「資料處理」導覽項目 MUST 顯示 1–3 的橘色更新 badge；無更新時隱藏。badge MUST 由 SSE `/api/events/stream?topic=updates` 推送更新，初次載入取得一次，SSE 斷線重連後由初始 payload 補齊；MUST NOT 使用固定 timer 或每 60 秒輪詢。`judgment:updates-changed` 事件 MAY 觸發一次重新取得。
 - **FR-011**: 法規／命令下載成功或 no_change MUST 寫入更新紀錄 `update_available=false`，避免 sidebar 持續顯示更新。
 - **FR-012**: 判決下載流程結束 MUST 寫入更新紀錄；pending > 0 時保持 `update_available=true`，成功補齊時清除。
 - **FR-013**: 法規／命令 ZIP MUST 使用下載日期資料夾與原始檔名；同檔名不同內容 MUST 以 hash suffix 保留，不得覆寫。

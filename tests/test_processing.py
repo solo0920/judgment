@@ -399,6 +399,7 @@ def test_processing_sections_report_remote_updates_and_actions(
     assert law_workflow["update_count"] == 1
     assert law_workflow["update_origin"] == "線上來源"
     assert "Content-Length" in law_workflow["update_mechanism"]
+    assert "僅記錄" in law_workflow["update_mechanism"]
     assert law_workflow["update_message"] == "法規遠端 ZIP 大小變更"
 
 
@@ -3011,3 +3012,166 @@ def test_processing_workflow_endpoint_starts_selected_workflow(
     payload = response.json()
     assert payload["workflow"] == "law_download"
     assert started == ["law_download"]
+
+
+def test_merge_prior_index_runtime_restores_resumed_re_counts() -> None:
+    runtime = {
+        "version_id": 5,
+        "build_mode": "reuse",
+        "months": [
+            {
+                "month": "199601",
+                "archive": "199601.rar",
+                "total": 136,
+                "processed": 136,
+                "reused": 0,
+                "embedded": 0,
+            },
+            {
+                "month": "200506",
+                "archive": "200506.rar",
+                "total": 5231,
+                "processed": 5231,
+                "reused": 0,
+                "embedded": 0,
+            },
+            {
+                "month": "201601",
+                "archive": "201601.rar",
+                "total": 1000,
+                "processed": 1000,
+                "reused": 0,
+                "embedded": 1000,
+            },
+        ],
+        "summary": {"indexed": 6367, "total": 6367, "reused": 0, "embedded": 1000},
+    }
+    runs = [
+        {
+            "id": "prior-a",
+            "meta": {
+                "index_runtime": {
+                    "version_id": 5,
+                    "months": [
+                        {
+                            "month": "199601",
+                            "archive": "199601.rar",
+                            "processed": 136,
+                            "reused": 0,
+                            "embedded": 136,
+                        },
+                        {
+                            "month": "201601",
+                            "archive": "201601.rar",
+                            "processed": 1000,
+                            "reused": 1000,
+                            "embedded": 0,
+                        },
+                    ],
+                }
+            },
+        },
+        {
+            "id": "prior-b",
+            "meta": {
+                "index_runtime": {
+                    "version_id": 5,
+                    "months": [
+                        {
+                            "month": "200506",
+                            "archive": "200506.rar",
+                            "processed": 5231,
+                            "reused": 0,
+                            "embedded": 5231,
+                        },
+                    ],
+                }
+            },
+        },
+    ]
+
+    merged = processing_module._merge_prior_index_runtime(runtime, runs)
+    months = {
+        (item["month"], item["archive"]): item for item in merged["months"]
+    }
+    assert months[("199601", "199601.rar")]["embedded"] == 136
+    assert months[("200506", "200506.rar")]["embedded"] == 5231
+    assert months[("201601", "201601.rar")]["reused"] == 1000
+    assert months[("201601", "201601.rar")]["embedded"] == 0
+    assert merged["summary"]["reused"] == 1000
+    assert merged["summary"]["embedded"] == 5367
+
+
+def test_build_processing_live_merges_prior_index_month_counters(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "processing_state.json"
+    store = ProcessingStateStore(state_path)
+    prior_id = store.start_run(
+        branch="judgment",
+        kind="index",
+        title="Qdrant判決向量索引版本建置",
+        stages=["ollama", "qdrant", "validate"],
+        pid=os.getpid(),
+    )
+    store.update_run(
+        prior_id,
+        meta={
+            "index_runtime": {
+                "version_id": 5,
+                "build_mode": "reuse",
+                "months": [
+                    {
+                        "month": "199601",
+                        "archive": "199601.rar",
+                        "processed": 136,
+                        "reused": 0,
+                        "embedded": 136,
+                    }
+                ],
+            }
+        },
+    )
+    store.finish_run(prior_id, status="stale")
+
+    current_id = store.start_run(
+        branch="judgment",
+        kind="index",
+        title="Qdrant判決向量索引版本建置",
+        stages=["ollama", "qdrant", "validate"],
+        pid=os.getpid(),
+    )
+    store.update_run(
+        current_id,
+        meta={
+            "index_runtime": {
+                "version_id": 5,
+                "build_mode": "reuse",
+                "summary": {
+                    "indexed": 136,
+                    "total": 136,
+                    "reused": 0,
+                    "embedded": 0,
+                },
+                "months": [
+                    {
+                        "month": "199601",
+                        "archive": "199601.rar",
+                        "processed": 136,
+                        "total": 136,
+                        "reused": 0,
+                        "embedded": 0,
+                    }
+                ],
+            }
+        },
+    )
+    store.finish_run(current_id, status="running")
+
+    live = processing_module.build_processing_live(state_path=state_path)
+    workflow = next(
+        item for item in live["workflows"] if item["id"] == "index_versions"
+    )
+    month = workflow["index_runtime"]["months"][0]
+    assert month["embedded"] == 136
+    assert workflow["index_runtime"]["summary"]["embedded"] == 136

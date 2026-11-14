@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Status**: Partially implemented (RAG, vector search, performance report and article-level law versions implemented; Google auth and remaining version/UX requirements pending)
+**Status**: Partially implemented (RAG, vector search, cross-encoder reranker, performance report and article-level law versions implemented; Google auth and remaining version/UX requirements pending)
 
 **Input**: 使用者提供之需求（原文）：
 
@@ -196,7 +196,7 @@
 
 #### 法規版本管理
 
-- **FR-048**: 系統 MUST 支援定期與管理者手動檢查「中文法規」與「中文命令」端點是否發布新版本；定期檢查預設至少每日一次，並記錄檢查時間、來源、結果與耗時。
+- **FR-048**: 系統 MUST 支援定期與管理者手動檢查「中文法規」與「中文命令」端點是否發布新版本。`up.sh` MUST 在啟動後執行一次檢查；定期檢查由外部 cron／`scripts/run_scheduled_update.sh` 至少每日一次執行，程式本身不內建排程器。每次檢查 MUST 記錄檢查時間、來源與結果；逐來源耗時尚未寫入 `performance_records`（目前只有 `checked_at` 與 log）。
 - **FR-049**: 偵測到新版法規或命令時，系統 MUST 下載並匯入新版本，且保留既有舊版本資料，不得以新版本覆蓋或刪除舊版本。
 - **FR-050**: 舊版本條文內容有變更時，系統 MUST 產生變更紀錄，至少包含條號、變更前後內容、變更欄位、新舊版本識別、生效日期與偵測時間，並可供使用者與管理者查詢。
 - **FR-051**: 顯示法規或命令條文時，系統 MUST 以最新有效版本為主；若使用者或判決引用特定舊版本，系統 MUST 提供切換或連結以查看該舊版本及其變更紀錄。
@@ -301,7 +301,7 @@
 - 新增 `#/performance` 效能報表頁，支援 metadata 篩選、平均／P95 耗時、分頁與 CSV／JSON 匯出。
 - 效能紀錄預設保留至少 90 天；每累積約 200 筆寫入後，於寫入流程中機會性清理過期資料，不是獨立背景工作。
 
-已完成：RAG 各階段（法規／命令比對、檢索、取全文、生成、引用驗證）的細部效能紀錄、判決向量索引與完整 RAG 回答，包含版本化 Qdrant collection 與 alias。尚未完成：Google 登入；目前沒有獨立的 reranker／後處理階段，因此這兩項不列為已實作。
+已完成：RAG 各階段（法規／命令比對、檢索、cross-encoder rerank、取全文、生成、引用驗證）的細部效能紀錄、判決向量索引與完整 RAG 回答，包含版本化 Qdrant collection 與 alias。目前 `.env` 設定 `RAG_RERANK_ENABLED=true`，主要 reranker 為 `bge-reranker-v2-m3`，失敗時保留原 Qdrant 排序並標示 degraded。尚未完成：Google 登入；目前沒有獨立於生成後的額外後處理階段（引用驗證已包含在 `rag.validate_citations`）。
 
 ## Implementation Note (2026-11-08): 法規條文版本
 

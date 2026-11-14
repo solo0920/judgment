@@ -13,6 +13,8 @@ from judgment.config import Settings
 from judgment.embeddings import EmbeddingError
 from judgment.index_versions import activate_version, recipe_version, rollback_version
 from judgment.judgment_index import (
+    _merge_prior_month_runtime,
+    _prior_index_month_runtime,
     build_index_version,
     history_point_id,
     index_staleness,
@@ -595,3 +597,89 @@ def test_build_version_does_not_switch_on_validation_failure(
             select(JudgmentIndexVersion).order_by(JudgmentIndexVersion.version_id)
         ).all()
         assert [item.status for item in versions] == ["active", "failed"]
+
+
+def test_merge_prior_month_runtime_seeds_resumed_counters() -> None:
+    month_runtime = {
+        ("199601", "199601.rar"): {
+            "month": "199601",
+            "archive": "199601.rar",
+            "total": 136,
+            "processed": 136,
+            "reused": 0,
+            "embedded": 0,
+        },
+        ("201601", "201601.rar"): {
+            "month": "201601",
+            "archive": "201601.rar",
+            "total": 1000,
+            "processed": 1000,
+            "reused": 0,
+            "embedded": 0,
+        },
+    }
+    prior = {
+        ("199601", "199601.rar"): {
+            "processed": 136,
+            "reused": 0,
+            "embedded": 136,
+        },
+        ("201601", "201601.rar"): {
+            "processed": 1000,
+            "reused": 1000,
+            "embedded": 0,
+        },
+    }
+
+    _merge_prior_month_runtime(month_runtime, prior)
+
+    assert month_runtime[("199601", "199601.rar")]["embedded"] == 136
+    assert month_runtime[("201601", "201601.rar")]["reused"] == 1000
+    assert month_runtime[("201601", "201601.rar")]["embedded"] == 0
+
+
+def test_prior_index_month_runtime_uses_best_month_across_runs() -> None:
+    class FakeState:
+        def read(self):
+            return {
+                "runs": [
+                    {
+                        "started_at": "2026-11-14T11:00:00+00:00",
+                        "meta": {
+                            "index_runtime": {
+                                "version_id": 5,
+                                "months": [
+                                    {
+                                        "month": "199601",
+                                        "archive": "199601.rar",
+                                        "processed": 136,
+                                        "reused": 0,
+                                        "embedded": 136,
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                    {
+                        "started_at": "2026-11-14T15:00:00+00:00",
+                        "meta": {
+                            "index_runtime": {
+                                "version_id": 5,
+                                "months": [
+                                    {
+                                        "month": "200506",
+                                        "archive": "200506.rar",
+                                        "processed": 5231,
+                                        "reused": 0,
+                                        "embedded": 5231,
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                ]
+            }
+
+    prior = _prior_index_month_runtime(FakeState(), version_id=5)
+    assert prior[("199601", "199601.rar")]["embedded"] == 136
+    assert prior[("200506", "200506.rar")]["embedded"] == 5231

@@ -481,6 +481,82 @@ def _indexed_month_counts(
     }
 
 
+def _prior_index_month_runtime(
+    state: Optional[ProcessingStateStore],
+    *,
+    version_id: Optional[int],
+) -> Dict[tuple[str, str], Dict[str, Any]]:
+    """Return the most complete month R/E counts for a resumed version.
+
+    A resumed version already has ``processed`` rows in PostgreSQL, but the
+    rows do not record whether each point was reused or newly embedded.  The
+    previous run's runtime payload is the authoritative source for those
+    counters, so keep the run with the highest R/E coverage.
+    """
+
+    if state is None or not version_id:
+        return {}
+    try:
+        data = state.read()
+    except Exception:
+        logger.warning("無法讀取續跑前的索引月份進度", exc_info=True)
+        return {}
+    best: Dict[tuple[str, str], Dict[str, Any]] = {}
+    best_scores: Dict[tuple[str, str], tuple[int, int, str]] = {}
+    for run in data.get("runs") or []:
+        runtime = (run.get("meta") or {}).get("index_runtime") or {}
+        if not isinstance(runtime, dict):
+            continue
+        try:
+            run_version = int(runtime.get("version_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if run_version != int(version_id):
+            continue
+        updated_at = str(
+            runtime.get("updated_at") or run.get("started_at") or ""
+        )
+        for item in runtime.get("months") or []:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("month") or ""),
+                str(item.get("archive") or ""),
+            )
+            processed = int(item.get("processed") or 0)
+            coverage = int(item.get("reused") or 0) + int(
+                item.get("embedded") or 0
+            )
+            score = (processed, coverage, updated_at)
+            if score <= best_scores.get(key, (-1, -1, "")):
+                continue
+            best_scores[key] = score
+            best[key] = item
+    return best
+
+
+def _merge_prior_month_runtime(
+    month_runtime: Dict[tuple[str, str], Dict[str, Any]],
+    prior: Dict[tuple[str, str], Dict[str, Any]],
+) -> None:
+    """Seed resumed month counters with the previous run's R/E values."""
+
+    for key, item in month_runtime.items():
+        previous = prior.get(key)
+        if not previous:
+            continue
+        processed = int(item.get("processed") or 0)
+        if processed <= 0:
+            continue
+        prior_reused = min(processed, int(previous.get("reused") or 0))
+        prior_embedded = min(
+            max(0, processed - prior_reused),
+            int(previous.get("embedded") or 0),
+        )
+        item["reused"] = prior_reused
+        item["embedded"] = prior_embedded
+
+
 def _month_runtime_rows(
     session_factory,
     *,
@@ -1365,6 +1441,13 @@ def build_index_version(
             state = ProcessingStateStore()
             month_runtime = _month_runtime_rows(
                 session_factory, version_id=version_id
+            )
+            _merge_prior_month_runtime(
+                month_runtime,
+                _prior_index_month_runtime(
+                    state,
+                    version_id=version_id,
+                ),
             )
             runtime = {
                 "version_id": version_id,

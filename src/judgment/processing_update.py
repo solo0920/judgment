@@ -14,6 +14,7 @@ from .index_versions import active_version
 from .judgment_import import import_judgments
 from .judgment_index import build_index_version, index_staleness
 from .legal_index import build_legal_article_index
+from .ollama_hosts import runtime_settings
 from .vector_store import QdrantStore
 from .processing_state import (
     ProcessingStateError,
@@ -455,6 +456,9 @@ def run_update(*, run_id: Optional[str], index: bool) -> int:
     if settings.auto_create_schema:
         init_db(engine)
     session_factory = build_session_factory(engine)
+    # Apply the embedding host/model selected in the web console to the legal
+    # and judgment indexing stages of the full update pipeline.
+    settings = runtime_settings(settings, session_factory)
     result: Dict[str, Any] = {}
     try:
         logger.info("update %s: checking law/order sources", root_id)

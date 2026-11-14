@@ -21,6 +21,7 @@ from .db import build_engine, build_session_factory, init_db
 from .embeddings import EmbeddingError, OllamaEmbedder
 from .law_rag import _latest_parquet_files
 from .models import LegalArticleIndexVersion
+from .ollama_hosts import runtime_settings
 from .processing_state import ProcessingStateStore, parent_run_id
 from .vector_store import QdrantError, QdrantStore
 
@@ -1346,9 +1347,19 @@ def _processing_progress_callback(
     return report
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = parse_args(argv)
-    settings = Settings.from_env().with_overrides(
+def resolve_legal_index_settings(
+    args: argparse.Namespace,
+    *,
+    session_factory: Optional[sessionmaker[Session]] = None,
+    base_settings: Optional[Settings] = None,
+) -> Settings:
+    """Resolve CLI/env settings and apply the active Ollama host preference.
+
+    Explicit CLI embedding arguments win over the persisted host selection so
+    command-line diagnostics remain reproducible.
+    """
+
+    settings = (base_settings or Settings.from_env()).with_overrides(
         database_url=args.database_url,
         qdrant_url=args.qdrant_url,
         qdrant_api_key=args.qdrant_api_key,
@@ -1360,16 +1371,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         embedding_model=args.embedding_model,
         log_level=args.log_level,
     )
+    if session_factory is not None:
+        settings = runtime_settings(settings, session_factory).with_overrides(
+            embedding_url=args.embedding_url,
+            embedding_fallback_url=args.embedding_fallback_url,
+            embedding_model=args.embedding_model,
+        )
     if args.max_chars is not None:
         settings = replace(
             settings,
             legal_article_index_max_chars=int(args.max_chars),
         )
-    configure_logging(settings.log_level)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    engine = build_engine(settings.database_url)
+    return settings
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
+    base_settings = Settings.from_env()
+    engine = build_engine(
+        base_settings.with_overrides(database_url=args.database_url).database_url
+    )
     init_db(engine)
     session_factory = build_session_factory(engine)
+    settings = resolve_legal_index_settings(
+        args,
+        session_factory=session_factory,
+        base_settings=base_settings,
+    )
+    configure_logging(settings.log_level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     store = QdrantStore(
         settings.qdrant_url,
         api_key=settings.qdrant_api_key,

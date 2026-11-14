@@ -9,6 +9,7 @@ RUN_DIR=".run"
 PID_FILE="${RUN_DIR}/web.pid"
 AGENT_PID_FILE="${RUN_DIR}/agent.pid"
 RERANK_PID_FILE="${RUN_DIR}/rerank_server.pid"
+TMUX_SESSION="${JUDGMENT_WEB_TMUX_SESSION:-judgment-web}"
 
 read_env_value() {
   local key="$1"
@@ -57,8 +58,20 @@ wait_for_port_close() {
   return 1
 }
 
+stop_web_tmux_session() {
+  if ! command -v tmux >/dev/null 2>&1; then
+    return 0
+  fi
+  if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+    echo "停止 tmux session ${TMUX_SESSION}…"
+    tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null || true
+    wait_for_port_close "${PORT}" 20 || true
+  fi
+}
+
 stop_backend() {
   echo "停止後端…"
+  stop_web_tmux_session
   if curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/api/power/status" >/dev/null 2>&1; then
     curl -fsS -X POST -H "X-Judgment-Power: 1" --max-time 40 \
       "http://127.0.0.1:${AGENT_PORT}/api/power/stop" >/dev/null 2>&1 || true
