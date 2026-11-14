@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..judgment_import import load_law_list
-from ..judgment_raw_parquet import raw_judgment_files
+from ..judgment_raw_parquet import raw_judgment_files, raw_judgment_totals
 from ..models import JudgmentDocument, LawDocument
 from ..observability import traced
 from ..vector_store import QdrantError, QdrantStore
+from .judgment_stats import judgment_stats_from_counts
 
 SOURCE_OPTIONS = [
     {"value": "all", "label": "全部"},
@@ -643,6 +644,13 @@ def build_catalog(
     levels = _distinct(session_factory, LawDocument.law_level)
     categories = _distinct(session_factory, LawDocument.law_category)
     judgment_count = _judgment_count(session_factory)
+    judgment_total = None
+    try:
+        judgment_total = int(
+            raw_judgment_totals(settings.judgment_data_dir).get("row_count") or 0
+        )
+    except Exception:
+        judgment_total = None
     judgment_law_names: List[str] = []
     if judgment_law_list is not None:
         try:
@@ -816,6 +824,10 @@ def build_catalog(
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "judgment_stats": judgment_stats_from_counts(
+            judgment_total,
+            judgment_count if postgres_ok else None,
+        ),
         "categories": [
             {
                 "id": "law",

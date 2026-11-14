@@ -1132,12 +1132,21 @@ def build_index_version(
 
     started_at = datetime.now(timezone.utc)
     started = time.perf_counter()
+    probe_ms = 0.0
+    version_ms = 0.0
+    copy_ms = 0.0
+    qdrant_delete_ms = 0.0
+    validate_ms = 0.0
+    activate_ms = 0.0
+    resumed = False
+    resumed_indexed = 0
     store = store or QdrantStore(
         settings.qdrant_url,
         api_key=settings.qdrant_api_key,
         timeout=120.0,
     )
     model = settings.embedding_model
+    probe_started = time.perf_counter()
     if embedder is None:
         host_probe = probe_embedding_hosts(
             primary_url=settings.embedding_url,
@@ -1186,7 +1195,7 @@ def build_index_version(
                     failed_run_id = failed_state.start_run(
                         branch="judgment",
                         kind="index",
-                        title="Qdrant 向量索引版本",
+                        title="Qdrant判決向量索引版本建置",
                         stages=["ollama", "qdrant", "validate"],
                         meta={
                             "index_runtime": failed_runtime,
@@ -1236,6 +1245,7 @@ def build_index_version(
         )
     else:
         host_probe = _provided_embedding_probe(embedder, model)
+    probe_ms = (time.perf_counter() - probe_started) * 1000
     if not store.configured:
         raise QdrantError("QDRANT_URL 未設定")
     if not embedder.configured:
@@ -1253,6 +1263,7 @@ def build_index_version(
         snapshot["limited"] = True
     expected_count = int(snapshot.get("document_count") or 0)
 
+    version_started = time.perf_counter()
     active = active_version(session_factory, alias_name=settings.judgment_vector_alias)
     version = (
         find_resumable_version(
@@ -1261,6 +1272,7 @@ def build_index_version(
         if resume
         else None
     )
+    resumed = version is not None
     if version is not None:
         old_snapshot = version.get("source_snapshot") or {}
         if (
@@ -1274,6 +1286,7 @@ def build_index_version(
                 reason="來源資料已變更，放棄舊的 building 版本",
             )
             version = None
+            resumed = False
     if version is None:
         previous = active
         compatible = bool(
@@ -1314,6 +1327,8 @@ def build_index_version(
     version_id = int(version["version_id"])
     collection = str(version["physical_collection"])
     indexed = int(version.get("indexed_count") or 0)
+    resumed_indexed = indexed
+    version_ms = (time.perf_counter() - version_started) * 1000
     progress = IndexProgress(
         expected_count,
         label=f"v{version_id:03d}",
@@ -1337,6 +1352,8 @@ def build_index_version(
     db_durations: List[float] = []
     progress_samples: List[Dict[str, Any]] = []
     last_progress_at = 0.0
+    last_copy_publish_at = 0.0
+    copy_started = 0.0
 
     state: Optional[ProcessingStateStore] = None
     state_run_id: Optional[str] = None
@@ -1351,6 +1368,7 @@ def build_index_version(
             )
             runtime = {
                 "version_id": version_id,
+                "version_duration_ms": round(version_ms, 2),
                 "collection": collection,
                 "alias": settings.judgment_vector_alias,
                 "build_mode": build_mode,
@@ -1367,6 +1385,16 @@ def build_index_version(
                     reverse=True,
                 ),
                 "current": {},
+                "copy": {
+                    "copied": 0,
+                    "total": 0,
+                    "percent": None,
+                    "status": (
+                        "pending"
+                        if build_mode == "reuse" and indexed == 0
+                        else "skipped"
+                    ),
+                },
                 "summary": {
                     "indexed": indexed,
                     "total": expected_count,
@@ -1377,10 +1405,77 @@ def build_index_version(
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+            active_coverage: Dict[str, Any] = {}
+            if active:
+                try:
+                    coverage = index_month_coverage(
+                        session_factory,
+                        version_id=active.get("version_id"),
+                        collection=str(
+                            active.get("physical_collection") or ""
+                        ),
+                        model=str(
+                            active.get("embedding_model") or model
+                        ),
+                    )
+                    active_coverage = {
+                        str(item["month"]): {
+                            "processed": int(item["processed"]),
+                            "total": int(item["total"]),
+                            "percent": item.get("percent"),
+                        }
+                        for item in coverage.get("months") or []
+                        if item.get("month")
+                    }
+                except Exception:
+                    logger.warning(
+                        "無法取得 active collection 月份覆蓋", exc_info=True
+                    )
+            runtime["active_coverage"] = active_coverage
+            try:
+                with session_factory() as session:
+                    first_pending = session.execute(
+                        select(
+                            JudgmentDocument.issue_month,
+                            JudgmentDocument.source_archive,
+                            JudgmentDocument.jid,
+                            JudgmentDocument.title,
+                            JudgmentDocument.court_normalized,
+                            JudgmentDocument.jdate,
+                        )
+                        .where(
+                            JudgmentDocument.id > last_id,
+                            JudgmentDocument.id
+                            <= int(snapshot.get("max_judgment_id") or 0),
+                            JudgmentDocument.full_text != "",
+                            JudgmentDocument.is_current.is_(True),
+                        )
+                        .order_by(JudgmentDocument.id)
+                        .limit(1)
+                    ).mappings().first()
+                if first_pending is not None:
+                    runtime["current"] = {
+                        "month": str(first_pending["issue_month"] or ""),
+                        "archive": str(
+                            first_pending["source_archive"] or ""
+                        ),
+                        "jid": str(first_pending["jid"] or ""),
+                        "title": str(first_pending["title"] or ""),
+                        "court": str(
+                            first_pending["court_normalized"] or ""
+                        ),
+                        "jdate": str(first_pending["jdate"] or ""),
+                        "batch_size": 0,
+                        "scanned": 0,
+                        "indexed": indexed,
+                        "preparing": True,
+                    }
+            except Exception:
+                logger.warning("無法取得索引起始月份", exc_info=True)
             state_run_id = state.start_run(
                 branch="judgment",
                 kind="index",
-                title="Qdrant 向量索引版本",
+                title="Qdrant判決向量索引版本建置",
                 stages=["ollama", "qdrant", "validate"],
                 meta={
                     "index_runtime": runtime,
@@ -1418,16 +1513,44 @@ def build_index_version(
     active_stage = "qdrant"
 
     def on_copy_progress(copied: int, total: int) -> None:
+        nonlocal last_copy_publish_at
         progress.copy_update(copied, total)
+        now = time.perf_counter()
+        percent = round(copied / total * 100, 1) if total else None
+        if runtime is not None:
+            runtime["copy"] = {
+                "copied": int(copied),
+                "total": int(total),
+                "percent": percent,
+                "duration_ms": (
+                    round((now - copy_started) * 1000, 2)
+                    if copy_started
+                    else 0
+                ),
+                "status": "success" if total and copied >= total else "running",
+            }
         if state is not None and state_run_id is not None:
             state.update_stage(
                 state_run_id,
                 "qdrant",
-                current=copied,
-                total=total,
+                current=indexed,
+                total=expected_count,
                 status="running",
                 message=f"複製可重用向量 {copied:,} / {total:,} points。",
             )
+            if runtime is not None and (
+                (total and copied >= total)
+                or now - last_copy_publish_at >= 1.0
+            ):
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message=(
+                        f"複製可重用向量 {copied:,} / {total:,} points。"
+                    ),
+                )
+                last_copy_publish_at = now
 
     try:
         if state is not None and state_run_id is not None:
@@ -1439,13 +1562,30 @@ def build_index_version(
             )
         if build_mode == "reuse" and previous and indexed == 0:
             source_collection = str(previous["physical_collection"])
-            if store.collection_info(source_collection) is None:
+            source_info = store.collection_info(source_collection)
+            if source_info is None:
                 raise QdrantError(
                     f"來源 collection 不存在，無法增量沿用：{source_collection}"
                 )
             dimensions = store.collection_dimension(source_collection) or int(
                 previous.get("embedding_dimension") or 0
             )
+            copy_total = int(source_info.get("points_count") or 0)
+            if runtime is not None:
+                runtime["copy"] = {
+                    "copied": 0,
+                    "total": copy_total,
+                    "percent": 0.0 if copy_total else None,
+                    "duration_ms": 0,
+                    "status": "running",
+                }
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message=f"複製可重用向量 0 / {copy_total:,} points。",
+                )
+            copy_started = time.perf_counter()
             store.copy_collection(
                 source_collection,
                 collection,
@@ -1461,6 +1601,21 @@ def build_index_version(
                 last_indexed_id=0,
                 embedding_dimension=dimensions,
             )
+            copy_ms = (time.perf_counter() - copy_started) * 1000
+            if runtime is not None:
+                runtime["copy"] = {
+                    "copied": copy_total,
+                    "total": copy_total,
+                    "percent": 100.0 if copy_total else None,
+                    "duration_ms": round(copy_ms, 2),
+                    "status": "success",
+                }
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message="舊 collection 複製完成，開始逐批判決索引。",
+                )
             if state is not None and state_run_id is not None:
                 state.update_stage(
                     state_run_id,
@@ -1840,10 +1995,14 @@ def build_index_version(
                     previous_version_id=previous_version_id,
                     version_id=version_id,
                 )
+                delete_started = time.perf_counter()
                 deleted_points = store.delete_points(
                     collection,
                     [vector_point_id(jid) for jid in stale_jids],
                 )
+                qdrant_delete_ms = (
+                    time.perf_counter() - delete_started
+                ) * 1000
 
         progress.finish(indexed)
         update_version_progress(
@@ -1869,20 +2028,167 @@ def build_index_version(
                 message="驗證 collection 筆數、維度與 alias。",
             )
         active_stage = "validate"
+        validate_started = time.perf_counter()
         version_data = get_version(session_factory, version_id) or {}
         validation = validate_version(
             session_factory, store=store, version=version_data
         )
+        validate_ms = (time.perf_counter() - validate_started) * 1000
         activated = None
         if validation.get("status") == "ready" and auto_activate:
+            activate_started = time.perf_counter()
             activated = activate_version(
                 session_factory,
                 store=store,
                 version_id=version_id,
                 alias_name=settings.judgment_vector_alias,
             )
+            activate_ms = (time.perf_counter() - activate_started) * 1000
         duration_ms = int((time.perf_counter() - started) * 1000)
         validation_status = validation.get("status")
+        active_embedding = _active_embedding_view(embedder, model)
+        selected_host = host_probe.get("selected") or {}
+        host_view = {
+            "url": active_embedding.get("url") or "",
+            "host": active_embedding.get("host") or "",
+            "port": active_embedding.get("port"),
+            "role": selected_host.get("role") or "primary",
+            "model": model,
+            "using_fallback": bool(active_embedding.get("using_fallback")),
+        }
+        embedding_ms = sum(embedding_durations)
+        qdrant_ms = sum(qdrant_durations) + qdrant_delete_ms
+        db_ms = sum(db_durations)
+        timed_ms = (
+            probe_ms
+            + version_ms
+            + copy_ms
+            + embedding_ms
+            + qdrant_ms
+            + db_ms
+            + validate_ms
+            + activate_ms
+        )
+        other_ms = max(0.0, float(duration_ms) - timed_ms)
+        qdrant_count = int(validation.get("qdrant_count") or 0)
+        postgres_count = int(validation.get("postgres_count") or 0)
+        if activated:
+            activate_detail = (
+                f"alias {settings.judgment_vector_alias} → "
+                f"v{version_id:03d} / {collection}"
+            )
+            activate_status = "success"
+        elif not auto_activate:
+            activate_detail = "未啟用（auto_activate=false），保留舊 alias"
+            activate_status = "skipped"
+        elif validation_status != "ready":
+            activate_detail = "驗證未通過，保留舊 alias"
+            activate_status = "failed"
+        else:
+            activate_detail = "未切換 alias"
+            activate_status = "skipped"
+        pipeline = {
+            "version_id": version_id,
+            "collection": collection,
+            "alias": settings.judgment_vector_alias,
+            "build_mode": build_mode,
+            "resumed": resumed,
+            "resumed_indexed": resumed_indexed,
+            "host": host_view,
+            "model": model,
+            "total_ms": duration_ms,
+            "stages": [
+                {
+                    "key": "probe",
+                    "label": "測試 embedding 主機",
+                    "duration_ms": round(probe_ms, 2),
+                    "status": "success",
+                    "detail": (
+                        f"{len(host_probe.get('hosts') or []):,} 台主機 · "
+                        f"{host_view['host'] or '—'}:{host_view['port'] or '—'} · {model}"
+                    ),
+                    "host": host_view,
+                    "model": model,
+                },
+                {
+                    "key": "version",
+                    "label": "建立／接續 Blue-Green collection",
+                    "duration_ms": round(version_ms, 2),
+                    "status": "success",
+                    "detail": (
+                        f"接續 v{version_id:03d} · 已索引 {resumed_indexed:,} 筆"
+                        if resumed
+                        else f"建立 v{version_id:03d} · {collection}"
+                    ),
+                },
+                {
+                    "key": "copy",
+                    "label": "複製可重用向量",
+                    "duration_ms": round(copy_ms, 2),
+                    "status": "success" if copy_ms > 0 else "skipped",
+                    "detail": (
+                        f"累計重用 {reused_count:,} 筆"
+                        if copy_ms > 0
+                        else (
+                            "接續版本已跳過複製"
+                            if resumed
+                            else "本次無可複製向量"
+                        )
+                    ),
+                },
+                {
+                    "key": "embedding",
+                    "label": "差異 embedding",
+                    "duration_ms": round(embedding_ms, 2),
+                    "status": "success",
+                    "detail": f"新 embedding {embedded_count:,} 筆",
+                    "host": host_view,
+                    "model": model,
+                },
+                {
+                    "key": "qdrant",
+                    "label": "Qdrant 寫入／刪除",
+                    "duration_ms": round(qdrant_ms, 2),
+                    "status": "success",
+                    "detail": (
+                        f"寫入 {points_upserted:,} 點 · 刪除 {deleted_points:,} 點"
+                    ),
+                },
+                {
+                    "key": "postgres",
+                    "label": "PostgreSQL 索引紀錄",
+                    "duration_ms": round(db_ms, 2),
+                    "status": "success",
+                    "detail": f"索引紀錄 {indexed:,} 筆",
+                },
+                {
+                    "key": "validate",
+                    "label": "驗證新版本",
+                    "duration_ms": round(validate_ms, 2),
+                    "status": (
+                        "success" if validation_status == "ready" else "failed"
+                    ),
+                    "detail": (
+                        f"{validation_status or '—'} · Qdrant {qdrant_count:,} · "
+                        f"PostgreSQL {postgres_count:,} · {dimensions}D"
+                    ),
+                },
+                {
+                    "key": "activate",
+                    "label": "原子切換 alias",
+                    "duration_ms": round(activate_ms, 2),
+                    "status": activate_status,
+                    "detail": activate_detail,
+                },
+                {
+                    "key": "report",
+                    "label": "掃描與效能紀錄收尾",
+                    "duration_ms": round(other_ms, 2),
+                    "status": "success",
+                    "detail": "performance_records · 執行資訊",
+                },
+            ],
+        }
         summary = {
             "status": (
                 "success" if validation_status == "ready" else "validation_failed"
@@ -1911,6 +2217,7 @@ def build_index_version(
             "task": run_label,
             "embedding_host": host_probe.get("selected"),
             "host_tests": host_probe.get("hosts"),
+            "pipeline": pipeline,
         }
         if state is not None and state_run_id is not None:
             ready = validation_status == "ready"

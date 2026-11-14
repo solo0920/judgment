@@ -785,6 +785,59 @@ def test_judgment_timeline_keeps_reusable_parquet_complete_while_active(
     assert month["stages"]["postgres"] == "incomplete"
 
 
+def test_workflow_progress_includes_financial_ratio_fields() -> None:
+    run = {
+        "id": "run-financial",
+        "status": "running",
+        "stages": {
+            "filter": {
+                "key": "filter",
+                "label": "金融法規篩選",
+                "status": "running",
+                "current": 1000,
+                "total": 5000,
+                "financial_processed": 1000,
+                "financial_matched": 420,
+                "financial_percent": 42.0,
+            }
+        },
+    }
+
+    progress = processing_module._workflow_progress(run)
+    stage = progress["stages"][0]
+
+    assert stage["financial_processed"] == 1000
+    assert stage["financial_matched"] == 420
+    assert stage["financial_percent"] == 42.0
+
+
+def test_workflow_progress_strips_filter_hit_suffix() -> None:
+    run = {
+        "id": "run-filter-message",
+        "status": "running",
+        "stages": {
+            "filter": {
+                "key": "filter",
+                "label": "金融法規篩選",
+                "status": "running",
+                "current": 10,
+                "total": 20,
+                "message": (
+                    "目前篩選 2023-05（202305--demo.rar）："
+                    "已處理 10/20 筆候選，命中 10 筆。"
+                ),
+            }
+        },
+    }
+
+    progress = processing_module._workflow_progress(run)
+    stage = progress["stages"][0]
+
+    assert stage["message"] == (
+        "目前篩選 2023-05（202305--demo.rar）：已處理 10/20 筆候選。"
+    )
+
+
 def test_workflow_failed_stage_reports_reason_and_resolution() -> None:
     run = {
         "id": "run-failed",
@@ -1175,6 +1228,11 @@ def test_snapshot_reports_raw_parquet_backups(
 
     assert snapshot["raw_backups"]["available"] is True
     assert snapshot["raw_backups"]["count"] == 1
+    assert snapshot["judgment_stats"] == {
+        "judgment_total": 123,
+        "financial_total": 1,
+        "financial_ratio": 0.8,
+    }
     judgment = snapshot["branches"][0]
     raw_stage = next(stage for stage in judgment["stages"] if stage["key"] == "raw_parquet")
     assert {"label": "磁碟備份", "value": "1 檔"} in raw_stage["stats"]
@@ -1502,6 +1560,10 @@ def test_processing_snapshot_lists_workflows(processing_client: TestClient) -> N
     assert "judgment_import" in workflows
     assert "index_versions" in workflows
     assert "legal_index_versions" in workflows
+    assert (
+        workflows["index_versions"]["label"]
+        == "Qdrant判決向量索引版本建置"
+    )
     assert workflows["index_versions"]["script"] == "scripts/index_full_task.sh"
     assert workflows["legal_index_versions"]["stage"] == "legal_qdrant"
     assert workflows["legal_index_versions"]["program"].startswith(
@@ -1520,7 +1582,7 @@ def test_processing_snapshot_exposes_index_runtime(
     run_id = store.start_run(
         branch="judgment",
         kind="index",
-        title="Qdrant 向量索引版本",
+        title="Qdrant判決向量索引版本建置",
         stages=["ollama", "qdrant", "validate"],
         pid=os.getpid(),
     )
@@ -2408,6 +2470,188 @@ def test_build_processing_live_reports_messages_and_month_progress(
     assert month["import_stages"]["filter"] == "processing"
     assert month["import_stages"]["postgres"] == "processing"
     assert month["import_overall"] == "processing"
+
+
+def test_coverage_month_map_normalizes_index_coverage() -> None:
+    months = processing_module._coverage_month_map(
+        {
+            "months": [
+                {
+                    "month": "2026-01",
+                    "processed": 10,
+                    "total": 10,
+                    "percent": 100.0,
+                },
+                {
+                    "month": "202602",
+                    "processed": 3,
+                    "total": 6,
+                    "percent": 50.0,
+                },
+            ]
+        }
+    )
+
+    assert months["202601"] == {
+        "processed": 10,
+        "total": 10,
+        "percent": 100.0,
+    }
+    assert months["202602"] == {
+        "processed": 3,
+        "total": 6,
+        "percent": 50.0,
+    }
+
+
+def test_law_order_index_timeline_maps_download_prepared_index() -> None:
+    timeline = {
+        "key": "law",
+        "label": "法規",
+        "months": [
+            {
+                "month": "202611",
+                "year": "2026",
+                "month_no": 11,
+                "month_label": "2026-11",
+                "has_data": True,
+                "active": True,
+                "stages": {
+                    "download": "complete",
+                    "parquet": "complete",
+                    "postgres": "complete",
+                    "qdrant": "complete",
+                },
+                "versions": [
+                    {
+                        "version_code": "202611131821",
+                        "downloaded_at": "2026-11-13T10:21:00+00:00",
+                        "law_count": 1351,
+                        "article_count": 222126,
+                        "is_current": True,
+                    }
+                ],
+            },
+            {
+                "month": "202610",
+                "year": "2026",
+                "month_no": 10,
+                "month_label": "2026-10",
+                "has_data": True,
+                "active": False,
+                "stages": {
+                    "download": "complete",
+                    "parquet": "complete",
+                    "postgres": "complete",
+                    "qdrant": "not_applicable",
+                },
+                "versions": [
+                    {
+                        "version_code": "202610011200",
+                        "is_current": False,
+                    }
+                ],
+            },
+            {
+                "month": "202609",
+                "year": "2026",
+                "month_no": 9,
+                "month_label": "2026-09",
+                "has_data": True,
+                "active": False,
+                "stages": {
+                    "download": "complete",
+                    "parquet": "complete",
+                    "postgres": "incomplete",
+                    "qdrant": "incomplete",
+                },
+                "versions": [],
+            },
+        ],
+        "current": {"month": "202611", "label": "目前版本"},
+    }
+
+    result = processing_module._law_order_index_timeline(timeline)
+    months = {item["month"]: item for item in result["months"]}
+
+    assert result["stage_order"] == ["download", "prepared", "indexed"]
+    assert months["202611"]["stages"] == {
+        "download": "complete",
+        "prepared": "complete",
+        "indexed": "complete",
+    }
+    assert months["202611"]["overall"] == "complete"
+    assert months["202610"]["superseded"] is True
+    assert months["202610"]["overall"] == "complete"
+    assert months["202609"]["stages"]["prepared"] == "incomplete"
+    assert months["202609"]["overall"] == "incomplete"
+    assert result["summary"] == {
+        "complete": 1,
+        "incomplete": 1,
+        "processing": 0,
+        "superseded": 1,
+        "empty": 0,
+    }
+
+
+def test_build_processing_live_includes_index_runtime(tmp_path: Path) -> None:
+    state_path = tmp_path / "processing_state.json"
+    store = ProcessingStateStore(state_path)
+    run_id = store.start_run(
+        branch="judgment",
+        kind="index",
+        title="Qdrant判決向量索引版本建置",
+        stages=["ollama", "qdrant", "validate"],
+        pid=os.getpid(),
+    )
+    runtime = {
+        "version_id": 5,
+        "collection": "judgments_v005",
+        "build_mode": "reuse",
+        "expected_count": 100,
+        "copy": {
+            "copied": 40,
+            "total": 50,
+            "percent": 80.0,
+            "status": "running",
+        },
+        "summary": {
+            "indexed": 0,
+            "total": 100,
+            "reused": 0,
+            "embedded": 0,
+        },
+        "current": {
+            "month": "202601",
+            "jid": "J-1",
+            "preparing": True,
+        },
+        "months": [],
+    }
+    store.update_run(run_id, meta={"index_runtime": runtime})
+    store.update_stage(
+        run_id,
+        "qdrant",
+        status="running",
+        current=0,
+        total=100,
+        message="複製可重用向量 40 / 50 points。",
+    )
+
+    live = processing_module.build_processing_live(state_path=state_path)
+    workflow = next(
+        item for item in live["workflows"] if item["id"] == "index_versions"
+    )
+
+    assert workflow["index_runtime"]["copy"]["copied"] == 40
+    assert workflow["index_runtime"]["current"]["preparing"] is True
+    qdrant = next(
+        stage
+        for stage in workflow["progress"]["stages"]
+        if stage["key"] == "qdrant"
+    )
+    assert qdrant["current"] == 0
+    assert qdrant["total"] == 100
 
 
 def test_build_processing_live_marks_preparation_phase_on_month(

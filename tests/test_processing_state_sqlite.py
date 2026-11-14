@@ -6,6 +6,35 @@ from pathlib import Path
 from judgment.processing_state import ProcessingStateStore
 
 
+def test_state_store_preserves_financial_ratio_fields(
+    tmp_path: Path,
+) -> None:
+    store = ProcessingStateStore(tmp_path / "processing_state.db")
+    run_id = store.start_run(
+        branch="judgment",
+        kind="import",
+        title="判決 RAR 匯入",
+        stages=["extract", "raw_parquet", "filter", "postgres"],
+        pid=1,
+    )
+    store.update_stage(
+        run_id,
+        "filter",
+        status="running",
+        current=1000,
+        total=5000,
+        financial_processed=1000,
+        financial_matched=420,
+        financial_percent=42.0,
+        message="目前篩選",
+    )
+    stage = store.read()["runs"][0]["stages"]["filter"]
+
+    assert stage["financial_processed"] == 1000
+    assert stage["financial_matched"] == 420
+    assert stage["financial_percent"] == 42.0
+
+
 def test_state_store_migrates_legacy_json_to_sqlite(
     tmp_path: Path,
 ) -> None:

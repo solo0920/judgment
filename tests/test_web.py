@@ -497,6 +497,31 @@ def test_static_console_is_served(web_client) -> None:
     home_js = web_client.get("/assets/js/pages/home.js")
     assert home_js.status_code == 200
     assert "home-ask-form" in home_js.text
+    assert "home-judgment-stats" in home_js.text
+    assert "judgmentStatsCardsMarkup" in home_js.text
+    stats_js = web_client.get("/assets/js/judgment-stats.js")
+    assert stats_js.status_code == 200
+    assert "判決總件數" in stats_js.text
+    assert "金融相關總件數" in stats_js.text
+    assert "JUDGMENT COVERAGE · 金融案件佔比" in stats_js.text
+    assert "data-judgment-stat" in stats_js.text
+    data_js = web_client.get("/assets/js/pages/data.js")
+    assert data_js.status_code == 200
+    assert "data-judgment-stats" in data_js.text
+    assert "judgmentStatsCardsMarkup" in data_js.text
+    processing_js = web_client.get("/assets/js/pages/processing.js")
+    assert processing_js.status_code == 200
+    assert "judgmentStatsCardsMarkup" in processing_js.text
+    assert "全部案件" in processing_js.text
+    assert "金融佔比" in processing_js.text
+    assert "index-month-are" in processing_js.text
+    assert "index-month-are-key" in processing_js.text
+    assert "lawIndexTimelinesMarkup" in processing_js.text
+    assert "law-index-timeline-card" in processing_js.text
+    performance_js = web_client.get("/assets/js/pages/performance.js")
+    assert performance_js.status_code == 200
+    assert "判決向量索引 Pipeline" in performance_js.text
+    assert "renderIndexPipelinePanel" in performance_js.text
     app_js = web_client.get("/assets/js/app.js")
     assert app_js.status_code == 200
     assert 'DEFAULT_ROUTE = "home"' in app_js.text
@@ -887,7 +912,13 @@ def test_updates_check_can_filter_sources(web_client, monkeypatch) -> None:
 def test_catalog_exposes_law_and_judgment_categories(web_client) -> None:
     response = web_client.get("/api/catalog")
     assert response.status_code == 200
-    categories = {item["id"]: item for item in response.json()["categories"]}
+    payload = response.json()
+    assert payload["judgment_stats"] == {
+        "judgment_total": 2,
+        "financial_total": 2,
+        "financial_ratio": 100.0,
+    }
+    categories = {item["id"]: item for item in payload["categories"]}
     assert set(categories) == {"law", "judgment"}
     assert categories["judgment"]["count"] == 2
 
@@ -941,6 +972,18 @@ def test_catalog_exposes_law_and_judgment_categories(web_client) -> None:
     assert "臺灣臺北地方法院" in court_options
     assert "臺灣臺北地方法院民事" not in court_options
     assert judgment_databases["qdrant"]["status"] == "not_configured"
+
+
+def test_judgment_stats_returns_total_financial_and_ratio(web_client) -> None:
+    response = web_client.get("/api/judgment-stats")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["judgment_total"] == 2
+    assert payload["financial_total"] == 2
+    assert payload["financial_ratio"] == 100.0
+    assert payload["available"] is True
+    assert payload["error"] == ""
 
 
 def test_performance_middleware_records_api_calls(web_client) -> None:
@@ -1069,6 +1112,71 @@ def test_index_stats_derives_batch_metrics_for_old_records(web_client) -> None:
     assert latest["points_per_second"] == 4.27
     assert latest["batch_avg_ms"] == 30000.0
     assert latest["time_breakdown"] == []
+
+
+def test_performance_exposes_judgment_index_pipeline(web_client) -> None:
+    pipeline = {
+        "version_id": 3,
+        "collection": "judgments_v003",
+        "alias": "judgments_current",
+        "build_mode": "reuse",
+        "resumed": False,
+        "resumed_indexed": 0,
+        "host": {
+            "host": "x570",
+            "port": 11434,
+            "model": "bge-m3:latest",
+        },
+        "model": "bge-m3:latest",
+        "total_ms": 12_345,
+        "stages": [
+            {
+                "key": "probe",
+                "label": "測試 embedding 主機",
+                "duration_ms": 1_200,
+                "status": "success",
+                "detail": "1 台主機 · x570:11434 · bge-m3:latest",
+            },
+            {
+                "key": "embedding",
+                "label": "差異 embedding",
+                "duration_ms": 8_000,
+                "status": "success",
+                "detail": "新 embedding 100 筆",
+            },
+            {
+                "key": "activate",
+                "label": "原子切換 alias",
+                "duration_ms": 300,
+                "status": "success",
+                "detail": "alias judgments_current → v003",
+            },
+        ],
+    }
+    record_performance(
+        web_client.app.state.session_factory,
+        process="判決向量索引版本",
+        module="judgment.judgment_index.build_index_version",
+        status="success",
+        duration_ms=12_345,
+        params={"model": "bge-m3:latest", "build_mode": "reuse"},
+        details={
+            "indexed_count": 100,
+            "scanned_count": 100,
+            "pipeline": pipeline,
+        },
+    )
+
+    payload = web_client.get(
+        "/api/performance",
+        params={"process": "判決向量索引版本", "page_size": 10},
+    ).json()
+
+    assert payload["index_stats"]["latest"]["pipeline"] == pipeline
+    assert payload["index_pipeline"]["latest"]["pipeline"] == pipeline
+    assert payload["index_pipeline"]["latest"]["model"] == "bge-m3:latest"
+    assert payload["index_pipeline"]["latest"]["build_mode"] == "reuse"
+    assert payload["index_pipeline"]["latest"]["version_id"] == 3
 
 
 def test_client_timing_merges_into_flow(web_client) -> None:

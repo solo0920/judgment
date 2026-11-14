@@ -436,12 +436,22 @@ def _index_run(record: PerformanceRecord) -> Dict[str, Any]:
     progress = progress if isinstance(progress, list) else []
     coverage = details.get("coverage")
     coverage = coverage if isinstance(coverage, dict) else {}
+    pipeline = details.get("pipeline")
+    pipeline = pipeline if isinstance(pipeline, dict) else None
 
     return {
         "id": record.id,
         "started_at": record.started_at,
         "status": record.status,
         "task": str(details.get("task") or params.get("task") or ""),
+        "model": str(params.get("model") or details.get("model") or ""),
+        "build_mode": str(
+            params.get("build_mode")
+            or (pipeline or {}).get("build_mode")
+            or ""
+        ),
+        "version_id": _as_int((pipeline or {}).get("version_id")),
+        "pipeline": pipeline,
         "indexed_count": indexed,
         "scanned_count": scanned,
         "duration_ms": duration_ms,
@@ -600,6 +610,16 @@ def query_performance(
         ).all()
         index_stats = _index_stats(list(reversed(index_records)))
 
+        pipeline_records = session.scalars(
+            select(PerformanceRecord)
+            .where(
+                PerformanceRecord.process.like(f"{INDEX_PROCESS_PREFIX}%")
+            )
+            .order_by(PerformanceRecord.started_at.desc())
+            .limit(30)
+        ).all()
+        index_pipeline = _index_stats(list(reversed(pipeline_records)))
+
         rows = []
         for record in records:
             flow = record.flow if isinstance(record.flow, dict) else None
@@ -735,6 +755,7 @@ def query_performance(
         "duration_ms": query_duration_ms,
         "summary": summary,
         "index_stats": index_stats,
+        "index_pipeline": index_pipeline,
         "distribution": [
             {"label": str(label or "未命名"), "value": int(count)}
             for label, count in distribution_rows
@@ -744,6 +765,7 @@ def query_performance(
         "warnings": [
             "Flow 統計取最近 1000 筆符合條件的紀錄；平均段數與區段耗時只計算有 flow 的紀錄。",
             "索引效能取最近 30 筆符合條件的判決向量索引紀錄；舊紀錄若無階段計時，會由總耗時與 batch_size 推算。",
+            "判決向量索引 Pipeline 取最近 30 筆版本化建置紀錄，不受一般篩選條件影響。",
         ],
         "meta": {
             "table": "performance_records",

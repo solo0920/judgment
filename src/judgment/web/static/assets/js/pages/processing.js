@@ -1,4 +1,5 @@
 import { api, apiUrl, subscribeRefresh } from "../api.js";
+import { judgmentStatsCardsMarkup } from "../judgment-stats.js";
 import {
   escapeHtml,
   formatBytes,
@@ -17,6 +18,8 @@ const OLLAMA_PRIORITY_WORKFLOWS = new Set([
   "judgment_import",
   "index_versions",
 ]);
+
+const INDEX_RATE_BASELINES = new Map();
 
 const STATUS_META = {
   running: { label: "執行中", tone: "info" },
@@ -1376,6 +1379,7 @@ function summaryMarkup(snapshot) {
     : escapeHtml(local.error || "找不到判決資料目錄。");
 
   return `<div class="processing-summary">
+    ${judgmentStatsCardsMarkup(judgmentStatsFromSnapshot(snapshot))}
     ${summaryCard(
       "處理狀態",
       statusBadge(snapshot.status || "unknown"),
@@ -1729,8 +1733,9 @@ function timelineMonthCellMarkup({
     : fileNames.length
       ? ` · ${fileNames.join("、")}`
       : "";
+  const extraDetail = month?.detail ? ` · ${month.detail}` : "";
   const title = month
-    ? `${monthLabel} · ${stageTitle}${detail}`
+    ? `${monthLabel} · ${stageTitle}${detail}${extraDetail}`
     : `${monthLabel} · 無資料`;
   const segments = stageOrder
     .map((stage) => {
@@ -1779,6 +1784,123 @@ function processingTimelineMonthCell(timeline, month, year, monthNo) {
     workflowForStage: (stage) =>
       processingTimelineStageWorkflow(timeline.key, stage),
   });
+}
+
+function lawIndexTimelineMarkup(timeline) {
+  const months = Array.isArray(timeline?.months) ? timeline.months : [];
+  if (!months.length) {
+    return `<section class="report-card processing-card import-files-card law-index-timeline-card">
+      <div class="side-card-head">
+        <span class="side-card-title">${icon(
+          timeline?.key === "order" ? "file" : "layers",
+          14,
+        )}${escapeHtml(timeline?.label || "法規／命令")} 索引版本時間表</span>
+        <span class="badge badge-neutral">尚無</span>
+      </div>
+      <div class="processing-workflow-empty">尚無下載版本或索引紀錄。</div>
+    </section>`;
+  }
+  const byKey = new Map(
+    months.map((month) => [String(month.month), month]),
+  );
+  const years = [...new Set(months.map((month) => month.year))].sort(
+    (left, right) => right.localeCompare(left),
+  );
+  const stageOrder = ["download", "prepared", "indexed"];
+  const stageLabels = timeline.stage_labels || {
+    download: "D 下載版本",
+    prepared: "P 資料就緒",
+    indexed: "I 索引覆蓋",
+  };
+  const rows = years
+    .map((year) => {
+      const cells = Array.from({ length: 12 }, (_, index) => {
+        const monthNo = index + 1;
+        const key = `${year}${String(monthNo).padStart(2, "0")}`;
+        const month = byKey.get(key);
+        return timelineMonthCellMarkup({
+          month,
+          year,
+          monthNo,
+          stageOrder,
+          stageLabels,
+          stageStatuses: month?.stages || {},
+          overall: month?.overall || "empty",
+          active: Boolean(month?.active),
+          workflowForStage: (stage) =>
+            stage === "indexed"
+              ? "legal_index_versions"
+              : `${timeline.key}_download`,
+        });
+      }).join("");
+      return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
+    })
+    .join("");
+  const summary = timeline.summary || {};
+  const current = timeline.current || {};
+  const currentLine = current.month
+    ? `<div class="index-current-row">
+        <span class="badge badge-info">${icon("activity", 11)}${escapeHtml(
+          current.label || "目前版本",
+        )}</span>
+        <strong class="mono">${escapeHtml(
+          current.month_label || indexMonthLabel(current.month),
+        )}</strong>
+        <span class="mono">${escapeHtml(current.file || "—")}</span>
+        <span class="index-current-copy">${escapeHtml(
+          current.detail || "",
+        )}</span>
+      </div>`
+    : "";
+  return `<section class="report-card processing-card import-files-card law-index-timeline-card" data-law-index-timeline="${escapeHtml(
+    timeline.key || "",
+  )}">
+    <div class="side-card-head">
+      <span class="side-card-title">${icon(
+        timeline.key === "order" ? "file" : "layers",
+        14,
+      )}${escapeHtml(timeline.label || timeline.key || "")} 索引版本時間表</span>
+      <span class="badge badge-neutral">${formatNumber(
+        months.length,
+      )} 個月</span>
+    </div>
+    <div class="judgment-months index-months">
+      <div class="judgment-months-meta">
+        <span class="badge badge-ok">完成 ${formatNumber(
+          summary.complete || 0,
+        )}</span>
+        <span class="badge badge-danger">未完成 ${formatNumber(
+          summary.incomplete || 0,
+        )}</span>
+        <span class="badge badge-neutral">處理中 ${formatNumber(
+          summary.processing || 0,
+        )}</span>
+        <span class="badge badge-neutral">已取代 ${formatNumber(
+          summary.superseded || 0,
+        )}</span>
+        <span class="muted">共 ${formatNumber(months.length)} 個月</span>
+      </div>
+      ${currentLine}
+      <div class="judgment-months-scroll">
+        <table class="judgment-months-table index-months-table processing-months-table">
+          <thead><tr><th scope="col">年份</th>${Array.from(
+            { length: 12 },
+            (_, index) => `<th scope="col">${index + 1}</th>`,
+          ).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="judgment-months-hint">D：下載版本；P：raw Parquet + PostgreSQL 就緒；I：active 索引覆蓋。舊版本顯示「已取代」，不需重建索引。滑鼠移到月份可查看版本編號、下載時間與筆數。</p>
+    </div>
+  </section>`;
+}
+
+function lawIndexTimelinesMarkup(timelines) {
+  const items = Array.isArray(timelines) ? timelines : [];
+  if (!items.length) return "";
+  return `<div class="law-index-timelines">${items
+    .map(lawIndexTimelineMarkup)
+    .join("")}</div>`;
 }
 
 function importActiveRowMarkup({
@@ -2008,6 +2130,16 @@ function processingTimelinesMarkup(snapshot) {
       </section>`;
     })
     .join("")}</div>`;
+}
+
+function judgmentStatsFromSnapshot(snapshot) {
+  if (snapshot.judgment_stats && typeof snapshot.judgment_stats === "object") {
+    return snapshot.judgment_stats;
+  }
+  return {
+    judgment_total: (snapshot.raw_backups?.totals || {}).row_count,
+    financial_total: (snapshot.database || {}).judgment_count,
+  };
 }
 
 function contentMarkup(snapshot, expandedStages = new Set()) {
@@ -2524,6 +2656,43 @@ function workflowStageStatusBadge(stage) {
 
 function workflowStageMarkup(stage) {
   const status = String(stage.status || "idle");
+  const financialProcessed = Number(stage.financial_processed);
+  const financialMatched = Number(stage.financial_matched);
+  const hasFinancialRatio =
+    stage.key === "filter" &&
+    stage.financial_processed !== null &&
+    stage.financial_processed !== undefined &&
+    Number.isFinite(financialProcessed) &&
+    Number.isFinite(financialMatched) &&
+    financialProcessed > 0;
+  const financialPercent = hasFinancialRatio
+    ? (financialMatched / financialProcessed) * 100
+    : 0;
+  const financialRatioMarkup = hasFinancialRatio
+    ? `<span class="processing-financial-ratio" title="金融案件佔比：本次金融案件數 / 本次累計已處理原始判決數">
+        <span class="processing-financial-ratio-count">金融案件<strong class="mono">${formatNumber(
+          financialMatched,
+        )}</strong></span>
+        <span class="faint" aria-hidden="true">/</span>
+        <span class="processing-financial-ratio-count">全部案件<strong class="mono">${formatNumber(
+          financialProcessed,
+        )}</strong></span>
+        <strong class="mono">金融佔比${Math.round(financialPercent)}%</strong>
+      </span>`
+    : "";
+  const stageCountsText =
+    stage.key === "postgres" &&
+    stage.total !== null &&
+    stage.total !== undefined
+      ? `總計 ${formatNumber(stage.total)} 筆`
+      : stageCounts(stage);
+  const stageMessage =
+    stage.key === "filter"
+      ? String(stage.message || "").replace(
+          /\s*[，,]\s*命中\s*[\d,]+\s*筆。?\s*$/,
+          "。",
+        )
+      : String(stage.message || "");
   return `<div class="processing-workflow-stage${
     status === "running" ? " is-running" : ""
   }" style="--stage-color:${escapeHtml(barColor(stage))}" ${stageHoverAttributes(
@@ -2541,13 +2710,257 @@ function workflowStageMarkup(stage) {
     </div>
     ${progressBar(stage)}
     <div class="processing-workflow-stage-meta">
-      <span>${escapeHtml(stageCounts(stage))}</span>
-      <span class="mono">${formatDuration(stage.duration_ms || 0)}</span>
+      ${
+        stage.key === "filter"
+          ? ""
+          : `<span>${escapeHtml(stageCountsText)}</span>
+      <span class="mono">${formatDuration(stage.duration_ms || 0)}</span>`
+      }
       <span class="processing-workflow-stage-message">${escapeHtml(
-        stage.message || "—",
+        stageMessage || "—",
       )}</span>
+      ${financialRatioMarkup}
     </div>
   </div>`;
+}
+
+function indexWorkflowProgressMarkup(workflow) {
+  const progress = workflow.progress || {};
+  const stages = Array.isArray(progress.stages) ? progress.stages : [];
+  if (!stages.length) {
+    return `<section class="report-card processing-card processing-workflow-progress-card" data-workflow-progress>
+      <div class="side-card-head">
+        <span class="side-card-title">${icon("activity", 14)}判決向量索引 Pipeline</span>
+        <span class="badge badge-neutral">尚無</span>
+      </div>
+      <div class="processing-workflow-empty">執行此流程後，會在這裡顯示 host/model、Blue-Green 建置與各階段進度。</div>
+    </section>`;
+  }
+  const byKey = new Map(
+    stages.map((stage) => [String(stage.key || ""), stage]),
+  );
+  const probe = byKey.get("ollama") || {};
+  const indexStage = byKey.get("qdrant") || {};
+  const validate = byKey.get("validate") || {};
+  const runtime = workflow.index_runtime || {};
+  const summary = runtime.summary || {};
+  const copy = runtime.copy || {};
+  const current = runtime.current || {};
+  const embedding = runtime.embedding || {};
+  const selected = embedding.selected || {};
+  const activeHost = embedding.active || {};
+  const expected = Number(
+    runtime.expected_count || summary.total || indexStage.total || 0,
+  );
+  const indexed = Number(
+    summary.indexed ?? indexStage.current ?? 0,
+  );
+  const indexPercent =
+    expected > 0
+      ? Math.min(100, (indexed / expected) * 100)
+      : indexStage.status === "success"
+        ? 100
+        : 0;
+  const copyTotal = Number(copy.total || 0);
+  const copyCopied = Number(copy.copied || 0);
+  const copyPercent =
+    copyTotal > 0
+      ? Math.min(100, (copyCopied / copyTotal) * 100)
+      : copy.status === "success"
+        ? 100
+        : 0;
+  const buildMode = String(runtime.build_mode || "");
+  const runStatus = String(progress.run_status || "");
+  const terminal =
+    Boolean(runStatus) &&
+    !["running", "success", "no_change"].includes(runStatus);
+  let copyStatus = String(
+    copy.status || (buildMode === "reuse" ? "pending" : "skipped"),
+  );
+  if (terminal && copyStatus === "pending") {
+    copyStatus = "stale";
+  }
+  const validateStatus = String(validate.status || "pending");
+  const activated =
+    validateStatus === "success" &&
+    /alias 已切換/.test(String(validate.message || ""));
+  const activateStatus = activated
+    ? "success"
+    : validateStatus === "failed"
+      ? "failed"
+      : runStatus === "running"
+        ? "pending"
+        : "skipped";
+  const versionLabel = runtime.version_id
+    ? `v${String(runtime.version_id).padStart(3, "0")}`
+    : "—";
+  const hostName =
+    activeHost.host || selected.host || activeHost.url || selected.url || "—";
+  const hostPort = activeHost.port || selected.port;
+  const hostLabel = hostPort ? `${hostName}:${hostPort}` : String(hostName);
+  const model =
+    activeHost.model || selected.model || runtime.model || "—";
+  const currentLabel = current.month
+    ? `${indexMonthLabel(current.month)}${current.preparing ? "（準備中）" : ""}`
+    : progress.run_status === "running"
+      ? "準備中"
+      : "—";
+  const phases = [
+    {
+      key: "probe",
+      label: "Ollama 主機／模型測試",
+      color: "#22c55e",
+      status: probe.status || "pending",
+      percent: Number(probe.percent) || 0,
+      duration_ms: probe.duration_ms,
+      detail: `${formatNumber(probe.current || 0)} / ${formatNumber(
+        probe.total || 0,
+      )} 台 · ${hostLabel} · ${model}`,
+    },
+    {
+      key: "version",
+      label: "建立／接續 Blue-Green 版本",
+      color: "#06b6d4",
+      status: runtime.version_id ? "success" : "pending",
+      percent: runtime.version_id ? 100 : 0,
+      duration_ms: runtime.version_duration_ms,
+      detail: `${versionLabel} · ${runtime.collection || "—"} · ${
+        buildMode || "—"
+      }`,
+    },
+    {
+      key: "copy",
+      label: "複製可重用向量",
+      color: "#f59e0b",
+      status: copyStatus,
+      percent: copyPercent,
+      duration_ms: copy.duration_ms,
+      detail:
+        copyTotal > 0
+          ? `${formatNumber(copyCopied)} / ${formatNumber(
+              copyTotal,
+            )} points · 舊 collection 向量`
+          : copyStatus === "skipped"
+            ? "本次不需複製舊向量"
+            : copyStatus === "stale"
+              ? "上次執行中止，未完成複製"
+              : "等待舊 collection 複製",
+    },
+    {
+      key: "index",
+      label: "金融判決向量索引",
+      color: "#a78bfa",
+      status: indexStage.status || "pending",
+      percent: indexPercent,
+      duration_ms: indexStage.duration_ms,
+      detail: `${formatNumber(indexed)} / ${formatNumber(
+        expected,
+      )} 筆 · 重用 ${formatNumber(summary.reused)} · 新 embedding ${formatNumber(
+        summary.embedded,
+      )}`,
+    },
+    {
+      key: "validate",
+      label: "驗證新版本",
+      color: "#eab308",
+      status: validateStatus,
+      percent: validateStatus === "success" ? 100 : 0,
+      duration_ms: validate.duration_ms,
+      detail:
+        validate.message ||
+        (terminal
+          ? "上次執行中止，未進行驗證。"
+          : "等待索引完成後驗證筆數、維度與 payload。"),
+    },
+    {
+      key: "activate",
+      label: "切換 alias",
+      color: "#3b82f6",
+      status: activateStatus,
+      percent: activated ? 100 : 0,
+      duration_ms: 0,
+      detail: activated
+        ? validate.message
+        : terminal
+          ? "上次執行中止，未切換 alias。"
+          : "驗證通過後切換 judgments_current。",
+    },
+  ];
+  const counted = phases.filter((phase) => phase.status !== "skipped");
+  const overall = counted.length
+    ? counted.reduce((sum, phase) => sum + phase.percent, 0) / counted.length
+    : 0;
+  const completed = phases.filter((phase) => phase.status === "success").length;
+  const overallLabel = percentText(overall);
+  const rows = phases
+    .map(
+      (phase, index) => `<div class="index-wf-row is-${escapeHtml(
+        phase.status,
+      )}">
+        <div class="index-wf-rail">
+          <span class="index-wf-dot" style="--stage-color:${escapeHtml(
+            phase.color,
+          )}"></span>
+        </div>
+        <div class="index-wf-body">
+          <div class="index-wf-head">
+            <span class="index-wf-step">${String(index + 1).padStart(
+              2,
+              "0",
+            )}</span>
+            <strong>${escapeHtml(phase.label)}</strong>
+            ${statusBadge(phase.status)}
+            <span class="index-wf-duration mono">${
+              phase.duration_ms
+                ? formatDuration(phase.duration_ms)
+                : "—"
+            }</span>
+          </div>
+          <div class="index-wf-track">
+            <span style="width:${Math.max(
+              0,
+              Math.min(100, phase.percent),
+            ).toFixed(1)}%;background:${escapeHtml(phase.color)}"></span>
+          </div>
+          <div class="index-wf-detail">${escapeHtml(phase.detail)}</div>
+        </div>
+      </div>`,
+    )
+    .join("");
+  return `<section class="report-card processing-card processing-workflow-progress-card index-wf-card" data-workflow-progress>
+    <div class="side-card-head">
+      <span class="side-card-title">${icon("activity", 14)}判決向量索引 Pipeline</span>
+      <span class="badge ${
+        progress.run_status === "running" ? "badge-info" : "badge-neutral"
+      }">${formatNumber(completed)} / ${formatNumber(
+        counted.length,
+      )} 階段</span>
+    </div>
+    <div class="index-wf-summary">
+      <span>整體 <strong class="mono">${overallLabel}</strong></span>
+      <span>版本 <strong class="mono">${escapeHtml(versionLabel)}</strong></span>
+      <span>Collection <strong class="mono">${escapeHtml(
+        runtime.collection || "—",
+      )}</strong></span>
+      <span>模式 <strong>${escapeHtml(buildMode || "—")}</strong></span>
+      <span>Host <strong class="mono">${escapeHtml(hostLabel)}</strong></span>
+      <span>Model <strong class="mono">${escapeHtml(model)}</strong></span>
+      <span>目前 <strong>${escapeHtml(currentLabel)}</strong></span>
+    </div>
+    <div class="index-wf-list">${rows}</div>
+    <div class="index-wf-overall">
+      <div class="index-wf-overall-head">
+        <span>整體進度</span>
+        <span class="mono">${overallLabel}</span>
+      </div>
+      <div class="index-wf-overall-track">
+        <span style="width:${Math.max(
+          0,
+          Math.min(100, overall),
+        ).toFixed(1)}%"></span>
+      </div>
+    </div>
+  </section>`;
 }
 
 function workflowProgressMarkup(workflow) {
@@ -2555,6 +2968,9 @@ function workflowProgressMarkup(workflow) {
     // Starting a new run: hide the previous run's progress card immediately
     // instead of showing stale results until the backend snapshot arrives.
     return "";
+  }
+  if (workflow.id === "index_versions") {
+    return indexWorkflowProgressMarkup(workflow);
   }
   const progress = workflow.progress || {};
   const stages = Array.isArray(progress.stages) ? progress.stages : [];
@@ -2673,6 +3089,7 @@ function indexHostMarkup(host, selectedUrl) {
 function indexMonthGridMarkup(runtime) {
   const months = Array.isArray(runtime.months) ? runtime.months : [];
   const current = runtime.current || {};
+  const activeCoverage = runtime.active_coverage || {};
   const groups = new Map();
   for (const item of months) {
     const key = String(item.month || "");
@@ -2687,16 +3104,28 @@ function indexMonthGridMarkup(runtime) {
         monthNo,
         total: 0,
         processed: 0,
+        activeTotal: 0,
+        activeProcessed: 0,
         reused: 0,
         embedded: 0,
         archives: [],
         current: false,
+        preparing: false,
         jid: "",
       };
       groups.set(key, group);
     }
     group.total += Number(item.total) || 0;
     group.processed += Number(item.processed) || 0;
+    const activeItem = activeCoverage[key] || {};
+    group.activeTotal = Math.max(
+      group.activeTotal,
+      Number(activeItem.total) || 0,
+    );
+    group.activeProcessed = Math.max(
+      group.activeProcessed,
+      Number(activeItem.processed) || 0,
+    );
     group.reused += Number(item.reused) || 0;
     group.embedded += Number(item.embedded) || 0;
     if (item.archive) group.archives.push(String(item.archive));
@@ -2705,23 +3134,52 @@ function indexMonthGridMarkup(runtime) {
       (!current.archive || current.archive === item.archive)
     ) {
       group.current = true;
+      group.preparing = Boolean(current.preparing);
       group.jid = String(current.jid || "");
     }
   }
   if (!groups.size) {
     return '<div class="processing-workflow-empty">尚無可顯示的索引月份；開始索引後會依時間列出月份狀態。</div>';
   }
-  const counts = { green: 0, red: 0, gray: 0 };
+  const counts = {
+    active: 0,
+    reuseComplete: 0,
+    reuseIncomplete: 0,
+    embedComplete: 0,
+    embedIncomplete: 0,
+  };
   for (const group of groups.values()) {
-    if (group.total > 0 && group.processed >= group.total) {
-      group.status = "green";
-      counts.green += 1;
-    } else if (group.processed > 0) {
-      group.status = "red";
-      counts.red += 1;
+    const currentComplete =
+      group.total > 0 && group.processed >= group.total;
+    const activeComplete =
+      group.activeTotal > 0 && group.activeProcessed >= group.activeTotal;
+    const kind =
+      group.embedded > 0
+        ? "embed"
+        : group.reused > 0
+          ? "reuse"
+          : activeComplete
+            ? "reuse"
+            : "embed";
+    group.kind = kind;
+    group.currentComplete = currentComplete;
+    group.status = currentComplete
+      ? "green"
+      : group.processed > 0
+        ? "red"
+        : activeComplete
+          ? "green"
+          : "gray";
+    if (kind === "reuse") {
+      if (currentComplete) counts.reuseComplete += 1;
+      else counts.reuseIncomplete += 1;
+    } else if (currentComplete) {
+      counts.embedComplete += 1;
     } else {
-      group.status = "gray";
-      counts.gray += 1;
+      counts.embedIncomplete += 1;
+    }
+    if (activeComplete) {
+      counts.active += 1;
     }
   }
   const years = [...new Set([...groups.values()].map((item) => item.year))].sort(
@@ -2746,35 +3204,99 @@ function indexMonthGridMarkup(runtime) {
         const title = [
           `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
           group.archives.join("、") || "—",
-          `已處理 ${formatNumber(group.processed)} / ${formatNumber(
+          `新版本 ${formatNumber(group.processed)} / ${formatNumber(
             group.total,
           )}（${percent}）`,
+          group.activeTotal > 0
+            ? `active ${formatNumber(group.activeProcessed)} / ${formatNumber(
+                group.activeTotal,
+              )}（${(
+                (100 * group.activeProcessed) /
+                group.activeTotal
+              ).toFixed(1)}%）`
+            : "",
           `重用 ${formatNumber(group.reused)} · 新 embedding ${formatNumber(
             group.embedded,
           )}`,
+          !group.currentComplete
+            ? group.kind === "reuse"
+              ? "待完成：R 既有向量重用"
+              : "待完成：E 新 embedding"
+            : "",
           group.current
-            ? `${active ? "目前索引" : "最後索引"}${
-                group.jid ? ` · ${group.jid}` : ""
-              }`
+            ? `${
+                active
+                  ? group.preparing
+                    ? "準備索引"
+                    : "目前索引"
+                  : "最後索引"
+              }${group.jid ? ` · ${group.jid}` : ""}`
             : "",
         ]
           .filter(Boolean)
           .join(" · ");
-        return `<td class="judgment-month index-month is-${group.status}${
-          active ? " is-active" : ""
-        }" title="${escapeHtml(title)}"${
+        const activeFill =
+          group.activeTotal > 0
+            ? Math.min(
+                100,
+                (100 * group.activeProcessed) / group.activeTotal,
+              )
+            : 0;
+        const reusedFill =
+          group.total > 0
+            ? Math.min(100, (100 * group.reused) / group.total)
+            : 0;
+        const embeddedFill =
+          group.total > 0
+            ? Math.min(100, (100 * group.embedded) / group.total)
+            : 0;
+        const reuseIncomplete =
+          group.kind === "reuse" && !group.currentComplete;
+        const embedIncomplete =
+          group.kind === "embed" && !group.currentComplete;
+        return `<td class="judgment-month index-month index-month-are is-${
+          group.status
+        }${active ? " is-active" : ""}" title="${escapeHtml(title)}"${
           active ? ' aria-current="true"' : ""
-        }><span>${monthNo}</span></td>`;
+        }><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true"><span class="index-month-block is-active" style="--fill:${activeFill.toFixed(
+          1,
+        )}%"></span><span class="index-month-block is-reuse${
+          reuseIncomplete ? " is-incomplete" : ""
+        }" style="--fill:${
+          reuseIncomplete ? "0.0" : reusedFill.toFixed(1)
+        }%"></span><span class="index-month-block is-embed${
+          embedIncomplete ? " is-incomplete" : ""
+        }" style="--fill:${
+          embedIncomplete ? "0.0" : embeddedFill.toFixed(1)
+        }%"></span></span></td>`;
       }).join("");
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
     .join("");
   return `<div class="judgment-months index-months">
     <div class="judgment-months-meta">
-      <span class="badge badge-ok">完成 ${formatNumber(counts.green)}</span>
-      <span class="badge badge-danger">未完成 ${formatNumber(counts.red)}</span>
-      <span class="badge badge-neutral">待索引 ${formatNumber(counts.gray)}</span>
+      <span class="badge badge-ok" title="A：上一個正式版本的既有覆蓋，不列入新版本完成數">A 基線 ${formatNumber(
+        counts.active,
+      )}</span>
+      <span class="badge badge-reuse" title="R 完成：新版本已完成且該月全部沿用既有向量">R 完成 ${formatNumber(
+        counts.reuseComplete,
+      )}</span>
+      <span class="badge badge-reuse-outline" title="R 未完成：該月仍需或正在進行既有向量重用">R 未完成 ${formatNumber(
+        counts.reuseIncomplete,
+      )}</span>
+      <span class="badge badge-embed" title="E 完成：新版本已完成且該月包含新 embedding">E 完成 ${formatNumber(
+        counts.embedComplete,
+      )}</span>
+      <span class="badge badge-embed-outline" title="E 未完成：該月仍需或正在進行新 embedding">E 未完成 ${formatNumber(
+        counts.embedIncomplete,
+      )}</span>
       <span class="muted">共 ${formatNumber(groups.size)} 個月</span>
+    </div>
+    <div class="index-month-are-key" aria-label="索引月份方格圖例">
+      <span><i class="is-active"></i>A · 上一個正式版本既有覆蓋，不列入本次新版本完成數</span>
+      <span><i class="is-reuse"></i>R · 本次沿用既有向量，不重新計算 embedding</span>
+      <span><i class="is-embed"></i>E · 本次重新計算 embedding 的新增或變更向量</span>
+      <span><i class="is-outline"></i>空心框 · 該月 R／E 尚未完成</span>
     </div>
     <div class="judgment-months-scroll">
       <table class="judgment-months-table index-months-table">
@@ -2785,7 +3307,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">綠色：索引完成；灰色：新檔／尚未索引；紅色：已開始但未完成；空白：沒有該月份資料。滑鼠移到月份可查看來源檔案、已處理筆數與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（重用向量）、E（新 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；填滿表示完成，空心框表示該月 R／E 尚未完成。綠色：新版本完成或 active 基線；灰色：尚未開始；紅色：新版本處理中；空白：沒有該月份資料。滑鼠移到月份可查看新版本與 active 筆數、來源檔案與目前案號。</p>
   </div>`;
 }
 
@@ -2876,6 +3398,57 @@ function importTimelineMarkup(workflow) {
   </section>`;
 }
 
+function indexRuntimeAverage(workflow, runtime, indexed) {
+  const runId =
+    runtime.run_id ||
+    workflow.active_run?.id ||
+    workflow.last_run?.id ||
+    "";
+  const key = [
+    runId,
+    runtime.version_id ?? "",
+    runtime.collection || "",
+    runtime.started_at || "",
+  ].join("|");
+  const now = Date.now();
+  let baseline = INDEX_RATE_BASELINES.get(key);
+  if (!baseline) {
+    const startedMs = Date.parse(runtime.started_at || "");
+    const finishedMs = Date.parse(runtime.finished_at || "");
+    const updatedMs = Date.parse(runtime.updated_at || "");
+    if (
+      runtime.run_status !== "running" &&
+      Number.isFinite(startedMs) &&
+      (Number.isFinite(finishedMs) || Number.isFinite(updatedMs))
+    ) {
+      baseline = { at: startedMs, indexed: 0 };
+    } else {
+      baseline = { at: now, indexed: Math.max(0, indexed) };
+    }
+    INDEX_RATE_BASELINES.set(key, baseline);
+  }
+  const finishedMs = Date.parse(runtime.finished_at || "");
+  const updatedMs = Date.parse(runtime.updated_at || "");
+  const endMs =
+    runtime.run_status === "running"
+      ? now
+      : Number.isFinite(finishedMs)
+        ? finishedMs
+        : Number.isFinite(updatedMs)
+          ? updatedMs
+          : now;
+  const elapsedSeconds = Math.max(
+    0,
+    (endMs - Number(baseline.at || 0)) / 1000,
+  );
+  const deltaIndexed = Math.max(
+    0,
+    Number(indexed) - Number(baseline.indexed || 0),
+  );
+  if (elapsedSeconds <= 0 || deltaIndexed <= 0) return 0;
+  return deltaIndexed / elapsedSeconds;
+}
+
 function indexRuntimeMarkup(workflow) {
   const runtime = workflow.index_runtime || {};
   if (!runtime.available) {
@@ -2884,7 +3457,7 @@ function indexRuntimeMarkup(workflow) {
         <span class="side-card-title">${icon("cloud", 14)}Ollama 連線測試</span>
         <span class="badge badge-neutral">尚無</span>
       </div>
-      <div class="processing-workflow-empty">執行 Qdrant 版本建置後，會在這裡顯示測試的主機、模型與選用結果。</div>
+      <div class="processing-workflow-empty">執行 Qdrant判決向量索引版本建置後，會在這裡顯示測試的主機、模型與選用結果。</div>
     </section>`;
   }
   const coverageOnly = Boolean(runtime.coverage_only);
@@ -2894,13 +3467,26 @@ function indexRuntimeMarkup(workflow) {
   const active = embedding.active || {};
   const current = runtime.current || {};
   const summary = runtime.summary || {};
+  const indexed = Number(summary.indexed ?? current.indexed ?? 0);
+  const averageRate = coverageOnly
+    ? 0
+    : indexRuntimeAverage(workflow, runtime, indexed);
+  const rateMarkup = coverageOnly
+    ? ""
+    : `<span class="badge badge-neutral index-runtime-rate" title="自本次頁面開始觀察的累計平均；中途加入以首次觀察時間與筆數為基準。後段若以新 embedding 為主，速度會下降。">本次平均 ${
+        averageRate > 0 ? `${averageRate.toFixed(1)} 筆/秒` : "—"
+      }</span>`;
   const selectedUrl = selected.url || "";
   const activeUrl = active.url || "";
   const hostRows = hosts
     .map((host) => indexHostMarkup(host, selectedUrl))
     .join("");
   const currentLabel =
-    runtime.run_status === "running" ? "目前處理" : "最後處理";
+    runtime.run_status === "running"
+      ? current.preparing
+        ? "準備中"
+        : "目前處理"
+      : "最後處理";
   const currentLine = current.jid
     ? `<div class="index-current-row">
         <span class="badge badge-info">${icon("activity", 11)}${currentLabel}</span>
@@ -2912,7 +3498,11 @@ function indexRuntimeMarkup(workflow) {
         <span class="index-current-copy">${escapeHtml(
           [current.court, current.title].filter(Boolean).join(" · ") || "—",
         )}</span>
-        <span class="faint">批次 ${formatNumber(current.batch_size)} 筆</span>
+        <span class="faint">${
+          current.preparing
+            ? "準備中"
+            : `批次 ${formatNumber(current.batch_size)} 筆`
+        }</span>
       </div>`
     : "";
   return `<section class="report-card processing-card index-runtime-card"${
@@ -2960,9 +3550,12 @@ function indexRuntimeMarkup(workflow) {
   <section class="report-card processing-card index-files-card">
     <div class="side-card-head">
       <span class="side-card-title">${icon("table", 14)}索引檔案時間表</span>
-      <span class="badge badge-neutral">${formatNumber(
-        summary.indexed,
-      )} / ${formatNumber(summary.total)} 筆</span>
+      <span class="index-runtime-counts">
+        <span class="badge badge-neutral">${formatNumber(
+          summary.indexed,
+        )} / ${formatNumber(summary.total)} 筆</span>
+        ${rateMarkup}
+      </span>
     </div>
     <div class="index-runtime-summary">
       <span>版本 <strong class="mono">v${escapeHtml(
@@ -2985,7 +3578,7 @@ function indexRuntimeMarkup(workflow) {
     ${indexMonthGridMarkup(runtime)}
     ${
       coverageOnly
-        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant 版本建置後會顯示本次 Ollama 測試與即時進度。</p>'
+        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant判決向量索引版本建置後會顯示本次 Ollama 測試與即時進度。</p>'
         : ""
     }
   </section>`;
@@ -3698,6 +4291,11 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
             )}</span>
             <span class="badge badge-warn">更新</span>
           </div>`
+        : ""
+    }
+    ${
+      workflow.id === "legal_index_versions"
+        ? lawIndexTimelinesMarkup(workflow.index_timelines)
         : ""
     }
     ${
@@ -4901,9 +5499,6 @@ export async function render(root) {
     if (!hoveredStageKey) return;
     hoveredStageKey = "";
     stageTooltip.hidden = true;
-    content.querySelectorAll("[data-workflow-progress]").forEach((card) => {
-      card.classList.remove("is-stage-hovering");
-    });
     content.querySelectorAll("[data-stage-key]").forEach((element) => {
       element.classList.remove("is-stage-hovered");
     });
@@ -4913,10 +5508,6 @@ export async function render(root) {
     const key = target.dataset.stageKey || "";
     if (!key) return;
     hoveredStageKey = key;
-    const card = target.closest("[data-workflow-progress]");
-    content.querySelectorAll("[data-workflow-progress]").forEach((item) => {
-      item.classList.toggle("is-stage-hovering", item === card);
-    });
     content.querySelectorAll("[data-stage-key]").forEach((element) => {
       element.classList.toggle("is-stage-hovered", element.dataset.stageKey === key);
     });
@@ -5178,6 +5769,9 @@ export async function render(root) {
     }
     if (seq > 0) lastProgressSeq = seq;
     const workflowId = String(event.workflow_id || "judgment_import");
+    const eventMonthKey = String(event.month || "")
+      .replace(/\D/g, "")
+      .slice(0, 6);
     const workflow = (lastSnapshot.workflows || []).find(
       (item) => item.id === workflowId,
     );
@@ -5192,22 +5786,51 @@ export async function render(root) {
           (item) => String(item.key) === stageKey,
         )
       : null;
-    if (stage) {
-      if (event.status) stage.status = String(event.status);
-      if (event.current !== undefined) {
-        stage.current = Number(event.current) || 0;
+    const sameRun =
+      String(workflow.progress.run_id || "") === String(event.run_id || "");
+    if (stage && event.type === "stage_progress") {
+      const nextCurrent = Number(event.current);
+      const currentValue = Number(stage.current);
+      const regressed =
+        sameRun &&
+        event.status === "running" &&
+        Number.isFinite(nextCurrent) &&
+        Number.isFinite(currentValue) &&
+        nextCurrent < currentValue;
+      if (!regressed) {
+        if (event.status) stage.status = String(event.status);
+        if (event.current !== undefined) {
+          stage.current = Number(event.current) || 0;
+        }
+        if (event.total !== undefined) {
+          stage.total = Number(event.total) || 0;
+        }
+        if (event.percent !== undefined) {
+          stage.percent = Number(event.percent) || 0;
+        }
+        if (event.message) stage.message = String(event.message);
       }
-      if (event.total !== undefined) {
-        stage.total = Number(event.total) || 0;
-      }
-      if (event.percent !== undefined) {
-        stage.percent = Number(event.percent) || 0;
-      }
-      if (event.message) stage.message = String(event.message);
     }
-    if (event.overall_percent !== undefined) {
-      workflow.progress.overall_percent =
-        Number(event.overall_percent) || 0;
+    if (stage && event.extra && typeof event.extra === "object") {
+      for (const key of [
+        "financial_processed",
+        "financial_matched",
+        "financial_percent",
+      ]) {
+        if (event.extra[key] !== undefined) {
+          stage[key] = Number(event.extra[key]) || 0;
+        }
+      }
+    }
+    if (
+      event.type === "stage_progress" &&
+      event.overall_percent !== undefined
+    ) {
+      const nextOverall = Number(event.overall_percent) || 0;
+      const previousOverall = Number(workflow.progress.overall_percent) || 0;
+      workflow.progress.overall_percent = sameRun
+        ? Math.max(previousOverall, nextOverall)
+        : nextOverall;
     }
     if (event.type !== "run_finished") {
       workflow.progress.run_status = "running";
@@ -5225,34 +5848,27 @@ export async function render(root) {
         message: event.message || "",
       };
     }
-    if (event.type === "archive_completed") {
-      for (const item of workflow.progress.stages) {
-        if (item.key === "filter" || item.key === "postgres") {
-          item.status = "success";
-        }
-      }
-    }
     if (event.type === "run_finished") {
       workflow.active_run = null;
       workflow.progress.run_status = String(event.status || "success");
       workflow.can_run = true;
     }
     const monthUpdates = [];
-    if (event.month && event.month_stages) {
+    if (eventMonthKey && event.month_stages) {
       monthUpdates.push({
-        month: event.month,
+        month: eventMonthKey,
         import_stages: event.month_stages,
         import_overall: event.month_overall || "",
       });
     }
     let activeImport = null;
-    if (event.type === "archive_started" && event.month) {
+    if (event.type === "archive_started" && eventMonthKey) {
       const parsed = Date.parse(event.timestamp || "");
       activeImport = {
-        active_month: event.month,
+        active_month: eventMonthKey,
         active_archive: event.archive,
         active_phase: event.stage || "filter",
-        processing_month: event.month,
+        processing_month: eventMonthKey,
         processing_archive: event.archive,
         run_id: event.run_id,
         run_status: "running",
@@ -5307,7 +5923,51 @@ export async function render(root) {
       if (Array.isArray(update.recent_runs)) {
         workflow.recent_runs = update.recent_runs;
       }
-      if (update.progress) workflow.progress = update.progress;
+      if ("index_runtime" in update) {
+        const nextRuntime = update.index_runtime;
+        if (
+          nextRuntime &&
+          !nextRuntime.active_coverage &&
+          workflow.index_runtime?.active_coverage
+        ) {
+          nextRuntime.active_coverage = workflow.index_runtime.active_coverage;
+        }
+        workflow.index_runtime = nextRuntime;
+      }
+      if (update.progress) {
+        const nextProgress = update.progress;
+        const previousProgress = workflow.progress;
+        if (
+          workflow.id === "judgment_import" &&
+          previousProgress?.run_id &&
+          previousProgress.run_id === nextProgress.run_id
+        ) {
+          const previousStages = new Map(
+            (previousProgress.stages || []).map((stage) => [
+              String(stage.key),
+              stage,
+            ]),
+          );
+          for (const stage of nextProgress.stages || []) {
+            const previous = previousStages.get(String(stage.key));
+            if (
+              previous &&
+              stage.status === "running" &&
+              Number(stage.current) < Number(previous.current)
+            ) {
+              stage.current = previous.current;
+              stage.total = previous.total;
+              stage.percent = previous.percent;
+              stage.message = previous.message;
+            }
+          }
+          nextProgress.overall_percent = Math.max(
+            Number(previousProgress.overall_percent) || 0,
+            Number(nextProgress.overall_percent) || 0,
+          );
+        }
+        workflow.progress = nextProgress;
+      }
       if (typeof update.can_run === "boolean") {
         workflow.can_run = update.can_run;
       }

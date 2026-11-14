@@ -51,6 +51,7 @@ from ..processing_state import (
 from ..update_records import update_history, update_status
 from ..version_codes import version_code_for_datetime
 from ..workflows import workflow_catalog, workflow_definition
+from .judgment_stats import judgment_stats_from_counts
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,13 @@ def _percent(current: Any, total: Any) -> Optional[float]:
 def _safe_int(value: Any) -> Optional[int]:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -550,6 +558,18 @@ def _attach_external_runs(
     return synthetic + list(runs), external
 
 
+_FILTER_HIT_SUFFIX = re.compile(
+    r"\s*[，,]\s*命中\s*[\d,]+\s*筆。?\s*$"
+)
+
+
+def _clean_stage_message(key: str, message: Any) -> str:
+    text = str(message or "")
+    if key == "filter":
+        text = _FILTER_HIT_SUFFIX.sub("。", text)
+    return text
+
+
 def _stage_view(stage: Dict[str, Any], run: Dict[str, Any]) -> Dict[str, Any]:
     key = str(stage.get("key") or "")
     status = str(stage.get("status") or "pending")
@@ -587,12 +607,23 @@ def _stage_view(stage: Dict[str, Any], run: Dict[str, Any]) -> Dict[str, Any]:
         "total": total,
         "percent": percent,
         "rate": rate,
-        "message": stage.get("message") or "",
+        "message": _clean_stage_message(key, stage.get("message")),
         "duration_ms": int(stage.get("duration_ms") or 0),
         "started_at": stage.get("started_at"),
         "finished_at": stage.get("finished_at"),
         "run_id": run.get("id"),
         "run_status": run.get("status"),
+        "financial_processed": _safe_int(
+            stage.get("financial_processed")
+        ),
+        "financial_matched": _safe_int(
+            stage.get("financial_matched")
+        ),
+        "financial_percent": (
+            round(_safe_float(stage.get("financial_percent")) or 0.0, 1)
+            if stage.get("financial_percent") is not None
+            else None
+        ),
         "stats": [],
     }
 
@@ -878,6 +909,20 @@ def _index_month_coverage_runtime(
             {"key": key, "expires_at": now + 60.0, "payload": deepcopy(payload)}
         )
     return payload
+
+
+def _coverage_month_map(coverage: Dict[str, Any]) -> Dict[str, Any]:
+    months: Dict[str, Any] = {}
+    for item in coverage.get("months") or []:
+        key = _timeline_month_key(item.get("month"))
+        if not key:
+            continue
+        months[key] = {
+            "processed": int(item.get("processed") or 0),
+            "total": int(item.get("total") or 0),
+            "percent": item.get("percent"),
+        }
+    return months
 
 
 def _database_metrics(session_factory) -> Dict[str, Any]:
@@ -3385,6 +3430,119 @@ def _law_order_file_timeline(
     )
 
 
+def _law_order_index_timeline(
+    timeline: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Project the law/order file timeline into D / P / I stages."""
+
+    months: List[Dict[str, Any]] = []
+    summary = {
+        "complete": 0,
+        "incomplete": 0,
+        "processing": 0,
+        "superseded": 0,
+        "empty": 0,
+    }
+    for month in timeline.get("months") or []:
+        if not isinstance(month, dict):
+            continue
+        stages = month.get("stages") or {}
+        download = str(stages.get("download") or "empty")
+        parquet = str(stages.get("parquet") or "empty")
+        postgres = str(stages.get("postgres") or "empty")
+        indexed = str(stages.get("qdrant") or "empty")
+        if parquet == "complete" and postgres == "complete":
+            prepared = "complete"
+        elif "processing" in {parquet, postgres}:
+            prepared = "processing"
+        elif "incomplete" in {parquet, postgres}:
+            prepared = "incomplete"
+        elif download == "complete":
+            prepared = "incomplete"
+        else:
+            prepared = "empty"
+
+        values = [download, prepared]
+        if indexed != "not_applicable":
+            values.append(indexed)
+        if "incomplete" in values:
+            overall = "incomplete"
+        elif "processing" in values:
+            overall = "processing"
+        elif (
+            indexed == "not_applicable"
+            and download == "complete"
+            and prepared == "complete"
+        ):
+            overall = "complete"
+        elif (
+            download == "complete"
+            and prepared == "complete"
+            and indexed == "complete"
+        ):
+            overall = "complete"
+        else:
+            overall = "empty"
+
+        if overall == "complete" and indexed == "not_applicable":
+            summary["superseded"] += 1
+        else:
+            summary[overall] = int(summary.get(overall) or 0) + 1
+
+        versions = [
+            version
+            for version in (month.get("versions") or [])
+            if isinstance(version, dict)
+        ]
+        current_version = next(
+            (version for version in versions if version.get("is_current")),
+            versions[-1] if versions else {},
+        )
+        detail_parts: List[str] = []
+        if current_version.get("downloaded_at"):
+            detail_parts.append(f"下載 {current_version['downloaded_at']}")
+        if current_version.get("law_count") is not None:
+            detail_parts.append(f"法規 {int(current_version['law_count']):,}")
+        if current_version.get("article_count") is not None:
+            detail_parts.append(
+                f"條文 {int(current_version['article_count']):,}"
+            )
+
+        months.append(
+            {
+                "month": month.get("month"),
+                "year": month.get("year"),
+                "month_no": month.get("month_no"),
+                "month_label": month.get("month_label"),
+                "has_data": month.get("has_data"),
+                "active": month.get("active"),
+                "versions": versions,
+                "stages": {
+                    "download": download,
+                    "prepared": prepared,
+                    "indexed": indexed,
+                },
+                "overall": overall,
+                "superseded": indexed == "not_applicable",
+                "detail": " · ".join(detail_parts),
+            }
+        )
+
+    return {
+        "key": timeline.get("key"),
+        "label": timeline.get("label"),
+        "months": months,
+        "summary": summary,
+        "current": timeline.get("current") or {},
+        "stage_order": ["download", "prepared", "indexed"],
+        "stage_labels": {
+            "download": "D 下載版本",
+            "prepared": "P 資料就緒",
+            "indexed": "I 索引覆蓋",
+        },
+    }
+
+
 def _judgment_file_timeline(
     *,
     settings: Settings,
@@ -4126,6 +4284,10 @@ def build_processing_snapshot(
         embedding_runtime=embedding_runtime,
     )
     _merge_import_timeline_stages(import_timeline, archives, file_timelines)
+    file_timeline_map = {
+        str(timeline.get("key") or ""): timeline
+        for timeline in file_timelines
+    }
 
     if database.get("status") != "operational":
         notices.append(
@@ -4303,6 +4465,14 @@ def build_processing_snapshot(
                 )
                 if coverage is not None:
                     index_runtime = coverage
+            elif not index_runtime.get("active_coverage"):
+                coverage = _index_month_coverage_runtime(
+                    settings, session_factory, index
+                )
+                if coverage is not None:
+                    index_runtime["active_coverage"] = _coverage_month_map(
+                        coverage
+                    )
         workflow_entries.append(
             {
                 **definition,
@@ -4311,6 +4481,16 @@ def build_processing_snapshot(
                 "recent_runs": [_public_run(run) for run in history_runs],
                 "progress": _workflow_progress(progress_run),
                 "index_runtime": index_runtime,
+                "index_timelines": (
+                    [
+                        _law_order_index_timeline(
+                            file_timeline_map.get(source, {})
+                        )
+                        for source in ("law", "order")
+                    ]
+                    if definition["id"] == "legal_index_versions"
+                    else None
+                ),
                 "import_timeline": (
                     import_timeline
                     if definition["id"] == "judgment_import"
@@ -4386,6 +4566,10 @@ def build_processing_snapshot(
             "law_article_count": database.get("law_article_count"),
             "order_article_count": database.get("order_article_count"),
         },
+        "judgment_stats": judgment_stats_from_counts(
+            (raw_backups.get("totals") or {}).get("row_count"),
+            database.get("judgment_count"),
+        ),
         "index": index,
         "legal_index": legal_index,
         "raw_backups": raw_backups,
@@ -4428,7 +4612,7 @@ def _cache_processing_snapshot(
             f".{path.name}.{os.getpid()}.tmp"
         )
         temporary.write_text(
-            json.dumps(snapshot, ensure_ascii=False),
+            json.dumps(snapshot, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
         os.chmod(temporary, 0o600)
@@ -4568,6 +4752,11 @@ def _live_workflow_entries(
                 "last_run": _public_run(workflow_latest),
                 "recent_runs": [_public_run(run) for run in history_runs],
                 "progress": _workflow_progress(progress_run),
+                "index_runtime": (
+                    _index_runtime_view(progress_run)
+                    if definition["id"] == "index_versions"
+                    else None
+                ),
                 "can_run": can_run,
             }
         )

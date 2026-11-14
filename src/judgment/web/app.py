@@ -122,6 +122,7 @@ from ..runtime_settings import (
     set_test_mode,
 )
 from .catalog import build_catalog
+from .judgment_stats import build_judgment_stats
 from .performance import performance_options, query_performance
 from .power_agent import ensure_power_agent
 from .events import build_event_broker
@@ -254,6 +255,7 @@ PERFORMANCE_TARGETS = {
     "/api/system-usage": ("系統資源使用", "judgment.web.system_usage.build_system_usage"),
     "/api/index-versions": ("索引版本", "judgment.web.app.index_versions"),
     "/api/catalog": ("資料庫 catalog", "judgment.web.catalog.build_catalog"),
+    "/api/judgment-stats": ("判決金融佔比", "judgment.web.judgment_stats.build_judgment_stats"),
     "/api/query": ("資料查詢", "judgment.web.query.run_query"),
     "/api/law": ("法規明細", "judgment.web.query.get_law_detail"),
     "/api/judgment": ("判決原文", "judgment.web.query.get_judgment_detail"),
@@ -1635,6 +1637,19 @@ def create_app(
                 app.state.data_dir,
                 settings=settings,
                 judgment_law_list=settings.judgment_law_list,
+            )
+
+    @app.get("/api/judgment-stats")
+    def judgment_stats() -> Dict[str, Any]:
+        with trace_segment(
+            "api.endpoint",
+            module=__name__,
+            function="judgment_stats",
+            params={},
+        ):
+            return build_judgment_stats(
+                app.state.session_factory,
+                settings.judgment_data_dir,
             )
 
     @app.get("/api/test-mode")

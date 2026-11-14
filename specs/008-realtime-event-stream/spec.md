@@ -28,7 +28,7 @@
 **Acceptance Scenarios**:
 
 1. **Given** importer 開始處理 `2024-04` 的 filter，**When** archive 進入 running，**Then** 立即發布 `archive_started` event，包含月份、archive、stage、message、開始時間。
-2. **Given** filter 已處理 1,000/5,000 筆，**When** importer 更新進度，**Then** 發布 `stage_progress` event，包含 current／total／percent／message。
+2. **Given** filter 已處理 1,000/5,000 筆，**When** importer 更新進度，**Then** 發布 `stage_progress` event，包含 current／total／percent／message，以及 filter 的金融案件累計數與本次累計已處理原始判決數。
 3. **Given** archive filter 與 postgres 完成，**When** importer 完成該月份，**Then** 發布 `archive_completed` event，包含完成的 stages 與 month overall。
 4. **Given** SSE 客戶端停留在 processing 頁，**When** 收到 event，**Then** 必須直接更新目前月份、階段訊息與時間表，不得發出 `/api/processing` 查詢。
 
@@ -59,7 +59,7 @@ Web server 接收到 importer socket 事件後，必須直接 fan-out 到 SSE；
 ## Functional Requirements
 
 - **FR-001**: Importer MUST 是 progress event publisher；event 必須在 archive／月份／階段狀態變更的同一處理點立即產生，不得等到整個 archive 完成才批次發布。
-- **FR-002**: Event MUST 使用固定 envelope，至少包含 `version`、`seq`、`run_id`、`type`、`timestamp`、`month`、`archive`、`stage`、`status`、`message`、`current`、`total`、`percent`、`month_stages`、`month_overall`。
+- **FR-002**: Event MUST 使用固定 envelope，至少包含 `version`、`seq`、`run_id`、`type`、`timestamp`、`month`、`archive`、`stage`、`status`、`message`、`current`、`total`、`percent`、`month_stages`、`month_overall`。`month` MUST 使用 canonical `YYYYMM`（例如 `202108`），不得使用 `2021-08`、`2021/08` 或帶時間的字串；`month_label`／UI 顯示格式 MAY 另行由 `YYYYMM` 推導。
 - **FR-003**: Phase 1 event type MUST 至少包含 `run_started`、`archive_started`、`stage_progress`、`archive_completed`、`run_finished`；`stage_started`／`stage_failed` MAY 在後續擴充使用，但 archive 開始／完成與 run 失敗已足以讓 UI 對齊。
 - **FR-004**: Phase 1 transport MUST 使用本機 Unix domain socket；importer MUST 以非阻塞 queue 發送，web server MUST 以 async Unix server 接收。Socket 路徑 MUST 可由 `JUDGMENT_EVENT_SOCKET` 覆寫；預設 MUST 使用依 processing state 路徑雜湊產生的短檔名（例如 `judgment-pe-<hash>.sock`），避免 macOS AF_UNIX 路徑長度限制。
 - **FR-005**: Web server MUST 在收到 event 後立即 append 到 append-only journal，並以 `event: progress` SSE 推送；journal 路徑 MUST 可由 `JUDGMENT_EVENT_JOURNAL` 覆寫。
@@ -82,6 +82,10 @@ Web server 接收到 importer socket 事件後，必須直接 fan-out 到 SSE；
 - **FR-028**: 系統 MUST 暴露 event latency、queue drop、journal append error、replay count、SSE subscriber 數與 state read/write 耗時等 observability 指標。
 - **FR-029**: 備份／還原流程 MUST 包含 SQLite state checkpoint 與 event journal，或能從 PostgreSQL／manifest 完整重建；不得只備份 JSON 或只備份 WAL。
 - **FR-030**: SQLite busy／corrupt／磁碟滿時，web server MUST 降級為 snapshot 顯示並記錄 error；importer MUST 繼續執行，不得因 checkpoint 或 journal 失敗中止匯入。
+- **FR-031**: 所有 SSE `data:` payload MUST 可被 JSON 序列化。`datetime`／`date` MUST 轉為 ISO 8601 字串，`Path` MUST 轉為字串，其他非 JSON 原生型別 MUST 明確轉換或拒絕；不得讓單一 topic 的 payload 造成整條 SSE stream 中斷。
+- **FR-032**: Frontend MUST 將 event 的 `month` 正規化為 timeline canonical key；接受 `YYYY-MM`、`YYYY/MM` 或 `YYYYMM` 輸入，但套用到月份 cell、`aria-current`、目前列與 processing month 前 MUST 轉為 `YYYYMM`（例如 `2021-08` → `202108`）。
+- **FR-033**: 同一 import run 的全域階段進度 MUST 單調遞增。`archive_started`／`archive_completed` 是 archive-scoped event，MUST NOT 用它們的 archive current／total 覆寫全域 filter／postgres current／total／percent；它們只能更新 timeline 月份、目前 archive 與階段訊息。PostgreSQL 執行中的百分比分母 MUST 使用穩定的全域候選數（`candidate_total_all`），不得使用會隨 filter 命中數變動的 `matched`；overall percent MUST 由四個階段等權計算，且 archive 完成不得讓全域 postgres 階段提前變成 100%。
+- **FR-034**: Filter 階段的 `stage_progress` event MUST 在 `extra` 提供 `financial_processed`（本次累計已處理原始判決數 `raw_total_rows`）、`financial_matched`（本次累計命中的金融案件數）與 `financial_percent`；前端 MUST 以 `financial_matched ÷ financial_processed` 顯示「金融案件佔比」，MUST NOT 使用 event 的 `current ÷ total`、`candidate_total` 或 filter `percent` 代替。`archive_started` 與 live payload 也 MUST 帶同一組欄位，且同一 run 內 MUST 維持與 state checkpoint 一致。
 - **FR-011**: Journal MUST 保存事件順序與時間；Phase 2 MUST 使用 SQLite WAL 保存具單調遞增 `event_id` 的事件，並支援 SSE `Last-Event-ID` replay。重連時若缺少事件仍在保留範圍內，MUST 只補送缺少事件；若 `Last-Event-ID` 早於保留範圍或 journal 已重置，MUST 改送完整 snapshot 並附上最新 `event_id` 對齊。
 - **FR-016**: Event journal MUST 支援保留上限（預設 200,000 筆，可用 `JUDGMENT_EVENT_RETENTION` 覆寫）與 Phase 1 JSONL 遷移；舊 `.jsonl` 在 SQLite journal 為空時 MUST 自動匯入並重新命名為 `.migrated`。
 - **FR-012**: Event queue MUST 有界；queue 滿時 SHOULD 優先保留 lifecycle event（started／completed／failed），可丟棄舊的 `stage_progress`。
@@ -101,6 +105,7 @@ Web server 接收到 importer socket 事件後，必須直接 fan-out 到 SSE；
 - **NFR-008**: 前端處理單一 progress event SHOULD 小於 16 ms，且不得產生超過 200 ms 的 long task。
 - **NFR-009**: Event journal 與 state checkpoint 的檔案權限、遷移與 retention MUST 可在不中斷 importer 的情況下完成。
 - **NFR-010**: 所有低延遲機制 MUST 有可觀測的失敗計數與 log；不得以靜默丟棄作為正常路徑。
+- **NFR-011**: SSE payload serialization failure MUST 只影響該 event／topic，不得終止其他 topic 的 stream 或讓 web server 停止服務；錯誤 MUST 記錄於 log／metrics。
 
 ## Phase 1 Scope
 
@@ -158,3 +163,6 @@ Phase 5（跨主機與備份）：
 - **SC-011**: 初次 processing 頁 bootstrap SHOULD 在 1 秒內開始渲染；完整 DB／Qdrant 統計可延遲補上，不得讓空白頁等待 5 秒以上。
 - **SC-012**: 兩個 web server instance 共用同一 event bus 時，同一 event MUST 在 100 ms 內到達兩邊的 SSE 訂閱者，且各 instance 不得重複推送。
 - **SC-013**: 判決下載、索引、測試 Flow、benchmark 與 status 頁收到進度變更時，network log MUST 沒有 progress GET；MUST 只收到含 payload 的 SSE event 或使用 topic-specific replay。
+- **SC-014**: Importer 對 `2021-08` archive 發布 `archive_started` 時，event `month` MUST 為 `202108`；前端 MUST 對到 `data-month="202108"` 的 cell，更新目前外框、processing month 與灰色階段，不得只更新階段卡而時間表不動。
+- **SC-015**: 任一 SSE payload 含 `datetime`／`date`／`Path` 時，server MUST 將其轉為 JSON-safe 值並繼續推送；不得出現 `Object of type datetime is not JSON serializable` 造成 stream 中斷或 web server 停止。
+- **SC-016**: 判決匯入執行 filter／postgres 時，階段 current／percent 與整體進度 MUST 只維持或增加，不得因新 archive 開始、archive 完成、progress event 與 live payload 交錯而下降。archive 完成只能把 timeline 該月份標成完成；全域 postgres 階段必須等 run 真正完成才顯示 100%。390px viewport 無水平溢出，console error 為 0。

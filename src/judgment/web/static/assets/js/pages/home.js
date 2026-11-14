@@ -1,3 +1,5 @@
+import { api } from "../api.js";
+import { judgmentStatsCardsMarkup } from "../judgment-stats.js";
 import { escapeHtml, icon } from "../utils.js";
 
 const SECTIONS = [
@@ -142,6 +144,10 @@ export async function render(root, ctx) {
         <p>每個工作區都直接連到可驗證的資料來源與模型服務，沒有模擬資料，也不以推測補齊。</p>
       </div>
 
+      <div class="processing-summary judgment-stats-cards" id="home-judgment-stats" aria-label="金融案件佔比">
+        ${judgmentStatsCardsMarkup(null, { loading: true })}
+      </div>
+
       <a class="home-feature" href="#/${feature.route}">
         <span class="home-feature-glow" aria-hidden="true"></span>
         <div class="home-feature-copy">
@@ -218,6 +224,19 @@ export async function render(root, ctx) {
       submitQuestion();
     }
   });
+
+  const statsRoot = root.querySelector("#home-judgment-stats");
+  api
+    .judgmentStats()
+    .then((stats) => {
+      if (!statsRoot || !statsRoot.isConnected) return;
+      statsRoot.innerHTML = judgmentStatsCardsMarkup(stats);
+    })
+    .catch(() => {
+      if (!statsRoot || !statsRoot.isConnected) return;
+      statsRoot.innerHTML = judgmentStatsCardsMarkup(null);
+    });
+
   resizeInput();
   input?.focus({ preventScroll: true });
 }

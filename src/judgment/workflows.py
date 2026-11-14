@@ -126,7 +126,7 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     ),
     WorkflowDefinition(
         id="index_versions",
-        label="Qdrant 版本建置",
+        label="Qdrant判決向量索引版本建置",
         description="先測試 Ollama 主機與 embedding 模型，建立完整的新版本 collection，複製可重用向量、只 embedding 差異資料，驗證後原子切換 alias。",
         branch="judgment",
         stage="qdrant",

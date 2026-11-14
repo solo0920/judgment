@@ -205,6 +205,19 @@ def _apply_stage_update(stage: Dict[str, Any], fields: Dict[str, Any]) -> None:
         stage["rate"] = None
     if "message" in fields and fields["message"] is not None:
         stage["message"] = str(fields["message"])
+    for key in ("financial_processed", "financial_matched"):
+        if key in fields and fields[key] is not None:
+            try:
+                stage[key] = max(0, int(fields[key]))
+            except (TypeError, ValueError):
+                pass
+    if "financial_percent" in fields and fields["financial_percent"] is not None:
+        try:
+            stage["financial_percent"] = round(
+                max(0.0, float(fields["financial_percent"])), 1
+            )
+        except (TypeError, ValueError):
+            pass
     if status:
         stage["status"] = str(status)
         if status in {
@@ -455,6 +468,9 @@ class ProcessingStateStore:
         message: Optional[str] = None,
         duration_ms: Optional[int] = None,
         increment: Optional[int] = None,
+        financial_processed: Optional[int] = None,
+        financial_matched: Optional[int] = None,
+        financial_percent: Optional[float] = None,
     ) -> None:
         fields: Dict[str, Any] = {}
         if current is not None:
@@ -469,6 +485,12 @@ class ProcessingStateStore:
             fields["duration_ms"] = duration_ms
         if increment is not None:
             fields["_increment"] = increment
+        if financial_processed is not None:
+            fields["financial_processed"] = financial_processed
+        if financial_matched is not None:
+            fields["financial_matched"] = financial_matched
+        if financial_percent is not None:
+            fields["financial_percent"] = financial_percent
         self._stage_update(run_id, stage_key, fields)
 
     def finish_stage(

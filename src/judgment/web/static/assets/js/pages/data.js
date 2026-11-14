@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { judgmentStatsCardsMarkup } from "../judgment-stats.js";
 import {
   addAuditEvents,
   addHistory,
@@ -1853,6 +1854,9 @@ export async function render(root, ctx) {
         </button>
       </div>
     </div>
+    <div class="processing-summary judgment-stats-cards" id="data-judgment-stats" aria-label="金融案件佔比">
+      ${judgmentStatsCardsMarkup(null, { loading: true })}
+    </div>
     <div class="data-layout">
       <aside class="card query-sidebar" id="query-sidebar" aria-label="資料查詢功能">
         <div id="data-nav"></div>
@@ -1887,6 +1891,7 @@ export async function render(root, ctx) {
   const schemaSuggestPopover = root.querySelector("#schema-suggest-popover");
   const catalogMeta = root.querySelector("#catalog-meta");
   const refreshButton = root.querySelector("#refresh-catalog");
+  const judgmentStatsRoot = root.querySelector("#data-judgment-stats");
 
   const getCategory = (id) => categories.find((category) => category.id === id);
   const getDatabases = () =>
@@ -2743,6 +2748,11 @@ export async function render(root, ctx) {
       ]);
       if (disposed) return;
       catalog = catalogResponse;
+      if (judgmentStatsRoot) {
+        judgmentStatsRoot.innerHTML = judgmentStatsCardsMarkup(
+          catalog.judgment_stats,
+        );
+      }
       categories = Array.isArray(catalog.categories) ? catalog.categories : [];
       savedPageSize = PAGE_SIZES.includes(Number(storedPageSize))
         ? Number(storedPageSize)
@@ -2791,6 +2801,9 @@ export async function render(root, ctx) {
       catalog = null;
       categories = [];
       dataNav.innerHTML = "";
+      if (judgmentStatsRoot) {
+        judgmentStatsRoot.innerHTML = judgmentStatsCardsMarkup(null);
+      }
       updateCatalogMeta();
       dbOptionsWrap.innerHTML = `<div class="sidebar-notice">${notice({
         tone: "danger",

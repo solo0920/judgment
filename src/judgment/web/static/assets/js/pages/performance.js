@@ -1675,6 +1675,178 @@ function renderIndexStats(stats) {
   </section>`;
 }
 
+const INDEX_PIPELINE_COLORS = [
+  "#22d3ee",
+  "#a78bfa",
+  "#f59e0b",
+  "#ec4899",
+  "#3b82f6",
+  "#10b981",
+  "#f97316",
+  "#8b5cf6",
+  "#64748b",
+];
+
+function indexPipelineHostLabel(host) {
+  const name = String(host?.host || host?.url || "").trim();
+  const port = host?.port ? `:${host.port}` : "";
+  return `${name || "—"}${port}`;
+}
+
+function renderIndexPipelinePanel(stats, selectedId, loading, error) {
+  if (error && !stats) {
+    return `<div class="report-card rag-wf-card">
+      ${notice({
+        tone: "danger",
+        title: "判決向量索引 Pipeline 讀取失敗",
+        text: escapeHtml(error.message || "請確認後端服務是否啟動。"),
+      })}
+      <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
+        <button class="btn btn-secondary btn-sm" type="button" data-action="refresh-index-pipeline">${icon(
+          "refresh",
+          14,
+        )}<span>重試</span></button>
+      </div>
+    </div>`;
+  }
+  const runs = Array.isArray(stats?.runs) ? stats.runs : [];
+  if (!runs.length) {
+    return `<div class="report-card rag-wf-card">
+      ${emptyState({
+        iconName: "layers",
+        title: loading
+          ? "讀取判決向量索引 Pipeline…"
+          : "尚無判決向量索引 Pipeline 紀錄",
+        text: loading
+          ? "正在整理最近的版本化索引紀錄。"
+          : "執行「Qdrant判決向量索引版本建置」後，這裡會顯示 host/model、Blue-Green collection 與各階段耗時。",
+      })}
+    </div>`;
+  }
+  const selected =
+    runs.find((run) => String(run.id) === String(selectedId)) ||
+    stats?.latest ||
+    runs[runs.length - 1];
+  const pipeline =
+    selected?.pipeline && typeof selected.pipeline === "object"
+      ? selected.pipeline
+      : null;
+  const orderedRuns = [...runs].reverse();
+  const options = orderedRuns
+    .map((run) => {
+      const version = Number(run.pipeline?.version_id || run.version_id || 0);
+      const versionLabel = version
+        ? `v${String(version).padStart(3, "0")}`
+        : "索引";
+      return `<option value="${escapeHtml(String(run.id))}" ${
+        String(run.id) === String(selected.id) ? "selected" : ""
+      }>${escapeHtml(
+        `${formatDateTime(run.started_at)} · ${versionLabel} · ${formatIndexDuration(
+          run.duration_ms,
+        )}`,
+      )}</option>`;
+    })
+    .join("");
+  const version = Number(pipeline?.version_id || selected.version_id || 0);
+  const versionLabel = version
+    ? `v${String(version).padStart(3, "0")}`
+    : "—";
+  const host = pipeline?.host || {};
+  const hostLabel = indexPipelineHostLabel(host);
+  const model = pipeline?.model || selected.model || "—";
+  const total = Number(pipeline?.total_ms) || Number(selected.duration_ms) || 0;
+  const stages = Array.isArray(pipeline?.stages) ? pipeline.stages : [];
+  const segments = stages
+    .map((stage, index) => ({
+      ...stage,
+      ms: Math.max(0, Number(stage.duration_ms) || 0),
+      color: INDEX_PIPELINE_COLORS[index % INDEX_PIPELINE_COLORS.length],
+    }))
+    .filter((stage) => stage.ms > 0)
+    .map(
+      (stage) =>
+        `<span class="index-pipeline-seg" style="width:${(
+          (stage.ms / Math.max(1, total)) *
+          100
+        ).toFixed(2)}%;background:${escapeHtml(stage.color)}" title="${escapeHtml(
+          `${stage.label} ${formatIndexDuration(stage.ms)}`,
+        )}"></span>`,
+    )
+    .join("");
+  const rows = stages
+    .map((stage, index) => {
+      const ms = Math.max(0, Number(stage.duration_ms) || 0);
+      const percent = total > 0 ? (ms / total) * 100 : 0;
+      const stageHost =
+        stage.host && typeof stage.host === "object" ? stage.host : null;
+      return `<div class="index-pipeline-row">
+        <span class="index-pipeline-step">${String(index + 1).padStart(2, "0")}</span>
+        <div class="index-pipeline-copy">
+          <div class="index-pipeline-title">
+            <strong>${escapeHtml(stage.label || stage.key || "階段")}</strong>
+            ${statusBadge(stage.status || "success")}
+          </div>
+          <span class="index-pipeline-detail">${escapeHtml(
+            stage.detail || "—",
+          )}</span>
+          ${
+            stageHost
+              ? `<span class="index-pipeline-host">${icon(
+                  "server",
+                  12,
+                )} ${escapeHtml(
+                  indexPipelineHostLabel(stageHost),
+                )} · ${escapeHtml(stage.model || model)}</span>`
+              : ""
+          }
+        </div>
+        <div class="index-pipeline-time">
+          <strong>${formatIndexDuration(ms)}</strong>
+          <span>${percent.toFixed(1)}%</span>
+        </div>
+      </div>`;
+    })
+    .join("");
+  return `<section class="index-perf-panel index-pipeline-panel">
+    <div class="index-perf-head">
+      <div>
+        <div class="report-section-title">判決向量索引 Pipeline</div>
+        <div class="index-perf-sub">Blue-Green collection、host/model 與階段耗時</div>
+      </div>
+      <div class="index-pipeline-actions">
+        <select class="select index-pipeline-select" data-index-pipeline-select aria-label="選擇索引 Pipeline 紀錄">${options}</select>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="refresh-index-pipeline">${icon(
+          "refresh",
+          14,
+        )}<span>重新整理</span></button>
+      </div>
+    </div>
+    ${
+      pipeline
+        ? `<div class="index-pipeline-meta">
+            <span><strong>版本</strong> ${escapeHtml(versionLabel)}</span>
+            <span><strong>collection</strong> ${escapeHtml(
+              String(pipeline.collection || "—"),
+            )}</span>
+            <span><strong>模式</strong> ${escapeHtml(
+              String(pipeline.build_mode || "—"),
+            )}</span>
+            <span><strong>本次</strong> ${
+              pipeline.resumed
+                ? `接續（已索引 ${formatNumber(pipeline.resumed_indexed)} 筆）`
+                : "新建版本"
+            }</span>
+            <span><strong>Host</strong> ${escapeHtml(hostLabel)}</span>
+            <span><strong>Model</strong> ${escapeHtml(String(model))}</span>
+            <span><strong>總耗時</strong> ${formatIndexDuration(total)}</span>
+          </div>
+          <div class="index-pipeline-bar">${segments}</div>
+          <div class="index-pipeline-list">${rows}</div>`
+        : `<div class="index-chart-empty">此筆索引紀錄尚未包含 Pipeline 階段資料；下一次 Qdrant判決向量索引版本建置會記錄 host/model 與各階段耗時。</div>`
+    }
+  </section>`;
+}
+
 function renderPerfPagination(result) {
   const total = Number(result.total) || 0;
   const pageSize = Number(result.page_size) || 25;
@@ -2361,6 +2533,11 @@ export async function render(root, ctx) {
   let pipelineLoading = false;
   let pipelineError = null;
   let pipelineLoaded = false;
+  let indexPipelineStats = null;
+  let indexPipelineSelectedId = "";
+  let indexPipelineLoading = false;
+  let indexPipelineError = null;
+  let indexPipelineLoaded = false;
 
   root.innerHTML = `<section class="page data-page performance-page">
     <div class="page-header">
@@ -2392,6 +2569,10 @@ export async function render(root, ctx) {
           <button class="status-tab" type="button" data-performance-tab="pipeline">
             <span class="status-tab-icon">${icon("activity", 15)}</span>
             <span class="status-tab-copy"><strong>RAG Pipeline</strong><small>Span waterfall、Token 與 TTFT</small></span>
+          </button>
+          <button class="status-tab" type="button" data-performance-tab="index-pipeline">
+            <span class="status-tab-icon">${icon("layers", 15)}</span>
+            <span class="status-tab-copy"><strong>判決向量索引 Pipeline</strong><small>Host／Model、Blue-Green 與階段耗時</small></span>
           </button>
           <button class="status-tab" type="button" data-performance-tab="benchmark">
             <span class="status-tab-icon">${icon("brain", 15)}</span>
@@ -2433,6 +2614,7 @@ export async function render(root, ctx) {
           </div>
         </div>
         <div id="performance-panel-pipeline" hidden></div>
+        <div id="performance-panel-index-pipeline" hidden></div>
         <div id="performance-panel-benchmark" hidden></div>
       </section>
     </div>
@@ -2443,12 +2625,16 @@ export async function render(root, ctx) {
   const flowBox = root.querySelector("#performance-test-flow");
   const reportBox = root.querySelector("#performance-report");
   const pipelineBox = root.querySelector("#performance-panel-pipeline");
+  const indexPipelineBox = root.querySelector(
+    "#performance-panel-index-pipeline",
+  );
   const metaBadge = root.querySelector("#performance-meta");
   const refreshButton = root.querySelector("#performance-refresh");
   const performanceTabs = [...root.querySelectorAll("[data-performance-tab]")];
   const performancePanels = {
     overview: root.querySelector("#performance-panel-overview"),
     pipeline: root.querySelector("#performance-panel-pipeline"),
+    "index-pipeline": root.querySelector("#performance-panel-index-pipeline"),
     benchmark: root.querySelector("#performance-panel-benchmark"),
   };
   let activePerformanceTab = "overview";
@@ -2468,6 +2654,8 @@ export async function render(root, ctx) {
       metaBadge.textContent = "BENCHMARK · RAG";
     } else if (tab === "pipeline") {
       metaBadge.textContent = "PERFORMANCE · RAG WATERFALL";
+    } else if (tab === "index-pipeline") {
+      metaBadge.textContent = "PERFORMANCE · INDEX PIPELINE";
     } else if (result) {
       metaBadge.textContent = `PERFORMANCE · ${formatNumber(result.total)} 筆`;
     }
@@ -2526,10 +2714,60 @@ export async function render(root, ctx) {
     }
   };
 
+  const paintIndexPipeline = () => {
+    if (!indexPipelineBox) return;
+    indexPipelineBox.innerHTML = renderIndexPipelinePanel(
+      indexPipelineStats,
+      indexPipelineSelectedId,
+      indexPipelineLoading,
+      indexPipelineError,
+    );
+  };
+
+  const loadIndexPipeline = async ({ force = false } = {}) => {
+    if (disposed || indexPipelineLoading) return;
+    if (indexPipelineLoaded && !force) {
+      paintIndexPipeline();
+      return;
+    }
+    indexPipelineLoading = true;
+    if (!indexPipelineStats) paintIndexPipeline();
+    try {
+      const response = await api.performance({}, 1, 1);
+      if (disposed) return;
+      indexPipelineStats =
+        response.index_pipeline || response.index_stats || null;
+      const runs = Array.isArray(indexPipelineStats?.runs)
+        ? indexPipelineStats.runs
+        : [];
+      if (
+        !indexPipelineSelectedId ||
+        !runs.some(
+          (run) => String(run.id) === String(indexPipelineSelectedId),
+        )
+      ) {
+        indexPipelineSelectedId = indexPipelineStats?.latest
+          ? String(indexPipelineStats.latest.id)
+          : "";
+      }
+      indexPipelineError = null;
+      indexPipelineLoaded = true;
+    } catch (error) {
+      if (disposed) return;
+      indexPipelineError = error;
+    } finally {
+      if (!disposed) {
+        indexPipelineLoading = false;
+        paintIndexPipeline();
+      }
+    }
+  };
+
   const activatePerformanceTab = (tab) => {
     syncPerformanceTab(tab);
     if (tab === "benchmark") benchmarkController.show();
     if (tab === "pipeline") loadPipeline();
+    if (tab === "index-pipeline") loadIndexPipeline();
   };
 
   root.addEventListener("click", (event) => {
@@ -2547,6 +2785,17 @@ export async function render(root, ctx) {
   pipelineBox?.addEventListener("click", (event) => {
     if (!event.target.closest('[data-action="refresh-rag-waterfall"]')) return;
     loadPipeline({ force: true });
+  });
+
+  indexPipelineBox?.addEventListener("change", (event) => {
+    if (!event.target.matches("[data-index-pipeline-select]")) return;
+    indexPipelineSelectedId = String(event.target.value || "");
+    paintIndexPipeline();
+  });
+
+  indexPipelineBox?.addEventListener("click", (event) => {
+    if (!event.target.closest('[data-action="refresh-index-pipeline"]')) return;
+    loadIndexPipeline({ force: true });
   });
 
   let testRun = null;
@@ -2673,6 +2922,24 @@ export async function render(root, ctx) {
       const response = await api.performance(filters, page, pageSize);
       if (disposed) return;
       result = response;
+      if (response.index_pipeline) {
+        indexPipelineStats = response.index_pipeline;
+        const runs = Array.isArray(indexPipelineStats.runs)
+          ? indexPipelineStats.runs
+          : [];
+        if (
+          !indexPipelineSelectedId ||
+          !runs.some(
+            (run) => String(run.id) === String(indexPipelineSelectedId),
+          )
+        ) {
+          indexPipelineSelectedId = indexPipelineStats.latest
+            ? String(indexPipelineStats.latest.id)
+            : "";
+        }
+        indexPipelineLoaded = true;
+        indexPipelineError = null;
+      }
       page = Number(response.page) || page;
       pageSize = Number(response.page_size) || pageSize;
       reportBox.removeAttribute("aria-busy");
@@ -2722,6 +2989,15 @@ export async function render(root, ctx) {
       setBusy(refreshButton, true, "整理中…");
       try {
         await loadPipeline({ force: true });
+      } finally {
+        if (!disposed) setBusy(refreshButton, false);
+      }
+      return;
+    }
+    if (activePerformanceTab === "index-pipeline") {
+      setBusy(refreshButton, true, "整理中…");
+      try {
+        await loadIndexPipeline({ force: true });
       } finally {
         if (!disposed) setBusy(refreshButton, false);
       }

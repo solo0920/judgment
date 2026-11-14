@@ -322,6 +322,29 @@ def test_build_version_reuses_unchanged_and_embeds_new(tmp_path: Path) -> None:
     assert summary["embedded_count"] == 1
     assert summary["indexed_count"] == 2
     assert summary["validation"]["status"] == "ready"
+    pipeline = summary["pipeline"]
+    assert pipeline["version_id"] == 2
+    assert pipeline["collection"] == "judgments_v002"
+    assert pipeline["model"] == settings.embedding_model
+    assert pipeline["resumed"] is False
+    assert [stage["key"] for stage in pipeline["stages"]] == [
+        "probe",
+        "version",
+        "copy",
+        "embedding",
+        "qdrant",
+        "postgres",
+        "validate",
+        "activate",
+        "report",
+    ]
+    stages = {stage["key"]: stage for stage in pipeline["stages"]}
+    assert stages["embedding"]["detail"] == "新 embedding 1 筆"
+    assert stages["validate"]["status"] == "success"
+    assert stages["activate"]["status"] == "success"
+    assert all(
+        float(stage["duration_ms"]) >= 0 for stage in pipeline["stages"]
+    )
     assert store.aliases[settings.judgment_vector_alias] == "judgments_v002"
     assert "judgments_v001" in store.collections
     assert "judgments_v002" in store.collections
@@ -413,6 +436,10 @@ def test_build_version_records_processing_state_and_month_progress(
     runtime = run["meta"]["index_runtime"]
     assert runtime["summary"]["indexed"] == 2
     assert runtime["embedding"]["selected"]["model"] == settings.embedding_model
+    assert runtime["copy"]["status"] == "success"
+    assert runtime["copy"]["copied"] == 1
+    assert runtime["copy"]["total"] == 1
+    assert runtime["version_duration_ms"] >= 0
     assert [item["month"] for item in runtime["months"]] == [
         "202602",
         "202601",

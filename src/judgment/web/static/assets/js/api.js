@@ -546,6 +546,10 @@ export const api = {
     return request("/api/catalog");
   },
 
+  judgmentStats() {
+    return request("/api/judgment-stats");
+  },
+
   query({ database, filters, page = 1, pageSize = 25 }) {
     return request("/api/query", {
       method: "POST",

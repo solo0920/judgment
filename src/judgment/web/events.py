@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -26,6 +26,14 @@ from ..processing_state import (
 
 Signature = Callable[[], Any]
 _UNSET = object()
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
 
 
 @dataclass(frozen=True)
@@ -356,7 +364,7 @@ class EventBroker:
         id_line = f"id: {int(event_id)}\n" if event_id else ""
         return (
             f"{id_line}event: {event_name}\n"
-            f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+            f"data: {json.dumps(data, ensure_ascii=False, default=_json_default)}\n\n"
         )
 
     def _publish(self, topic: str, snapshot: Any = None) -> None:

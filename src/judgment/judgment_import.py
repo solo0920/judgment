@@ -1509,6 +1509,7 @@ def import_judgments(
                 continue
             current_archive = archive
             month_label = _archive_month_label(archive)
+            month_key = month_label.replace("-", "")
             snapshot_info = snapshots.get(archive) or {}
             snapshot_id = int(snapshot_info.get("id") or 0)
             issue_month = str(snapshot_info.get("issue_month") or "")
@@ -1534,11 +1535,22 @@ def import_judgments(
                     },
                     stage_updates={
                         "filter": {
+                            "current": scanned,
+                            "total": candidate_total_all,
+                            "financial_processed": raw_total_rows,
+                            "financial_matched": matched,
+                            "financial_percent": (
+                                matched / raw_total_rows * 100 if raw_total_rows else 0.0
+                            ),
                             "message": (
                                 f"目前篩選 {month_label}（{archive.name}，"
                                 f"{archive_index + 1}/{len(archive_paths)}）。"
-                            )
-                        }
+                            ),
+                        },
+                        "postgres": {
+                            "current": stored,
+                            "total": candidate_total_all,
+                        },
                     },
                 )
             archive_seen_jids: set[str] = set()
@@ -1597,7 +1609,7 @@ def import_judgments(
             publish_event(
                 "archive_started",
                 run_id=state_run_id or "",
-                month=month_label,
+                month=month_key,
                 archive=archive.name,
                 stage="filter",
                 status="running",
@@ -1610,9 +1622,21 @@ def import_judgments(
                 total=archive_candidates,
                 percent=0.0,
                 overall_percent=(
-                    round(scanned / candidate_total_all * 100, 1)
-                    if candidate_total_all
-                    else 0.0
+                    (
+                        100.0
+                        + 100.0
+                        + (
+                            scanned / candidate_total_all * 100
+                            if candidate_total_all
+                            else 0.0
+                        )
+                        + (
+                            stored / candidate_total_all * 100
+                            if candidate_total_all
+                            else 0.0
+                        )
+                    )
+                    / 4.0
                 ),
                 month_stages={
                     "filter": "processing",
@@ -1622,6 +1646,11 @@ def import_judgments(
                 extra={
                     "archive_index": archive_index + 1,
                     "archive_count": len(archive_paths),
+                    "financial_processed": raw_total_rows,
+                    "financial_matched": matched,
+                    "financial_percent": (
+                        matched / raw_total_rows * 100 if raw_total_rows else 0.0
+                    ),
                 },
             )
 
@@ -1647,8 +1676,7 @@ def import_judgments(
                     state_run_id,
                     message=(
                         f"目前篩選 {month_label}（{archive.name}）："
-                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選，"
-                        f"命中 {matched:,} 筆。"
+                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選。"
                     ),
                     meta={
                         "current_archive": archive.name,
@@ -1659,17 +1687,22 @@ def import_judgments(
                             "status": "running",
                             "current": scanned,
                             "total": candidate_total_all,
+                            "financial_processed": raw_total_rows,
+                            "financial_matched": matched,
+                            "financial_percent": (
+                                matched / raw_total_rows * 100 if raw_total_rows else 0.0
+                            ),
                             "duration_ms": int(filter_total_s * 1000),
                             "message": (
                                 f"目前篩選 {month_label}（{archive.name}）："
                                 f"已處理 {scanned:,}/"
-                                f"{candidate_total_all:,} 筆候選，"
-                                f"命中 {matched:,} 筆。"
+                                f"{candidate_total_all:,} 筆候選。"
                             ),
                         },
                         "postgres": {
                             "status": "running",
                             "current": stored,
+                            "total": candidate_total_all,
                             "duration_ms": int(db_total_s * 1000),
                             "message": (
                                 f"目前寫入 {month_label}（{archive.name}）："
@@ -1692,8 +1725,7 @@ def import_judgments(
                             "total": archive_candidates,
                             "message": (
                                 f"{month_label}：已處理 {archive_scanned:,}/"
-                                f"{archive_candidates:,} 筆候選，"
-                                f"命中 {archive_matched:,} 筆。"
+                                f"{archive_candidates:,} 筆候選。"
                             ),
                         },
                         "postgres": {
@@ -1712,31 +1744,42 @@ def import_judgments(
                     else 0.0
                 )
                 postgres_percent = (
-                    stored / matched * 100 if matched else 0.0
+                    stored / candidate_total_all * 100
+                    if candidate_total_all
+                    else 0.0
                 )
+                overall_percent = (
+                    100.0 + 100.0 + filter_percent + postgres_percent
+                ) / 4.0
                 publish_event(
                     "stage_progress",
                     run_id=state_run_id,
-                    month=month_label,
+                    month=month_key,
                     archive=archive.name,
                     stage="filter",
                     status="running",
                     message=(
                         f"目前篩選 {month_label}（{archive.name}）："
-                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選，"
-                        f"命中 {matched:,} 筆。"
+                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選。"
                     ),
                     current=scanned,
                     total=candidate_total_all,
                     percent=filter_percent,
-                    overall_percent=filter_percent,
+                    overall_percent=overall_percent,
                     month_stages={"filter": "processing"},
                     month_overall="processing",
+                    extra={
+                        "financial_processed": raw_total_rows,
+                        "financial_matched": matched,
+                        "financial_percent": (
+                            matched / raw_total_rows * 100 if raw_total_rows else 0.0
+                        ),
+                    },
                 )
                 publish_event(
                     "stage_progress",
                     run_id=state_run_id,
-                    month=month_label,
+                    month=month_key,
                     archive=archive.name,
                     stage="postgres",
                     status="running",
@@ -1745,9 +1788,9 @@ def import_judgments(
                         f"已寫入 {stored:,} 筆。"
                     ),
                     current=stored,
-                    total=matched or None,
+                    total=candidate_total_all,
                     percent=postgres_percent,
-                    overall_percent=filter_percent,
+                    overall_percent=overall_percent,
                     month_stages={"postgres": "processing"},
                     month_overall="processing",
                 )
@@ -1903,17 +1946,22 @@ def import_judgments(
                     "filter",
                     current=scanned,
                     total=candidate_total_all,
+                    financial_processed=raw_total_rows,
+                    financial_matched=matched,
+                    financial_percent=(
+                        matched / raw_total_rows * 100 if raw_total_rows else 0.0
+                    ),
                     duration_ms=int(filter_total_s * 1000),
                     message=(
                         f"目前篩選 {month_label}（{archive.name}）："
-                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選，"
-                        f"命中 {matched:,} 筆。"
+                        f"已處理 {scanned:,}/{candidate_total_all:,} 筆候選。"
                     ),
                 )
                 state.update_stage(
                     state_run_id,
                     "postgres",
                     current=stored,
+                    total=candidate_total_all,
                     duration_ms=int(db_total_s * 1000),
                     message=(
                         f"目前寫入 {month_label}（{archive.name}）："
@@ -1923,7 +1971,7 @@ def import_judgments(
             publish_event(
                 "archive_completed",
                 run_id=state_run_id or "",
-                month=month_label,
+                month=month_key,
                 archive=archive.name,
                 stage="postgres",
                 status="success",
@@ -1936,9 +1984,21 @@ def import_judgments(
                 total=archive_candidates,
                 percent=100.0,
                 overall_percent=(
-                    round(scanned / candidate_total_all * 100, 1)
-                    if candidate_total_all
-                    else 0.0
+                    (
+                        100.0
+                        + 100.0
+                        + (
+                            scanned / candidate_total_all * 100
+                            if candidate_total_all
+                            else 0.0
+                        )
+                        + (
+                            stored / candidate_total_all * 100
+                            if candidate_total_all
+                            else 0.0
+                        )
+                    )
+                    / 4.0
                 ),
                 month_stages={
                     "filter": "complete",
