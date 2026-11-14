@@ -24,6 +24,7 @@ from judgment.rag import (
     answer_question,
     extract_excerpt,
     generate_answer_with_model,
+    is_list_all_question,
 )
 from judgment.rerank import RerankOutcome, RerankResult
 from judgment.law_rag import (
@@ -388,6 +389,44 @@ def test_answer_question_returns_retrieval_only_without_llm(monkeypatch) -> None
     assert payload["judgments"][0]["jid"] == "TPDV,114,訴,1,20260101,1"
     assert payload["coverage"]["indexed_judgments"] == 0
     assert "LLM_URL" in payload["notice"]
+
+
+def test_is_list_all_question_detects_exhaustive_judgment_requests() -> None:
+    assert is_list_all_question("可以找出近5年所有違約交割的判決嗎?")
+    assert is_list_all_question("請列出全部返還借款案件")
+    assert is_list_all_question("list all judgments about loan repayment")
+    assert not is_list_all_question("違約交割有那些罰則?")
+    assert not is_list_all_question("原告如何請求返還借款?")
+
+
+def test_answer_question_suggests_database_for_all_results() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    settings = _settings(
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        rag_top_k=1,
+    )
+
+    class ThreeHitStore(MultiHitStore):
+        def search(self, collection, vector, *, limit=4, **kwargs):
+            return super().search(collection, vector, limit=3, **kwargs)
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="可以找出近5年所有返還借款的判決嗎？",
+        settings=settings,
+        store=ThreeHitStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+
+    assert payload["status"] == "retrieval_only"
+    assert len(payload["judgments"]) == 1
+    assert payload["retrieval"]["unique_judgments"] == 3
+    assert "資料庫查詢" in payload["notice"]
+    assert "全部" in payload["notice"]
+    assert "前 1 筆" in payload["notice"]
 
 
 def test_answer_question_reranks_candidates_and_traces_provider(

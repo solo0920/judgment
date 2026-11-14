@@ -50,6 +50,53 @@ _CASE_NO_RE = re.compile(r"\b[A-Z]{2,6},\d{2,3},[^,\s]+,\d+,\d{8},\d+\b")
 _CITATION_RE = re.compile(r"\[(\d{1,2}(?:\s*[,，、]\s*\d{1,2})*)\]")
 _CITATION_NUMBER_RE = re.compile(r"\d{1,2}")
 _INSUFFICIENT_RE = re.compile(r"(不足以回答|無法回答|沒有足夠|查無相關|未提及|無法判斷)")
+_LIST_ALL_TERMS_RE = re.compile(
+    r"(所有|全部|完整|逐一|逐筆|全數|不限|列出|列舉|清單|清冊)"
+)
+_LIST_CASE_SCOPE_RE = re.compile(r"(判決|案件|裁判|結果)")
+_LIST_ALL_EN_RE = re.compile(
+    r"\b(?:all|every|complete|full)\b.{0,24}\b(?:judg(?:ment|ments)?|cases?|results?)\b"
+    r"|\blist\s+all\b",
+    re.IGNORECASE,
+)
+
+
+def is_list_all_question(question: str) -> bool:
+    """Detect explicit requests for an exhaustive judgment/case list."""
+
+    text = str(question or "").strip()
+    if not text:
+        return False
+    if _LIST_ALL_EN_RE.search(text):
+        return True
+    return bool(
+        _LIST_ALL_TERMS_RE.search(text)
+        and _LIST_CASE_SCOPE_RE.search(text)
+    )
+
+
+def _list_query_notice(
+    question: str,
+    retrieval: Dict[str, Any],
+    shown_count: int,
+) -> str:
+    if not is_list_all_question(question):
+        return ""
+    unique = int(retrieval.get("unique_judgments") or 0)
+    shown = max(0, int(shown_count or 0))
+    if unique and shown and unique > shown:
+        scope = (
+            f"本次檢索共有 {unique:,} 筆候選判決，RAG 只保留前 {shown:,} 筆。"
+        )
+    elif shown:
+        scope = f"RAG 只保留語意最相關的前 {shown:,} 筆判決。"
+    else:
+        scope = "RAG 只會回傳語意最相關的少量判決。"
+    return (
+        f"此問題要求列出全部判決；{scope}"
+        "若要查詢全部符合條件的判決，請改用「資料庫查詢」頁面的判決分類，"
+        "以案由、關鍵字與裁判日期範圍篩選，並使用分頁或匯出 CSV／JSON。"
+    )
 
 
 def _elapsed_ms(started: float) -> int:
@@ -85,7 +132,10 @@ def _preview_fallback(
         limit=3,
     )
     payload["status"] = "preview"
-    payload["notice"] = notice
+    list_notice = _list_query_notice(question, retrieval, 0)
+    payload["notice"] = (
+        f"{notice} {list_notice}".strip() if list_notice else notice
+    )
     payload["retrieval"] = retrieval
     payload["coverage"] = coverage
     payload["judgments"] = []
@@ -1843,10 +1893,17 @@ def answer_question(
                 "問題中也沒有可直接對應的法規或命令。"
                 "請嘗試更具體的案件事實、法規名稱或爭點；系統不會在沒有來源時生成答案。"
             ),
-            "notice": (
-                f"索引涵蓋 {coverage['indexed_judgments']:,} / "
-                f"{coverage['total_judgments']:,} 筆判決，相似度門檻 "
-                f"{settings.rag_score_threshold}。"
+            "notice": " ".join(
+                part
+                for part in (
+                    (
+                        f"索引涵蓋 {coverage['indexed_judgments']:,} / "
+                        f"{coverage['total_judgments']:,} 筆判決，相似度門檻 "
+                        f"{settings.rag_score_threshold}。"
+                    ),
+                    _list_query_notice(question, retrieval, 0),
+                )
+                if part
             ),
             "citations": [],
             "judgments": [],
@@ -1976,6 +2033,9 @@ def answer_question(
 
     retrieval["law_hits"] = len(law_sources)
     retrieval["law_stats"] = law_stats or None
+    list_notice = _list_query_notice(question, retrieval, len(citations))
+    if list_notice:
+        notice = f"{notice} {list_notice}".strip() if notice else list_notice
     return {
         "status": status,
         "answer": answer,
