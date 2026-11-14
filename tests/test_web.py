@@ -518,6 +518,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-month-are-key" in processing_js.text
     assert "lawIndexTimelinesMarkup" in processing_js.text
     assert "law-index-timeline-card" in processing_js.text
+    assert "pending_count" in processing_js.text
+    assert "update_mechanism" in processing_js.text
+    assert "processing-run-strip" in processing_js.text
+    assert "中止執行" in processing_js.text
     performance_js = web_client.get("/assets/js/pages/performance.js")
     assert performance_js.status_code == 200
     assert "判決向量索引 Pipeline" in performance_js.text

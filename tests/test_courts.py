@@ -71,6 +71,41 @@ def test_normalize_court_uses_simple_court_and_jid_fallbacks() -> None:
     )
 
 
+def test_normalize_court_recognizes_historical_bodies_and_jid_aliases() -> None:
+    assert (
+        normalize_court("臺灣板橋地方法院行政訴訟")
+        == "臺灣板橋地方法院"
+    )
+    assert (
+        normalize_court("司法院冤獄賠償覆議委員會決定書九十四年度台覆字第二六七號")
+        == "司法院冤獄賠償覆議委員會"
+    )
+    assert (
+        normalize_court("司法院冤獄賠償法庭覆審決定書九十七年度台覆字第二０五號")
+        == "司法院冤獄賠償法庭"
+    )
+    assert (
+        normalize_court("司法院刑事補償法庭覆審決定書109年度台覆字第27號")
+        == "司法院刑事補償法庭"
+    )
+    assert (
+        normalize_court("", "", jid="PTEM,90,屏簡,240,20010629")
+        == "臺灣屏東地方法院"
+    )
+    assert (
+        normalize_court("", "", jid="ILDA,105,續收,1834,20160831,1")
+        == "臺灣宜蘭地方法院"
+    )
+    assert (
+        normalize_court("", "", jid="ULDA,107,續收,223,20180509,1")
+        == "臺灣雲林地方法院"
+    )
+    assert (
+        normalize_court("", "", jid="TPCM,94,台覆,267,20050927")
+        == "司法院刑事補償法庭"
+    )
+
+
 def test_normalize_court_returns_empty_for_unknown() -> None:
     assert normalize_court("") == ""
     assert normalize_court("本院公開宣示", "本院公開宣示") == ""

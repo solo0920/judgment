@@ -663,8 +663,8 @@ function processingStageCountBadges(stage) {
   const badges = [];
   if (updateCount > 0) {
     badges.push(`<span class="processing-wf-count is-update" title="${escapeHtml(
-      `${formatNumber(updateCount)} 項線上更新`,
-    )}">${icon("download", 11)}<strong>${formatNumber(updateCount)}</strong></span>`);
+      `${formatNumber(updateCount)} 項可更新內容`,
+    )}">${icon("refresh", 11)}<strong>${formatNumber(updateCount)}</strong></span>`);
   }
   if (pendingCount > 0 && (!updateCount || pendingCount !== updateCount)) {
     badges.push(`<span class="processing-wf-count is-pending" title="${escapeHtml(
@@ -1026,7 +1026,7 @@ function processingStageDetailsMarkup(stage) {
       updateItems.length
         ? `<div class="processing-wf-work-group">
             <div class="processing-wf-work-head">
-              <span class="processing-wf-work-kicker">${icon("download", 12)}可更新內容</span>
+              <span class="processing-wf-work-kicker">${icon("refresh", 12)}可更新內容</span>
               <span class="badge badge-warn">${formatNumber(
                 Number(stage.update?.count) || updateItems.length,
               )}</span>
@@ -1288,9 +1288,9 @@ function processingSectionMarkup(section, expandedStages) {
                 data-processing-action="open-stage"
                 data-stage-id="${escapeHtml(stageId(updateStage))}"
                 title="展開可更新內容">${icon(
-                  "download",
+                  "refresh",
                   13,
-                )}<strong>${formatNumber(updateCount)}</strong><span>線上更新</span></button>`
+                )}<strong>${formatNumber(updateCount)}</strong><span>可更新</span></button>`
             : ""
         }
         ${
@@ -1311,7 +1311,7 @@ function processingSectionMarkup(section, expandedStages) {
     <div class="report-section processing-wf-body">
       ${processingVersionsMarkup(section)}
       <div class="processing-wf-legend">
-        <span class="processing-wf-legend-item">${icon("download", 12)}線上更新</span>
+        <span class="processing-wf-legend-item">${icon("refresh", 12)}可更新</span>
         <span class="processing-wf-legend-item">${icon("clock", 12)}待執行工作</span>
         ${sources
           .map(
@@ -2284,6 +2284,22 @@ function workflowNavMarkup(snapshot, activeWorkflowId) {
           const divider = dividerBefore.has(item.id)
             ? '<div class="status-tab-divider" role="separator" aria-hidden="true"></div>'
             : "";
+          const pendingCount = Number(item.pending_count) || 0;
+          const updateCount =
+            Number(item.update_count) ||
+            (item.update_available ? pendingCount : 0);
+          const showUpdateCount =
+            item.update_available && updateCount > 0 && !item.activeRun;
+          const updateTitle = [
+            item.update_message ||
+              `${item.update_origin || "更新偵測"}找到 ${formatNumber(
+                updateCount,
+              )} 項可更新內容`,
+            item.update_origin ? `來源：${item.update_origin}` : "",
+            item.update_mechanism ? `機制：${item.update_mechanism}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
           return `${divider}<button class="status-tab${active ? " is-active" : ""}" type="button"
             data-processing-workflow="${escapeHtml(item.id)}"
             ${active ? 'aria-current="page"' : ""}>
@@ -2292,7 +2308,15 @@ function workflowNavMarkup(snapshot, activeWorkflowId) {
               <strong>${escapeHtml(item.label)}</strong>
               <small>${escapeHtml(item.description || "")}</small>
             </span>
-            ${statusBadge(item.status)}
+            ${
+              showUpdateCount
+                ? `<span class="badge badge-warn badge-mono processing-update-count" title="${escapeHtml(
+                    updateTitle,
+                  )}">${icon("refresh", 10)}${formatNumber(
+                    updateCount,
+                  )}</span>`
+                : statusBadge(item.status)
+            }
           </button>`;
         })
         .join("")}
@@ -2964,11 +2988,6 @@ function indexWorkflowProgressMarkup(workflow) {
 }
 
 function workflowProgressMarkup(workflow) {
-  if (pendingWorkflowId === workflow.id) {
-    // Starting a new run: hide the previous run's progress card immediately
-    // instead of showing stale results until the backend snapshot arrives.
-    return "";
-  }
   if (workflow.id === "index_versions") {
     return indexWorkflowProgressMarkup(workflow);
   }
@@ -3856,7 +3875,11 @@ function courtCheckMarkup(context = {}) {
       <div class="processing-workflow-empty">目前沒有可檢查的判決資料。</div>
     </section>`;
   }
-  const labels = { green: "已檢查", red: "未檢查", gray: "需正規化" };
+  const labels = {
+    green: "已檢查",
+    red: "需正規化（完全未檢查）",
+    gray: "需正規化",
+  };
   const byKey = new Map(months.map((item) => [String(item.month), item]));
   const years = [...new Set(months.map((item) => item.year))].sort(
     (left, right) => right - left,
@@ -3882,9 +3905,9 @@ function courtCheckMarkup(context = {}) {
         ]
           .filter(Boolean)
           .join(" · ");
-        return `<td class="judgment-month court-check-month is-${status}" title="${escapeHtml(
-          title,
-        )}"><span>${monthNo}</span></td>`;
+        return `<td class="judgment-month court-check-month is-${
+          status === "gray" ? "red" : status
+        }" title="${escapeHtml(title)}"><span>${monthNo}</span></td>`;
       }).join("");
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
@@ -3899,11 +3922,8 @@ function courtCheckMarkup(context = {}) {
         <span class="badge badge-ok">已檢查 ${formatNumber(
           summary.green || 0,
         )}</span>
-        <span class="badge badge-danger">未檢查 ${formatNumber(
-          summary.red || 0,
-        )}</span>
-        <span class="badge badge-neutral">需正規化 ${formatNumber(
-          summary.gray || 0,
+        <span class="badge badge-danger">需正規化 ${formatNumber(
+          (summary.red || 0) + (summary.gray || 0),
         )}</span>
         <span class="muted">共 ${formatNumber(months.length)} 個月</span>
       </div>
@@ -3933,7 +3953,7 @@ function courtCheckMarkup(context = {}) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">綠色：全部已正規化；紅色：完全未檢查；灰色：部分未正規化或有無效值；空白：沒有該月份資料。滑鼠移到月份可查看筆數與有效比例。</p>
+      <p class="judgment-months-hint">綠色：全部已正規化；紅色：需正規化（含完全未檢查、部分未正規化或無效值）；空白：沒有該月份資料。summary 的紅色數字為需正規化月份數；下方明細仍保留未檢查與無效值筆數。滑鼠移到月份可查看詳細筆數與有效比例。</p>
       <div class="index-runtime-foot">檢查時間 ${escapeHtml(
         formatDateTime(data.checked_at),
       )} · 標準法院名稱 ${formatNumber(data.canonical_count)} 個</div>
@@ -4272,43 +4292,47 @@ function ollamaPriorityMarkup(hostsData, loading, error) {
 function workflowPanelMarkup(workflow, workflowContext = {}) {
   const activeRun = workflow.active_run || null;
   const lastRun = activeRun || workflow.last_run || null;
-  const busy = Boolean(activeRun) || pendingWorkflowId === workflow.id;
+  const starting = pendingWorkflowId === workflow.id;
+  const busy = Boolean(activeRun) || starting;
   const canRun = Boolean(workflow.can_run) && !busy;
+  const disabledReason = busy
+    ? "此流程正在執行中。"
+    : workflow.start_blocked_reason ||
+      "目前有其他處理程序執行中，請稍後再試。";
   const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
-  return `<div class="processing-workflow-panel">
-    ${notice({
-      tone: "info",
-      title: workflow.label,
-      text: workflow.description || "",
-    })}
-    ${
-      workflow.update_available
-        ? `<div class="processing-update-notice" role="status">
-            ${icon("refresh", 13)}
-            <span>${escapeHtml(
-              (workflow.update_status && workflow.update_status.message) ||
-                "線上偵測到新版",
-            )}</span>
-            <span class="badge badge-warn">更新</span>
-          </div>`
-        : ""
-    }
-    ${
-      workflow.id === "legal_index_versions"
-        ? lawIndexTimelinesMarkup(workflow.index_timelines)
-        : ""
-    }
-    ${
-      workflow.id === "normalize_courts"
-        ? courtCheckMarkup(workflowContext)
-        : ""
-    }
-    ${
-      workflow.id === "backfill_law_articles"
-        ? lawVersionCheckMarkup(workflowContext)
-        : ""
-    }
-    <section class="report-card processing-card">
+  const updateCount =
+    Number(workflow.update_count) ||
+    (workflow.update_available ? Number(workflow.pending_count) || 0 : 0);
+  const updateOrigin = workflow.update_origin || "更新偵測";
+  const updateMechanism =
+    workflow.update_mechanism || "既有更新檢查紀錄";
+  const updateMessage =
+    workflow.update_message ||
+    (workflow.update_status && workflow.update_status.message) ||
+    "找到可更新內容。";
+  const updateCheckedAt =
+    workflow.update_status && workflow.update_status.checked_at
+      ? formatDateTime(workflow.update_status.checked_at)
+      : "";
+  const progress = workflow.progress || {};
+  const progressStages = Array.isArray(progress.stages)
+    ? progress.stages
+    : [];
+  const activeStageKey = String(progress.active_stage || "");
+  const activeStage = progressStages.find(
+    (stage) => String(stage.key || "") === activeStageKey,
+  );
+  const currentMonth =
+    (workflow.index_runtime && workflow.index_runtime.current
+      ? workflow.index_runtime.current.month
+      : "") || "";
+  const currentLabel = currentMonth
+    ? indexMonthLabel(currentMonth)
+    : activeStage
+      ? activeStage.label || activeStage.key || ""
+      : "";
+  const runStatusLabel = starting && !activeRun ? "啟動中" : "執行中";
+  const executionInfo = `<section class="report-card processing-card">
       <div class="side-card-head">
         <span class="side-card-title">${icon(WORKFLOW_ICONS[workflow.id] || "terminal", 14)}執行資訊</span>
         <span class="badge badge-neutral badge-mono">${escapeHtml(workflow.branch || "")}</span>
@@ -4327,8 +4351,9 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
         <button class="btn btn-primary btn-sm" type="button"
           data-processing-action="run-workflow"
           data-workflow-id="${escapeHtml(workflow.id)}"
-          ${canRun ? "" : "disabled"}>
-          ${icon("play", 14)}<span>${busy ? "執行中" : "執行此流程"}</span>
+          ${canRun ? "" : "disabled"}
+          ${canRun ? "" : `title="${escapeHtml(disabledReason)}"`}>
+          ${busy ? '<span class="spinner" aria-hidden="true"></span>' : icon("play", 14)}<span>${busy ? runStatusLabel : "執行此流程"}</span>
         </button>
         ${
           ["law_download", "order_download", "judgment_download"].includes(
@@ -4336,15 +4361,16 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
           )
             ? `<button class="btn btn-secondary btn-sm" type="button"
                 data-processing-action="check-updates"
-                data-workflow-id="${escapeHtml(workflow.id)}">
+                data-workflow-id="${escapeHtml(workflow.id)}"
+                ${busy ? "disabled" : ""}>
                 ${icon("refresh", 14)}<span>檢查更新</span>
               </button>`
             : ""
         }
         ${
-          activeRun
+          busy
             ? `<button class="btn btn-secondary btn-sm processing-stop" type="button"
-                data-processing-action="stop">${icon("x", 14)}<span>停止</span></button>`
+                data-processing-action="stop">${icon("x", 14)}<span>中止執行</span></button>`
             : ""
         }
         ${
@@ -4367,10 +4393,91 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
             : ""
         }
       </div>
+      ${
+        busy
+          ? `<div class="processing-run-strip" data-processing-run-strip role="status">
+              <span class="badge badge-info">${icon(
+                "activity",
+                11,
+              )}${runStatusLabel}</span>
+              ${
+                activeRun && activeRun.id
+                  ? `<span class="mono">${escapeHtml(activeRun.id)}</span>`
+                  : ""
+              }
+              ${
+                activeRun && activeRun.started_at
+                  ? `<span>開始 ${escapeHtml(
+                      formatDateTime(activeRun.started_at),
+                    )}</span>`
+                  : ""
+              }
+              ${
+                currentLabel
+                  ? `<span>目前處理 <strong class="mono">${escapeHtml(
+                      currentLabel,
+                    )}</strong></span>`
+                  : ""
+              }
+            </div>`
+          : ""
+      }
       <div class="side-card-foot">
         執行結果會寫入共用處理狀態檔，可從處理總覽查看。
       </div>
-    </section>
+    </section>`;
+  return `<div class="processing-workflow-panel">
+    ${notice({
+      tone: "info",
+      title: workflow.label,
+      text: workflow.description || "",
+    })}
+    ${
+      workflow.update_available
+        ? `<div class="processing-update-notice" role="status">
+            <span class="processing-update-notice-icon">${icon(
+              "refresh",
+              14,
+            )}</span>
+            <span class="processing-update-notice-copy">
+              <strong>${escapeHtml(
+                updateOrigin,
+              )}偵測到可更新內容</strong>
+              <span class="processing-update-mechanism">偵測機制：${escapeHtml(
+                updateMechanism,
+              )}${updateCheckedAt ? ` · 檢查時間 ${escapeHtml(updateCheckedAt)}` : ""}</span>
+              <span class="processing-update-message">${escapeHtml(
+                updateMessage,
+              )}</span>
+            </span>
+            ${
+              updateCount > 0
+                ? `<span class="badge badge-warn badge-mono">${icon(
+                    "refresh",
+                    10,
+                  )}${formatNumber(updateCount)}</span>`
+                : '<span class="badge badge-warn">可更新</span>'
+            }
+          </div>`
+        : ""
+    }
+    ${
+      workflow.id === "legal_index_versions"
+        ? lawIndexTimelinesMarkup(workflow.index_timelines)
+        : ""
+    }
+    ${workflow.id === "normalize_courts" ? executionInfo : ""}
+    ${
+      workflow.id === "normalize_courts"
+        ? courtCheckMarkup(workflowContext)
+        : ""
+    }
+    ${
+      workflow.id === "backfill_law_articles"
+        ? lawVersionCheckMarkup(workflowContext)
+        : ""
+    }
+    ${workflow.id !== "normalize_courts" ? executionInfo : ""}
     ${workflowProgressMarkup(workflow)}
     ${
       workflow.id === "judgment_parquet" ? judgmentParquetHelpMarkup() : ""
@@ -5394,6 +5501,9 @@ export async function render(root) {
       }
     } finally {
       indexStorageLoading = false;
+      if (activeWorkflowId === "index_versions") {
+        repaintFromSnapshot();
+      }
     }
   };
 
@@ -5422,6 +5532,9 @@ export async function render(root) {
       }
     } finally {
       courtCheckLoading = false;
+      if (activeWorkflowId === "normalize_courts") {
+        repaintFromSnapshot();
+      }
     }
   };
 
@@ -5546,9 +5659,9 @@ export async function render(root) {
             ${
               updateCount
                 ? `<span class="processing-wf-count is-update">${icon(
-                    "download",
+                    "refresh",
                     11,
-                  )}<strong>${formatNumber(updateCount)}</strong><span>線上更新</span></span>`
+                  )}<strong>${formatNumber(updateCount)}</strong><span>可更新</span></span>`
                 : ""
             }
             ${
@@ -6227,11 +6340,10 @@ export async function render(root) {
     // also keeps repainted panels disabled while the start request is in
     // flight.
     setBusy(button, true, "執行中");
-    // Drop the previous run's progress card now; the new run's card is
-    // rendered from the next authoritative SSE snapshot.
-    content
-      .querySelectorAll("[data-workflow-progress]")
-      .forEach((card) => card.remove());
+    // Keep the current progress table visible while the new run starts.  The
+    // authoritative SSE snapshot will replace it once the backend reports the
+    // new run; removing it here made the table flash out of existence.
+    repaintFromSnapshot();
     const stageId = button.dataset.stageId || "";
     let started = false;
     try {
@@ -6256,11 +6368,26 @@ export async function render(root) {
         throw error;
       }
       started = true;
-      toast("已啟動升級工作流程。", "ok", 6000);
+      toast(
+        `已啟動「${currentWorkflow?.label || workflowId}」流程。`,
+        "ok",
+        6000,
+      );
       if (result && result.run_id) {
         console.info("processing workflow started", result);
       }
       window.dispatchEvent(new CustomEvent("judgment:updates-changed"));
+      // Ask for an authoritative snapshot immediately instead of waiting for
+      // the next SSE tick.  This is what transitions the panel from「啟動中」
+      // to the real run with its stop button and progress table.
+      void refresh({ silent: true });
+      window.setTimeout(() => {
+        if (pendingWorkflowId === workflowId) {
+          pendingWorkflowId = "";
+          pendingWorkflowBaselineRunId = "";
+          void refresh({ silent: true });
+        }
+      }, 15000);
     } catch (error) {
       toast(error.message || "無法啟動工作流程。", "danger", 7000);
     } finally {

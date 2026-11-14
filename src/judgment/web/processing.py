@@ -930,6 +930,7 @@ def _database_metrics(session_factory) -> Dict[str, Any]:
         "status": "unavailable",
         "error": "",
         "judgment_count": None,
+        "court_pending_count": None,
         "law_count": None,
         "order_count": None,
         "law_article_count": None,
@@ -948,6 +949,17 @@ def _database_metrics(session_factory) -> Dict[str, Any]:
                     select(func.count())
                     .select_from(JudgmentDocument)
                     .where(JudgmentDocument.is_current.is_(True))
+                )
+                or 0
+            )
+            result["court_pending_count"] = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(JudgmentDocument)
+                    .where(
+                        JudgmentDocument.is_current.is_(True),
+                        JudgmentDocument.court_normalized == "",
+                    )
                 )
                 or 0
             )
@@ -4473,6 +4485,64 @@ def build_processing_snapshot(
                     index_runtime["active_coverage"] = _coverage_month_map(
                         coverage
                     )
+        court_pending = (
+            int(database.get("court_pending_count") or 0)
+            if definition["id"] == "normalize_courts"
+            else None
+        )
+        workflow_update_available = bool(
+            update_record.get("update_available")
+        )
+        update_count = 0
+        update_origin = ""
+        update_mechanism = ""
+        update_message = ""
+        download_source = {
+            "law_download": "law",
+            "order_download": "order",
+            "judgment_download": "judgment",
+        }.get(definition["id"], "")
+        if download_source and workflow_update_available:
+            update_count = 1
+            if download_source == "judgment":
+                pending = _safe_int(
+                    (update_record.get("details") or {}).get(
+                        "pending_count"
+                    )
+                )
+                if pending:
+                    update_count = pending
+            update_origin = "線上來源"
+            update_mechanism = (
+                "司法院 resources 月份／fileset 與本機 raw_rar／下載 manifest 比對"
+                if download_source == "judgment"
+                else "線上 ZIP 的 Content-Length／Last-Modified／ETag 與本機版本 ZIP 大小比對"
+            )
+            update_message = str(update_record.get("message") or "")
+        if court_pending:
+            workflow_update_available = True
+            update_count = court_pending
+            update_origin = "PostgreSQL／本機"
+            update_mechanism = (
+                "judgment_documents 中 is_current = true 且 "
+                "court_normalized 為空的筆數"
+            )
+            update_message = (
+                f"偵測到 {court_pending:,} 筆判決需要法院名稱正規化。"
+            )
+        active_run_label = ""
+        if active_runs:
+            active_run = active_runs[0]
+            active_run_label = (
+                f"目前有處理程序執行中（run {active_run.get('id')}，"
+                f"PID {active_run.get('pid')}），請等待結束或先中止。"
+            )
+        elif external_processes:
+            process = external_processes[0]
+            active_run_label = (
+                f"外部{process.get('title') or '處理程序'}正在執行中"
+                f"（PID {process.get('pid')}），請等待結束後再啟動。"
+            )
         workflow_entries.append(
             {
                 **definition,
@@ -4497,9 +4567,13 @@ def build_processing_snapshot(
                     else None
                 ),
                 "can_run": bool(workflow_runnable),
-                "update_available": bool(
-                    update_record.get("update_available")
-                ),
+                "start_blocked_reason": active_run_label,
+                "pending_count": court_pending,
+                "update_available": workflow_update_available,
+                "update_count": update_count,
+                "update_origin": update_origin,
+                "update_mechanism": update_mechanism,
+                "update_message": update_message,
                 "update_status": deepcopy(update_record),
                 "update_history": update_history_map.get(update_source, []),
             }
@@ -4561,6 +4635,7 @@ def build_processing_snapshot(
             "status": database.get("status"),
             "error": database.get("error"),
             "judgment_count": database.get("judgment_count"),
+            "court_pending_count": database.get("court_pending_count"),
             "law_count": database.get("law_count"),
             "order_count": database.get("order_count"),
             "law_article_count": database.get("law_article_count"),

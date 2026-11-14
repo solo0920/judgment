@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -392,6 +392,14 @@ def test_processing_sections_report_remote_updates_and_actions(
     ]
     assert download["recheck"]["kind"] == "check_updates"
     assert download["recheck"]["source_types"] == ["law", "order"]
+
+    workflows = {item["id"]: item for item in snapshot["workflows"]}
+    law_workflow = workflows["law_download"]
+    assert law_workflow["update_available"] is True
+    assert law_workflow["update_count"] == 1
+    assert law_workflow["update_origin"] == "線上來源"
+    assert "Content-Length" in law_workflow["update_mechanism"]
+    assert law_workflow["update_message"] == "法規遠端 ZIP 大小變更"
 
 
 def test_embedding_runtime_reports_host_and_full_model_tag(
@@ -1237,6 +1245,39 @@ def test_snapshot_reports_raw_parquet_backups(
     raw_stage = next(stage for stage in judgment["stages"] if stage["key"] == "raw_parquet")
     assert {"label": "磁碟備份", "value": "1 檔"} in raw_stage["stats"]
     assert {"label": "最新備份", "value": "123 筆"} in raw_stage["stats"]
+
+
+def test_snapshot_exposes_court_normalization_pending_count(
+    tmp_path: Path, monkeypatch, session_factory
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    settings = _settings(tmp_path)
+    _add_judgment(session_factory, source_archive="202601.rar")
+    with session_factory() as session:
+        session.execute(
+            update(JudgmentDocument).values(court_normalized="")
+        )
+        session.commit()
+
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+    workflow = next(
+        item
+        for item in snapshot["workflows"]
+        if item["id"] == "normalize_courts"
+    )
+
+    assert snapshot["database"]["court_pending_count"] == 1
+    assert workflow["pending_count"] == 1
+    assert workflow["update_available"] is True
+    assert workflow["update_count"] == 1
+    assert workflow["update_origin"] == "PostgreSQL／本機"
+    assert "court_normalized" in workflow["update_mechanism"]
+    assert workflow["update_message"] == "偵測到 1 筆判決需要法院名稱正規化。"
 
 
 def test_snapshot_reports_duckdb_candidate_count(
