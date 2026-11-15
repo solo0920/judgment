@@ -500,6 +500,14 @@ def test_static_console_is_served(web_client) -> None:
     assert "home-ask-form" in home_js.text
     assert "home-judgment-stats" in home_js.text
     assert "judgmentStatsCardsMarkup" in home_js.text
+    assert "homeSummary" in home_js.text
+    assert "home-live-card" in home_js.text
+    assert "home-rag-values" in home_js.text
+    assert "home-laws-grid" in home_js.text
+    assert "home-waterfall-slot" in home_js.text
+    assert "subscribeRefresh" in home_js.text
+    assert "HOME_REFRESH_MIN_INTERVAL" in home_js.text
+    assert "scheduleLiveRefresh" in home_js.text
     stats_js = web_client.get("/assets/js/judgment-stats.js")
     assert stats_js.status_code == 200
     assert "判決總件數" in stats_js.text
@@ -633,6 +641,12 @@ def test_static_console_is_served(web_client) -> None:
     assert ".processing-month-stage.is-raw_parquet" in css.text
     assert ".processing-month-stage.is-filter" in css.text
     assert ".processing-timeline-swatch.is-raw-parquet" in css.text
+    assert ".home-hero" in css.text
+    assert ".home-rag-flow" in css.text
+    assert ".home-laws-grid" in css.text
+    assert "repeat(var(--home-law-columns, 11)" in css.text
+    assert ".home-wf-card" in css.text
+    assert ".home-wf-slow" in css.text
     assert ".status-wf-card" in css.text
     assert ".status-wf-stage.is-error" in css.text
     assert ".workflow-wf-legend i.is-failed-state" in css.text
@@ -1156,6 +1170,63 @@ def test_judgment_stats_returns_total_financial_and_ratio(web_client) -> None:
     assert payload["financial_ratio"] == 100.0
     assert payload["available"] is True
     assert payload["error"] == ""
+
+
+def test_home_summary_returns_live_metrics_and_pipeline(web_client) -> None:
+    response = web_client.get("/api/home")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["status"] == "operational"
+    data = payload["data"]
+    assert data["laws"]["law_count"] == 2
+    assert data["laws"]["order_count"] == 1
+    assert data["laws"]["article_count"] == 5
+    assert data["laws"]["version_count"] == 1
+    assert data["laws"]["run_count"] == 1
+
+    judgments = data["judgments"]
+    assert judgments["financial_total"] == 2
+    assert judgments["raw_total"] == 2
+    assert judgments["financial_ratio"] == 100.0
+    assert judgments["date_min"] == "20260110"
+    assert judgments["date_max"] == "20260112"
+    assert judgments["year_min"] == 2026
+    assert judgments["year_max"] == 2026
+    assert judgments["year_span"] == 1
+
+    index = data["rag"]["judgment_index"]
+    assert index["indexed"] == 0
+    assert index["total"] == 2
+    assert index["coverage_pct"] == 0.0
+    assert index["alias"] == "judgments_current"
+    assert data["rag"]["legal_index"]["current_article_count"] == 5
+    assert data["rag"]["models"]["embedding"]
+
+    laws = data["financial_laws"]
+    assert laws["count"] == 99
+    assert laws["laws"][0] == "民法"
+    assert laws["source_path"] == "documents/金融法規.md"
+    assert laws["source_sha256"]
+    assert laws["content"].startswith("民法\n")
+
+    assert data["sources"]["opendata"]["url"] == "https://opendata.judicial.gov.tw/"
+    assert data["sources"]["laws"]["url"] == "https://law.moj.gov.tw/"
+
+    pipeline = payload["pipeline"]
+    assert pipeline["label"] == "首頁即時摘要載入"
+    assert pipeline["total_ms"] >= 0
+    stage_keys = [stage["key"] for stage in pipeline["stages"]]
+    for key in (
+        "laws",
+        "judgments",
+        "raw",
+        "judgment_index",
+        "legal_index",
+        "financial_laws",
+    ):
+        assert key in stage_keys
+    assert all(stage["duration_ms"] >= 0 for stage in pipeline["stages"])
 
 
 def test_performance_middleware_records_api_calls(web_client) -> None:

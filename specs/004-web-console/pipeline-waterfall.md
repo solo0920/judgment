@@ -2,13 +2,13 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.2
+**Version**: 1.3
 
-**Last Updated**: 2026-11-15
+**Last Updated**: 2026-11-16
 
-**Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline，以及未來新增的任何 pipeline waterfall。
+**Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline、`#/home` 的即時摘要載入 Pipeline，以及未來新增的任何 pipeline waterfall。
 
-**Related Requirements**: FR-119、FR-120、FR-121、FR-147、FR-155、FR-162、SC-075、SC-084、SC-085
+**Related Requirements**: FR-119、FR-120、FR-121、FR-147、FR-155、FR-162、FR-166、FR-167、FR-168、SC-075、SC-084、SC-085、SC-090
 
 **Parent Specification**: [`spec.md`](spec.md)
 
@@ -37,6 +37,8 @@
 - RAG 查詢的 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 流程。
 - 判決向量索引的 Ollama 測試／Blue-Green 版本／向量複製／金融判決索引／驗證／alias 切換流程。
 - 效能報表的 Flow 紀錄與測試 Flow。
+- `#/status` 的服務總覽載入 Pipeline。
+- `#/home` 的即時摘要載入 Pipeline：`/api/home` 的法規／命令統計、金融判決統計、原始 manifest、判決索引、法規索引、金融法規清單與回應彙整。
 - 任何以 waterfall 形式呈現且具有開始時間、結束時間、耗時或進度的 pipeline／workflow 視圖。
 
 ### 2.2 不適用
@@ -430,6 +432,10 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
   - `build_status()` 的 `pipeline`：服務總覽載入的後端檢查階段與耗時。
 - `src/judgment/web/static/assets/js/pages/status.js`
   - `statusPipelineMarkup(status)`：服務總覽載入 Pipeline；使用 `STATUS_WF_OPEN_STAGES` 保存展開狀態。
+- `src/judgment/web/static/assets/js/pages/home.js`
+  - `waterfallMarkup(data, options)`：首頁即時摘要載入 Pipeline；使用 `HOME_WF_OPEN_STAGES` 保存展開狀態，並以 `home-wf-slow` 標示最慢階段。
+- `src/judgment/web/home.py`
+  - `build_home_summary()` 的 `pipeline`：`/api/home` 的法規／命令、判決、manifest、判決索引、法規索引、金融法規清單與彙整階段計時。
 - `src/judgment/web/static/assets/styles.css`
   - `.rag-wf-axis`、`.rag-wf-stages`、`.rag-wf-stage`、`.rag-wf-track`、`.rag-wf-bar`。
   - `.index-wf-*` 只保留索引 Pipeline 的包裝與階段編號。
@@ -510,6 +516,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.3 | 2026-11-16 | 將 `#/home` 即時摘要載入 Pipeline 納入適用範圍；新增 `/api/home` 階段計時、`home-wf-slow` 最慢階段標示與 `HOME_WF_OPEN_STAGES` 參考實作。 |
 | 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
 | 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |
 | 1.0 | 2026-11-15 | 建立 canonical Pipeline Waterfall 規格；納入接續階段、最小可見寬度、部分完成空心 bar、展開狀態保存、響應式與驗收清單。 |

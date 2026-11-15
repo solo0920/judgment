@@ -4,15 +4,50 @@
 
 **Created**: 2026-11-06
 
-**Status**: Implemented (MVP, standalone deployment, law/judgment detail, performance Flow report, test-mode multi-model runs, live test flowchart, processing workflows and live download progress, law/judgment data categories, judgment court normalization, versioned judgment vector index/RAG with law/order sources, RRF law/order hybrid retrieval and grouped rerank, Ollama boot preload and llama-server reranker deployment baseline, settings sidebar with persisted font sizing, Phase 4 data lifecycle automation and RAG regression gates, question bank and benchmark management, Ollama host management, judgment raw-Parquet full-text link, NVIDIA default theme)
+**Last Updated**: 2026-11-16
+
+**Status**: Implemented · code-aligned 2026-11-16. 本規格以目前程式為唯一事實來源，涵蓋 `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 八個路由；首頁即時摘要（`/api/home`）、99 條金融法規 11 欄清單、首頁 Pipeline waterfall、服務總覽載入 Pipeline、前後端架構與 SVG 流程圖、資料版本（PostgreSQL／IndexedDB／Qdrant／Parquet）、FastAPI route table 動態 API 端點目錄、判決匯入 waterfall、Qdrant A／R／E 索引月份、RAG／reranker、題庫與 benchmark、SSE 即時更新、standalone `file://` 部署與設定 sidebar 均已納入。
 
 **Pipeline Waterfall 規格**: [`pipeline-waterfall.md`](pipeline-waterfall.md)（全站所有以時間軸呈現 pipeline 的視圖 MUST 依此建置）
+
+**Source of Truth**: 目前程式碼（`src/judgment/web/`、`src/judgment/web/static/assets/js/`、`src/judgment/*.py` 與 `scripts/`）為唯一事實來源。若本文件與程式行為不一致，以程式為準，並 MUST 在同一次變更同步更新本規格，不得保留未實作的 MUST 或已移除的 UI／API。
 
 **Input**: 使用者提供之需求（原文摘要）：
 
 > 首頁右上角要有 Style 選擇器，提供十種科技網站設計，參考 https://getdesign.md/。Header 以橫向排列三個頁面：RAG 問答、資料庫資料檢視、前後端架構與服務狀態。資料庫頁左側以單選控制（目前為下拉選單）選擇資料庫，metadata 篩選條件依資料庫改變；按下搜尋後在右側顯示查詢報表。前端必須使用 vanilla JS，不得捏造 RAG 答案或無法取得的服務資料。
 
 **需求解讀**: 建立一個由 FastAPI 提供 API 與靜態資源的單頁 Web 主控台，讓使用者能在同一個介面完成判決向量檢索與 RAG 問答、資料庫瀏覽與系統狀態檢查。所有顯示的資料都必須可追溯到 PostgreSQL、Qdrant、Parquet、Ollama 或瀏覽器本機儲存；尚未設定的向量索引、RAG 管線與 LLM 必須明確標示為未設定，且不得生成沒有來源的答案。
+
+### Implementation Map（程式事實來源）
+
+本節列出目前程式實際提供的路由、頁面與核心模組；後續需求若與程式衝突，以程式為準並更新本規格。
+
+| 路由／介面 | 前端模組 | 後端／資料來源 |
+| --- | --- | --- |
+| `#/home` | `pages/home.js`、`judgment-stats.js` | `/api/home`、`/api/events/stream?topic=processing`；PostgreSQL、Qdrant、原始判決 manifest、`documents/金融法規.md` |
+| `#/rag` | `pages/rag.js`、`pages/performance.js`（waterfall） | `/api/rag/query`、`/api/rag/query/stream`、`/api/status`、`judgment.rag` |
+| `#/data` | `pages/data.js`、`store.js` | `/api/query`、`/api/law`、`/api/judgment`、`/api/data/suggest`、`/api/schema/suggest`、`/api/catalog` |
+| `#/quality` | `pages/quality.js`、`pages/question_bank.js` | `/api/quality`、`/api/question-bank/*` |
+| `#/performance` | `pages/performance.js`、`pages/benchmark_page.js` | `/api/performance`、`/api/performance/options`、`/api/benchmark/*`、`/api/test-runs/*` |
+| `#/processing` | `pages/processing.js` | `/api/processing*`、`/api/processing/events/status`、`/api/updates/*`、`/api/courts/check`、`/api/law-versions/check` |
+| `#/status` | `pages/status.js`、`pages/tests.js`（系統測試分類） | `/api/status`、`/api/system-usage`、`/api/ollama/hosts`、`/api/index-versions`、`/api/versioning/*`、`/api/rerank/*` |
+| `#/tests` | `pages/tests.js` | `/api/test-mode`、`/api/llm/models`、`/api/rerank/status`、`/api/rerank/test` |
+| 全站 API 目錄 | `pages/status.js` | `/api/status.endpoints`（由 FastAPI `APIRoute` route table 產生） |
+| 即時更新 | `api.js`、各頁 SSE 訂閱 | `/api/events/stream`、`ProcessingEventServer`、SQLite event journal |
+| 本機儲存 | `store.js` | IndexedDB `judgment-console` v2：`query_history`、`settings`、`audit_events` |
+
+### Current Functional Surface（目前網站功能）
+
+| 頁面 | 目前功能 |
+| --- | --- |
+| `#/home` | 主視覺與提問輸入；即時資料卡（法規／命令、金融判決、裁判年份、判決向量索引）；六張重要數據卡與三項事實條；RAG 能力卡（判決／法規索引、Embedding／LLM／Reranker）與判決／法規引用追溯路徑；司法院 OpenData／全國法規資料庫來源卡；可收合的 99 條金融法規清單（11 欄 × 9 列、來源 SHA-256、下載）；`/api/home` 實際階段計時的 Pipeline waterfall、最慢階段標示與展開明細；七個分頁功能卡、footer；`processing` SSE 更新時重新取得摘要。 |
+| `#/rag` | 法規優先／判決優先模式、SSE 串流回答、引用驗證與重試、判決／法規引用卡、Parquet 判決原文 dialog、模型 strip、reranker 狀態、IndexedDB 提問歷史、RAG Pipeline waterfall。 |
+| `#/data` | 法規命令／判決分類、PostgreSQL／Parquet／Qdrant／IndexedDB 四種來源、動態篩選、查詢報表、分布、實際查詢、分頁、CSV／JSON 匯出、法規報表、判決原文、查詢歷史。 |
+| `#/quality` | DuckDB raw Parquet 品質統計與警告，以及題庫列表、AI 生成、匯入匯出、驗證、人工評分、benchmark-ready 狀態。 |
+| `#/performance` | 效能總覽、完整 Flow、RAG Pipeline 分頁、判決向量索引 Pipeline 分頁、RAG Benchmark suite/run、模型清單與 regression gate。 |
+| `#/processing` | 處理總覽三張月份時間表；9 個白名單 workflow；判決匯入／下載／索引／法規索引／法院正規化／條文歷史進度；Embedding 主機模型選擇；更新 notice。 |
+| `#/status` | 服務總覽與載入 Pipeline、系統測試、系統資料使用、Model Provider、四層架構與 SVG、資料版本（PostgreSQL／IndexedDB／Qdrant／Parquet）、動態 API 端點、最近下載。 |
+| `#/tests` | API Base 設定與連線測試、測試模式、LLM 模型測試、Reranker 服務測試。 |
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -22,7 +57,7 @@
 
 **Why this priority**: 這些頁面是整個主控台的主要工作流程；沒有穩定的導覽與路由，其他功能無法被使用。
 
-**Independent Test**: 依序點擊六個 header 連結，確認 URL、頁面標題、選取狀態與內容都正確；重新整理或直接輸入 `#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 仍能開啟對應頁面。
+**Independent Test**: 依序點擊六個 header 連結與品牌首頁，確認 URL、頁面標題、選取狀態與內容都正確；重新整理或直接輸入 `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 仍能開啟對應頁面。
 
 **Acceptance Scenarios**:
 
@@ -100,21 +135,23 @@
 
 ### User Story 5 - 檢視架構與誠實的服務狀態 (Priority: P2)
 
-使用者在系統狀態頁查看前端、FastAPI、PostgreSQL、Parquet、Qdrant、Embedding、RAG 管線與 LLM 的健康狀態，以及判決索引覆蓋率、資料量、架構圖、API 端點、最新版本與最近下載執行。未設定的服務會明確標示，不會以正常狀態呈現。
+使用者在系統狀態頁查看服務總覽載入 Pipeline、前端／FastAPI／PostgreSQL／Parquet／Qdrant／法規索引／Embedding／Reranker／RAG／LLM 的健康狀態、判決索引覆蓋率、資料版本、前後端架構與 SVG 流程圖、動態 API 端點目錄、系統資源、Ollama 主機、最近下載執行與系統測試。未設定的服務會明確標示，不會以正常狀態呈現。
 
-**Why this priority**: 使用者需要快速判斷資料是否可用、哪些元件尚未接入，以及最近的匯入是否成功。
+**Why this priority**: 使用者需要快速判斷資料是否可用、哪些元件尚未接入、頁面載入時間花在哪裡，以及最近的匯入是否成功。
 
-**Independent Test**: 在 PostgreSQL 正常但 Qdrant／RAG／LLM 未設定的環境開啟狀態頁，確認核心服務顯示正常、AI 元件顯示未設定、資料量與最近執行紀錄來自實際資料。
+**Independent Test**: 在 PostgreSQL 正常但 Qdrant／RAG／LLM 未設定的環境開啟狀態頁，確認核心服務顯示正常、AI 元件顯示未設定、資料量與最近執行紀錄來自實際資料；再切換資料版本、架構與 API 端點分類，確認五張資料版本卡、四層架構與 SVG、99 個動態端點皆可顯示。
 
 **Acceptance Scenarios**:
 
-1. **Given** 核心服務正常，**When** 開啟狀態頁，**Then** 顯示整體健康狀態、各服務卡片與實際資料筆數。
+1. **Given** 核心服務正常，**When** 開啟狀態頁，**Then** 顯示整體健康狀態、服務總覽載入 Pipeline、各服務卡片與實際資料筆數。
 2. **Given** Qdrant、Embedding、RAG 或 LLM 未設定，**When** 檢視服務卡片，**Then** 狀態為「未設定」或「降級」，並說明缺少的設定或尚未建立的 collection。
 3. **Given** PostgreSQL 或 Parquet 無法使用，**When** 檢視狀態頁，**Then** 對應服務顯示降級或離線，整體狀態不標示為正常。
-4. **Given** 使用者按下重新整理，**When** 請求完成，**Then** 頁面更新檢查時間、服務狀態與資料量。
+4. **Given** 使用者按下重新整理，**When** 請求完成，**Then** 頁面更新檢查時間、服務狀態、載入 Pipeline 與資料量。
 5. **Given** 使用者啟用 30 秒自動更新，**When** 停留在狀態頁，**Then** 後端 `status` topic 每 30 秒推送含最新狀態的 SSE payload 並更新頁面；離開頁面或取消勾選後關閉 SSE，前端不以固定 timer 查詢。
-6. **Given** 使用者查看架構圖，**When** 檢視節點，**Then** 已接入且正常的節點與尚未設定的節點有明顯區別。
-7. **Given** 使用者查看最近下載執行，**When** 有成功、無變更或失敗紀錄，**Then** 可看到狀態、時間、耗時、法規數、條文數與錯誤訊息。
+6. **Given** 使用者查看「資料版本」，**When** 頁面載入完成，**Then** 顯示 PostgreSQL 資料版本、IndexedDB 本機資料、Qdrant 判決向量索引、Qdrant 法規／命令向量索引與 Parquet／執行狀態五張卡片，以及目前 alias、collection、版本、模型、points、dimension、fresh／stale 與容量。
+7. **Given** 使用者查看「前後端架構」，**When** 檢視節點與 SVG，**Then** Client、Application、Pipelines、Data 四層節點有正常／降級區別，下方 SVG 顯示 REST、SSE、RAG、workflow、資料讀寫、排程與 IndexedDB 方向。
+8. **Given** 使用者查看「API 端點」，**When** 頁面載入完成，**Then** 由目前 FastAPI route table 產生 hero、method 統計與分類端點清單，並提供 Swagger UI／OpenAPI JSON 連結。
+9. **Given** 使用者查看最近下載執行，**When** 有成功、無變更或失敗紀錄，**Then** 可看到狀態、時間、耗時、法規數、條文數與錯誤訊息。
 
 ---
 
@@ -285,7 +322,7 @@
 
 ### Functional Requirements
 
-- **FR-001**: 主控台 MUST 提供 `#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status` 六個主要頁面，並以橫向 header 導覽；`#/tests` 為可獨立開啟的系統測試路由，不列於 header。
+- **FR-001**: 主控台 MUST 提供 `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status` 七個主要頁面與可獨立開啟的 `#/tests`；header 以品牌連到首頁，並以橫向導覽提供 RAG、資料庫、資料品質、效能報表、資料處理與系統狀態六個入口。
 - **FR-002**: header MUST 顯示目前頁面的選取狀態，且切換頁面時不得重新載入整份靜態資源。
 - **FR-003**: 主控台 MUST 在無法辨識路由時回到預設的 `#/home` 首頁；RAG 提問頁仍可透過 `#/rag` 直接開啟。
 - **FR-004**: RAG 頁 MUST 接受 1–500 字的問題，並以 Enter 送出、Shift+Enter 換行。
@@ -305,11 +342,11 @@
 - **FR-018**: 設定選項 sidebar 的「介面風格」分類 MUST 提供十種科技網站風格；每一項目 MUST 以該風格在 header 的呈現方式顯示（header 底色、文字色、品牌線、邊角與陰影），但項目名稱不變；套用時不得重新載入頁面。
 - **FR-019**: 使用者選擇的風格 MUST 在重新開啟主控台後保留。
 - **FR-020**: 「介面風格」分類 MUST 支援滑鼠與鍵盤（Tab／Enter）操作；header MUST NOT 另設 Style／調色盤按鈕。
-- **FR-021**: 狀態頁 MUST 顯示前端、API、PostgreSQL、Parquet、Qdrant、Embedding、RAG 與 LLM 的狀態。
+- **FR-021**: 狀態頁 MUST 顯示前端、API、PostgreSQL、Parquet、Qdrant、法規／命令索引、Embedding、Reranker、RAG 與 LLM 共 10 個服務元件的狀態。
 - **FR-022**: 狀態頁 MUST 將未設定的服務標示為 `not_configured`、降級的服務標示為 `degraded`，不得以正常或推測數據呈現。
-- **FR-023**: 狀態頁 MUST 顯示實際資料筆數、Parquet 快照數、最新版本與最近下載執行。
+- **FR-023**: 狀態頁 MUST 顯示服務總覽載入 Pipeline、10 個服務元件、實際資料筆數、Parquet 快照數、判決／法規索引覆蓋率、資料版本（PostgreSQL、IndexedDB、Qdrant、Parquet）、前後端架構與 SVG 流程圖、動態 API 端點目錄、系統資源、Ollama 主機、最新版本與最近下載執行。
 - **FR-024**: 狀態頁 MUST 支援手動重新整理與可選的 30 秒自動更新；啟用時前端 MUST 訂閱 SSE `status` topic，由後端每 30 秒推送含最新狀態的 payload，離開頁面或取消勾選後 MUST 關閉訂閱，MUST NOT 使用前端 `setInterval` 或定期 GET `/api/status`。
-- **FR-025**: 架構圖 MUST 區分已接入且正常的節點與尚未設定或尚未接入的節點。
+- **FR-025**: 架構分類 MUST 顯示 Client、Application、Pipelines、Data 四層目前節點，區分已接入且正常的節點與尚未設定或尚未接入的節點，並在下方提供 SVG 流程方向示意圖。
 - **FR-026**: 查詢頁（`#/data`）的 PostgreSQL／Parquet／Qdrant 查詢 MUST 為唯讀；`#/processing`、題庫、benchmark 與 Ollama 主機管理屬於獨立的管理介面，可執行寫入與啟動程序。
 - **FR-027**: API MUST 對未知資料庫、未知資料表、無效分頁與空白問題回傳明確的 4xx 錯誤。
 - **FR-028**: 主控台 MUST 在桌面與 390px 寬的行動裝置上保持可操作，且不得產生水平溢位。
@@ -398,11 +435,11 @@
 - **FR-116**: `#/performance` MUST 提供 RAG Pipeline waterfall，且每次 `#/rag` 回答的最下方 MUST 以相同規格與相同視覺格式嵌入該次請求的 waterfall；二者 MUST 共用同一套階段、摘要、時間軸與展開明細。Waterfall MUST 將單次 RAG Trace 的 Parsing、Embedding、Qdrant、Reranker、Context、LLM 與 Response 依執行順序由左至右緊密排列，每一階段 bar MUST 從上一階段 bar 的結束位置接續開始，不得留下未追蹤空隙或互相重疊；實際 `started_at`／`finished_at`／`offset_ms`／`end_offset_ms` MUST 保留在展開明細與 hover 資訊中。每個 span SHOULD 記錄模組、函式、參數與階段監控欄位：Parsing 輸入長度、Embedding Model／Token／Batch、Qdrant Collection／Filter／Top K、Reranker Model／候選數、Context Chunk／Token、LLM Model／Input／Output Token／TTFT、Response 總耗時／引用數／Abstain。點選階段 MUST 可查看上述欄位與開始／結束時間。
 - **FR-117**: `#/rag` 首頁狀態區 MUST 彙整所有可用主機已確認支援 chat 的模型按鈕，按鈕名稱 MUST 使用「主機名稱:模型名稱」（例如 `mbp:gemma3:4b`、`x570:gemma3:4b`）；可用模型 MUST 以綠色呈現，目前使用中的 provider／模型 MUST 有明確標示，點選其他模型 MUST 切換並持久化，且下一次提問 MUST 立即使用新模型。切換 LLM provider MUST NOT 改變 embedding 主機的優先順序。若模型尚未測試 chat 能力，介面 MUST 提供重新檢查入口；不得把未測試或確定不支援 chat 的模型標示為可用。
 - **FR-118**: `#/status` 的 Model Provider 主機模型清單 MUST 顯示每個模型已測試的能力標籤（至少 Chat、Embedding、Vision、Tools、Thinking、Speech、Reranker 中適用的項目）；尚未測試的模型 MUST 明確標示「未測試」，不得推測其能力。介面 MUST 提供「檢查模型能力」動作，檢查所有可用主機並更新快取。
-- **FR-119**: 全站所有「以時間呈現執行流程」的視圖 MUST 共用同一套 waterfall 元件與視覺規格（以 [`pipeline-waterfall.md`](pipeline-waterfall.md) 為準；axis、階段列、bar、可展開明細、hover 資訊卡）；至少涵蓋 `#/rag` 回答底部、`#/rag` 後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow 紀錄、測試 Flow 與 `#/processing` 的 Qdrant 判決向量索引版本建置 Pipeline。RAG Pipeline MUST 採依執行順序接續的水平排列；效能 Flow 與測試 Flow MAY 依實際 offset 呈現平行 span。靜態架構圖與資料流程圖不屬於時間軸流程，可維持原呈現。`#/processing` 的處理總覽 MUST NOT 使用 waterfall；改用 FR-142 的「法規」「命令」「判決」三張四階段月份時間表。
+- **FR-119**: 全站所有「以時間呈現執行流程」的視圖 MUST 共用同一套 waterfall 元件與視覺規格（以 [`pipeline-waterfall.md`](pipeline-waterfall.md) 為準；axis、階段列、bar、可展開明細、hover 資訊卡）；至少涵蓋 `#/rag` 回答底部、`#/rag` 後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow 紀錄、測試 Flow、`#/processing` 的 Qdrant 判決向量索引版本建置 Pipeline、判決匯入與非索引 workflow 流程進度、`#/status` 服務總覽載入 Pipeline，以及 `#/home` 即時摘要載入 Pipeline。RAG Pipeline MUST 採依執行順序接續的水平排列；效能 Flow 與測試 Flow MAY 依實際 offset 呈現平行 span。靜態架構圖與資料流程圖不屬於時間軸流程，可維持原呈現。`#/processing` 的處理總覽 MUST NOT 使用 waterfall；改用 FR-142 的「法規」「命令」「判決」三張四階段月份時間表。
 - **FR-120**: waterfall 中任何使用模型的 span（Embedding、LLM、Reranker 等）與其 Model Load 區段 MUST 在階段列、明細與 hover 資訊中標註「主機名稱:模型名稱」；主機名稱取自 Model Provider 設定，舊資料找不到名稱時才退回 URL hostname。
 - **FR-121**: 使用模型的 span SHOULD 記錄 Ollama `load_duration`，並在對應 Embedding／LLM 階段的 bar 內，以獨立的藍色前段呈現 Model Load；不得把不同來源的載入合併，也不得另列成與來源階段未對齊的子階段。展開明細 MUST 將 Model Load 與推論分成兩個區塊，各自顯示實際開始／結束時間與耗時，且 Model Load 的結束時間 MUST 等於推論的開始時間。該區段 MUST 分開呈現冷啟動載入耗時、模型呼叫總耗時、扣除載入後（熱啟動）流程時間與載入占比，讓冷啟動與熱啟動可直接比較。載入時間為 0 或低於門檻時 MUST 標示為熱啟動。
 - **FR-122**: 滑鼠移到任一 waterfall bar 上時 MUST 顯示該 span 的資訊卡，內容與該階段展開明細一致，至少包含開始／結束時間、耗時、模型／主機與可用監控欄位；資訊卡 MUST 跟隨指標並避開視窗邊界，離開 bar 或捲動時 MUST 隱藏。
-- **FR-123**: 根網址與預設路由 MUST 顯示獨立 `#/home` 首頁；品牌標誌 MUST 導回首頁。首頁 MUST 包含原 RAG 頁主視覺文案、可直接輸入問題的輸入框、七個主要分頁的介紹 section，以及包含 MIT 授權、Copyright 與法律免責聲明的 footer。首頁送出問題後 MUST 導向 `#/rag` 並自動以該題目發問。
+- **FR-123**: 根網址與預設路由 MUST 顯示獨立 `#/home` 首頁；品牌標誌 MUST 導回首頁。首頁 MUST 包含主視覺、可直接輸入問題的輸入框、七個主要分頁的介紹 section，以及包含 MIT 授權、Copyright 與法律免責聲明的 footer。首頁送出問題後 MUST 導向 `#/rag` 並自動以該題目發問。首頁 MUST 另包含即時資料卡、重要數據卡、RAG 能力與引用追溯區、司法院 OpenData／全國法規資料庫來源卡、金融法規清單，以及 `/api/home` 載入 Pipeline waterfall；實際內容與資料契約見 FR-166–FR-168。
 - **FR-124**: RAG MUST 支援 cross-encoder reranker。程式預設 `RAG_RERANK_ENABLED=false`，目前 `.env` 覆寫為 `true`。啟用時 MUST 先向 Qdrant 取得 `RAG_RERANK_CANDIDATES` 筆候選，依序嘗試 `RERANK_URL` 與 `RERANK_FALLBACK_URL` 的 `/v1/rerank` 或 `/rerank`，再依 rerank 分數取 `RAG_TOP_K` 筆進入 Context；不得把 reranker 當成 Ollama chat 模型。`rag.rerank` Flow MUST 記錄 model、provider、候選數、選用數、top score、fallback 與錯誤。主要與 fallback 都失敗時 MUST 保留原本 Qdrant 排序並將 `retrieval.rerank.status` 標示為 `degraded`，不得因此讓回答失敗。第一輪預設模型為 `bge-reranker-v2-m3`。
 - **FR-125**: `#/rag` 的模型狀態區 MUST 另列 Rerank models，顯示主要與 fallback reranker 的「主機:模型」；可用者 MUST 以綠色呈現，離線、degraded 或未啟用者 MUST 以灰色呈現，並標示目前實際使用的 reranker。區塊 MUST 提供重新檢查健康狀態的動作；reranker 設定未啟用時 MUST 顯示「未啟用」，不得把離線模型標示為可用。
 - **FR-126**: RAG MUST 區分法規優先（law-first）與判決優先（judgment-first）。問題含明確法規名稱或法規導向詞彙（規定、條文、義務、責任、限制、罰則、從業人員、負責人、職員等）時 MUST 採 law-first；含判決、案例、法院、實務等詞彙時 MUST 採 judgment-first。law-first 時法規／命令 context MUST 排在判決前、法規 citation MUST 從 `[1]` 開始、判決最多保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT` 筆；LLM prompt MUST 要求以現行法規／命令條文為主要依據，判決僅作實務補充。`那些規定`／`有哪些規定` 不得被誤判為「列出相關法規」，且未實際回傳結構化清單前 MUST NOT 清空已選出的法規 articles。
@@ -445,11 +482,14 @@
 - **FR-163**: `#/status` 的「前後端架構」MUST 以目前專案內容顯示四層架構：`Client · Browser`（RAG Console SPA、API Client + SSE、IndexedDB、Standalone Frontend）、`Application · FastAPI`（REST API :9200、SSE Broker、RAG Endpoint、Power Agent :9201）、`Pipelines · RAG / Batch`（RAG Orchestrator、Processing Runtime、Embedding / Rerank / LLM、Scheduler / CLI）與 `Data · Storage`（PostgreSQL、Qdrant、Parquet / Files、Ollama Hosts）。每個節點 MUST 有標題與副說明；有對應服務的節點 MUST 依 `/api/status` 服務狀態顯示正常或虛線降級樣式。架構卡片下方 MUST 另外內嵌一張可縮放的 SVG 流程方向示意圖，說明瀏覽器 REST／SSE、FastAPI → RAG、FastAPI → Processing Runtime、RAG／處理流程 → PostgreSQL／Qdrant／Parquet／Ollama、Scheduler／CLI → Processing Runtime 與瀏覽器 ↔ IndexedDB 的方向；SVG MUST 有 `role="img"`、`title`、`desc` 與圖例，使用主題 CSS variables 以支援亮／暗主題。390px viewport MUST 讓 SVG 在卡片內水平捲動，不得造成頁面水平溢出；console error MUST 為 0。
 - **FR-164**: `#/status` 的「資料版本」MUST 沿用目前服務總覽的視覺語言重新呈現：頂部 hero MUST 顯示資料版本狀態、判決索引落後筆數、檢查時間、現行資料量、Parquet 檔案數／容量與 alias → collection，並以圓環顯示判決索引覆蓋率；索引落後時 MUST 使用 warning 色並以「判決索引尚缺 N 筆」為標題，不得只顯示靜態版本清單。Hero 下方 MUST 使用 2×3 指標卡顯示現行法規、現行命令、條文總數、資料版本、判決文件與判決向量索引；再以 `data-version-card` 顯示「PostgreSQL 資料版本」「IndexedDB 本機資料」「Qdrant 判決向量索引」「Qdrant 法規／命令向量索引」「Parquet 與執行狀態」五張卡片。PostgreSQL 卡 MUST 顯示資料版本總數、下載執行總數、最新版本 ID／類型／來源更新日／條文數／下載時間／current 狀態與 Parquet 路徑；IndexedDB 卡 MUST 顯示資料庫名稱、schema 版本、儲存模式、query_history／settings／audit_events 筆數與上限、總紀錄數、已用容量、可用配額，並說明本機只保存提問歷史、設定與版本稽核。每張卡片 MUST 使用 `index-current-row`、`data-version-facts`、`data-version-coverage` 等目前 status 元件；判決索引與法規／命令索引 MUST 分別顯示 alias、collection、版本、模型、Qdrant points、覆蓋率、剩餘／待補筆數與最近索引時間；法規／命令索引 MUST 顯示 dimension 與 fresh／stale；索引落後時 MUST 顯示可前往 Qdrant 判決向量索引版本建置的提示。390px viewport MUST 無水平溢出，console error MUST 為 0。
 - **FR-165**: `#/status` 的「API 端點」MUST 由 FastAPI 目前 route table 動態產生，不得只顯示固定 curation 清單；後端 `/api/status` 的 `endpoints` MUST 包含所有 `/api/` `APIRoute` 的 `method`、`path`、`label`、`deprecated`，排除 `HEAD`／`OPTIONS`，並包含 `/api/docs` 與 `/api/openapi.json`。前端 MUST 顯示 hero（OpenAPI 最新、端點數、分類數、API Base、GET／POST／PATCH／PUT／DELETE 數量、更新時間、Swagger UI／OpenAPI JSON 連結），並依分類分組：系統與即時狀態、資料處理與更新、查詢與資料、RAG 問答、版本與索引、模型與服務、測試與效能、題庫、Benchmark。每列 MUST 顯示 method 色彩、path 與 label；deprecated 端點 MUST 有刪除線或降級樣式。端點變更後重新整理頁面 MUST 取得最新 route table；390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **FR-166**: `/api/home` MUST 回傳首頁即時摘要，包含 `data.laws`（現行法規／命令與條文數、資料版本數、下載執行數）、`data.judgments`（原始判決總數、金融 current 判決數、金融佔比、裁判日期與年份範圍）、`data.raw`（原始 manifest 的 archive 數、筆數與壓縮容量）、`data.rag.judgment_index`（已索引／總筆數、覆蓋率、alias、collection、version、model、最近索引時間）、`data.rag.legal_index`（points、條文數、法規數、alias、collection、version、dimension）、`data.rag.models`（embedding／LLM／reranker 名稱與 rerank 啟用狀態）、`data.financial_laws`（清單筆數、法規名稱、原始內容、來源路徑、SHA-256、修改時間）與 `data.sources`（司法院 OpenData、全國法規資料庫、金融法規清單）。金融判決總數與佔比 MUST 與 `/api/judgment-stats`、processing snapshot 使用相同的 `judgment_stats_from_counts` 定義；法規／命令數 MUST 與 `/api/status` 的 PostgreSQL current 統計一致；法規清單 MUST 直接讀取 `documents/金融法規.md`，不得在前端或後端複製固定名單。端點 MUST NOT 等待 `/api/status`、`/api/processing` 或 `/api/quality`，任一階段失敗時 MUST 回傳其餘可用資料、`status` 標示 `degraded`、`errors` 說明失敗原因，不得捏造數值。
+- **FR-167**: `#/home` MUST 以 `/api/home` 顯示即時資料卡：法規／命令數、金融判決數、裁判年份與年數、判決向量索引筆數與覆蓋率；並顯示六張重要數據卡（判決總件數、金融相關總件數、金融案件佔比、法規、命令、法規／命令條文）與三項事實（原始判決備份、金融判決年份、向量索引覆蓋）。RAG 能力區 MUST 顯示判決索引、法規／命令索引、Embedding／LLM／Reranker、判決與法規引用追溯路徑，並提供 `#/rag`、`#/data`、`#/performance` 入口。來源區 MUST 顯示司法院資料開放平臺與全國法規資料庫的實際筆數與外部連結，並以 `<details>` 收合金融法規清單；展開後 MUST 列出 `documents/金融法規.md` 全部 99 條法規，固定每列 11 條（共 9 列），顯示編號、名稱、來源路徑、SHA-256 與修改時間，並可下載原始清單。390px viewport MUST 仍維持 11 欄且無水平溢出。
+- **FR-168**: `#/home` MUST 以 [`pipeline-waterfall.md`](pipeline-waterfall.md) 的共用 `.rag-wf-*` 結構顯示 `/api/home` 載入 Pipeline，階段 MUST 依實際執行順序排列，至少包含 `laws`、`judgments`、`raw`、`judgment_index`、`legal_index`、`financial_laws` 與 `assemble`；每個階段 MUST 有穩定 `key`、`label`、`caption`、`color`、`status`、`started_at`、`finished_at`、`duration_ms` 與 `message`。前端 MUST 顯示階段總耗時、HTTP 往返、傳輸／排隊、最慢階段、完成階段數與更新時間，並在階段列標示「最慢」；bar MUST 依階段耗時接續排列，極短階段 MUST 保留最小可見寬度，點擊階段 MUST 可展開開始／結束、耗時、占比與說明。首頁 MUST 訂閱 `processing` SSE，收到非 initial 更新時重新取得 `/api/home` 並就地更新數據與 waterfall；為避免執行中的索引每 2 秒觸發一次完整摘要查詢，前端 MUST 以 15 秒最小間隔節流並保留最後一次更新，手動重新整理不受節流限制。已展開階段 MUST 保持展開，不得重設法規清單收合狀態或捲動位置。390px viewport MUST 無水平溢出，console error MUST 為 0。
 - **FR-050**: 文件 MUST 說明電源控制器的啟動方式、日誌位置、停用設定，以及由後端提供頁面時停止後重新整理的限制。
 
-### Runtime Deployment Baseline（2026-11-13）
+### Runtime Deployment Baseline（2026-11-16）
 
-以下為 2026-11-13 以 x570 API 與 `.env` 驗證的建置值；systemd 的 enable／active 狀態若未登入主機確認，會標示為待 shell 驗證。變更主機、模型、版本或啟動參數時 MUST 同步更新本節與相關 FR／SC。
+以下為 2026-11-16 以現行 `.env`、`/api/home`、`/api/status`、`/api/quality` 與測試套件驗證的建置值；systemd 的 enable／active 狀態若未登入主機確認，會標示為待 shell 驗證。變更主機、模型、版本或啟動參數時 MUST 同步更新本節與相關 FR／SC。
 
 #### Ollama
 
@@ -537,6 +577,24 @@ LLM_KEEP_ALIVE=30m
 | 前端即時更新 | 進度／流程類 topic 直接套用 payload；`#/status` 的資源與 Ollama 區塊可在 `status` topic 更新時重新取得輔助資料，但 MUST NOT 由前端固定 timer 發起 |
 | 後端常駐啟動 | `up.sh` 優先使用 detached tmux session `judgment-web`（`JUDGMENT_WEB_TMUX_SESSION` 可覆寫）；tmux 不可用時回退 `nohup`；`down.sh` 先停止 session，再清理 9200 listener |
 
+#### Current Data & UI Snapshot（2026-11-16）
+
+以下為目前程式與實際資料的同步快照；數值變動時以 API 回傳為準，規格結構與行為不得任意變更。
+
+| 項目 | 目前值 |
+|---|---|
+| 原始判決 | 368 個 archive、22,630,347 筆（DuckDB raw Parquet） |
+| PostgreSQL current 判決 | 4,681,502 筆 |
+| Qdrant 判決索引 | 738,743 / 4,681,502（15.8%）、剩餘 3,942,759、`judgments_current → judgments_v002`、version #4、`bge-m3` |
+| 法規／命令 | 1,351 法規、10,454 命令、222,126 條文、4 個資料版本、14 次下載執行 |
+| Qdrant 法規索引 | 222,126 / 222,126、`legal_articles_current → legal_articles_v006`、version #9、1,024 維 |
+| 服務總覽 Pipeline | 11 個後端檢查階段＋彙整；目前最慢階段為 `staleness`（約 3.2–3.5 秒） |
+| 首頁即時摘要 Pipeline | 7 個階段（法規／命令、金融判決、原始 manifest、判決索引、法規索引、金融法規清單、彙整）；目前最慢階段為 `judgments`（約 0.6–1.4 秒） |
+| 金融法規清單 | `documents/金融法規.md` · 99 條 · 11 欄 × 9 列 |
+| API 端點目錄 | 99 個端點、9 個分類（GET 59／POST 33／PATCH 3／DELETE 4） |
+| IndexedDB | `judgment-console` v2；`query_history` 上限 120、`audit_events` 上限 2,000、`settings` |
+| 測試 | 350 tests collected |
+
 ### Key Entities
 
 - **Console Route**: 主控台的主要頁面與 URL 片段，包含 RAG、資料庫、資料品質、效能報表、資料處理、系統狀態，以及獨立的 `#/tests` 系統測試路由。
@@ -570,14 +628,18 @@ LLM_KEEP_ALIVE=30m
 - **Theme Preview Item**: 「介面風格」中的單一主題項目，保留主題名稱，但以該主題 header 的底色、文字色、品牌線、邊框、圓角與陰影呈現，並顯示 active／check 狀態。
 - **Appearance Mode**: 全站明暗配置，分為 `light`、`dark`、`system`；`light` 不覆寫主題 token，直接使用目前主題的原始配色；`dark` 以 `data-appearance="dark"` 套用共用暗色 palette；`system` 依 `prefers-color-scheme` 解析，並以 `judgment.appearance` 持久化。
 - **Local History Entry**: 儲存在瀏覽器的提問或查詢紀錄，包含類型、標題、摘要、參數與建立時間。
-- **Architecture Layer**: 系統架構中的一層節點，例如 Client、Application、Data 與 Intelligence。
+- **Architecture Layer**: 系統架構中的一層節點；目前為 `Client · Browser`、`Application · FastAPI`、`Pipelines · RAG / Batch`、`Data · Storage`，節點包含標題、副說明與可選的服務狀態對應。
+- **IndexedDB Store**: 瀏覽器 `judgment-console` v2 的三個 object store：`query_history`、`settings`、`audit_events`；資料版本頁顯示 schema 版本、儲存模式、筆數上限、目前筆數、總紀錄與 storage estimate。
+- **Status Pipeline Stage**: 服務總覽載入 Pipeline 的單一階段；包含 `key`、`label`、`caption`、`color`、`status`、`duration_ms`、`started_at`、`finished_at`、`message`，後端階段與瀏覽器 HTTP／初始化階段共用同一 waterfall。
+- **API Endpoint Catalog**: 由 FastAPI `APIRoute` route table 產生的 `method`／`path`／`label`／`deprecated` 清單；前端依系統、處理、查詢、RAG、索引、模型、測試、題庫與 Benchmark 分組。
+- **Data Version Card**: 狀態頁資料版本分類的卡片，涵蓋 PostgreSQL、IndexedDB、Qdrant 判決向量索引、Qdrant 法規／命令索引與 Parquet／執行狀態。
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
 - **SC-001**: 使用者可在 3 次點擊內從任一主要頁面切換到其他 header 頁面。
-- **SC-002**: 六個主要頁面與 `#/tests` 在桌面與 390px 行動版皆無水平溢位，且 header 導覽仍可操作。
+- **SC-002**: 八個路由（`#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`）在桌面與 390px 行動版皆無水平溢位，且 header 導覽仍可操作。
 - **SC-003**: 十種風格皆可從「設定選項」→「介面風格」套用；每個項目 MUST 以該風格 header 的底色、文字色、品牌線與邊角顯示，重新整理後仍保留上次選擇。
 - **SC-004**: RAG 回答的每一筆判決引用都能在 PostgreSQL 中找到對應案號；法規／命令引用的每一筆都能在現行法規資料中找到對應名稱與條文。
 - **SC-005**: 沒有相似度足夠的判決且沒有法規來源時回傳零筆引用，且回答明確說明無法產生有依據的答案；有法規來源時仍使用法規內容回答。
@@ -587,17 +649,17 @@ LLM_KEEP_ALIVE=30m
 - **SC-009**: 未設定的 Qdrant、Embedding、RAG 與 LLM 在狀態頁與 RAG 頁皆顯示 `not_configured` 或 `degraded`，不會顯示為正常。
 - **SC-010**: 狀態頁的資料筆數與最近下載執行與 PostgreSQL／資料目錄的實際內容一致。
 - **SC-011**: IndexedDB 不可用時，查詢與提問仍可在記憶體模式下完成，且畫面明確標示資料不會持久化。
-- **SC-012**: 在實際資料集上，Playwright 檢查主要頁面、四種資料來源與十種風格時，沒有 console error 或失敗請求。
+- **SC-012**: 在實際資料集上，Playwright 檢查八個路由、四種資料來源、十種風格與狀態頁的服務總覽 Pipeline／資料版本／架構 SVG／API 端點目錄時，沒有 console error 或失敗請求。
 - **SC-017**: 從 PostgreSQL 與 Parquet 的法規查詢結果皆可開啟法規完整報表，並以「返回查詢結果」回到原本的查詢頁碼與資料列。
 - **SC-018**: 從 `#/status` 的「系統測試」或 `#/tests` 可切換測試模式 ON／OFF，狀態顏色、標籤與 `aria-checked` 和 `/api/test-mode` 一致；後端電源仍由本機腳本／控制器管理。
 - **SC-028**: 測試模式 ON 時，一次 RAG 請求會執行所有可用 embedding／LLM 模型；實際 4 個 LLM 的測試產生 11 個 steps，總耗時約 82–149 秒，前端不得因 45 秒 timeout 中止。
 - **SC-029**: 測試流程圖表在執行中會由 `test-runs` SSE topic 推送更新進度；完成後顯示問題、答案、每個步驟的 module／function、5 個階段、每個模型一條子進度條、100% 總進度與依階段耗時比例的總流程時間 bar；失敗模型顯示紅色與錯誤訊息。
 - **SC-030**: 重新載入效能報表後，可從歷史選單載入先前的 test run，還原相同的 stages、models、status、duration 與 step 狀態。
-- **SC-031**: 原始判決 Parquet 目前有 2,485,151 筆、約 6.23 GB；以 `jid` 讀取單筆全文可在 1 秒內完成，RAG 引用卡的 Parquet dialog 顯示的案號與全文與原始 `raw.parquet` 一致。過濾後的 `judgments.parquet` 只能由「判決 Parquet 匯出」workflow 選擇性產生，不是查詢來源。
+- **SC-031**: 原始判決資料目前涵蓋 368 個 archive、DuckDB raw Parquet 共 22,630,347 筆（去重 22,630,346 筆，原始壓縮檔 53,246,710,786 bytes）；以 `jid` 讀取單筆全文可在 1 秒內完成，RAG 引用卡的 Parquet dialog 顯示的案號與全文與原始 `raw.parquet` 一致。過濾後的 `judgments.parquet` 只能由「判決 Parquet 匯出」workflow 選擇性產生，不是查詢來源。
 - **SC-032**: 快速 profile（`.env.example` 的 `gemma3:4b`、top_k=4、4,000 字上下文、num_ctx=4096、num_predict=384）在實際金融法規問題上 MUST 於 10 秒內完成一般 RAG 回答；實測約 2–5 秒。
 - **SC-033**: 「證交法有多少條文?」MUST 回傳 `證券交易法` 229 條並附法規來源；「銀行法是何時開始有的?」MUST 回傳中華民國 20 年 3 月 28 日（1931-03-28）；「保險業務員最常觸犯什麼法條?」MUST 依判決引用統計列出熱門法條並標示引用次數，不得虛構數字。
 - **SC-035**: 「證券營業員常觸犯什麼法規或命令?」MUST 依判決引用統計列出法規／命令並標示次數；「有哪些法規是和壽險及產險相關的?」MUST 回傳含保險法、簡易人壽保險法與財產保險相關命令的法規清單。
-- **SC-036**: 判決分類的 Schema 模式 MUST 顯示 `judgment_documents` 與 `judgment_import_runs`；切換 Parquet 後 MUST 顯示原始判決 Parquet 資料表，點選後 MUST 在右側顯示欄位、前 10 筆資料與目前總數（2026-11-11 為 2,485,151 筆）；表頭排序與逐欄搜尋建議 MUST 正常，並可開啟 Parquet 原判決。
+- **SC-036**: 判決分類的 Schema 模式 MUST 顯示 `judgment_documents` 與 `judgment_import_runs`；切換 Parquet 後 MUST 顯示原始判決 Parquet 資料表，點選後 MUST 在右側顯示欄位、前 10 筆資料與目前總數（現行 22,630,347 筆，實際值以查詢 API 為準）；表頭排序與逐欄搜尋建議 MUST 正常，並可開啟 Parquet 原判決。
 - **SC-037**: 以滑鼠或觸控板在所有主要頁面連續上下滾動至少 10 秒時，header MUST 保持不透明且不得出現可視閃爍、消失或重新進場；資料頁切換每頁 10／25／50／100 筆、上／下一頁與排序時，表格 MUST 維持顯示直到新結果抵達，不得先閃成骨架，且表格、報表卡片與分布條不得重播進場動畫或淡入淡出效果。
 - **SC-038**: 在 `#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 分別連續觸發自動更新、後端推送、重新整理、換頁、排序、每頁筆數切換、篩選與分類切換至少三次時，畫面 MUST NOT 出現可視閃爍、白屏、淡入淡出、透明度變化或進場動畫重播；表格、報表卡片、分布條、時間表、清單與統計卡 MUST 保持穩定並直接更新為最終狀態。
 - **SC-039**: 連續在七個主要頁面之間切換路由至少 10 次時，不得先出現整頁 skeleton、白屏或頁面進場動畫；header 與固定背景 MUST 保持穩定，舊頁面 MUST 直接由新頁面內容取代。
@@ -608,11 +670,11 @@ LLM_KEEP_ALIVE=30m
 - **SC-044**: 在 `#/performance` 的 RAG Pipeline、任一 Flow 紀錄、測試 Flow，以及 `#/rag` 回答底部與後端處理流程中，時間軸 MUST 使用相同的 `.rag-wf-*` waterfall 結構；不得再使用舊的 `flow-timeline` 或 `test-flow-time` 作為主要流程呈現。RAG Pipeline MUST 依階段耗時接續排列，效能 Flow 與測試 Flow MAY 依實際 offset 定位並重疊平行 span。階段可展開且資料不足時顯示「未記錄」。
 - **SC-045**: 任一含模型呼叫的 waterfall 在 Embedding、LLM、Reranker 階段列，以及 Embedding／LLM bar 的 Model Load 區段 MUST 顯示「主機:模型」，例如 `mbp:bge-m3`、`x570:gemma3:4b`；展開明細與 hover 資訊 MUST 顯示相同主機與模型。舊 Flow 缺少 `provider_name` 時 MUST 從 endpoint URL 顯示 hostname。
 - **SC-046**: 當 Ollama 回應包含 `load_duration` 時，waterfall MUST 在來源 Embedding／LLM 階段 bar 的開始處顯示藍色 Model Load 區段，且該區段 MUST 與後續階段時間精準接續，不得另列成未對齊的子階段，也不得將不同來源的載入合併；展開明細 MUST 分成 Model Load 與推論兩個區塊，各自顯示正確且不同的開始／結束時間，兩者交界時間 MUST 相同；冷啟動案例 MUST 顯示載入耗時、模型呼叫總耗時、扣除載入後時間與載入占比，且載入時間大於等於 100 ms 時標示冷啟動；熱啟動案例載入為 0 或低於門檻時 MUST 標示熱啟動。滑鼠移到藍色 Model Load bar 時 MUST 顯示上述數值。
-- **SC-047**: 直接開啟 `/` 或 `#/home` MUST 顯示首頁，內容包含主視覺、提問輸入框、七個分頁介紹與 footer；品牌標誌 MUST 連到 `#/home`。在首頁輸入題目並送出後 MUST 導向 `#/rag`、保留題目並自動發問。footer MUST 顯示 `© 2026 Judgment RAG Console`、`MIT License` 與「法規資料僅供檢索與研究參考，不構成法律意見」。
+- **SC-047**: 直接開啟 `/` 或 `#/home` MUST 顯示首頁，內容包含主視覺、提問輸入框、即時資料卡、六張重要數據卡、RAG 能力與引用追溯區、資料來源卡、可收合的金融法規清單、Pipeline waterfall、七個分頁介紹與 footer；品牌標誌 MUST 連到 `#/home`。在首頁輸入題目並送出後 MUST 導向 `#/rag`、保留題目並自動發問。footer MUST 顯示 `© 2026 Judgment RAG Console`、`MIT License` 與「法規資料僅供檢索與研究參考，不構成法律意見」。
 - **SC-048**: 啟用 reranker 且主要端點可用時，RAG 回覆的判決順序 MUST 依 rerank 分數排列，`retrieval.rerank.status` MUST 為 `ok`，`rag.rerank` Flow MUST 顯示「主機:模型」、候選數、選用數與 top score。主要端點失敗但 fallback 可用時 MUST 自動改用 fallback，並將 `fallback_used` 標示為真。兩者都失敗時 MUST 保留 Qdrant 原排序、只取 `RAG_TOP_K` 筆，且 `retrieval.rerank.status` MUST 為 `degraded`，回答不得因 reranker 失敗而中斷。
 - **SC-049**: 當主要 reranker 離線、fallback 可用時，`#/rag` 的 Rerank models MUST 將主要模型顯示為灰色「離線」、fallback 顯示為綠色「使用中」，並以 fallback 作為目前 reranker。兩者都離線時 MUST 全部灰色並顯示「無可用模型」；`RAG_RERANK_ENABLED=false` 時 MUST 顯示「未啟用」。按下重新檢查後 MUST 依最新健康狀態更新顏色與目前使用標示。
 - **SC-050**: 當使用者詢問「銀行法對從業人員有那些規定？」時，RAG MUST 判定為 law-first、保留銀行法已選出的 articles、將法規 source 編號為 `[1]`，並讓判決從 `[2]` 開始；`retrieval.mode` MUST 為 `law_first`，判決 context 數 MUST 不超過 `RAG_LAW_FIRST_JUDGMENT_LIMIT`。同時，「有哪些法規和壽險及產險相關？」仍 MUST 觸發 related-laws 結構化清單；「銀行法有哪些規定？」MUST NOT 被當成相關法規清單。
-- **SC-051**: 以現行法規／命令 Parquet 建置時，`legal_articles_current` MUST 指向新版本 collection，索引筆數 MUST 等於可檢索條文數（目前 222,124），維度 MUST 為 1,024，且判決 collection `judgments_v002` 的 points 數 MUST 不變。第二次以未變更來源執行 `--incremental --if-changed` MUST 回傳 `unchanged` 且不新增 collection；變更一部法規後執行 `--incremental` MUST 只替換該法規的 points，未變動法規的 points 與向量 MUST 保留。
+- **SC-051**: 以現行法規／命令 Parquet 建置時，`legal_articles_current` MUST 指向新版本 collection，索引筆數 MUST 等於可檢索條文數（目前 222,126），維度 MUST 為 1,024，且判決 collection `judgments_v002` 的 points 數 MUST 不變。第二次以未變更來源執行 `--incremental --if-changed` MUST 回傳 `unchanged` 且不新增 collection；變更一部法規後執行 `--incremental` MUST 只替換該法規的 points，未變動法規的 points 與向量 MUST 保留。
 - **SC-052**: 啟用法規向量檢索時，同一次 RAG 查詢 MUST 只呼叫一次 `bge-m3` embedding；`retrieval.law_vector.status` MUST 為 `ok` 並包含命中的法規，`retrieval.law_rerank` MUST 獨立記錄法規 rerank。把 `legal_articles_current` alias 移除後，同一題 MUST 仍能由 PostgreSQL／Parquet + BM25 產出法規來源，且不得回傳 5xx。
 - **SC-053**: 同一題同時有法規與命令候選時，`retrieval.law_fusion.method` MUST 為 `rrf` 並包含 `rrf_k`／`dense_weight`；`retrieval.law_rerank.groups` MUST 至少包含 `law` 與 `order` 兩組。兩組 MUST 使用不同的 rerank 批次；其中一組失敗時，另一組 MUST 仍套用 rerank，失敗組 MUST 保留原順序，整體 `status` MUST 標示 `degraded`。
 - **SC-054**: x570 開機後 `systemctl is-enabled judgment-ollama-preload` MUST 為 `enabled`；`/api/ps` MUST 顯示 `gemma3:4b`、`size_vram == size`、`context_length=4096`，且 `keep_alive=-1` 時 `expires_at` 為長期。應用端 `LLM_KEEP_ALIVE=30m` 時模型 MAY 在閒置後卸載；設為 `-1` 時 MUST 保持載入。
@@ -634,7 +696,7 @@ LLM_KEEP_ALIVE=30m
 - **SC-070**: 判決匯入 active month 由 202601 切換到 202602 時，外框與 `aria-current="true"` MUST 在 1 秒內移動到 202602，舊月份 MUST 移除 `is-current`／`aria-current`；目前列 MUST 同步顯示 202602 的 archive 與階段，不得等待完整 snapshot 的 2 秒週期。390px viewport 無水平溢出，console error 為 0。
 - **SC-071**: 在 `#/processing`、`#/tests`、`#/performance`、`#/rag`、`#/status` 停留 10 秒且後端資料沒有變更時，瀏覽器 MUST NOT 發出重複的 `/api/processing`、`/api/judgment-download/status`、`/api/test-runs/current`、`/api/benchmark/runs` 或 `/api/status` 查詢；每個頁面只允許初始 snapshot／SSE 載入與使用者操作。變更 state／manifest／progress 檔或 DB run 資料後，後端 MUST 在 0.5 秒內透過 SSE 推送含最新進度的完整或增量 payload；前端 MUST 直接套用 payload 更新畫面，MUST NOT 再發出進度查詢。非進度類輔助資料 MAY 由後端 topic 推送觸發載入（例如 `#/status` 的資源與 Ollama 區塊），但 MUST NOT 由前端固定 timer 發起。390px viewport 無水平溢出，console error 為 0。
 - **SC-072**: 判決匯入執行金融法規篩選或 PostgreSQL metadata 時，processing state 更新後 MUST 由 `/api/events/stream` 的 `processing` topic 推送 live payload；前端 MUST 在 1 秒內更新 workflow 階段訊息、目前處理月份與下方時間表，network log MUST NOT 出現重複的 `/api/processing` GET，且 MUST NOT 使用 `/api/processing/active/stream` 作為 UI 進度來源。初次連線 MUST 由同一 topic 的完整 snapshot 建立頁面；後續只套用 SSE payload。390px viewport 無水平溢出，console error 為 0。
-- **SC-073**: 首頁、`#/data` 資料庫分頁與 `#/processing` 處理總覽 MUST 同時顯示判決總件數、金融相關總件數與佔比；例如 `22,630,347`、`4,011,827`、`17.7%`。三處數值 MUST 僅由後端相同定義的統計 payload 提供，MUST NOT 由前端自行以候選數或索引數推導。390px viewport 無水平溢出，console error 為 0。
+- **SC-073**: 首頁、`#/data` 資料庫分頁與 `#/processing` 處理總覽 MUST 同時顯示判決總件數、金融相關總件數與佔比；目前值為 `22,630,347`、`4,681,502`、`20.7%`（實際值 MUST 以後端相同定義的統計 payload 為準）。首頁使用 `/api/home`，資料庫分頁使用 `/api/judgment-stats`／catalog，處理總覽使用 processing snapshot；三處 MUST 由後端 `judgment_stats_from_counts` 提供，MUST NOT 由前端自行以候選數或索引數推導。390px viewport 無水平溢出，console error 為 0。
 - **SC-074**: 完成一次 Qdrant判決向量索引版本建置後，`#/performance` 的「判決向量索引 Pipeline」分頁 MUST 顯示實際 host/model、版本／collection／alias、build mode、是否接續，以及 probe／version／copy／embedding／qdrant／postgres／validate／activate／report 各階段耗時與百分比。舊紀錄若缺少 pipeline MUST 顯示明確提示。390px viewport 無水平溢出，console error 為 0。
 - **SC-075**: 執行 Qdrant判決向量索引版本建置時，`#/processing` 的流程進度 MUST 以 waterfall 顯示六個階段，包含時間軸、接續排列的階段 bar、可展開明細與 hover 資訊卡；每個 bar MUST 從上一階段結束的位置開始，進行中的金融索引階段 bar MUST 只以紫色著色已完成比例，未完成比例 MUST 以紫色 1px 外框、內部透明的空心 bar 呈現，不得整條填滿；已完成階段 MUST 整條著色。複製舊 collection 時，複製列 MUST 顯示 `copied / total points`，金融判決向量索引列 MUST 顯示 `indexed / expected_count 筆`，不得把 738,743 等舊 collection points 當成金融判決索引總數。複製期間目前月份 MUST 顯示「準備索引」或「準備中」，第一批開始後 MUST 切換為實際目前月份。SSE live payload 更新後畫面 MUST 隨之更新，且已展開的階段 MUST 保持展開。390px viewport 無水平溢出，console error 為 0。
 - **SC-076**: 開啟 `#/processing` 的「法規／命令索引」workflow 面板時，MUST 顯示法規與命令兩張 D／P／I 版本月份表，並使用與處理總覽相同的 metrics、目前版本列、legend 與月份格幾何。2026-11 目前版本 MUST 顯示綠色 D、粉色 P、藍色 I 三個實心方塊，並顯示版本編號、下載時間、法規數與條文數；2026-10 舊版本 MUST 在 D／P 顯示綠／粉實心方塊、I 顯示淡色空心方塊與「已取代」，且 metrics 的已取代月份 MUST 為 1、完成階段 MUST 為 5 / 5。「法規下載」「命令下載」workflow 面板 MUST 分別顯示標題為「法規 下載時間表」「命令 下載時間表」的同格式卡片，並重用 law／order D／P／I timeline 資料。390px viewport 無水平溢出，console error 為 0。
@@ -644,7 +706,9 @@ LLM_KEEP_ALIVE=30m
 - **SC-085**: 開啟 `#/status` 的「服務總覽」時，MUST 顯示「服務總覽載入 Pipeline」waterfall；在目前資料下，`/api/status` 的 `pipeline.stages` MUST 依序包含 11 個後端檢查階段，且索引鮮度（`staleness`）的耗時 MUST 反映實際查詢時間，例如約 3.3 秒；前端 MUST 顯示總耗時、Server、HTTP 傳輸、最慢階段與完成階段等指標，axis MUST 從 `0 ms` 到實際總耗時，階段 bar MUST 由左至右接續排列，並可展開查看開始／結束、耗時、占比與說明。SSE 更新後已展開階段 MUST 保持展開；390px viewport MUST 無水平溢出，console error MUST 為 0。
 - **SC-086**: 開啟 `#/status` 的「前後端架構」時，MUST 顯示 Client、Application、Pipelines、Data 四層與目前專案節點（RAG Console SPA、SSE Broker、RAG Orchestrator、Processing Runtime、PostgreSQL、Qdrant、Parquet、Ollama 等）；下方 MUST 顯示內嵌 SVG 流程方向示意圖，包含 REST、SSE、RAG、workflow run、資料讀寫、排程與 IndexedDB 方向，並有 `role="img"`、title／desc 與圖例。亮色與暗色主題皆可辨識；390px viewport 的 SVG MUST 只在卡片內水平捲動，頁面 MUST 無水平溢出，console error MUST 為 0。以 `file:///…/frontend/index.html#/status` 開啟 standalone frontend 時，架構頁與 SVG MUST 同樣可顯示。
 - **SC-087**: 開啟 `#/status` 的「資料版本」時，MUST 顯示 hero、判決索引覆蓋圓環（目前為 15.8%）、2×3 指標與五張 `data-version-card`：PostgreSQL 資料版本、IndexedDB 本機資料、Qdrant 判決向量索引、Qdrant 法規／命令向量索引、Parquet 與執行狀態。Hero 標題 MUST 顯示「判決索引尚缺 3,942,759 筆」時使用 warning 色；PostgreSQL 卡 MUST 顯示 4 個資料版本、14 次下載執行與版本 #4 current；IndexedDB 卡 MUST 顯示 `judgment-console v2`、indexeddb 模式、query_history 0/120、audit_events 0/2,000、settings 0 與可用配額；判決向量索引卡 MUST 顯示 `judgments_current → judgments_v002`、版本 #4、模型 bge-m3、738,743 / 4,681,502 筆與剩餘 3,942,759 筆；法規／命令索引卡 MUST 顯示 `legal_articles_current → legal_articles_v006`、版本 #9、222,126 / 222,126 條、1,024 維與 fresh；Parquet 卡 MUST 顯示 4 個檔案、174.6 MB、最近下載執行與耗時。390px viewport MUST 無水平溢出，console error MUST 為 0。
-- **SC-088**: 開啟 `#/status` 的「API 端點」時，MUST 顯示「API 端點目錄」hero 與 `api-endpoint-groups`；目前 `/api/status` 的 `endpoints` MUST 至少包含 98 個端點、9 個分類，且 MUST 包含 `GET /api/status`、`GET /api/events/stream`、`POST /api/processing/workflows/{workflow_id}/run`、`GET /api/versioning/audit`、`POST /api/benchmark/runs`、`POST /api/rag/query/stream`、`GET /api/docs` 與 `GET /api/openapi.json`。分類 MUST 依序顯示系統與即時狀態、資料處理與更新、查詢與資料、RAG 問答、版本與索引、模型與服務、測試與效能、題庫、Benchmark；method summary MUST 顯示 GET／POST／PATCH／DELETE 數量。以 `file:///…/frontend/index.html#/status` 開啟時 MUST 同樣載入 98 個端點；390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **SC-088**: 開啟 `#/status` 的「API 端點」時，MUST 顯示「API 端點目錄」hero 與 `api-endpoint-groups`；目前 `/api/status` 的 `endpoints` MUST 至少包含 99 個端點、9 個分類，且 MUST 包含 `GET /api/home`、`GET /api/status`、`GET /api/events/stream`、`POST /api/processing/workflows/{workflow_id}/run`、`GET /api/versioning/audit`、`POST /api/benchmark/runs`、`POST /api/rag/query/stream`、`GET /api/docs` 與 `GET /api/openapi.json`。分類 MUST 依序顯示系統與即時狀態、資料處理與更新、查詢與資料、RAG 問答、版本與索引、模型與服務、測試與效能、題庫、Benchmark；method summary MUST 顯示 GET／POST／PATCH／DELETE 數量。以 `file:///…/frontend/index.html#/status` 開啟時 MUST 同樣載入 99 個端點；390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **SC-089**: `GET /api/home` 在目前資料集 MUST 回傳 `data.laws.law_count=1,351`、`order_count=10,454`、`article_count=222,126`，`data.judgments.financial_total=4,681,502`、`raw_total=22,630,347`、`financial_ratio=20.7`、年份 `1996–2026`（31 年），`data.rag.judgment_index.indexed=738,743`、`total=4,681,502`、`coverage_pct=15.8`，`data.financial_laws.count=99` 且第一筆為 `民法`；`pipeline.stages` MUST 包含 `laws`、`judgments`、`raw`、`judgment_index`、`legal_index`、`financial_laws`。以 `file:///…/frontend/index.html#/home` 開啟時，展開金融法規清單 MUST 顯示 99 筆、11 欄 × 9 列、無水平溢出，並可下載原始清單；console error MUST 為 0。
+- **SC-090**: `#/home` 的「首頁即時資料載入 Pipeline」MUST 顯示 `/api/home` 的 7 個實際階段（含 `assemble`）、階段總耗時、HTTP 往返、傳輸／排隊、最慢階段與完成階段數；最慢階段 MUST 標示「最慢」並有 warning 色，展開後 MUST 顯示開始、結束、耗時、占比與說明。`processing` SSE 非 initial 更新後 MUST 重新取得 `/api/home`，但同一頁面 15 秒內最多一次；重新取得後 MUST 保留已展開階段；390px viewport MUST 無水平溢出，console error MUST 為 0。
 - **SC-079**: 執行 `./down.sh` 後再執行 `./up.sh`，後端 MUST 在 tmux session `judgment-web` 啟動，`/api/health` MUST 回應 ok，`.run/web.pid` MUST 指向 9200 的 listener PID。後端健康時再次執行 `./up.sh` MUST NOT 建立第二個 session 或 process。`./down.sh` MUST 停止該 session 並關閉 9200。tmux 不可用時 `./up.sh` MUST 顯示警告並回退 `nohup`；`./down.sh` MUST 仍能停止 listener。自訂 `JUDGMENT_WEB_TMUX_SESSION` 時兩個腳本 MUST 使用同一名稱。
 - **SC-080**: 開啟 `#/tests` 時 MUST 顯示「Reranker 服務測試」卡；`RAG_RERANK_ENABLED=false` 或未設定 URL 時 MUST 顯示 `not_configured` 與原因，不得誤報可用。設定 primary／fallback 且至少一端可用時，按下「執行 Reranker 服務測試」MUST 顯示各端點 status、latency、top score、scores 與文件片段；失敗端點 MUST 顯示錯誤。測試 Flow 的 Reranker 階段 MUST 顯示於 Qdrant 檢索與 PostgreSQL 取文之間。390px viewport 無水平溢出，console error 為 0。
 - **SC-081**: 新的 test-mode run MUST 在 waterfall 顯示 `x570:bge-m3`、`x570:bge-reranker-v2-m3`、`mbp:gemma3:4b` 等「主機:模型」標籤，PostgreSQL 取文階段 MUST 顯示 `mbp:judgment` 形式的「主機:DB名稱」；RAG 引擎答案標頭與 footer primary MUST 使用相同模型格式。歷史 run 若沒有 host metadata，MAY 只顯示原始模型或 DB 名稱，不得推測或偽造主機。390px viewport 無水平溢出，console error 為 0。
@@ -654,7 +718,7 @@ LLM_KEEP_ALIVE=30m
 - **SC-019**: 資料庫頁可在法規命令與判決間切換；判決分類可查詢已篩選的 `judgment_documents`，且未匯入或未命中時顯示 0 筆，不出現虛構資料。
 - **SC-020**: 從判決查詢結果可開啟判決原文，並以「返回查詢結果」回到原本的判決頁碼與資料列。
 - **SC-021**: 執行 API 或 CLI 後，效能報表可查到對應的 process、module、timestamp、duration 與 flow；以程序、狀態或模型篩選時只回傳符合的紀錄，並顯示平均與 P95 耗時。
-- **SC-022**: 以目前 4,681,502 筆 current 判決回填後，法院下拉選單只包含程式定義的 44 個標準法院名稱且無空值或重複；以「臺灣臺北地方法院」篩選得到 914,107 筆，排序與判決原文顯示的法院名稱一致。
+- **SC-022**: 以目前 4,681,502 筆 current 判決回填後，法院下拉選單只包含程式定義的 44 個標準法院名稱且無空值或重複；以「臺灣臺北地方法院」篩選的回傳筆數 MUST 與 PostgreSQL current 查詢結果一致，排序與判決原文顯示的法院名稱一致。
 - **SC-023**: 向量索引中斷後重跑時，已索引且 content hash 未變更的判決不會重複寫入 Qdrant；`judgment_vector_index` 與 Qdrant points 數量一致。
 - **SC-024**: 在向量索引與 LLM 就緒時，RAG 回答包含可對應下方判決的 `[n]` 引用；移除 LLM 設定後，同一問題降級為 `retrieval_only` 且仍列出實際檢索到的判決。
 - **SC-025**: 一次實際 RAG 請求的 Flow 至少包含 `http.request`、`api.endpoint`、`rag.answer_question`、`rag.search`、`rag.embed_query`、`rag.qdrant_search`、`rag.fetch_documents`、`rag.llm` 與 `rag.validate_citations`，且 `summary.models` 包含 `bge-m3` 與 `gemma3:4b`。

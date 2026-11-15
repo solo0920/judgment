@@ -124,6 +124,7 @@ from ..runtime_settings import (
     set_test_mode,
 )
 from .catalog import build_catalog
+from .home import build_home_summary
 from .judgment_stats import build_judgment_stats
 from .performance import performance_options, query_performance
 from .power_agent import ensure_power_agent
@@ -257,6 +258,7 @@ PERFORMANCE_TARGETS = {
     "/api/system-usage": ("系統資源使用", "judgment.web.system_usage.build_system_usage"),
     "/api/index-versions": ("索引版本", "judgment.web.app.index_versions"),
     "/api/catalog": ("資料庫 catalog", "judgment.web.catalog.build_catalog"),
+    "/api/home": ("首頁即時摘要", "judgment.web.home.build_home_summary"),
     "/api/judgment-stats": ("判決金融佔比", "judgment.web.judgment_stats.build_judgment_stats"),
     "/api/query": ("資料查詢", "judgment.web.query.run_query"),
     "/api/law": ("法規明細", "judgment.web.query.get_law_detail"),
@@ -319,6 +321,7 @@ API_ENDPOINT_LABELS = {
     "/api/law-versions/check": "條文歷史檢查",
     "/api/quality": "資料品質與統計",
     "/api/catalog": "資料庫 catalog",
+    "/api/home": "首頁即時摘要",
     "/api/judgment-stats": "判決金融佔比",
     "/api/query": "資料查詢",
     "/api/data/suggest": "資料欄位建議",
@@ -827,6 +830,21 @@ def create_app(
     @app.get("/api/health")
     def health() -> Dict[str, Any]:
         return {"status": "ok", "version": __version__}
+
+    @app.get("/api/home")
+    def home_summary() -> Dict[str, Any]:
+        with trace_segment(
+            "api.endpoint",
+            module=__name__,
+            function="home_summary",
+            params={},
+        ):
+            return build_home_summary(
+                settings=runtime_settings(
+                    app.state.settings, app.state.session_factory
+                ),
+                session_factory=app.state.session_factory,
+            )
 
     @app.get("/api/status")
     def status() -> Dict[str, Any]:

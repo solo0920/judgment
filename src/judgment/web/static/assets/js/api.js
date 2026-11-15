@@ -546,6 +546,10 @@ export const api = {
     return request("/api/catalog");
   },
 
+  homeSummary() {
+    return request("/api/home");
+  },
+
   judgmentStats() {
     return request("/api/judgment-stats");
   },
