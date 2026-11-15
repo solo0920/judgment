@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .config import Settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,3 +235,141 @@ class RerankerClient:
             candidate_count=candidate_count,
             errors=errors,
         )
+
+
+RERANK_TEST_QUERY = "銀行未經許可吸收存款，應負什麼責任？"
+RERANK_TEST_DOCUMENTS = (
+    "銀行法第29條規定，除法律另有規定者外，非銀行不得經營收受存款業務。",
+    "民法第184條規定，因故意或過失不法侵害他人權利者，負損害賠償責任。",
+    "證券交易法第20條規定，有價證券之募集、發行、私募或買賣，不得有虛偽、詐欺或其他足致他人誤信之行為。",
+    "刑法第339條規定，意圖為自己或第三人不法之所有，以詐術使人交付財物者，處五年以下有期徒刑。",
+)
+
+
+def rerank_service_test(
+    settings: Settings,
+    *,
+    query: str = RERANK_TEST_QUERY,
+    documents: Sequence[str] = RERANK_TEST_DOCUMENTS,
+) -> Dict[str, Any]:
+    """Exercise each configured reranker with a real scoring request.
+
+    A health check alone cannot distinguish a reachable llama-server from one
+    that rejects the configured model or returns malformed scores, so the
+    system-test card uses this endpoint to verify the full response.
+    """
+
+    model = str(settings.rerank_model or "bge-reranker-v2-m3")
+    query = str(query or RERANK_TEST_QUERY)
+    docs = [str(item) for item in documents if str(item).strip()]
+    enabled = bool(settings.rag_rerank_enabled)
+    candidates = [
+        ("primary", str(settings.rerank_url or "").strip().rstrip("/")),
+        ("fallback", str(settings.rerank_fallback_url or "").strip().rstrip("/")),
+    ]
+    started = time.perf_counter()
+    providers: List[Dict[str, Any]] = []
+    for role, url in candidates:
+        if not url:
+            continue
+        entry: Dict[str, Any] = {
+            "role": role,
+            "url": url,
+            "model": model,
+            "status": "disabled" if not enabled else "degraded",
+            "latency_ms": None,
+            "candidate_count": len(docs),
+            "selected_count": 0,
+            "top_score": None,
+            "scores": [],
+            "results": [],
+            "errors": [],
+        }
+        if not enabled:
+            providers.append(entry)
+            continue
+        client = RerankerClient(
+            [url],
+            model=model,
+            timeout=settings.rerank_timeout_seconds,
+            connect_timeout=settings.rerank_connect_timeout_seconds,
+        )
+        try:
+            outcome = client.rerank(query, docs, top_n=min(3, len(docs)))
+            entry.update(
+                {
+                    "status": (
+                        "operational"
+                        if outcome.status == "ok"
+                        else "degraded"
+                    ),
+                    "latency_ms": outcome.latency_ms,
+                    "candidate_count": outcome.candidate_count,
+                    "selected_count": outcome.selected_count,
+                    "top_score": (
+                        round(float(outcome.results[0].score), 4)
+                        if outcome.results
+                        else None
+                    ),
+                    "scores": [
+                        round(float(result.score), 4)
+                        for result in outcome.results[:10]
+                    ],
+                    "results": [
+                        {
+                            "index": int(result.index),
+                            "score": round(float(result.score), 4),
+                            "document": docs[result.index][:180],
+                        }
+                        for result in outcome.results
+                        if 0 <= result.index < len(docs)
+                    ],
+                    "errors": list(outcome.errors),
+                    "provider": outcome.provider,
+                    "actual_model": outcome.model,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - report, do not fail the page
+            entry["errors"] = [
+                f"{exc.__class__.__name__}: {exc}"[:400]
+            ]
+            entry["latency_ms"] = int(
+                (time.perf_counter() - started) * 1000
+            )
+        providers.append(entry)
+
+    active = next(
+        (
+            provider
+            for provider in providers
+            if provider.get("status") == "operational"
+        ),
+        None,
+    )
+    if not enabled:
+        status = "not_configured"
+        detail = f"RAG_RERANK_ENABLED=false（模型：{model}）"
+    elif not providers:
+        status = "not_configured"
+        detail = f"未設定 RERANK_URL（模型：{model}）"
+    elif active is not None:
+        status = "operational"
+        detail = (
+            f"{'fallback ' if active['role'] == 'fallback' else ''}"
+            f"模型：{model} · {active['url']}"
+        )
+    else:
+        status = "degraded"
+        detail = f"無法完成 rerank（模型：{model}）"
+
+    return {
+        "status": status,
+        "enabled": enabled,
+        "model": model,
+        "query": query,
+        "providers": providers,
+        "active": active,
+        "candidate_count": len(docs),
+        "latency_ms": int((time.perf_counter() - started) * 1000),
+        "detail": detail,
+    }

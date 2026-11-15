@@ -620,6 +620,21 @@ export const api = {
     });
   },
 
+  rerankStatus() {
+    return request("/api/rerank/status", {
+      timeout: 60000,
+      trackClient: false,
+    });
+  },
+
+  testReranker() {
+    return request("/api/rerank/test", {
+      method: "POST",
+      timeout: 120000,
+      trackClient: false,
+    });
+  },
+
   selectLlmModel(model, hostId = null) {
     return request("/api/llm/model", {
       method: "POST",

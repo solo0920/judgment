@@ -14,10 +14,12 @@ from judgment.models import (
     PerformanceTestStep,
 )
 from judgment.performance_test import (
+    _database_endpoint,
     available_test_models,
     get_test_run,
     run_test_mode,
 )
+from judgment.rerank import RerankOutcome
 from judgment.runtime_settings import get_test_mode, set_test_mode
 
 
@@ -102,6 +104,18 @@ class FakeEmbedder:
         return [0.1, 0.2, 0.3]
 
 
+def test_database_endpoint_label_uses_host_and_database() -> None:
+    host, database = _database_endpoint(
+        _settings(
+            database_url=(
+                "postgresql+psycopg://user:secret@db.example:5432/judgment"
+            )
+        )
+    )
+    assert host == "db.example"
+    assert database == "judgment"
+
+
 def test_test_mode_setting_roundtrip() -> None:
     session_factory = _session_factory()
     assert get_test_mode(session_factory) is False
@@ -177,11 +191,30 @@ def test_run_test_mode_persists_run_and_steps(monkeypatch) -> None:
         "judgment.performance_test.generate_answer_with_model",
         lambda **kwargs: "依檢索到的判決，原告可請求返還借款 [1]。",
     )
+    monkeypatch.setattr(
+        "judgment.performance_test._rerank_hits",
+        lambda **kwargs: (
+            kwargs["hits"],
+            RerankOutcome(
+                status="ok",
+                model="bge-reranker-v2-m3",
+                provider="reranker.test",
+                url="http://reranker.test/v1/rerank",
+                latency_ms=12,
+                candidate_count=len(kwargs["hits"]),
+                selected_count=len(kwargs["hits"]),
+            ),
+        ),
+    )
 
     payload = run_test_mode(
         session_factory=session_factory,
         question="原告如何請求返還借款？",
-        settings=_settings(),
+        settings=_settings(
+            rag_rerank_enabled=True,
+            rerank_url="http://reranker.test",
+            rerank_model="bge-reranker-v2-m3",
+        ),
         coverage={
             "total_judgments": 1,
             "indexed_judgments": 1,
@@ -208,19 +241,28 @@ def test_run_test_mode_persists_run_and_steps(monkeypatch) -> None:
     assert run.status == "success"
     assert run.progress == 100
     assert run.answer.endswith("[1]。")
-    assert len(steps) == 5
+    assert len(steps) == 6
     assert [step.stage for step in steps] == [
         "embedding",
         "retrieval",
+        "rerank",
         "context",
         "llm",
         "validation",
     ]
     assert all(step.module and step.function for step in steps)
     assert all(step.status == "success" for step in steps)
+    by_stage = {step.stage: step for step in steps}
+    assert by_stage["embedding"].details["provider_name"] == "ollama.test"
+    assert by_stage["retrieval"].details["provider_name"] == "ollama.test"
+    assert by_stage["rerank"].details["provider_name"] == "reranker.test"
+    assert by_stage["context"].details["provider_name"] == "local"
+    assert by_stage["context"].details["database"] == ":memory:"
+    assert by_stage["llm"].details["provider_name"] == "ollama.test"
+    assert by_stage["validation"].details["provider_name"] == "ollama.test"
     serialized = get_test_run(session_factory, run.run_id)
     assert serialized is not None
     assert serialized["run_id"] == run.run_id
     assert serialized["answer"] == run.answer
-    assert len(serialized["steps"]) == 5
+    assert len(serialized["steps"]) == 6
     assert all(step["module"] and step["function"] for step in serialized["steps"])

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import socket
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
@@ -19,16 +22,25 @@ from .models import PerformanceTestRun, PerformanceTestStep
 from .rag import (
     _build_citations,
     _fetch_documents,
+    _rerank_hits,
     _retrieval_answer,
     _valid_citation_markers,
     generate_answer_with_model,
 )
 from .vector_store import QdrantStore
 
-STAGE_ORDER = ("embedding", "retrieval", "context", "llm", "validation")
+STAGE_ORDER = (
+    "embedding",
+    "retrieval",
+    "rerank",
+    "context",
+    "llm",
+    "validation",
+)
 STAGE_LABELS = {
     "embedding": "Embedding",
     "retrieval": "Qdrant 檢索",
+    "rerank": "Reranker",
     "context": "PostgreSQL 取文",
     "llm": "LLM 生成",
     "validation": "引用驗證",
@@ -36,6 +48,7 @@ STAGE_LABELS = {
 STEP_LOCATIONS = {
     "embedding": ("judgment.embeddings", "OllamaEmbedder.embed_query"),
     "retrieval": ("judgment.vector_store", "QdrantStore.search"),
+    "rerank": ("judgment.rerank", "RerankerClient.rerank"),
     "context": ("judgment.rag", "_fetch_documents / _build_citations"),
     "llm": ("judgment.rag", "generate_answer_with_model"),
     "validation": ("judgment.rag", "_valid_citation_markers"),
@@ -56,6 +69,46 @@ RERANK_HINTS = ("rerank", "reranker")
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
     return value.isoformat() if value else None
+
+
+def _endpoint_host(session_factory, url: str) -> str:
+    """Resolve a UI-friendly host name for an endpoint URL."""
+
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    parsed = urlparse(text if "://" in text else f"http://{text}")
+    base = (
+        f"{parsed.scheme}://{parsed.netloc}"
+        if parsed.netloc
+        else text
+    )
+    from .ollama_hosts import find_host
+
+    for candidate in (base, text):
+        host = find_host(session_factory, candidate)
+        if host is not None:
+            name = str(host.get("name") or "").strip()
+            if name:
+                return name
+    hostname = str(parsed.hostname or "").strip()
+    if hostname in {"127.0.0.1", "localhost", "::1"}:
+        return socket.gethostname().split(".", 1)[0] or "local"
+    return hostname or text
+
+
+def _database_endpoint(settings: Settings) -> Tuple[str, str]:
+    """Return the DB host and database name for test-flow labels."""
+
+    try:
+        url = make_url(settings.database_url)
+    except Exception:
+        return "local", "database"
+    host = str(url.host or "").strip()
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        host = socket.gethostname().split(".", 1)[0] or "local"
+    database = str(url.database or "").strip() or "database"
+    return host or "local", database
 
 
 def _base_model_name(name: str) -> str:
@@ -279,6 +332,8 @@ def _create_test_run(
     question: str,
     request_id: str,
     models: Dict[str, Any],
+    rerank_model: str = "",
+    database_name: str = "PostgreSQL",
 ) -> Tuple[str, Dict[Tuple[str, str], int], int]:
     run_id = uuid4().hex
     now = datetime.now(timezone.utc)
@@ -286,7 +341,10 @@ def _create_test_run(
     for model in models.get("embedding") or []:
         step_defs.append(("embedding", str(model)))
         step_defs.append(("retrieval", str(model)))
-    step_defs.append(("context", "PostgreSQL"))
+    step_defs.append(
+        ("rerank", str(rerank_model or "bge-reranker-v2-m3"))
+    )
+    step_defs.append(("context", str(database_name or "PostgreSQL")))
     for model in models.get("llm") or []:
         step_defs.append(("llm", str(model)))
         step_defs.append(("validation", str(model)))
@@ -547,14 +605,21 @@ def run_test_mode(
     models = available_test_models(
         settings, session_factory=session_factory
     )
+    database_host, database_name = _database_endpoint(settings)
     run_id, step_ids, total_steps = _create_test_run(
         session_factory,
         question=question,
         request_id=request_id,
         models=models,
+        rerank_model=settings.rerank_model,
+        database_name=database_name,
     )
     vectors: Dict[str, List[float]] = {}
+    embedding_hosts: Dict[str, str] = {}
+    embedding_urls: Dict[str, str] = {}
     reference_hits: Optional[List[Dict[str, Any]]] = None
+    context_hits: Optional[List[Dict[str, Any]]] = None
+    reference_documents: Dict[str, Any] = {}
     reference_model = ""
     citations: List[Dict[str, Any]] = []
     contexts: List[Dict[str, Any]] = []
@@ -614,6 +679,13 @@ def run_test_mode(
                 )
                 vector = embedder.embed_query(question)
                 vectors[model] = vector
+                active_url = (
+                    getattr(embedder, "active_base_url", "")
+                    or settings.embedding_url
+                )
+                host_name = _endpoint_host(session_factory, active_url)
+                embedding_hosts[model] = host_name
+                embedding_urls[model] = active_url
                 mark(
                     "embedding",
                     model,
@@ -622,6 +694,8 @@ def run_test_mode(
                     details={
                         "model": model,
                         "dimensions": len(vector),
+                        "provider_name": host_name,
+                        "active_base_url": active_url,
                     },
                     duration_ms=int((time.perf_counter() - step_started) * 1000),
                 )
@@ -670,6 +744,12 @@ def run_test_mode(
                     progress=100,
                     details={
                         "model": model,
+                        "provider_name": embedding_hosts.get(
+                            model, ""
+                        ),
+                        "active_base_url": embedding_urls.get(
+                            model, settings.embedding_url
+                        ),
                         "hits": len(hits),
                         "top_score": round(
                             float(hits[0].get("score") or 0), 4
@@ -690,23 +770,132 @@ def run_test_mode(
                     duration_ms=int((time.perf_counter() - step_started) * 1000),
                 )
 
-        # 3. Fetch full text and build citation contexts once.
-        context_model = "PostgreSQL"
+        # 3. Rerank the reference retrieval once. The reranker needs full
+        # document text, so fetch it here and reuse it for the context stage.
+        rerank_model = settings.rerank_model or "bge-reranker-v2-m3"
+        configured_rerank_url = (
+            settings.rerank_url or settings.rerank_fallback_url
+        )
+        configured_rerank_host = _endpoint_host(
+            session_factory, configured_rerank_url
+        )
+        now = datetime.now(timezone.utc)
+        mark("rerank", rerank_model, status="running", progress=5, started_at=now)
+        rerank_started = time.perf_counter()
+        context_hits = reference_hits
+        if not reference_hits:
+            mark(
+                "rerank",
+                rerank_model,
+                status="skipped",
+                progress=100,
+                details={
+                    "provider_name": configured_rerank_host,
+                    "base_url": configured_rerank_url,
+                },
+                error="沒有檢索結果，略過 rerank",
+            )
+        elif not settings.rag_rerank_enabled:
+            mark(
+                "rerank",
+                rerank_model,
+                status="skipped",
+                progress=100,
+                details={
+                    "enabled": False,
+                    "provider_name": configured_rerank_host,
+                    "base_url": configured_rerank_url,
+                },
+                error="RAG_RERANK_ENABLED=false",
+            )
+        else:
+            try:
+                reference_documents = _fetch_documents(
+                    session_factory,
+                    [
+                        str((hit.get("payload") or {}).get("jid") or "")
+                        for hit in reference_hits
+                    ],
+                )
+                reranked_hits, outcome = _rerank_hits(
+                    settings=settings,
+                    question=question,
+                    hits=reference_hits,
+                    documents=reference_documents,
+                )
+                context_hits = (
+                    reranked_hits
+                    if outcome.status == "ok"
+                    else reference_hits
+                )
+                rerank_status = (
+                    "success"
+                    if outcome.status == "ok"
+                    else "skipped"
+                    if outcome.status in {"empty", "disabled"}
+                    else "failed"
+                )
+                mark(
+                    "rerank",
+                    rerank_model,
+                    status=rerank_status,
+                    progress=100,
+                    details={
+                        "reference_embedding_model": reference_model,
+                        **outcome.to_dict(),
+                        "provider_name": _endpoint_host(
+                            session_factory,
+                            outcome.url or configured_rerank_url,
+                        ),
+                        "base_url": outcome.url or configured_rerank_url,
+                    },
+                    error=(
+                        "; ".join(outcome.errors)
+                        if outcome.errors
+                        else None
+                    ),
+                    duration_ms=int(
+                        (time.perf_counter() - rerank_started) * 1000
+                    ),
+                )
+            except Exception as exc:
+                context_hits = reference_hits
+                mark(
+                    "rerank",
+                    rerank_model,
+                    status="failed",
+                    progress=100,
+                    details={
+                        "enabled": True,
+                        "provider_name": configured_rerank_host,
+                        "base_url": configured_rerank_url,
+                    },
+                    error=f"{exc.__class__.__name__}: {exc}",
+                    duration_ms=int(
+                        (time.perf_counter() - rerank_started) * 1000
+                    ),
+                )
+
+        # 4. Fetch full text and build citation contexts once.
+        context_model = database_name
         now = datetime.now(timezone.utc)
         mark("context", context_model, status="running", progress=5, started_at=now)
         context_started = time.perf_counter()
         try:
             judgment_contexts: List[Dict[str, Any]] = []
-            if reference_hits:
+            if context_hits:
                 jids = [
                     str((hit.get("payload") or {}).get("jid") or "")
-                    for hit in reference_hits
+                    for hit in context_hits
                 ]
-                documents = _fetch_documents(session_factory, jids)
+                documents = (
+                    reference_documents
+                    or _fetch_documents(session_factory, jids)
+                )
                 citations, judgment_contexts = _build_citations(
                     hits=[
                         hit
-                        for hit in reference_hits
+                        for hit in context_hits
                         if str((hit.get("payload") or {}).get("jid") or "")
                         in documents
                     ],
@@ -726,6 +915,8 @@ def run_test_mode(
                 status="success" if contexts else "skipped",
                 progress=100,
                 details={
+                    "provider_name": database_host,
+                    "database": database_name,
                     "reference_embedding_model": reference_model,
                     "documents": len(judgment_contexts),
                     "laws": len(law_contexts),
@@ -740,12 +931,17 @@ def run_test_mode(
                 context_model,
                 status="failed",
                 progress=100,
-                details={"reference_embedding_model": reference_model},
+                details={
+                    "provider_name": database_host,
+                    "database": database_name,
+                    "reference_embedding_model": reference_model,
+                },
                 error=f"{exc.__class__.__name__}: {exc}",
                 duration_ms=int((time.perf_counter() - context_started) * 1000),
             )
 
-        # 4. LLM: one step per available LLM model.
+        # 5. LLM: one step per available LLM model.
+        llm_host = _endpoint_host(session_factory, settings.llm_url)
         for model in models.get("llm") or []:
             if not contexts:
                 mark(
@@ -775,6 +971,8 @@ def run_test_mode(
                     progress=100,
                     details={
                         "model": model,
+                        "provider_name": llm_host,
+                        "base_url": settings.llm_url,
                         "answer_chars": len(answer),
                         "answer_preview": answer[:500],
                     },
@@ -790,12 +988,16 @@ def run_test_mode(
                     model,
                     status="failed",
                     progress=100,
-                    details={"model": model},
+                    details={
+                        "model": model,
+                        "provider_name": llm_host,
+                        "base_url": settings.llm_url,
+                    },
                     error=f"{exc.__class__.__name__}: {exc}",
                     duration_ms=int((time.perf_counter() - step_started) * 1000),
                 )
 
-        # 5. Citation validation: one step per LLM model.
+        # 6. Citation validation: one step per LLM model.
         valid_models: List[str] = []
         for model in models.get("llm") or []:
             result = llm_results.get(model)
@@ -822,6 +1024,8 @@ def run_test_mode(
                 progress=100,
                 details={
                     "model": model,
+                    "provider_name": llm_host,
+                    "base_url": settings.llm_url,
                     "valid": valid,
                     "answer_chars": len(answer),
                     "citation_count": len(citations) + len(law_sources),

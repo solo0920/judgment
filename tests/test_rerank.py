@@ -8,7 +8,12 @@ import httpx
 
 from judgment.config import Settings
 from judgment.rag import _rerank_law_sources
-from judgment.rerank import RerankOutcome, RerankResult, RerankerClient
+from judgment.rerank import (
+    RerankOutcome,
+    RerankResult,
+    RerankerClient,
+    rerank_service_test,
+)
 from judgment.web.status import _rerank_metrics
 
 
@@ -220,6 +225,60 @@ def test_reranker_status_checks_primary_and_fallback(monkeypatch) -> None:
     assert metrics["providers"][1]["status"] == "operational"
     assert metrics["providers"][1]["active"] is True
     assert metrics["active"]["name"] == "local"
+
+
+def test_rerank_service_test_runs_actual_scoring(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, *, json, timeout):
+        calls.append((url, json))
+        return FakeResponse(
+            {
+                "model": "bge-reranker-v2-m3",
+                "results": [
+                    {"index": 0, "relevance_score": 0.98},
+                    {"index": 1, "relevance_score": 0.12},
+                ],
+            }
+        )
+
+    monkeypatch.setattr("judgment.rerank.httpx.post", fake_post)
+    settings = SimpleNamespace(
+        rag_rerank_enabled=True,
+        rerank_url="http://x570:11435",
+        rerank_fallback_url="http://127.0.0.1:11435",
+        rerank_model="bge-reranker-v2-m3",
+        rerank_timeout_seconds=3.0,
+        rerank_connect_timeout_seconds=0.75,
+    )
+
+    result = rerank_service_test(settings)
+
+    assert result["status"] == "operational"
+    assert result["enabled"] is True
+    provider = result["providers"][0]
+    assert provider["status"] == "operational"
+    assert provider["selected_count"] == 2
+    assert provider["top_score"] == 0.98
+    assert provider["results"][0]["document"].startswith("銀行法第29條")
+    assert calls[0][0] == "http://x570:11435/v1/rerank"
+    assert calls[0][1]["top_n"] == 3
+
+
+def test_rerank_service_test_reports_disabled() -> None:
+    settings = SimpleNamespace(
+        rag_rerank_enabled=False,
+        rerank_url="http://x570:11435",
+        rerank_fallback_url="",
+        rerank_model="bge-reranker-v2-m3",
+        rerank_timeout_seconds=3.0,
+        rerank_connect_timeout_seconds=0.75,
+    )
+
+    result = rerank_service_test(settings)
+
+    assert result["status"] == "not_configured"
+    assert result["providers"][0]["status"] == "disabled"
 
 
 def _law_settings() -> Settings:

@@ -519,7 +519,7 @@ uv run judgment-normalize-courts --all
 | `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Pipeline、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Pipeline 依執行順序接續繪製 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response waterfall，上一階段結束位置即下一階段開始位置；顯示各 span 的開始／結束時間、Token、TTFT、模型與來源數量，滑鼠移到 bar 上會顯示該 span 的詳細資訊；使用模型的階段會標註「主機:模型」，Embedding／LLM bar 的藍色前段為 Model Load，後段為扣除載入後的推論時間，展開明細會分成兩段並各自顯示開始／結束時間；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
 | `#/processing` | 資料處理 | 左側工作流程 sidebar 列出處理總覽與 9 個可執行流程；右側顯示所選流程的 Python 程式、Shell／入口腳本、實際命令、執行按鈕與最近一次結果。含 embedding 的流程（法規／命令索引、判決匯入、Qdrant判決向量索引版本建置）在執行資訊卡片提供「Embedding 主機／模型」按鈕列，與 RAG model strip 使用相同的可點選按鈕；按鈕以「主機:模型」顯示，例如 `x570:bge-m3:latest`、`mbp:bge-m3:latest`，列出線上具備 embedding 能力的模型。選擇後會儲存該主機的 embedding model、把該主機設為第一優先，其餘主機依序作為備援，切換前警告既有索引可能需要重建；不再顯示主機卡片、拖移把手或上下箭頭。處理總覽分為「法規」「命令」「判決」三個時間表卡片，沿用「匯入檔案時間表」框架：年份×月份表格、完成／未完成／處理中／有更新統計、目前版本或目前匯入列、可水平捲動的月份表。每個月份橫向切成四格，依序代表下載、Parquet、PostgreSQL、Qdrant；綠色完成、紅色未完成、灰色處理中、空白無資料。法規／命令以來源版本月份顯示，判決以 1996-01–2026-08 的 368 個月顯示；判決四階段分別依本機 `.rar`、raw Parquet manifest、PostgreSQL `issue_month` 與 Qdrant 月份覆蓋率判定。完整資料更新仍可由 `judgment.processing_update`／`POST /api/processing/update`／排程腳本執行；頁首僅保留執行中的「停止更新」按鈕。`YYYYMMDDHHMM` 版本編號仍持久化，法規／命令時間表的目前版本列與 tooltip 會顯示版本編號。 |
 | `#/status` | 系統狀態 | 左側分類依序為服務總覽、系統測試、系統資料使用、Model Provider、前後端架構、資料版本、API 端點與最近下載；包含核心與 AI 服務健康（含 Reranker 服務）、判決索引覆蓋率、資料量、CPU／RAM／Swap、Docker 容器與 volume 用量、PostgreSQL／Qdrant 資源、磁碟空間、架構圖與下載執行紀錄。Model Provider 可管理 Ollama 主機與模型、切換使用中的主機；每個模型會顯示 Chat／Embedding／Vision／Tools／Thinking／Speech／Reranker 能力標籤，並可手動「檢查模型能力」更新尚未測試的模型。embedding 主機與模型可在資料處理頁以「主機:模型」按鈕選擇，選取後設為第一優先。 |
-| `#/tests` | 系統測試 | 獨立路由，內容與 `#/status` 的「系統測試」分類相同：API 連線設定、測試模式開關、LLM 服務測試與測試 Flow。header 不直接列出此頁；未設定 API Base 的 standalone 前端會自動導向此頁。 |
+| `#/tests` | 系統測試 | 獨立路由，內容與 `#/status` 的「系統測試」分類相同：API 連線設定、測試模式開關、LLM 服務測試、Reranker 服務測試與測試 Flow。header 不直接列出此頁；未設定 API Base 的 standalone 前端會自動導向此頁。 |
 
 ### HTTP API
 
@@ -827,7 +827,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 - 前端不設請求 timeout；後端 embedding 與 LLM 呼叫也使用 `timeout=None`。
 - 模型清單從 Ollama `/api/tags` 自動偵測，排除 reranker；`bge-m3` 歸類為 embedding，其餘模型需經 **LLM 服務測試** 確認具備 chat 能力，才會列入 LLM 評測。
 - 可用 `TEST_EMBEDDING_MODELS`、`TEST_LLM_MODELS` 以逗號分隔覆寫要測試的模型；LLM 仍只保留具備 chat 能力者。
-- 每個 embedding 模型會建立 `embedding`／`retrieval` 各一筆 step；PostgreSQL `context` 共用一筆；每個 LLM 建立 `llm`／`validation` 各一筆。每筆 step 記錄 `module`、`function`、status、progress、duration、error 與模型輸出摘要；整個測試是 `performance_test_runs`，並保存原始問題與主要回答。
+- 每個 embedding 模型會建立 `embedding`／`retrieval` 各一筆 step；Reranker 共用一筆；PostgreSQL `context` 共用一筆；每個 LLM 建立 `llm`／`validation` 各一筆。每筆 step 記錄 `module`、`function`、status、progress、duration、error 與模型輸出摘要；整個測試是 `performance_test_runs`，並保存原始問題與主要回答。
 - 回覆仍會選出主要回答：優先使用 `LLM_MODEL`，若失敗或引用驗證不通過，改用第一個通過驗證的模型；若全部失敗則只回傳檢索結果。
 
 #### 測試流程圖表
@@ -836,8 +836,8 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 
 - 顯示目前執行中的測試，或最近一筆測試。
 - 標記原始 RAG 問題與 RAG 引擎產生的答案。
-- 每個步驟顯示使用的 `module`、`function`、模型、狀態與耗時。
-- 依階段分組：Embedding、Qdrant 檢索、PostgreSQL 取文、LLM 生成、引用驗證。
+- 每個步驟顯示使用的 `module`、`function`、模型、狀態與耗時；模型標籤使用實際執行端點的「主機:模型」格式，例如 `x570:bge-m3`、`x570:bge-reranker-v2-m3`、`mbp:gemma3:4b`，PostgreSQL 取文階段則使用「主機:DB名稱」格式，例如 `mbp:judgment`。RAG 引擎答案標頭與 footer primary 也使用同一模型格式。
+- 依階段分組：Embedding、Qdrant 檢索、Reranker、PostgreSQL 取文、LLM 生成、引用驗證；PostgreSQL 階段的模型欄顯示 `主機:DB名稱`。
 - 每個階段有幾個模型，就顯示幾條子程序進度條；模型失敗以紅色、略過以灰色、執行中以藍色 animated bar 顯示。
 - 最下方先顯示總流程進度條，再顯示**總流程時間（依階段）** stacked bar：每個階段依耗時比例顯示不同顏色，下方 legend 標記階段名稱、耗時與百分比；LLM 生成通常占最大比例，執行中會即時估算。
 - 系統測試頁、效能報表與 RAG 頁的測試 Flow panel 訂閱 SSE `/api/events/stream` 的 `test-runs` topic；`performance_test_runs`／`performance_test_steps` 變更時由後端推送，前端收到後才查詢 `/api/test-runs/current` 並更新，完成後取消訂閱。
@@ -846,7 +846,7 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 
 一次實際測試（4 個 LLM、1 個 embedding）：
 
-- 11 個子程序：1 embedding + 1 retrieval + 1 context + 4 LLM + 4 validation。
+- 12 個子程序：1 embedding + 1 retrieval + 1 rerank + 1 context + 4 LLM + 4 validation。
 - 一次歷史實測（27B 預設時期）：4 個 LLM、11 個子程序、總耗時約 82 秒；`gemma3:27b`、`granite4:small-h`、`command-r:latest` 成功，`phonon:latest` 不是 chat 模型而回傳 HTTP 400，測試狀態為 `partial`。
 - 主要回答由 `gemma3:27b` 產生，RAG 回應狀態 `operational`，並包含 `test_run` metadata。現在快速預設為 `gemma3:4b`，測試模式會自動多跑 4B 模型。
 
@@ -861,6 +861,8 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 | `GET` | `/api/test-runs/{run_id}` | 單一測試的完整 stages／steps |
 | `GET` | `/api/llm/models` | 讀取 Ollama 目前模型與已記錄的 chat 能力（不重新探測） |
 | `POST` | `/api/llm/models/test` | 執行 LLM 服務測試；只探測尚未記錄的新模型 |
+| `GET` | `/api/rerank/status` | 讀取 primary／fallback reranker 健康狀態（不執行 rerank） |
+| `POST` | `/api/rerank/test` | 對設定的 reranker 執行實際 rerank 測試並回傳分數 |
 
 測試模式設定儲存在 PostgreSQL `app_settings`（key `test_mode`），重啟後保留；測試 Flow 儲存在 `performance_test_runs` 與 `performance_test_steps`。
 
@@ -881,7 +883,16 @@ header 的 `效能報表` 頁面會顯示 PostgreSQL `performance_records` 內�
 - Benchmark judge 若未設定或不支援 chat，會自動改用另一個支援 chat 的模型；若沒有第二個 chat 模型，則關閉 judge。
 - 這可避免 `phonon:latest`（`speech`）或 `bge-m3`（`embedding`）被當成 LLM，造成 Ollama 回傳 `HTTP 400 does not support chat`。
 
+#### Reranker 服務測試
 
+系統測試頁的「Reranker 服務測試」卡會檢查 `RAG_RERANK_ENABLED`、primary／fallback URL、模型與健康狀態；按下「執行 Reranker 服務測試」後，會用固定 sample query 與四段文件對每個設定的端點執行實際 `/v1/rerank` 請求，回傳：
+
+- 每個端點的 status、latency、候選數與選用數
+- top score、前幾個 scores 與 top result 文件片段
+- 錯誤訊息與 primary／fallback 哪一個目前可用
+- `RAG_RERANK_ENABLED=false` 或未設定 URL 時顯示 `not_configured`，不得誤報可用
+
+測試不會修改索引、選取結果或 reranker 設定。測試模式的 Flow 也會在 Qdrant 檢索與 PostgreSQL 取文之間顯示 Reranker 階段，包含「主機:模型」、候選數、選用數、top score、耗時與 fallback 狀態；PostgreSQL 取文階段顯示「主機:DB名稱」，例如 `mbp:judgment`。歷史 run 若沒有 host metadata，只顯示原始模型或 DB 名稱。
 
 「設定選項」→「介面風格」提供十種科技網站風格，對應 <https://getdesign.md/> 的公開設計參考。每個項目直接套用該風格在 header 的底色、文字顏色、品牌線、邊角與陰影，作為即時預覽：
 
@@ -1543,7 +1554,7 @@ ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh --uninstall'
 
 ### 本階段驗證
 
-- `uv run pytest`：344 passed（含靜態資源、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：348 passed（含靜態資源、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／Reranker 服務測試與 test-mode Reranker 階段／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - `uv run ruff check .`：clean。
 - 實際資料（2026-11-11）：1,351 筆法規、10,454 筆命令、222,124 條文；法規／命令原始 Parquet 2 個檔案，約 87 MB。
 - 法規／命令條文向量索引：11,805 部法規／命令、222,124 條可檢索條文，`bge-m3` 1,024 維；Qdrant `legal_articles_v001` 由 `legal_articles_current` alias 提供，索引不含 14,840 筆章節標題。判決索引仍為 `judgments_v002`（738,743 筆），兩個 collection 完全分開。
@@ -1581,7 +1592,7 @@ ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh --uninstall'
 - 以 Playwright 驗證 `file://frontend/index.html`、系統測試頁的 API 連線測試／儲存流程，以及靜態主機（含 `?api=` 覆寫）的跨來源 API 呼叫。
 - 以 Playwright 驗證系統測試：`#/status` 的「系統測試」分類與 `#/tests` 路由、API 表單、測試模式 ON/OFF 切換、模型清單、測試 Flow、RAG 頁測試模式提示，以及 `/api/test-mode` 狀態一致；後端電源改由 `./up.sh`／`./down.sh` 管理。
 - 以 Playwright 驗證測試模式 RAG：4 個 LLM 全數執行、耗時 149 秒、無前端 timeout，回答卡顯示 `test_run` 與「查看測試 Flow」連結。
-- 以 Playwright 驗證測試流程圖表：問題、RAG 答案、每步驟 module／function、`test-runs` SSE 即時推送更新、11 個子程序進度條（1 embedding + 1 retrieval + 1 context + 4 LLM + 4 validation）、失敗模型紅色 bar、總流程進度與依階段時間 bar、歷史選單還原舊 Flow、390px 與 0 console error。
+- 以 Playwright 驗證測試流程圖表：問題、RAG 答案、每步驟 module／function、`test-runs` SSE 即時推送更新、12 個子程序進度條（1 embedding + 1 retrieval + 1 rerank + 1 context + 4 LLM + 4 validation）、失敗模型紅色 bar、總流程進度與依階段時間 bar、歷史選單還原舊 Flow、390px 與 0 console error。
 - 以 Playwright 驗證 RAG 提問頁下方的即時測試 Flow panel：測試模式提問時顯示問題、答案、module／function、5 個階段、子進度條與總時間 bar。
 
 ## Case Assessment 文件（未來）

@@ -108,6 +108,125 @@ function llmCapabilityMarkup(payload) {
   };
 }
 
+function rerankProviderRow(provider) {
+  const status = String(provider?.status || "degraded");
+  const tone =
+    status === "operational"
+      ? "badge-ok"
+      : status === "disabled"
+        ? "badge-neutral"
+        : "badge-danger";
+  const scores = Array.isArray(provider?.scores)
+    ? provider.scores.slice(0, 4)
+    : [];
+  const topResult = Array.isArray(provider?.results)
+    ? provider.results[0]
+    : null;
+  return `<div class="tests-llm-row">
+    <div class="tests-llm-model">
+      <strong class="mono">${escapeHtml(
+        `${provider?.role || "reranker"} · ${provider?.url || "—"}`,
+      )}</strong>
+      <small>${escapeHtml(
+        provider?.actual_model || provider?.model || "—",
+      )}</small>
+      ${
+        topResult
+          ? `<div class="tests-rerank-result"><span class="mono">#${escapeHtml(
+              String(topResult.index),
+            )} · ${escapeHtml(
+              Number(topResult.score).toFixed(4),
+            )}</span><span>${escapeHtml(topResult.document || "")}</span></div>`
+          : ""
+      }
+    </div>
+    <div class="tests-llm-meta">
+      <span class="badge ${tone}">${escapeHtml(status)}</span>
+      ${
+        provider?.latency_ms !== null && provider?.latency_ms !== undefined
+          ? `<span class="mono">${escapeHtml(
+              String(provider.latency_ms),
+            )} ms</span>`
+          : ""
+      }
+      ${
+        provider?.top_score !== null && provider?.top_score !== undefined
+          ? `<span class="chip chip-mono">top ${escapeHtml(
+              Number(provider.top_score).toFixed(4),
+            )}</span>`
+          : ""
+      }
+      ${
+        scores.length
+          ? `<span class="chip chip-mono">${escapeHtml(
+              scores.map((score) => Number(score).toFixed(4)).join(" / "),
+            )}</span>`
+          : ""
+      }
+      ${
+        provider?.selected_count
+          ? `<span class="chip chip-mono">選用 ${escapeHtml(
+              String(provider.selected_count),
+            )} / ${escapeHtml(String(provider.candidate_count || 0))}</span>`
+          : ""
+      }
+    </div>
+  </div>`;
+}
+
+function rerankMarkup(payload) {
+  if (!payload) {
+    return {
+      summary: "<span>正在讀取 reranker 狀態…</span>",
+      list: "",
+      failures: "",
+    };
+  }
+  const providers = Array.isArray(payload.providers) ? payload.providers : [];
+  const active = payload.active || {};
+  const status = String(payload.status || "degraded");
+  const tone =
+    status === "operational"
+      ? "badge-ok"
+      : status === "not_configured"
+        ? "badge-neutral"
+        : "badge-danger";
+  const failures = providers.flatMap((provider) =>
+    (provider.errors || []).map((error) => ({
+      model: provider.url,
+      detail: error,
+    })),
+  );
+  return {
+    summary: `<span>狀態 <span class="badge ${tone}">${escapeHtml(
+      status,
+    )}</span></span>
+      <span>模型 <strong>${escapeHtml(payload.model || "—")}</strong></span>
+      <span>啟用 <strong>${payload.enabled ? "true" : "false"}</strong></span>
+      ${
+        active.url
+          ? `<span>作用中 <strong class="mono">${escapeHtml(
+              active.url,
+            )}</strong></span>`
+          : ""
+      }
+      <span class="muted">${escapeHtml(payload.detail || "")}</span>`,
+    list: providers.length
+      ? providers.map(rerankProviderRow).join("")
+      : `<div class="tests-llm-empty">沒有設定 RERANK_URL；請設定 primary 或 fallback reranker。</div>`,
+    failures: failures.length
+      ? `<div class="tests-llm-failures">${failures
+          .map(
+            (item) =>
+              `<span><strong class="mono">${escapeHtml(
+                item.model || "—",
+              )}</strong> ${escapeHtml(item.detail || "測試失敗")}</span>`,
+          )
+          .join("")}</div>`
+      : "",
+  };
+}
+
 function flowSignature(run, runs, selectedRunId) {
   return JSON.stringify({
     selected: selectedRunId,
@@ -133,6 +252,8 @@ export async function render(root, ctx, { embedded = false } = {}) {
   let testModeBusy = false;
   let llmCapabilities = null;
   let llmTestBusy = false;
+  let rerankStatus = null;
+  let rerankTestBusy = false;
   let testRun = null;
   let testRuns = [];
   let selectedRunId = "";
@@ -251,6 +372,25 @@ export async function render(root, ctx, { embedded = false } = {}) {
       <div class="tests-status" id="tests-llm-status" role="status"></div>
     </section>
 
+    <section class="card tests-card tests-llm-card" aria-labelledby="tests-rerank-title">
+      <div class="tests-card-head">
+        <span class="tests-card-icon">${icon("filter", 16)}</span>
+        <div>
+          <div class="tests-card-title" id="tests-rerank-title">Reranker 服務測試</div>
+          <div class="tests-card-copy">檢查 RAG_RERANK_ENABLED、primary／fallback reranker 健康狀態，並以實際 rerank 請求驗證模型與分數。測試不會修改索引或選取結果。</div>
+        </div>
+      </div>
+      <div class="tests-llm-head">
+        <div class="tests-llm-summary" id="tests-rerank-summary">正在讀取 reranker 狀態…</div>
+        <button class="btn btn-primary btn-sm" type="button" id="tests-rerank-test">
+          ${icon("activity", 14)}<span>執行 Reranker 服務測試</span>
+        </button>
+      </div>
+      <div class="tests-llm-list" id="tests-rerank-list"></div>
+      <div id="tests-rerank-failures"></div>
+      <div class="tests-status" id="tests-rerank-status" role="status"></div>
+    </section>
+
     <div id="tests-flow"></div>
   </section>`;
 
@@ -274,6 +414,11 @@ export async function render(root, ctx, { embedded = false } = {}) {
   const llmFailures = root.querySelector("#tests-llm-failures");
   const llmStatus = root.querySelector("#tests-llm-status");
   const llmTest = root.querySelector("#tests-llm-test");
+  const rerankSummary = root.querySelector("#tests-rerank-summary");
+  const rerankList = root.querySelector("#tests-rerank-list");
+  const rerankFailures = root.querySelector("#tests-rerank-failures");
+  const rerankStatusBox = root.querySelector("#tests-rerank-status");
+  const rerankTest = root.querySelector("#tests-rerank-test");
 
   const setStatus = (element, text, tone = "") => {
     if (!element) return;
@@ -564,6 +709,88 @@ export async function render(root, ctx, { embedded = false } = {}) {
     }
   };
 
+  const paintRerank = () => {
+    const view = rerankMarkup(rerankStatus);
+    if (rerankSummary) rerankSummary.innerHTML = view.summary;
+    if (rerankList) rerankList.innerHTML = view.list;
+    if (rerankFailures) rerankFailures.innerHTML = view.failures;
+    if (rerankTest) {
+      rerankTest.disabled = rerankTestBusy;
+      rerankTest.setAttribute("aria-busy", rerankTestBusy ? "true" : "false");
+      const label = rerankTest.querySelector("span");
+      if (label) {
+        label.textContent = rerankTestBusy
+          ? "測試中…"
+          : "執行 Reranker 服務測試";
+      }
+    }
+  };
+
+  const loadRerankStatus = async () => {
+    try {
+      const data = await api.rerankStatus();
+      if (disposed) return;
+      rerankStatus = data;
+      setStatus(rerankStatusBox, "");
+    } catch (error) {
+      if (disposed) return;
+      rerankStatus = null;
+      setStatus(
+        rerankStatusBox,
+        error.message || "無法讀取 reranker 狀態。",
+        "error",
+      );
+    }
+    if (!disposed) paintRerank();
+  };
+
+  const runRerankServiceTest = async () => {
+    if (rerankTestBusy) return;
+    rerankTestBusy = true;
+    paintRerank();
+    setStatus(rerankStatusBox, "正在對 primary／fallback reranker 執行實際 rerank 測試…");
+    try {
+      const data = await api.testReranker();
+      if (disposed) return;
+      rerankStatus = data;
+      const providers = Array.isArray(data.providers) ? data.providers : [];
+      const ok = providers.filter(
+        (provider) => provider.status === "operational",
+      ).length;
+      const failures = providers.reduce(
+        (total, provider) =>
+          total + (Array.isArray(provider.errors) ? provider.errors.length : 0),
+        0,
+      );
+      setStatus(
+        rerankStatusBox,
+        failures
+          ? `Reranker 測試完成：${ok} 個端點可用，${failures} 個錯誤；詳細分數已列在上方。`
+          : `Reranker 測試完成：${ok} 個端點可用，模型 ${data.model || "—"}。`,
+        failures ? "warn" : "ok",
+      );
+      toast(
+        failures
+          ? "Reranker 部分端點失敗，請查看測試結果。"
+          : "Reranker 服務測試完成。",
+        failures ? "warn" : "ok",
+        5000,
+      );
+    } catch (error) {
+      if (!disposed) {
+        setStatus(
+          rerankStatusBox,
+          error.message || "Reranker 服務測試失敗。",
+          "error",
+        );
+        toast(error.message || "Reranker 服務測試失敗。", "danger", 6000);
+      }
+    } finally {
+      rerankTestBusy = false;
+      if (!disposed) paintRerank();
+    }
+  };
+
   const paintFlow = () => {
     if (!flowBox) return;
     const signature = flowSignature(testRun, testRuns, selectedRunId);
@@ -659,6 +886,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
 
   modeToggle?.addEventListener("click", toggleTestMode);
   llmTest?.addEventListener("click", runLlmServiceTest);
+  rerankTest?.addEventListener("click", runRerankServiceTest);
 
   flowBox?.addEventListener("change", async (event) => {
     if (event.target.id !== "test-run-select") return;
@@ -680,6 +908,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
       loadTestMode(),
       loadTestRuns(),
       loadLlmCapabilities(),
+      loadRerankStatus(),
     ]);
     if (!disposed) await refreshFlow();
     if (!disposed) {
@@ -698,10 +927,12 @@ export async function render(root, ctx, { embedded = false } = {}) {
   syncApiForm();
   paintTestMode();
   paintLlmCapabilities();
+  paintRerank();
   await Promise.allSettled([
     loadTestMode(),
     loadTestRuns(),
     loadLlmCapabilities(),
+    loadRerankStatus(),
   ]);
   await refreshFlow();
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -522,6 +523,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "update_mechanism" in processing_js.text
     assert "processing-run-strip" in processing_js.text
     assert "中止執行" in processing_js.text
+    tests_js = web_client.get("/assets/js/pages/tests.js")
+    assert tests_js.status_code == 200
+    assert "tests-rerank" in tests_js.text
+    assert "Reranker 服務測試" in tests_js.text
     performance_js = web_client.get("/assets/js/pages/performance.js")
     assert performance_js.status_code == 200
     assert "判決向量索引 Pipeline" in performance_js.text
@@ -1385,6 +1390,33 @@ def test_test_mode_endpoints_and_empty_test_runs(web_client) -> None:
     assert runs.json()["runs"] == []
 
 
+def test_rerank_system_test_endpoints(web_client, monkeypatch) -> None:
+    status = web_client.get("/api/rerank/status")
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["status"] in {
+        "not_configured",
+        "operational",
+        "degraded",
+    }
+    assert "providers" in payload
+
+    app_module = sys.modules["judgment.web.app"]
+    monkeypatch.setattr(
+        app_module,
+        "rerank_service_test",
+        lambda settings: {
+            "status": "operational",
+            "enabled": True,
+            "model": "bge-reranker-v2-m3",
+            "providers": [],
+            "active": None,
+            "detail": "test",
+        },
+    )
+    tested = web_client.post("/api/rerank/test")
+    assert tested.status_code == 200
+    assert tested.json()["status"] == "operational"
 
 
 def test_judgment_parquet_source_reads_full_text(web_client) -> None:

@@ -2043,6 +2043,7 @@ function renderFlowRecord(row, index) {
 const TEST_STAGE_LABELS = {
   embedding: "Embedding",
   retrieval: "Qdrant 檢索",
+  rerank: "Reranker",
   context: "PostgreSQL 取文",
   llm: "LLM 生成",
   validation: "引用驗證",
@@ -2051,6 +2052,7 @@ const TEST_STAGE_LABELS = {
 const TEST_STAGE_SHORT = {
   embedding: "EMB",
   retrieval: "檢索",
+  rerank: "RER",
   context: "取文",
   llm: "LLM",
   validation: "驗證",
@@ -2072,6 +2074,7 @@ function testStepStatusText(status) {
 const TEST_STAGE_COLORS = {
   embedding: "#3984c6",
   retrieval: "#d97706",
+  rerank: "#8b5cf6",
   context: "#64748b",
   llm: "#16a34a",
   validation: "#8b5cf6",
@@ -2167,6 +2170,10 @@ function buildTestFlowWaterfall(run, steps) {
 function renderTestFlowStep(step) {
   const status = String(step.status || "pending");
   const progress = Math.max(0, Math.min(100, Number(step.progress) || 0));
+  const stepHost = String(step.details?.provider_name || "").trim();
+  const stepModel = String(step.model || "").trim();
+  const stepLabel =
+    stepHost && stepModel ? `${stepHost}:${stepModel}` : stepModel;
   const width =
     status === "pending"
       ? 0
@@ -2183,8 +2190,8 @@ function renderTestFlowStep(step) {
           : testStepStatusText(status);
   return `<div class="test-flow-step is-${escapeHtml(status)}">
     <div class="test-flow-step-head">
-      <span class="test-flow-model" title="${escapeHtml(step.model || "")}">${escapeHtml(
-        step.model || "—",
+      <span class="test-flow-model" title="${escapeHtml(stepLabel || "")}">${escapeHtml(
+        stepLabel || "—",
       )}</span>
       <span class="test-flow-step-meta">${escapeHtml(meta)}</span>
     </div>
@@ -2390,13 +2397,18 @@ export function renderTestFlowPanel(run, runs, selectedRunId, viewOptions = {}) 
         step.stage === "llm" &&
         step.model === run.summary?.primary_model,
     ) || steps.find((step) => step.stage === "llm" && step.details?.answer_preview);
+  const primaryHost = String(primaryStep?.details?.provider_name || "").trim();
+  const primaryModelLabel =
+    primaryHost && run.summary?.primary_model
+      ? `${primaryHost}:${run.summary.primary_model}`
+      : run.summary?.primary_model || "";
   const answerText = run.answer || primaryStep?.details?.answer_preview || "";
   const answerBlock = `<div class="test-flow-answer">
     <div class="test-flow-answer-head">
       <span>RAG 引擎答案</span>
       ${
-        run.summary?.primary_model
-          ? `<span class="mono">${escapeHtml(run.summary.primary_model)}</span>`
+        primaryModelLabel
+          ? `<span class="mono">${escapeHtml(primaryModelLabel)}</span>`
           : ""
       }
     </div>
@@ -2437,8 +2449,8 @@ export function renderTestFlowPanel(run, runs, selectedRunId, viewOptions = {}) 
             : "測試已完成；可至效能報表查看歷史 Flow。"
       }</span>
       ${
-        run.summary?.primary_model
-          ? `<span class="mono">primary=${escapeHtml(run.summary.primary_model)}</span>`
+        primaryModelLabel
+          ? `<span class="mono">primary=${escapeHtml(primaryModelLabel)}</span>`
           : ""
       }
     </div>

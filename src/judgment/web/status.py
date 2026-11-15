@@ -422,6 +422,12 @@ def _rerank_metrics(settings: Settings) -> Dict[str, Any]:
     }
 
 
+def rerank_status(settings: Settings) -> Dict[str, Any]:
+    """Public health-only reranker status used by the system-test page."""
+
+    return _rerank_metrics(settings)
+
+
 def _llm_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
     started = time.perf_counter()
     base_url = base_url.rstrip("/")

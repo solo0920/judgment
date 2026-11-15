@@ -106,6 +106,7 @@ from ..ollama_hosts import (
     update_host,
 )
 from ..rag import answer_question
+from ..rerank import rerank_service_test
 from ..vector_store import QdrantStore
 from ..index_versions import (
     activate_version,
@@ -144,7 +145,7 @@ from .query import (
     run_query,
     schema_suggestions,
 )
-from .status import build_status
+from .status import build_status, rerank_status
 from .system_usage import build_system_usage
 
 logger = logging.getLogger(__name__)
@@ -1704,6 +1705,22 @@ def create_app(
             )
         return _llm_models_payload(
             app.state.session_factory, runtime
+        )
+
+    @app.get("/api/rerank/status")
+    def rerank_service_status() -> Dict[str, Any]:
+        return rerank_status(
+            runtime_settings(
+                app.state.settings, app.state.session_factory
+            )
+        )
+
+    @app.post("/api/rerank/test")
+    def rerank_service_probe() -> Dict[str, Any]:
+        return rerank_service_test(
+            runtime_settings(
+                app.state.settings, app.state.session_factory
+            )
         )
 
     @app.post("/api/llm/model")
