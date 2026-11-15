@@ -518,6 +518,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-month-are" in processing_js.text
     assert "index-month-are-key" in processing_js.text
     assert "lawIndexTimelinesMarkup" in processing_js.text
+    assert "lawIndexTimelinesMarkup(workflow.index_timelines" in processing_js.text
+    assert "下載時間表" in processing_js.text
     assert "law-index-timeline-card" in processing_js.text
     assert "pending_count" in processing_js.text
     assert "update_mechanism" in processing_js.text
@@ -529,6 +531,13 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-wf-bar is-hollow" in processing_js.text
     assert "minBarPercent" in processing_js.text
     assert "rag-wf-axis" in processing_js.text
+    assert "workflow-wf-card" in processing_js.text
+    assert "workflow-wf-stage" in processing_js.text
+    assert "data-workflow-wf-stage" in processing_js.text
+    assert "workflow-wf-bar is-hollow" in processing_js.text
+    assert "workflow-wf-legend" in processing_js.text
+    assert "workflow-wf-metrics" in processing_js.text
+    assert "WORKFLOW_WF_OPEN_STAGES" in processing_js.text
     assert "index-wf-row" not in processing_js.text
     assert "index-runtime-metrics" in processing_js.text
     assert "index-runtime-metric" in processing_js.text
@@ -538,9 +547,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "Estimated Total" in processing_js.text
     assert "Time Remaining" in processing_js.text
     assert "停止後重新執行會重新計時" in processing_js.text
-    assert "is-progressing" in processing_js.text
-    assert "--month-progress" in processing_js.text
-    assert "月份格底色顯示該月目前進度" in processing_js.text
+    assert "目前索引月份" in processing_js.text
+    assert "padding 不使用底色" in processing_js.text
     assert "processingTimelineMetricsMarkup" in processing_js.text
     assert "FILE_TIMELINE_STAGE_PROGRESS_KEYS" in processing_js.text
     assert "processingTimelineProgressContext" in processing_js.text
@@ -551,6 +559,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "is-parquet" in processing_js.text
     assert "is-postgres" in processing_js.text
     assert "is-qdrant" in processing_js.text
+    assert "is-prepared" in processing_js.text
+    assert "is-indexed" in processing_js.text
+    assert "lawIndexTimelineMetricsMarkup" in processing_js.text
+    assert "已取代月份" in processing_js.text
     assert "is-running" in processing_js.text
     assert "is-complete" in processing_js.text
     assert "is-partial" in processing_js.text
@@ -561,6 +573,38 @@ def test_static_console_is_served(web_client) -> None:
     assert "完成月份" in processing_js.text
     assert "完成率" in processing_js.text
     assert "完成階段" in processing_js.text
+    assert "importTimelineMetricsMarkup" in processing_js.text
+    assert 'variant: "import"' in processing_js.text
+    assert "is-raw-parquet" in processing_js.text
+    assert "is-extract" in processing_js.text
+    status_js = web_client.get("/assets/js/pages/status.js")
+    assert status_js.status_code == 200
+    assert "statusPipelineMarkup" in status_js.text
+    assert "buildStatusPagePipeline" in status_js.text
+    assert "data-status-pipeline" in status_js.text
+    assert "STATUS_WF_OPEN_STAGES" in status_js.text
+    assert "服務總覽載入 Pipeline" in status_js.text
+    assert "renderArchitectureFlowSvg" in status_js.text
+    assert "arch-diagram-svg" in status_js.text
+    assert "流程方向示意圖" in status_js.text
+    assert "arch-diagram-legend" in status_js.text
+    assert "data-version-hero" in status_js.text
+    assert "data-version-ring" in status_js.text
+    assert "dataVersionCoverage" in status_js.text
+    assert "data-version-facts" in status_js.text
+    assert "Qdrant 判決向量索引" in status_js.text
+    assert "Qdrant 法規／命令向量索引" in status_js.text
+    assert "IndexedDB 本機資料" in status_js.text
+    assert "PostgreSQL 資料版本" in status_js.text
+    assert "indexedDbStats" in status_js.text
+    assert "API_ENDPOINT_GROUPS" in status_js.text
+    assert "renderApiEndpointGroups" in status_js.text
+    assert "api-endpoint-groups" in status_js.text
+    assert "apiEndpointGroup" in status_js.text
+    store_js = web_client.get("/assets/js/store.js")
+    assert store_js.status_code == 200
+    assert "indexedDbStats" in store_js.text
+    assert "audit_events" in store_js.text
     tests_js = web_client.get("/assets/js/pages/tests.js")
     assert tests_js.status_code == 200
     assert "tests-rerank" in tests_js.text
@@ -577,13 +621,37 @@ def test_static_console_is_served(web_client) -> None:
     assert css.status_code == 200
     assert "--accent" in css.text
     assert ".index-month-are.is-active" in css.text
-    assert "background-color: var(--success-soft)" in css.text
+    assert ".index-month-are-key i.is-current" in css.text
     assert ".index-wf-bar.is-hollow" in css.text
+    assert ".workflow-wf-card" in css.text
+    assert ".workflow-wf-bar.is-hollow" in css.text
+    assert ".workflow-wf-card .rag-wf-stage-head" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
+    assert ".processing-month-stage.is-prepared" in css.text
+    assert ".processing-month-stage.is-extract" in css.text
+    assert ".processing-month-stage.is-raw_parquet" in css.text
+    assert ".processing-month-stage.is-filter" in css.text
+    assert ".processing-timeline-swatch.is-raw-parquet" in css.text
+    assert ".status-wf-card" in css.text
+    assert ".status-wf-stage.is-error" in css.text
+    assert ".workflow-wf-legend i.is-failed-state" in css.text
+    assert ".arch-diagram-svg" in css.text
+    assert ".arch-diagram-flow" in css.text
+    assert ".arch-node-detail" in css.text
+    assert ".data-version-hero" in css.text
+    assert ".data-version-ring" in css.text
+    assert ".data-version-coverage" in css.text
+    assert ".data-version-facts" in css.text
+    assert ".api-endpoint-groups" in css.text
+    assert ".endpoint-method.is-get" in css.text
+    assert ".api-endpoint-actions" in css.text
+    assert ".processing-month-stage.is-indexed" in css.text
     assert ".processing-month.index-month .processing-month-stage.is-running" in css.text
     assert ".processing-month-stage.is-partial" in css.text
     assert ".processing-timeline-swatch.is-partial-state" in css.text
+    assert ".processing-timeline-swatch.is-prepared" in css.text
+    assert ".processing-timeline-swatch.is-indexed" in css.text
     assert ".processing-timeline-legend" in css.text
 
     themes = web_client.get("/assets/themes.css")
@@ -686,8 +754,56 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
     assert [layer["id"] for layer in payload["architecture"]["layers"]] == [
         "client",
         "api",
+        "pipeline",
         "data",
-        "ai",
+    ]
+    client_nodes = payload["architecture"]["layers"][0]["nodes"]
+    assert isinstance(client_nodes[0], dict)
+    assert "RAG Console SPA" in client_nodes[0]["label"]
+    endpoints = {
+        (item["method"], item["path"]): item for item in payload["endpoints"]
+    }
+    assert len(endpoints) >= 80
+    for key in [
+        ("GET", "/api/status"),
+        ("GET", "/api/events/stream"),
+        ("POST", "/api/processing/workflows/{workflow_id}/run"),
+        ("GET", "/api/processing/events/status"),
+        ("GET", "/api/versioning/audit"),
+        ("POST", "/api/benchmark/runs"),
+        ("GET", "/api/question-bank/items"),
+        ("POST", "/api/rag/query/stream"),
+        ("GET", "/api/docs"),
+        ("GET", "/api/openapi.json"),
+    ]:
+        assert key in endpoints
+    assert all(method not in {"HEAD", "OPTIONS"} for method, _ in endpoints)
+    pipeline = payload["pipeline"]
+    pipeline_stages = pipeline["stages"]
+    by_key = {stage["key"]: stage for stage in pipeline_stages}
+    assert [stage["key"] for stage in pipeline_stages[:11]] == [
+        "postgres",
+        "parquet",
+        "version",
+        "qdrant",
+        "embedding",
+        "llm",
+        "reranker",
+        "rag",
+        "coverage",
+        "staleness",
+        "legal_index",
+    ]
+    assert by_key["postgres"]["status"] == "success"
+    assert by_key["parquet"]["status"] == "success"
+    assert by_key["qdrant"]["status"] == "skipped"
+    assert by_key["embedding"]["status"] == "skipped"
+    assert by_key["llm"]["status"] == "skipped"
+    assert by_key["coverage"]["status"] == "success"
+    assert by_key["staleness"]["status"] == "success"
+    assert pipeline["total_ms"] >= 0
+    assert sum(stage["duration_ms"] for stage in pipeline_stages) == pipeline[
+        "total_ms"
     ]
 
 

@@ -410,6 +410,71 @@ export async function auditEventCount() {
   }
 }
 
+export async function indexedDbStats() {
+  const base = {
+    name: DB_NAME,
+    version: DB_VERSION,
+    supported: "indexedDB" in window,
+    mode: storageMode(),
+    degraded,
+    stores: [HISTORY_STORE, SETTINGS_STORE, AUDIT_STORE],
+    caps: { history: MAX_HISTORY, audit: MAX_AUDIT },
+    usage_bytes: null,
+    quota_bytes: null,
+  };
+  if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
+    try {
+      const estimate = await navigator.storage.estimate();
+      base.usage_bytes = Number.isFinite(estimate.usage)
+        ? estimate.usage
+        : null;
+      base.quota_bytes = Number.isFinite(estimate.quota)
+        ? estimate.quota
+        : null;
+    } catch (error) {
+      /* storage estimate is optional */
+    }
+  }
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction(
+      [HISTORY_STORE, SETTINGS_STORE, AUDIT_STORE],
+      "readonly",
+    );
+    const done = transactionDone(transaction);
+    const [history, settings, audit] = await Promise.all([
+      requestToPromise(transaction.objectStore(HISTORY_STORE).count()),
+      requestToPromise(transaction.objectStore(SETTINGS_STORE).count()),
+      requestToPromise(transaction.objectStore(AUDIT_STORE).count()),
+      done,
+    ]);
+    return {
+      ...base,
+      available: true,
+      counts: {
+        query_history: history,
+        settings,
+        audit_events: audit,
+      },
+      total: history + settings + audit,
+    };
+  } catch (error) {
+    degraded = true;
+    return {
+      ...base,
+      available: false,
+      degraded: true,
+      mode: "memory",
+      counts: {
+        query_history: memory.history.length,
+        settings: memory.settings.size,
+        audit_events: memory.audit.length,
+      },
+      total: memory.history.length + memory.settings.size + memory.audit.length,
+    };
+  }
+}
+
 export async function setSetting(key, value) {
   const record = {
     key: String(key),

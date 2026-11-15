@@ -2,13 +2,13 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.0
+**Version**: 1.2
 
 **Last Updated**: 2026-11-15
 
-**Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline，以及未來新增的任何 pipeline waterfall。
+**Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline，以及未來新增的任何 pipeline waterfall。
 
-**Related Requirements**: FR-119、FR-120、FR-121、FR-155、SC-075
+**Related Requirements**: FR-119、FR-120、FR-121、FR-147、FR-155、FR-162、SC-075、SC-084、SC-085
 
 **Parent Specification**: [`spec.md`](spec.md)
 
@@ -424,11 +424,18 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
   - RAG 回答底部與後端處理流程的 waterfall。
 - `src/judgment/web/static/assets/js/pages/processing.js`
   - `indexWorkflowProgressMarkup(workflow)`：判決向量索引 Pipeline。
-  - 使用 `INDEX_WF_OPEN_STAGES` 保存展開狀態。
+  - `workflowProgressMarkup(workflow)`：判決匯入與其他非索引 workflow 的流程進度；使用 `WORKFLOW_WF_OPEN_STAGES` 保存展開狀態。
+  - 使用 `INDEX_WF_OPEN_STAGES` 保存索引 Pipeline 展開狀態。
+- `src/judgment/web/status.py`
+  - `build_status()` 的 `pipeline`：服務總覽載入的後端檢查階段與耗時。
+- `src/judgment/web/static/assets/js/pages/status.js`
+  - `statusPipelineMarkup(status)`：服務總覽載入 Pipeline；使用 `STATUS_WF_OPEN_STAGES` 保存展開狀態。
 - `src/judgment/web/static/assets/styles.css`
   - `.rag-wf-axis`、`.rag-wf-stages`、`.rag-wf-stage`、`.rag-wf-track`、`.rag-wf-bar`。
   - `.index-wf-*` 只保留索引 Pipeline 的包裝與階段編號。
-  - `.index-wf-bar.is-hollow`：未完成空心 bar。
+  - `.workflow-wf-*` 只保留非索引 workflow 的包裝、階段編號、狀態圖例與整體進度。
+  - `.status-wf-*` 只保留服務總覽載入 Pipeline 的包裝與階段編號。
+  - `.index-wf-bar.is-hollow`、`.workflow-wf-bar.is-hollow`：未完成空心 bar。
 
 ### 14.2 移植規則
 
@@ -503,4 +510,6 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
+| 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |
 | 1.0 | 2026-11-15 | 建立 canonical Pipeline Waterfall 規格；納入接續階段、最小可見寬度、部分完成空心 bar、展開狀態保存、響應式與驗收清單。 |

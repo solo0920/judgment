@@ -3653,6 +3653,23 @@ def _law_order_index_timeline(
     }
 
 
+def _workflow_index_timelines(
+    workflow_id: str,
+    file_timeline_map: Dict[str, Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    sources = {
+        "legal_index_versions": ("law", "order"),
+        "law_download": ("law",),
+        "order_download": ("order",),
+    }.get(workflow_id)
+    if not sources:
+        return None
+    return [
+        _law_order_index_timeline(file_timeline_map.get(source, {}))
+        for source in sources
+    ]
+
+
 def _judgment_file_timeline(
     *,
     settings: Settings,
@@ -4653,15 +4670,8 @@ def build_processing_snapshot(
                 "recent_runs": [_public_run(run) for run in history_runs],
                 "progress": _workflow_progress(progress_run),
                 "index_runtime": index_runtime,
-                "index_timelines": (
-                    [
-                        _law_order_index_timeline(
-                            file_timeline_map.get(source, {})
-                        )
-                        for source in ("law", "order")
-                    ]
-                    if definition["id"] == "legal_index_versions"
-                    else None
+                "index_timelines": _workflow_index_timelines(
+                    definition["id"], file_timeline_map
                 ),
                 "import_timeline": (
                     import_timeline

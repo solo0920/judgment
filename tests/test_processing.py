@@ -1612,6 +1612,16 @@ def test_processing_snapshot_lists_workflows(processing_client: TestClient) -> N
         "judgment-index-legal-articles"
     )
     assert workflows["law_download"]["program"].startswith("judgment-law-download")
+    assert [
+        item["key"] for item in workflows["law_download"]["index_timelines"]
+    ] == ["law"]
+    assert [
+        item["key"] for item in workflows["order_download"]["index_timelines"]
+    ] == ["order"]
+    assert [
+        item["key"]
+        for item in workflows["legal_index_versions"]["index_timelines"]
+    ] == ["law", "order"]
 
 
 def test_processing_snapshot_exposes_index_runtime(
@@ -2634,6 +2644,38 @@ def test_law_order_index_timeline_maps_download_prepared_index() -> None:
         "superseded": 1,
         "empty": 0,
     }
+
+
+def test_workflow_index_timelines_attach_download_sources() -> None:
+    law = processing_module._law_order_index_timeline(
+        {"key": "law", "label": "法規", "months": []}
+    )
+    order = processing_module._law_order_index_timeline(
+        {"key": "order", "label": "命令", "months": []}
+    )
+    timelines = {"law": law, "order": order}
+
+    assert [
+        item["key"]
+        for item in processing_module._workflow_index_timelines(
+            "legal_index_versions", timelines
+        )
+    ] == ["law", "order"]
+    assert [
+        item["key"]
+        for item in processing_module._workflow_index_timelines(
+            "law_download", timelines
+        )
+    ] == ["law"]
+    assert [
+        item["key"]
+        for item in processing_module._workflow_index_timelines(
+            "order_download", timelines
+        )
+    ] == ["order"]
+    assert processing_module._workflow_index_timelines(
+        "judgment_download", timelines
+    ) is None
 
 
 def test_build_processing_live_includes_index_runtime(tmp_path: Path) -> None:

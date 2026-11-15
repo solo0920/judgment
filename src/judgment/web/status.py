@@ -37,6 +37,50 @@ def _ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
 
 
+def _timed_call(fn):
+    """Run one status check and return its result plus timing metadata."""
+
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+    result = fn()
+    finished_at = datetime.now(timezone.utc)
+    return result, started_at, finished_at, _ms(started)
+
+
+def _service_stage_status(value: Optional[str]) -> str:
+    if value == "not_configured":
+        return "skipped"
+    if value in {"operational", "fresh"}:
+        return "success"
+    return "failed"
+
+
+def _pipeline_stage(
+    *,
+    key: str,
+    label: str,
+    caption: str,
+    color: str,
+    status: str,
+    started_at: datetime,
+    finished_at: datetime,
+    duration_ms: int,
+    message: str = "",
+) -> Dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "caption": caption,
+        "color": color,
+        "status": status,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_ms": max(0, int(duration_ms)),
+        "message": message,
+    }
+
+
+
 def _postgres_metrics(
     session_factory: sessionmaker[Session],
 ) -> Dict[str, Any]:
@@ -579,12 +623,30 @@ def build_status(
     data_dir: Path,
     settings: Settings,
 ) -> Dict[str, Any]:
+    pipeline_started = time.perf_counter()
     checked_at = datetime.now(timezone.utc)
-    postgres = _postgres_metrics(session_factory)
-    parquet = _parquet_metrics(data_dir)
+    (
+        postgres,
+        postgres_started_at,
+        postgres_finished_at,
+        postgres_ms,
+    ) = _timed_call(lambda: _postgres_metrics(session_factory))
+    (
+        parquet,
+        parquet_started_at,
+        parquet_finished_at,
+        parquet_ms,
+    ) = _timed_call(lambda: _parquet_metrics(data_dir))
 
-    active_index = active_version(
-        session_factory, alias_name=settings.judgment_vector_alias
+    (
+        active_index,
+        version_started_at,
+        version_finished_at,
+        version_ms,
+    ) = _timed_call(
+        lambda: active_version(
+            session_factory, alias_name=settings.judgment_vector_alias
+        )
     )
     qdrant_collection = (
         active_index["physical_collection"]
@@ -592,21 +654,57 @@ def build_status(
         else settings.judgment_vector_collection
     )
     embedding_model = settings.embedding_model
-    qdrant = _qdrant_metrics(
-        qdrant_collection,
-        base_url=settings.qdrant_url,
-        api_key=settings.qdrant_api_key,
+    (
+        qdrant,
+        qdrant_started_at,
+        qdrant_finished_at,
+        qdrant_ms,
+    ) = _timed_call(
+        lambda: _qdrant_metrics(
+            qdrant_collection,
+            base_url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key,
+        )
     )
-    embedding = _embedding_metrics(
-        base_url=settings.embedding_url,
-        model=settings.embedding_model,
-        fallback_url=settings.embedding_fallback_url,
-        fallback_urls=settings.embedding_failover_urls,
+    (
+        embedding,
+        embedding_started_at,
+        embedding_finished_at,
+        embedding_ms,
+    ) = _timed_call(
+        lambda: _embedding_metrics(
+            base_url=settings.embedding_url,
+            model=settings.embedding_model,
+            fallback_url=settings.embedding_fallback_url,
+            fallback_urls=settings.embedding_failover_urls,
+        )
     )
-    llm = _llm_metrics(base_url=settings.llm_url, model=settings.llm_model)
-    rerank = _rerank_metrics(settings)
-    rag = _rag_metrics(qdrant, embedding, llm)
+    (
+        llm,
+        llm_started_at,
+        llm_finished_at,
+        llm_ms,
+    ) = _timed_call(
+        lambda: _llm_metrics(
+            base_url=settings.llm_url, model=settings.llm_model
+        )
+    )
+    (
+        rerank,
+        rerank_started_at,
+        rerank_finished_at,
+        rerank_ms,
+    ) = _timed_call(lambda: _rerank_metrics(settings))
+    (
+        rag,
+        rag_started_at,
+        rag_finished_at,
+        rag_ms,
+    ) = _timed_call(lambda: _rag_metrics(qdrant, embedding, llm))
 
+    coverage_started_at = datetime.now(timezone.utc)
+    coverage_started = time.perf_counter()
+    coverage_failed = False
     try:
         coverage = index_coverage(
             session_factory,
@@ -615,6 +713,7 @@ def build_status(
             version_id=active_index["version_id"] if active_index else None,
         )
     except Exception:
+        coverage_failed = True
         coverage = {
             "total_judgments": 0,
             "indexed_judgments": 0,
@@ -623,6 +722,12 @@ def build_status(
             "model": embedding_model,
             "latest_indexed_at": None,
         }
+    coverage_finished_at = datetime.now(timezone.utc)
+    coverage_ms = _ms(coverage_started)
+
+    staleness_started_at = datetime.now(timezone.utc)
+    staleness_started = time.perf_counter()
+    staleness_failed = False
     try:
         staleness = index_staleness(
             session_factory,
@@ -631,6 +736,7 @@ def build_status(
             version_id=active_index["version_id"] if active_index else None,
         )
     except Exception:
+        staleness_failed = True
         staleness = {
             "status": "unknown",
             "fresh": None,
@@ -639,11 +745,185 @@ def build_status(
             "changed_judgments": None,
             "stale_judgments": None,
         }
-    legal_index = _legal_index_metrics(
-        session_factory=session_factory,
-        settings=settings,
-        postgres=postgres,
+    staleness_finished_at = datetime.now(timezone.utc)
+    staleness_ms = _ms(staleness_started)
+
+    (
+        legal_index,
+        legal_started_at,
+        legal_finished_at,
+        legal_ms,
+    ) = _timed_call(
+        lambda: _legal_index_metrics(
+            session_factory=session_factory,
+            settings=settings,
+            postgres=postgres,
+        )
     )
+
+    coverage_message = (
+        f"{coverage.get('indexed_judgments') or 0:,} / "
+        f"{coverage.get('total_judgments') or 0:,} 筆"
+    )
+    staleness_message = f"狀態：{staleness.get('status') or 'unknown'}"
+    legal_message = (
+        f"{legal_index.get('points_count') or 0:,} points · "
+        f"{legal_index.get('collection') or legal_index.get('alias') or '—'}"
+        if legal_index.get("status") == "fresh"
+        else "索引待更新：" + ", ".join(legal_index.get("reasons") or [])
+    )
+    pipeline_stages = [
+        _pipeline_stage(
+            key="postgres",
+            label="PostgreSQL 指標",
+            caption="連線、資料量與最近執行",
+            color="#3b82f6",
+            status=_service_stage_status(postgres.get("status")),
+            started_at=postgres_started_at,
+            finished_at=postgres_finished_at,
+            duration_ms=postgres_ms,
+            message=str(postgres.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="parquet",
+            label="Parquet 掃描",
+            caption="manifest 與原始檔案統計",
+            color="#ec4899",
+            status=_service_stage_status(parquet.get("status")),
+            started_at=parquet_started_at,
+            finished_at=parquet_finished_at,
+            duration_ms=parquet_ms,
+            message=str(parquet.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="version",
+            label="Active 索引版本",
+            caption="judgment alias／collection 查詢",
+            color="#06b6d4",
+            status="success",
+            started_at=version_started_at,
+            finished_at=version_finished_at,
+            duration_ms=version_ms,
+            message=(
+                f"v{active_index.get('version_id')}"
+                if active_index and active_index.get("version_id")
+                else f"使用預設 collection：{qdrant_collection}"
+            ),
+        ),
+        _pipeline_stage(
+            key="qdrant",
+            label="Qdrant 連線",
+            caption="collection、points 與維度",
+            color="#f59e0b",
+            status=_service_stage_status(qdrant.get("status")),
+            started_at=qdrant_started_at,
+            finished_at=qdrant_finished_at,
+            duration_ms=qdrant_ms,
+            message=str(qdrant.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="embedding",
+            label="Embedding 檢查",
+            caption="Ollama embedding 模型",
+            color="#0ea5e9",
+            status=_service_stage_status(embedding.get("status")),
+            started_at=embedding_started_at,
+            finished_at=embedding_finished_at,
+            duration_ms=embedding_ms,
+            message=str(embedding.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="llm",
+            label="LLM 檢查",
+            caption="Ollama chat 模型",
+            color="#16a34a",
+            status=_service_stage_status(llm.get("status")),
+            started_at=llm_started_at,
+            finished_at=llm_finished_at,
+            duration_ms=llm_ms,
+            message=str(llm.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="reranker",
+            label="Reranker 檢查",
+            caption="BGE rerank 服務",
+            color="#8b5cf6",
+            status=_service_stage_status(rerank.get("status")),
+            started_at=rerank_started_at,
+            finished_at=rerank_finished_at,
+            duration_ms=rerank_ms,
+            message=str(rerank.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="rag",
+            label="RAG 服務彙整",
+            caption="檢索、引用與回答服務",
+            color="#0f766e",
+            status=_service_stage_status(rag.get("status")),
+            started_at=rag_started_at,
+            finished_at=rag_finished_at,
+            duration_ms=rag_ms,
+            message=str(rag.get("detail") or ""),
+        ),
+        _pipeline_stage(
+            key="coverage",
+            label="索引覆蓋率",
+            caption="PostgreSQL × Qdrant 筆數",
+            color="#a78bfa",
+            status="failed" if coverage_failed else "success",
+            started_at=coverage_started_at,
+            finished_at=coverage_finished_at,
+            duration_ms=coverage_ms,
+            message=coverage_message,
+        ),
+        _pipeline_stage(
+            key="staleness",
+            label="索引鮮度",
+            caption="pending／missing／changed",
+            color="#64748b",
+            status="failed" if staleness_failed else "success",
+            started_at=staleness_started_at,
+            finished_at=staleness_finished_at,
+            duration_ms=staleness_ms,
+            message=staleness_message,
+        ),
+        _pipeline_stage(
+            key="legal_index",
+            label="法規／命令索引",
+            caption="alias、points 與版本",
+            color="#14b8a6",
+            status=_service_stage_status(legal_index.get("status")),
+            started_at=legal_started_at,
+            finished_at=legal_finished_at,
+            duration_ms=legal_ms,
+            message=legal_message,
+        ),
+    ]
+    pipeline_finished_at = datetime.now(timezone.utc)
+    pipeline_total_ms = _ms(pipeline_started)
+    measured_ms = sum(stage["duration_ms"] for stage in pipeline_stages)
+    overhead_ms = max(0, pipeline_total_ms - measured_ms)
+    if overhead_ms:
+        pipeline_stages.append(
+            _pipeline_stage(
+                key="assemble",
+                label="彙整狀態回應",
+                caption="服務、資料量與架構 payload",
+                color="#94a3b8",
+                status="success",
+                started_at=pipeline_stages[-1]["finished_at"],
+                finished_at=pipeline_finished_at,
+                duration_ms=overhead_ms,
+                message="組裝服務總覽回應",
+            )
+        )
+    pipeline_payload = {
+        "label": "服務總覽載入",
+        "started_at": checked_at,
+        "finished_at": pipeline_finished_at,
+        "total_ms": pipeline_total_ms,
+        "stages": pipeline_stages,
+    }
 
     services = [
         {
@@ -735,6 +1015,7 @@ def build_status(
         "checked_at": checked_at,
         "version": __version__,
         "environment": os.getenv("APP_ENV", "development"),
+        "pipeline": pipeline_payload,
         "services": services,
         "data": {
             "law_count": postgres["law_count"],
@@ -784,32 +1065,103 @@ def build_status(
             "layers": [
                 {
                     "id": "client",
-                    "label": "Client",
-                    "nodes": ["Vanilla JS SPA", "Theme Engine", "IndexedDB"],
+                    "label": "Client · Browser",
+                    "nodes": [
+                        {
+                            "label": "RAG Console SPA",
+                            "detail": "#/rag、#/data、#/processing、#/status",
+                        },
+                        {
+                            "label": "API Client + SSE",
+                            "detail": "REST 請求與即時事件訂閱",
+                        },
+                        {
+                            "label": "IndexedDB",
+                            "detail": "提問歷史與 audit_events",
+                        },
+                        {
+                            "label": "Standalone Frontend",
+                            "detail": "file:// 與靜態部署 bundle",
+                        },
+                    ],
                 },
                 {
                     "id": "api",
-                    "label": "Application",
-                    "nodes": ["FastAPI", "Query Builder", "Status Aggregator"],
+                    "label": "Application · FastAPI",
+                    "nodes": [
+                        {
+                            "label": "REST API · :9200",
+                            "service": "api",
+                            "detail": "query、catalog、performance、benchmark、quality、processing",
+                        },
+                        {
+                            "label": "SSE Broker",
+                            "service": "api",
+                            "detail": "processing、status、ollama、test-runs、Last-Event-ID",
+                        },
+                        {
+                            "label": "RAG Endpoint",
+                            "service": "rag",
+                            "detail": "/api/rag/query[/stream]",
+                        },
+                        {
+                            "label": "Power Agent · :9201",
+                            "detail": "主機 start／stop 控制",
+                        },
+                    ],
+                },
+                {
+                    "id": "pipeline",
+                    "label": "Pipelines · RAG / Batch",
+                    "nodes": [
+                        {
+                            "label": "RAG Orchestrator",
+                            "service": "rag",
+                            "detail": "法規比對、檢索、引用驗證",
+                        },
+                        {
+                            "label": "Processing Runtime",
+                            "detail": "import、index、download、backfill",
+                        },
+                        {
+                            "label": "Embedding / Rerank / LLM",
+                            "service": "embedding",
+                            "detail": "bge-m3、reranker-v2-m3、gemma3",
+                        },
+                        {
+                            "label": "Scheduler / CLI",
+                            "detail": "up.sh、cron、judgment-* 指令",
+                        },
+                    ],
                 },
                 {
                     "id": "data",
-                    "label": "Data",
-                    "nodes": ["PostgreSQL", "Parquet", "Qdrant"],
-                },
-                {
-                    "id": "ai",
-                    "label": "Intelligence",
+                    "label": "Data · Storage",
                     "nodes": [
-                        "Embedding",
-                        "Retriever",
-                        "Reranker",
-                        "RAG Engine",
-                        "LLM",
+                        {
+                            "label": "PostgreSQL",
+                            "service": "postgres",
+                            "detail": "current、versions、settings",
+                        },
+                        {
+                            "label": "Qdrant",
+                            "service": "qdrant",
+                            "detail": "judgments_current → vNNN",
+                        },
+                        {
+                            "label": "Parquet / Files",
+                            "service": "parquet",
+                            "detail": "raw、delta、manifest、run state、SQLite journal",
+                        },
+                        {
+                            "label": "Ollama Hosts",
+                            "service": "llm",
+                            "detail": "x570／本機 fallback",
+                        },
                     ],
                 },
             ],
-            "flow": ["client", "api", "data", "ai"],
+            "flow": ["client", "api", "pipeline", "data"],
         },
         "endpoints": [
             {"method": "GET", "path": "/api/status", "label": "服務狀態"},

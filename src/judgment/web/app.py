@@ -19,6 +19,7 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -271,6 +272,163 @@ def _performance_target(path: str) -> tuple[str, str]:
     return (path, f"http{path}")
 
 
+API_ENDPOINT_LABELS = {
+    "/api/health": "健康檢查",
+    "/api/status": "服務狀態",
+    "/api/system-usage": "系統資源使用",
+    "/api/events/stream": "即時事件 SSE",
+    "/api/processing/events/status": "處理事件指標",
+    "/api/docs": "Swagger UI",
+    "/api/openapi.json": "OpenAPI schema",
+    "/api/ollama/hosts": "Ollama 主機列表",
+    "/api/ollama/hosts/{host_id}": "Ollama 主機設定",
+    "/api/ollama/hosts/{host_id}/activate": "啟用 Ollama 主機",
+    "/api/ollama/hosts/deactivate": "停用 Ollama 主機",
+    "/api/ollama/hosts/capabilities/test": "檢查模型能力",
+    "/api/ollama/hosts/reorder": "Ollama 主機排序",
+    "/api/ollama/hosts/{host_id}/models/select": "選擇 Ollama 模型",
+    "/api/ollama/hosts/{host_id}/models/clear": "清除 Ollama 模型",
+    "/api/index-versions": "索引版本列表",
+    "/api/index-versions/{version_id}": "索引版本明細",
+    "/api/index-versions/{version_id}/validate": "驗證索引版本",
+    "/api/index-versions/{version_id}/activate": "啟用索引版本",
+    "/api/index-versions/rollback": "回滾索引 alias",
+    "/api/index-alias/reconcile": "Reconcile 索引 alias",
+    "/api/processing": "資料處理狀態",
+    "/api/processing/active": "目前處理狀態",
+    "/api/processing/active/stream": "目前處理 SSE（legacy）",
+    "/api/processing/plan": "資料處理計畫",
+    "/api/processing/update": "完整資料更新",
+    "/api/processing/workflows/{workflow_id}/run": "執行處理 workflow",
+    "/api/processing/stop": "停止處理程序",
+    "/api/judgment-download/status": "判決下載狀態",
+    "/api/judgment-download/files/{fileset_id}": "判決下載檔案",
+    "/api/versioning/summary": "版本摘要",
+    "/api/versioning/judgments/snapshots": "判決快照",
+    "/api/versioning/judgments/changes": "判決變更事件",
+    "/api/versioning/judgments/versions/{version_id}": "判決版本明細",
+    "/api/versioning/judgments/{jid}/vectors": "判決向量版本",
+    "/api/versioning/judgments/{jid}/vectors/{version_id}": "判決向量版本明細",
+    "/api/versioning/judgments/{jid}": "判決版本歷史",
+    "/api/versioning/parquet/deltas": "Parquet delta",
+    "/api/versioning/parquet/changes": "Parquet 變更",
+    "/api/versioning/audit": "版本稽核事件",
+    "/api/updates/status": "更新檢查狀態",
+    "/api/updates/check": "檢查線上更新",
+    "/api/courts/check": "法院名稱檢查",
+    "/api/law-versions/check": "條文歷史檢查",
+    "/api/quality": "資料品質與統計",
+    "/api/catalog": "資料庫 catalog",
+    "/api/judgment-stats": "判決金融佔比",
+    "/api/query": "資料查詢",
+    "/api/data/suggest": "資料欄位建議",
+    "/api/judgment": "判決原文",
+    "/api/law": "法規明細",
+    "/api/schema/suggest": "查詢 schema 建議",
+    "/api/performance/client": "Client timing",
+    "/api/performance/options": "效能篩選選項",
+    "/api/performance": "效能報表",
+    "/api/rag/query": "RAG 問答",
+    "/api/rag/query/stream": "RAG 問答 SSE",
+    "/api/question-bank/stats": "題庫統計",
+    "/api/question-bank/items": "題庫題目",
+    "/api/question-bank/tags": "題庫標籤",
+    "/api/question-bank/items/{item_id}": "題庫題目明細",
+    "/api/question-bank/items/{item_id}/submit": "題庫提交",
+    "/api/question-bank/items/{item_id}/restore": "題庫還原",
+    "/api/question-bank/items/{item_id}/review": "題庫人工評分",
+    "/api/question-bank/ai-items": "AI 產生題目",
+    "/api/question-bank/import": "題庫匯入",
+    "/api/question-bank/export": "題庫匯出",
+    "/api/question-bank/revalidate": "題庫重新驗證",
+    "/api/question-bank/benchmark-ready": "Benchmark-ready 題目",
+    "/api/benchmark/suites": "Benchmark suite",
+    "/api/benchmark/suites/{suite_id}": "Benchmark suite 明細",
+    "/api/benchmark/suites/{suite_id}/latest-answers": "Suite 最新答案",
+    "/api/benchmark/suites/{suite_id}/items/{item_id}": "Suite 題目",
+    "/api/benchmark/runs": "Benchmark runs",
+    "/api/benchmark/runs/{run_id}": "Benchmark run 明細",
+    "/api/benchmark/runs/{run_id}/stop": "停止 Benchmark run",
+    "/api/benchmark/fingerprints/{fingerprint}": "Benchmark fingerprint",
+    "/api/benchmark/results/{result_id}/review": "Benchmark 人工評分",
+    "/api/benchmark/models": "Benchmark 模型",
+    "/api/test-mode": "測試模式設定",
+    "/api/llm/models": "LLM 模型列表",
+    "/api/llm/models/test": "LLM 模型測試",
+    "/api/llm/model": "切換 LLM 模型",
+    "/api/rerank/status": "Reranker 狀態",
+    "/api/rerank/test": "Reranker 服務測試",
+    "/api/test-runs/current": "目前測試 Flow",
+    "/api/test-runs": "測試 Flow 列表",
+    "/api/test-runs/{run_id}": "測試 Flow 明細",
+}
+
+_API_METHOD_ORDER = {
+    "GET": 0,
+    "POST": 1,
+    "PATCH": 2,
+    "PUT": 3,
+    "DELETE": 4,
+}
+
+
+def _api_endpoint_catalog(app: FastAPI) -> List[Dict[str, Any]]:
+    """Return the live FastAPI route catalog for the status API tab."""
+
+    entries: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        path = str(route.path or "")
+        if not path.startswith("/api/"):
+            continue
+        label = API_ENDPOINT_LABELS.get(
+            path,
+            str(getattr(route, "name", "") or path).replace("_", " "),
+        )
+        for method in sorted(
+            route.methods or [],
+            key=lambda value: (_API_METHOD_ORDER.get(value, 9), value),
+        ):
+            if method in {"HEAD", "OPTIONS"}:
+                continue
+            key = (path, method)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(
+                {
+                    "method": method,
+                    "path": path,
+                    "label": label,
+                    "deprecated": bool(getattr(route, "deprecated", False)),
+                }
+            )
+    for path, label in (
+        ("/api/docs", "Swagger UI"),
+        ("/api/openapi.json", "OpenAPI schema"),
+    ):
+        key = (path, "GET")
+        if key not in seen:
+            entries.append(
+                {
+                    "method": "GET",
+                    "path": path,
+                    "label": label,
+                    "deprecated": False,
+                }
+            )
+    entries.sort(
+        key=lambda item: (
+            str(item["path"]),
+            _API_METHOD_ORDER.get(str(item["method"]), 9),
+            str(item["method"]),
+        )
+    )
+    return entries
+
+
 def _rag_response_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
     judgments = result.get("judgments") or []
     law_sources = result.get("law_sources") or []
@@ -497,6 +655,18 @@ def create_app(
         settings=settings,
         session_factory=session_factory,
     )
+
+    def status_payload() -> Dict[str, Any]:
+        payload = build_status(
+            session_factory=app.state.session_factory,
+            data_dir=app.state.data_dir,
+            settings=runtime_settings(
+                app.state.settings, app.state.session_factory
+            ),
+        )
+        payload["endpoints"] = _api_endpoint_catalog(app)
+        return payload
+
     app.state.event_broker = build_event_broker(
         settings_provider=lambda: app.state.settings,
         session_factory_provider=lambda: app.state.session_factory,
@@ -518,13 +688,7 @@ def create_app(
         updates_payload_provider=lambda: update_status(
             app.state.session_factory
         ),
-        status_payload_provider=lambda: build_status(
-            session_factory=app.state.session_factory,
-            data_dir=app.state.data_dir,
-            settings=runtime_settings(
-                app.state.settings, app.state.session_factory
-            ),
-        ),
+        status_payload_provider=status_payload,
         judgment_download_payload_provider=lambda: download_status(
             app.state.settings
         ),
@@ -672,13 +836,7 @@ def create_app(
             function="status",
             params={},
         ):
-            return build_status(
-                session_factory=app.state.session_factory,
-                data_dir=app.state.data_dir,
-                settings=runtime_settings(
-                    app.state.settings, app.state.session_factory
-                ),
-            )
+            return status_payload()
 
     @app.get("/api/ollama/hosts")
     def ollama_hosts() -> Dict[str, Any]:
