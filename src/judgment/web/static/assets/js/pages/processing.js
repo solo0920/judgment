@@ -20,6 +20,7 @@ const OLLAMA_PRIORITY_WORKFLOWS = new Set([
 ]);
 
 const INDEX_RATE_BASELINES = new Map();
+const INDEX_WF_OPEN_STAGES = new Set();
 
 const STATUS_META = {
   running: { label: "執行中", tone: "info" },
@@ -48,6 +49,26 @@ const FILE_TIMELINE_STAGE_LABELS = {
   parquet: "Parquet",
   postgres: "PostgreSQL",
   qdrant: "Qdrant",
+};
+const FILE_TIMELINE_STAGE_PROGRESS_KEYS = {
+  judgment: {
+    download: ["download"],
+    parquet: ["raw_parquet", "extract"],
+    postgres: ["postgres"],
+    qdrant: ["qdrant"],
+  },
+  law: {
+    download: ["download"],
+    parquet: ["raw_parquet", "parse"],
+    postgres: ["postgres"],
+    qdrant: ["qdrant"],
+  },
+  order: {
+    download: ["download"],
+    parquet: ["raw_parquet", "parse"],
+    postgres: ["postgres"],
+    qdrant: ["qdrant"],
+  },
 };
 const FILE_TIMELINE_STATUS_LABELS = {
   complete: "完成",
@@ -1703,6 +1724,8 @@ function timelineMonthCellMarkup({
   overall,
   active,
   workflowForStage,
+  stageProgress = null,
+  variant = "legacy",
 }) {
   const statuses = stageStatuses || {};
   const monthKey = String(
@@ -1710,13 +1733,44 @@ function timelineMonthCellMarkup({
   );
   const monthLabel =
     month?.month_label || `${year}-${String(monthNo).padStart(2, "0")}`;
+  const statusLabelFor = (status) =>
+    variant === "index" && status === "processing"
+      ? "執行中"
+      : FILE_TIMELINE_STATUS_LABELS[status] ||
+        FILE_TIMELINE_STATUS_LABELS.empty;
+  const progressFor = (stage) => {
+    const status = statuses[stage] || "empty";
+    const wantsProgress =
+      status === "processing" ||
+      (stage === "qdrant" && status === "incomplete");
+    if (
+      variant !== "index" ||
+      typeof stageProgress !== "function" ||
+      !wantsProgress
+    ) {
+      return null;
+    }
+    const value = Number(stageProgress(stage, monthKey, status));
+    return Number.isFinite(value)
+      ? Math.max(0, Math.min(100, value))
+      : null;
+  };
   const stageTitle = stageOrder
-    .map(
-      (stage) =>
-        `${stageLabels[stage] || stage}：${
-          FILE_TIMELINE_STATUS_LABELS[statuses[stage] || "empty"]
-        }`,
-    )
+    .map((stage) => {
+      const status = statuses[stage] || "empty";
+      const progress = progressFor(stage);
+      const partial =
+        stage === "qdrant" &&
+        status === "incomplete" &&
+        progress !== null &&
+        progress > 0;
+      const label = partial ? "已處理" : statusLabelFor(status);
+      const percent =
+        !partial && progress !== null && progress > 0
+          ? ` ${progress.toFixed(1)}%`
+          : "";
+      return `${stageLabels[stage] || stage}：${label}${percent}`;
+    })
     .join(" · ");
   const versionCodes = (month?.versions || [])
     .map((version) => version.version_code)
@@ -1737,6 +1791,12 @@ function timelineMonthCellMarkup({
   const title = month
     ? `${monthLabel} · ${stageTitle}${detail}${extraDetail}`
     : `${monthLabel} · 無資料`;
+  const overallClass =
+    variant === "index"
+      ? overall === "empty"
+        ? "is-empty"
+        : "is-neutral"
+      : FILE_TIMELINE_STATUS_CLASSES[overall] || "is-empty";
   const segments = stageOrder
     .map((stage) => {
       const status = statuses[stage] || "empty";
@@ -1746,19 +1806,70 @@ function timelineMonthCellMarkup({
       const action = workflowId
         ? ` type="button" data-timeline-workflow="${escapeHtml(workflowId)}"`
         : "";
-      return `<${tag} class="processing-month-stage ${
-        FILE_TIMELINE_STATUS_CLASSES[status] || "is-empty"
-      }${workflowId ? " is-actionable" : ""}"${action} title="${escapeHtml(
-        `${stageLabels[stage] || stage}：${
-          FILE_TIMELINE_STATUS_LABELS[status]
-        }${workflowId ? "（點選前往處理）" : ""}`,
+      const progress = progressFor(stage);
+      const partial =
+        stage === "qdrant" &&
+        status === "incomplete" &&
+        progress !== null &&
+        progress > 0;
+      const progressSuffix =
+        status === "processing" && progress !== null
+          ? ` ${progress.toFixed(1)}%`
+          : "";
+      const statusLabel = partial ? "已處理" : statusLabelFor(status);
+      const stageStateClass =
+        status === "complete"
+          ? "is-complete"
+          : status === "processing"
+            ? "is-running"
+            : partial
+              ? "is-partial"
+              : status === "incomplete"
+                ? "is-incomplete"
+                : "is-empty";
+      const classes =
+        variant === "index"
+          ? [
+              "index-month-block",
+              "processing-month-stage",
+              `is-${stage}`,
+              stageStateClass,
+              workflowId ? "is-actionable" : "",
+            ]
+          : [
+              "processing-month-stage",
+              FILE_TIMELINE_STATUS_CLASSES[status] || "is-empty",
+              workflowId ? "is-actionable" : "",
+            ];
+      const progressStyle =
+        status === "processing" && progress !== null
+          ? ` style="--stage-progress:${progress.toFixed(1)}%"`
+          : "";
+      return `<${tag} class="${classes
+        .filter(Boolean)
+        .join(" ")}"${action}${progressStyle} title="${escapeHtml(
+        `${stageLabels[stage] || stage}：${statusLabel}${progressSuffix}${
+          workflowId ? "（點選前往處理）" : ""
+        }`,
       )}" aria-label="${escapeHtml(
-        `${monthLabel} ${stageLabels[stage] || stage} ${
-          FILE_TIMELINE_STATUS_LABELS[status]
-        }${workflowId ? "，點選前往處理" : ""}`,
+        `${monthLabel} ${stageLabels[stage] || stage} ${statusLabel}${progressSuffix}${
+          workflowId ? "，點選前往處理" : ""
+        }`,
       )}"></${tag}>`;
     })
     .join("");
+  if (variant === "index") {
+    return `<td class="judgment-month index-month index-month-are processing-month ${overallClass}${
+      active ? " is-current" : ""
+    }" data-month="${escapeHtml(monthKey)}" title="${escapeHtml(
+      title,
+    )}" aria-label="${escapeHtml(title)}"${
+      active ? ' aria-current="true"' : ""
+    }>
+    <span class="index-month-number">${monthNo}</span>
+    <span class="index-month-blocks">${segments}</span>
+  </td>`;
+  }
   return `<td class="judgment-month import-month processing-month${
     active ? " is-current" : ""
   } is-${escapeHtml(overall)}" data-month="${escapeHtml(
@@ -1771,7 +1882,13 @@ function timelineMonthCellMarkup({
   </td>`;
 }
 
-function processingTimelineMonthCell(timeline, month, year, monthNo) {
+function processingTimelineMonthCell(
+  timeline,
+  month,
+  year,
+  monthNo,
+  stageProgress,
+) {
   return timelineMonthCellMarkup({
     month,
     year,
@@ -1780,9 +1897,11 @@ function processingTimelineMonthCell(timeline, month, year, monthNo) {
     stageLabels: FILE_TIMELINE_STAGE_LABELS,
     stageStatuses: month?.stages || {},
     overall: month?.overall || "empty",
-    active: Boolean(month?.active),
+    active: Boolean(month?.active || month?.overall === "processing"),
     workflowForStage: (stage) =>
       processingTimelineStageWorkflow(timeline.key, stage),
+    stageProgress,
+    variant: "index",
   });
 }
 
@@ -1971,12 +2090,18 @@ function importTimelineMonthCell(timeline, month, year, monthNo) {
   });
 }
 
-function processingTimelineYearRow(timeline, year, byMonth) {
+function processingTimelineYearRow(timeline, year, byMonth, stageProgress) {
   const cells = [];
   for (let monthNo = 1; monthNo <= 12; monthNo += 1) {
     const key = `${year}${String(monthNo).padStart(2, "0")}`;
     cells.push(
-      processingTimelineMonthCell(timeline, byMonth.get(key), year, monthNo),
+      processingTimelineMonthCell(
+        timeline,
+        byMonth.get(key),
+        year,
+        monthNo,
+        stageProgress,
+      ),
     );
   }
   return `<tr><th scope="row">${year}</th>${cells.join("")}</tr>`;
@@ -1984,7 +2109,7 @@ function processingTimelineYearRow(timeline, year, byMonth) {
 
 function processingTimelineModelsMarkup(timeline) {
   const models = timeline?.models || {};
-  const items = [
+  return [
     ["Embedding", models.embedding],
     ["Rerank", models.rerank],
   ]
@@ -2005,17 +2130,146 @@ function processingTimelineModelsMarkup(timeline) {
         .join(" · ");
       return `<span class="processing-timeline-model" title="${escapeHtml(
         title,
-      )}"><span>${label}</span><strong class="mono">${escapeHtml(
-        value,
-      )}</strong>${
+      )}">${label} <strong class="mono">${escapeHtml(value)}</strong>${
         label === "Rerank" && model.enabled === false
-          ? "<em>未啟用</em>"
+          ? ' <span class="faint">未啟用</span>'
           : ""
       }</span>`;
-    });
-  return items.length
-    ? `<span class="processing-timeline-models">${items.join("")}</span>`
-    : "";
+    })
+    .join("");
+}
+
+function processingTimelineMetricsMarkup(timeline, months, summary) {
+  const totalMonths = Number(timeline?.total_months) || months.length || 0;
+  const complete = Number(summary?.complete) || 0;
+  const completionRate =
+    totalMonths > 0 ? (complete / totalMonths) * 100 : null;
+  const stageTotal = months.reduce((total, month) => {
+    const stages = month?.stages || {};
+    return (
+      total +
+      FILE_TIMELINE_STAGES.filter(
+        (stage) =>
+          Boolean(stages[stage]) &&
+          stages[stage] !== "empty" &&
+          stages[stage] !== "not_applicable",
+      ).length
+    );
+  }, 0);
+  const stageComplete = months.reduce((total, month) => {
+    const stages = month?.stages || {};
+    return (
+      total +
+      FILE_TIMELINE_STAGES.filter((stage) => stages[stage] === "complete")
+        .length
+    );
+  }, 0);
+  const metrics = [
+    ["完成月份", formatNumber(complete), "已完成全部四個階段的月份數。"],
+    [
+      "未完成月份",
+      formatNumber(summary?.incomplete || 0),
+      "仍有至少一個階段未完成的月份數。",
+    ],
+    [
+      "有更新月份",
+      formatNumber(summary?.update || 0),
+      "偵測到有新資料可更新的月份數。",
+    ],
+    ["總月份", formatNumber(totalMonths), "時間表涵蓋的月份總數。"],
+    ["完成率", percentText(completionRate), "完成月份 ÷ 總月份。"],
+    [
+      "完成階段",
+      `${formatNumber(stageComplete)} / ${formatNumber(stageTotal)}`,
+      "有資料且需處理的階段方格中，已完成的方格數 / 總方格數。",
+    ],
+  ];
+  return `<div class="index-runtime-metrics">${metrics
+    .map(
+      ([label, value, title]) =>
+        `<span class="index-runtime-metric" title="${escapeHtml(
+          title,
+        )}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(
+          value,
+        )}</strong></span>`,
+    )
+    .join("")}</div>`;
+}
+
+function processingTimelineProgressContext(snapshot, timeline) {
+  const workflows = new Map(
+    (Array.isArray(snapshot?.workflows) ? snapshot.workflows : []).map(
+      (workflow) => [String(workflow.id || ""), workflow],
+    ),
+  );
+  const indexWorkflowId =
+    timeline.key === "judgment" ? "index_versions" : "legal_index_versions";
+  const indexWorkflow = workflows.get(indexWorkflowId);
+  const indexRuntime = indexWorkflow?.index_runtime || {};
+  const percentValue = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.max(0, Math.min(100, number))
+      : null;
+  };
+  const runtimeMonthPercents = new Map(
+    (Array.isArray(indexRuntime.months) ? indexRuntime.months : []).map(
+      (month) => [
+        String(month?.month || ""),
+        percentValue(month?.percent),
+      ],
+    ),
+  );
+  const activeCoveragePercents = new Map(
+    Object.entries(indexRuntime.active_coverage || {}).map(
+      ([month, coverage]) => [String(month), percentValue(coverage?.percent)],
+    ),
+  );
+  const stagePercent = (workflowId, keys) => {
+    const workflow = workflows.get(String(workflowId || ""));
+    if (!workflow) return null;
+    const progress = workflow.progress || {};
+    const stages = Array.isArray(progress.stages) ? progress.stages : [];
+    for (const key of keys) {
+      const stage = stages.find((item) => String(item.key) === key);
+      const value = percentValue(stage?.percent);
+      if (value !== null) return value;
+    }
+    return percentValue(progress.percent);
+  };
+  return (stage, monthKey, status) => {
+    const key = String(monthKey || "");
+    if (stage === "qdrant") {
+      const runtimePercent = runtimeMonthPercents.get(key);
+      const coveragePercent = activeCoveragePercents.get(key);
+      if (status === "processing") {
+        if (runtimePercent !== null && runtimePercent > 0) {
+          return runtimePercent;
+        }
+        if (coveragePercent !== null && coveragePercent > 0) {
+          return coveragePercent;
+        }
+      } else if (status === "incomplete") {
+        if (runtimePercent !== null && runtimePercent > 0) {
+          return runtimePercent;
+        }
+        if (coveragePercent !== null && coveragePercent > 0) {
+          return coveragePercent;
+        }
+        return 0;
+      } else {
+        return null;
+      }
+    }
+    const workflowId = processingTimelineStageWorkflow(timeline.key, stage);
+    if (!workflowId) return null;
+    const keys =
+      (FILE_TIMELINE_STAGE_PROGRESS_KEYS[timeline.key] || {})[stage] || [
+        stage,
+      ];
+    return stagePercent(workflowId, keys);
+  };
 }
 
 function processingTimelinesMarkup(snapshot) {
@@ -2036,66 +2290,69 @@ function processingTimelinesMarkup(snapshot) {
         .sort((left, right) => right - left);
       const summary = timeline.summary || {};
       const current = timeline.current || null;
+      const models = processingTimelineModelsMarkup(timeline);
+      const stageProgress = processingTimelineProgressContext(
+        snapshot,
+        timeline,
+      );
       return `<section class="report-card processing-card import-files-card processing-timeline-card" data-processing-timeline="${escapeHtml(
         timeline.key || "",
       )}">
-        <div class="side-card-head">
-          <span class="processing-timeline-head-main">
-            <span class="side-card-title">${icon(
-              timeline.icon || "activity",
-              14,
-            )}${escapeHtml(
-              timeline.title || `${timeline.label || ""}處理時間表`,
-            )}</span>
-            ${processingTimelineModelsMarkup(timeline)}
-          </span>
-          <span class="badge badge-neutral">${formatNumber(
-            timeline.total_months || 0,
-          )} 個月</span>
+        <div class="side-card-head index-runtime-head">
+          <span class="side-card-title">${icon(
+            timeline.icon || "activity",
+            14,
+          )}${escapeHtml(
+            timeline.title || `${timeline.label || ""}處理時間表`,
+          )}</span>
+          ${processingTimelineMetricsMarkup(timeline, months, summary)}
         </div>
+        ${
+          models
+            ? `<div class="index-runtime-summary">${models}</div>`
+            : ""
+        }
+        ${
+          current
+            ? `<div class="index-current-row">
+                <span class="badge badge-info">${icon(
+                  "activity",
+                  11,
+                )}${escapeHtml(current.label || "目前")}</span>
+                <strong class="mono">${escapeHtml(
+                  current.month_label || "—",
+                )}</strong>
+                <span class="mono">${escapeHtml(current.file || "—")}</span>
+                ${
+                  current.detail
+                    ? `<span class="index-current-copy">${escapeHtml(
+                        current.detail,
+                      )}</span>`
+                    : ""
+                }
+              </div>`
+            : ""
+        }
         <div class="judgment-months index-months">
-          <div class="judgment-months-meta">
-            <span class="badge badge-ok">完成 ${formatNumber(
-              summary.complete || 0,
-            )}</span>
-            <span class="badge badge-danger">未完成 ${formatNumber(
-              summary.incomplete || 0,
-            )}</span>
-            <span class="badge badge-neutral">處理中 ${formatNumber(
-              summary.processing || 0,
-            )}</span>
-            <span class="badge badge-info">有更新 ${formatNumber(
-              summary.update || 0,
-            )}</span>
-            <span class="muted">共 ${formatNumber(
-              timeline.total_months || 0,
-            )} 個月</span>
+          <div class="index-month-are-key processing-timeline-legend" aria-label="階段顏色圖例">
+            <span class="processing-timeline-legend-label">階段</span>
+            <span><i class="processing-timeline-swatch is-download"></i>下載</span>
+            <span><i class="processing-timeline-swatch is-parquet"></i>Parquet</span>
+            <span><i class="processing-timeline-swatch is-postgres"></i>PostgreSQL</span>
+            <span><i class="processing-timeline-swatch is-qdrant"></i>Qdrant</span>
           </div>
-          ${
-            current
-              ? `<div class="index-current-row">
-                  <span class="badge badge-info">${icon(
-                    "activity",
-                    11,
-                  )}${escapeHtml(current.label || "目前")}</span>
-                  <strong class="mono">${escapeHtml(
-                    current.month_label || "—",
-                  )}</strong>
-                  <span class="mono">${escapeHtml(current.file || "—")}</span>
-                  ${
-                    current.detail
-                      ? `<span class="muted">${escapeHtml(
-                          current.detail,
-                        )}</span>`
-                      : ""
-                  }
-                </div>`
-              : ""
-          }
+          <div class="index-month-are-key processing-timeline-legend" aria-label="階段狀態圖例">
+            <span class="processing-timeline-legend-label">狀態</span>
+            <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
+            <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成</span>
+            <span><i class="processing-timeline-swatch is-partial-state"></i>已處理（淡色）</span>
+            <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
+            <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
+          </div>
           ${
             months.length
               ? `<div class="judgment-months-scroll">
-                  <table class="judgment-months-table import-months-table processing-months-table">
+                  <table class="judgment-months-table index-months-table processing-months-table">
                     <thead><tr><th scope="col">年份</th>${Array.from(
                       { length: 12 },
                       (_, index) =>
@@ -2103,29 +2360,23 @@ function processingTimelinesMarkup(snapshot) {
                     ).join("")}</tr></thead>
                     <tbody>${years
                       .map((year) =>
-                        processingTimelineYearRow(timeline, year, byMonth),
+                        processingTimelineYearRow(
+                          timeline,
+                          year,
+                          byMonth,
+                          stageProgress,
+                        ),
                       )
                       .join("")}</tbody>
                   </table>
                 </div>`
               : '<div class="processing-workflow-empty">目前沒有資料。</div>'
           }
-          <div class="processing-timeline-key">
-            ${["complete", "incomplete", "processing", "empty"]
-              .map(
-                (status) =>
-                  `<span><i class="processing-timeline-swatch ${
-                    FILE_TIMELINE_STATUS_CLASSES[status]
-                  }"></i>${FILE_TIMELINE_STATUS_LABELS[status]}</span>`,
-              )
-              .join("")}
-            <span class="processing-timeline-key-order">每格由左至右：下載／Parquet／PostgreSQL／Qdrant</span>
-          </div>
           <p class="judgment-months-hint">${
             timeline.key === "judgment"
               ? "判決以裁判書月份顯示。"
               : "法規／命令以來源版本月份顯示。"
-          }綠色：完成；紅色：未完成；灰色：處理中；空白：無資料。滑鼠移到月份或色塊可查看各階段狀態。</p>
+          }每格由左至右為下載、Parquet、PostgreSQL、Qdrant 四個階段；實心方塊表示完成，空心方塊表示未完成，Qdrant 之前已處理但尚未完成時以淡橙色實心方塊表示，執行中的方塊以進度條填充，淡色空心方塊表示無資料。滑鼠移到月份或色塊可查看各階段狀態與進度。</p>
         </div>
       </section>`;
     })
@@ -2654,7 +2905,9 @@ function stageHoverAttributes(stage) {
     `data-stage-status="${escapeHtml(meta.label)}"`,
     `data-stage-percent="${escapeHtml(percentText(stage.percent))}"`,
     `data-stage-counts="${escapeHtml(stageCounts(stage))}"`,
-    `data-stage-duration="${escapeHtml(formatDuration(stage.duration_ms || 0))}"`,
+    `data-stage-duration="${escapeHtml(
+      formatIndexWorkflowDuration(stage.duration_ms || 0),
+    )}"`,
     `data-stage-contribution="${escapeHtml(
       percentText(stage.contribution_percent),
     )}"`,
@@ -2833,10 +3086,26 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "probe",
       label: "Ollama 主機／模型測試",
+      caption: "主機／模型、連線測試",
       color: "#22c55e",
       status: probe.status || "pending",
       percent: Number(probe.percent) || 0,
+      current: Number(probe.current) || 0,
+      total: Number(probe.total) || 0,
+      unit: "台",
       duration_ms: probe.duration_ms,
+      started_at: probe.started_at,
+      finished_at: probe.finished_at,
+      extraDetails: [
+        ["主機", hostLabel],
+        ["模型", model],
+        [
+          "測試主機",
+          `${formatNumber(probe.current || 0)} / ${formatNumber(
+            probe.total || 0,
+          )} 台`,
+        ],
+      ],
       detail: `${formatNumber(probe.current || 0)} / ${formatNumber(
         probe.total || 0,
       )} 台 · ${hostLabel} · ${model}`,
@@ -2844,10 +3113,21 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "version",
       label: "建立／接續 Blue-Green 版本",
+      caption: "Blue-Green 版本、collection",
       color: "#06b6d4",
       status: runtime.version_id ? "success" : "pending",
       percent: runtime.version_id ? 100 : 0,
+      current: runtime.version_id ? 1 : 0,
+      total: 1,
+      unit: "階段",
       duration_ms: runtime.version_duration_ms,
+      started_at: null,
+      finished_at: null,
+      extraDetails: [
+        ["版本", versionLabel],
+        ["Collection", runtime.collection || "—"],
+        ["模式", buildMode || "—"],
+      ],
       detail: `${versionLabel} · ${runtime.collection || "—"} · ${
         buildMode || "—"
       }`,
@@ -2855,10 +3135,20 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "copy",
       label: "複製可重用向量",
+      caption: "舊 collection 向量複製",
       color: "#f59e0b",
       status: copyStatus,
       percent: copyPercent,
+      current: copyCopied,
+      total: copyTotal,
+      unit: "points",
       duration_ms: copy.duration_ms,
+      started_at: copy.started_at,
+      finished_at: copy.finished_at,
+      extraDetails: [
+        ["已複製", `${formatNumber(copyCopied)} points`],
+        ["總 points", formatNumber(copyTotal)],
+      ],
       detail:
         copyTotal > 0
           ? `${formatNumber(copyCopied)} / ${formatNumber(
@@ -2873,10 +3163,25 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "index",
       label: "金融判決向量索引",
+      caption: "金融判決向量、批次進度",
       color: "#a78bfa",
       status: indexStage.status || "pending",
       percent: indexPercent,
+      current: indexed,
+      total: expected,
+      unit: "筆",
       duration_ms: indexStage.duration_ms,
+      started_at: indexStage.started_at || runtime.started_at,
+      finished_at: indexStage.finished_at,
+      extraDetails: [
+        [
+          "已索引",
+          `${formatNumber(indexed)} / ${formatNumber(expected)} 筆`,
+        ],
+        ["重用", formatNumber(summary.reused)],
+        ["新 embedding", formatNumber(summary.embedded)],
+        ["目前月份", currentLabel],
+      ],
       detail: `${formatNumber(indexed)} / ${formatNumber(
         expected,
       )} 筆 · 重用 ${formatNumber(summary.reused)} · 新 embedding ${formatNumber(
@@ -2886,10 +3191,18 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "validate",
       label: "驗證新版本",
+      caption: "筆數、維度、payload",
       color: "#eab308",
       status: validateStatus,
       percent: validateStatus === "success" ? 100 : 0,
+      current: null,
+      total: null,
       duration_ms: validate.duration_ms,
+      started_at: validate.started_at,
+      finished_at: validate.finished_at,
+      extraDetails: [
+        ["驗證訊息", validate.message || "等待索引完成"],
+      ],
       detail:
         validate.message ||
         (terminal
@@ -2899,10 +3212,16 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "activate",
       label: "切換 alias",
+      caption: "judgments_current alias",
       color: "#3b82f6",
       status: activateStatus,
       percent: activated ? 100 : 0,
+      current: null,
+      total: null,
       duration_ms: 0,
+      started_at: null,
+      finished_at: null,
+      extraDetails: [["目標 alias", "judgments_current"]],
       detail: activated
         ? validate.message
         : terminal
@@ -2916,40 +3235,172 @@ function indexWorkflowProgressMarkup(workflow) {
     : 0;
   const completed = phases.filter((phase) => phase.status === "success").length;
   const overallLabel = percentText(overall);
-  const rows = phases
-    .map(
-      (phase, index) => `<div class="index-wf-row is-${escapeHtml(
-        phase.status,
-      )}">
-        <div class="index-wf-rail">
-          <span class="index-wf-dot" style="--stage-color:${escapeHtml(
-            phase.color,
-          )}"></span>
-        </div>
-        <div class="index-wf-body">
-          <div class="index-wf-head">
-            <span class="index-wf-step">${String(index + 1).padStart(
-              2,
-              "0",
-            )}</span>
-            <strong>${escapeHtml(phase.label)}</strong>
-            ${statusBadge(phase.status)}
-            <span class="index-wf-duration mono">${
-              phase.duration_ms
-                ? formatDuration(phase.duration_ms)
-                : "—"
-            }</span>
-          </div>
-          <div class="index-wf-track">
-            <span style="width:${Math.max(
-              0,
-              Math.min(100, phase.percent),
-            ).toFixed(1)}%;background:${escapeHtml(phase.color)}"></span>
-          </div>
-          <div class="index-wf-detail">${escapeHtml(phase.detail)}</div>
-        </div>
-      </div>`,
-    )
+  const nowMs = Date.now();
+  const durationOf = (phase) => {
+    const raw = Number(phase.duration_ms) || 0;
+    const startMs = Date.parse(phase.started_at || "");
+    if (phase.status === "running" && Number.isFinite(startMs)) {
+      return Math.max(raw, nowMs - startMs);
+    }
+    if (raw > 0) return raw;
+    const endMs = Date.parse(phase.finished_at || "");
+    return Number.isFinite(startMs) && Number.isFinite(endMs)
+      ? Math.max(0, endMs - startMs)
+      : 0;
+  };
+  const timedPhases = phases.map((phase) => {
+    const duration = durationOf(phase);
+    return {
+      ...phase,
+      computedDuration: duration,
+      drawable: !["skipped", "pending"].includes(phase.status),
+    };
+  });
+  const totalDuration = Math.max(
+    timedPhases.reduce(
+      (sum, phase) => sum + (phase.drawable ? phase.computedDuration : 0),
+      0,
+    ),
+    Number(progress.duration_ms) || 0,
+    1,
+  );
+  // Very short stages would otherwise collapse to an invisible sub-pixel bar
+  // and visually overlap the next stage.  Give every drawable stage a small
+  // minimum slot so the sequential hand-off stays readable, then scale the
+  // slots back to 100% when the minimums push the total over the axis.
+  const minBarPercent = 1.25;
+  const slotPercents = timedPhases.map((phase) =>
+    phase.drawable
+      ? Math.max(
+          (phase.computedDuration / totalDuration) * 100,
+          minBarPercent,
+        )
+      : 0,
+  );
+  const slotTotal = slotPercents.reduce((sum, value) => sum + value, 0);
+  const slotScale = slotTotal > 100 ? 100 / slotTotal : 1;
+  let cursorPercent = 0;
+  const laidOutPhases = timedPhases.map((phase, index) => {
+    const slotPercent = slotPercents[index] * slotScale;
+    const bar =
+      slotPercent > 0
+        ? { start: cursorPercent, width: slotPercent }
+        : null;
+    if (bar) cursorPercent += slotPercent;
+    return { ...phase, bar };
+  });
+  const rows = laidOutPhases
+    .map((phase, index) => {
+      const stageClass = [
+        `is-${phase.status}`,
+        phase.status === "failed" || phase.status === "stale"
+          ? "is-error"
+          : "",
+        ["pending", "skipped"].includes(phase.status) ? "is-missing" : "",
+        phase.status === "running" ? "is-running" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const durationLabel = ["pending", "skipped"].includes(phase.status)
+        ? "—"
+        : formatIndexWorkflowDuration(phase.computedDuration);
+      const progressSuffix =
+        phase.status === "running" ? ` · ${percentText(phase.percent)}` : "";
+      let barMarkup = "";
+      if (phase.bar) {
+        const left = Math.max(0, Math.min(100, phase.bar.start));
+        const slotWidth = Math.max(
+          0,
+          Math.min(100 - left, phase.bar.width),
+        );
+        const completion =
+          phase.status === "success"
+            ? 100
+            : Math.max(0, Math.min(100, Number(phase.percent) || 0));
+        const filledWidth = (slotWidth * completion) / 100;
+        const hollowWidth = slotWidth - filledWidth;
+        const barColor = escapeHtml(phase.color);
+        if (filledWidth > 0) {
+          barMarkup += `<span class="rag-wf-bar index-wf-bar is-sequential" style="left:${left.toFixed(
+            3,
+          )}%;width:${filledWidth.toFixed(
+            4,
+          )}%;top:0;height:12px;--bar-color:${barColor}" aria-hidden="true"></span>`;
+        }
+        if (hollowWidth > 0.0001) {
+          barMarkup += `<span class="rag-wf-bar index-wf-bar is-hollow is-sequential" style="left:${(
+            left + filledWidth
+          ).toFixed(3)}%;width:${hollowWidth.toFixed(
+            4,
+          )}%;top:0;height:12px;--bar-color:${barColor}" aria-hidden="true"></span>`;
+        }
+      }
+      const detailRows = [];
+      const addDetail = (label, value) => {
+        if (value === null || value === undefined || value === "") return;
+        detailRows.push(
+          `<span class="rag-wf-detail"><span>${escapeHtml(
+            label,
+          )}</span><strong>${escapeHtml(String(value))}</strong></span>`,
+        );
+      };
+      addDetail("狀態", statusInfo(phase.status).label);
+      addDetail(
+        "開始",
+        phase.started_at ? formatDateTime(phase.started_at) : "—",
+      );
+      addDetail(
+        "結束",
+        phase.finished_at ? formatDateTime(phase.finished_at) : "—",
+      );
+      addDetail("耗時", durationLabel);
+      addDetail("進度", percentText(phase.percent));
+      for (const [label, value] of phase.extraDetails || []) {
+        addDetail(label, value);
+      }
+      addDetail("說明", phase.detail);
+      const tooltipPhase = {
+        ...phase,
+        duration_ms: phase.computedDuration,
+        contribution_percent: counted.length
+          ? (Number(phase.percent) || 0) / counted.length
+          : null,
+        message: phase.detail,
+      };
+      return `<details class="rag-wf-stage index-wf-stage ${stageClass}" data-index-stage="${escapeHtml(
+        phase.key,
+      )}"${INDEX_WF_OPEN_STAGES.has(phase.key) ? " open" : ""} style="--stage-color:${escapeHtml(
+        phase.color,
+      )}" ${stageHoverAttributes(tooltipPhase)}>
+        <summary class="rag-wf-stage-summary">
+          <span class="rag-wf-stage-head">
+            <span class="rag-wf-stage-label">
+              <i aria-hidden="true"></i>
+              <span><strong><span class="index-wf-step">${String(
+                index + 1,
+              ).padStart(
+                2,
+                "0",
+              )}</span> ${escapeHtml(
+                phase.label,
+              )}</strong><small>${escapeHtml(
+                phase.caption || "",
+              )}</small></span>
+            </span>
+            <span class="rag-wf-stage-meta">${escapeHtml(
+              durationLabel,
+            )}${escapeHtml(progressSuffix)} · ${escapeHtml(
+              statusInfo(phase.status).label,
+            )} <span class="rag-wf-chevron">${icon(
+              "chevronRight",
+              12,
+            )}</span></span>
+          </span>
+          <span class="rag-wf-track" style="height:12px">${barMarkup}</span>
+        </summary>
+        <div class="rag-wf-details">${detailRows.join("")}</div>
+      </details>`;
+    })
     .join("");
   return `<section class="report-card processing-card processing-workflow-progress-card index-wf-card" data-workflow-progress>
     <div class="side-card-head">
@@ -2971,7 +3422,14 @@ function indexWorkflowProgressMarkup(workflow) {
       <span>Model <strong class="mono">${escapeHtml(model)}</strong></span>
       <span>目前 <strong>${escapeHtml(currentLabel)}</strong></span>
     </div>
-    <div class="index-wf-list">${rows}</div>
+    <div class="index-wf-chart">
+      <div class="rag-wf-axis">
+        <span>0 ms</span>
+        <span>${totalDuration > 0 ? escapeHtml(formatIndexWorkflowDuration(totalDuration)) : "—"}</span>
+      </div>
+      <div class="rag-wf-stages">${rows}</div>
+      <p class="rag-wf-hint">階段依執行順序由左至右接續排列，上一階段的結束即下一階段的開始；已完成階段填滿顏色，進行中或未完成階段只著色已完成比例，其餘以同色空心框表示，等待與略過階段不繪製 bar。極短階段會以最小可見寬度呈現。點選任一階段可查看開始／結束時間、進度與詳細數據。</p>
+    </div>
     <div class="index-wf-overall">
       <div class="index-wf-overall-head">
         <span>整體進度</span>
@@ -3103,6 +3561,27 @@ function indexHostMarkup(host, selectedUrl) {
         : ""
     }
   </div>`;
+}
+
+function indexRuntimeMonthProgress(runtime) {
+  const months = Array.isArray(runtime.months) ? runtime.months : [];
+  const totals = new Map();
+  for (const item of months) {
+    const key = String(item.month || "");
+    if (!/^\d{6}$/.test(key)) continue;
+    let entry = totals.get(key);
+    if (!entry) {
+      entry = { total: 0, processed: 0 };
+      totals.set(key, entry);
+    }
+    entry.total += Number(item.total) || 0;
+    entry.processed += Number(item.processed) || 0;
+  }
+  let completed = 0;
+  for (const entry of totals.values()) {
+    if (entry.total > 0 && entry.processed >= entry.total) completed += 1;
+  }
+  return { completed, total: totals.size };
 }
 
 function indexMonthGridMarkup(runtime) {
@@ -3273,21 +3752,31 @@ function indexMonthGridMarkup(runtime) {
           group.kind === "reuse" && !group.currentComplete;
         const embedIncomplete =
           group.kind === "embed" && !group.currentComplete;
+        const monthFill = group.total
+          ? Math.min(100, (100 * group.processed) / group.total)
+          : 0;
+        // The active month cell doubles as a live progress bar: its
+        // background fills to the month's processed/total ratio, while the
+        // A/R/E blocks keep showing the per-source breakdown.
+        const progressing =
+          active && monthFill > 0 && !group.currentComplete;
+        const progressingClass = progressing ? " is-progressing" : "";
+        const progressingStyle = progressing
+          ? ` style="--month-progress:${monthFill.toFixed(1)}%"`
+          : "";
         return `<td class="judgment-month index-month index-month-are is-${
           group.status
-        }${active ? " is-active" : ""}" title="${escapeHtml(title)}"${
-          active ? ' aria-current="true"' : ""
-        }><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true"><span class="index-month-block is-active" style="--fill:${activeFill.toFixed(
+        }${active ? " is-active" : ""}${progressingClass}" title="${escapeHtml(
+          title,
+        )}"${progressingStyle}${active ? ' aria-current="true"' : ""}><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true"><span class="index-month-block is-active" style="--fill:${activeFill.toFixed(
           1,
         )}%"></span><span class="index-month-block is-reuse${
           reuseIncomplete ? " is-incomplete" : ""
-        }" style="--fill:${
-          reuseIncomplete ? "0.0" : reusedFill.toFixed(1)
-        }%"></span><span class="index-month-block is-embed${
+        }" style="--fill:${reusedFill.toFixed(
+          1,
+        )}%"></span><span class="index-month-block is-embed${
           embedIncomplete ? " is-incomplete" : ""
-        }" style="--fill:${
-          embedIncomplete ? "0.0" : embeddedFill.toFixed(1)
-        }%"></span></span></td>`;
+        }" style="--fill:${embeddedFill.toFixed(1)}%"></span></span></td>`;
       }).join("");
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
@@ -3316,6 +3805,7 @@ function indexMonthGridMarkup(runtime) {
       <span><i class="is-reuse"></i>R · 本次沿用既有向量，不重新計算 embedding</span>
       <span><i class="is-embed"></i>E · 本次重新計算 embedding 的新增或變更向量</span>
       <span><i class="is-outline"></i>空心框 · 該月 R／E 尚未完成</span>
+      <span><i class="is-progress"></i>進行中 · 月份格底色顯示該月目前進度</span>
     </div>
     <div class="judgment-months-scroll">
       <table class="judgment-months-table index-months-table">
@@ -3468,6 +3958,90 @@ function indexRuntimeAverage(workflow, runtime, indexed) {
   return deltaIndexed / elapsedSeconds;
 }
 
+function formatIndexWorkflowDuration(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return "—";
+  if (value >= 3_600_000) return formatIndexRuntimeDuration(value);
+  return formatDuration(value);
+}
+
+function formatIndexRuntimeDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = String(seconds).padStart(2, "0");
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m ${paddedSeconds}s`;
+  }
+  if (minutes > 0) return `${minutes}m ${paddedSeconds}s`;
+  return `${seconds}s`;
+}
+
+// A resumed index run gets a fresh started_at and rate baseline, so elapsed
+// and ETA only cover work performed since the restart.  ETA is based on the
+// remaining rows (total - indexed), not the original total.
+function indexRuntimeTiming(runtime, indexed, total, averageRate) {
+  const startedMs = Date.parse(runtime.started_at || "");
+  if (!Number.isFinite(startedMs)) {
+    return {
+      elapsedMs: null,
+      estimatedTotalMs: null,
+      remainingMs: null,
+      remainingCount: null,
+    };
+  }
+  const running = runtime.run_status === "running";
+  const finishedMs = Date.parse(runtime.finished_at || "");
+  const updatedMs = Date.parse(runtime.updated_at || "");
+  const endMs = running
+    ? Date.now()
+    : Number.isFinite(finishedMs)
+      ? finishedMs
+      : Number.isFinite(updatedMs)
+        ? updatedMs
+        : Date.now();
+  const elapsedMs = Math.max(0, endMs - startedMs);
+  const totalCount = Number(total);
+  const indexedCount = Number(indexed);
+  if (!Number.isFinite(totalCount) || totalCount <= 0) {
+    return {
+      elapsedMs,
+      estimatedTotalMs: null,
+      remainingMs: null,
+      remainingCount: null,
+    };
+  }
+  const remainingCount = Math.max(
+    0,
+    totalCount - Math.max(0, Number.isFinite(indexedCount) ? indexedCount : 0),
+  );
+  if (remainingCount <= 0) {
+    return {
+      elapsedMs,
+      estimatedTotalMs: elapsedMs,
+      remainingMs: 0,
+      remainingCount: 0,
+    };
+  }
+  if (!running || averageRate <= 0) {
+    return {
+      elapsedMs,
+      estimatedTotalMs: null,
+      remainingMs: null,
+      remainingCount,
+    };
+  }
+  const remainingMs = (remainingCount / averageRate) * 1000;
+  return {
+    elapsedMs,
+    estimatedTotalMs: elapsedMs + remainingMs,
+    remainingMs,
+    remainingCount,
+  };
+}
+
 function indexRuntimeMarkup(workflow) {
   const runtime = workflow.index_runtime || {};
   if (!runtime.available) {
@@ -3490,11 +4064,50 @@ function indexRuntimeMarkup(workflow) {
   const averageRate = coverageOnly
     ? 0
     : indexRuntimeAverage(workflow, runtime, indexed);
-  const rateMarkup = coverageOnly
-    ? ""
-    : `<span class="badge badge-neutral index-runtime-rate" title="自本次頁面開始觀察的累計平均；中途加入以首次觀察時間與筆數為基準。後段若以新 embedding 為主，速度會下降。">本次平均 ${
-        averageRate > 0 ? `${averageRate.toFixed(1)} 筆/秒` : "—"
-      }</span>`;
+  const monthProgress = indexRuntimeMonthProgress(runtime);
+  const timing = coverageOnly
+    ? null
+    : indexRuntimeTiming(runtime, indexed, summary.total, averageRate);
+  const remainingHint =
+    timing?.remainingCount > 0
+      ? `與剩餘 ${formatNumber(timing.remainingCount)} 筆`
+      : "";
+  const rateHint =
+    averageRate > 0
+      ? `依本次平均 ${averageRate.toFixed(1)} 筆/秒${remainingHint}估算；停止後重新執行會重新計時。實際速度會隨 embedding 與批次大小變動。`
+      : "尚無足夠的本頁觀察資料可估算；停止後重新執行會重新計時。";
+  const duration = (value) =>
+    escapeHtml(formatIndexRuntimeDuration(timing ? timing[value] : null));
+  const metricsMarkup = `<div class="index-runtime-metrics">
+    <span class="index-runtime-metric" title="已完成索引的月份數；目前處理中的月份不列入，總數為索引範圍內的有效月份。">
+      <span>已處理月份</span>
+      <strong>${formatNumber(monthProgress.completed)} / ${formatNumber(
+        monthProgress.total,
+      )}</strong>
+    </span>
+    <span class="index-runtime-metric" title="已索引筆數 / 索引範圍總筆數。">
+      <span>已處理筆數</span>
+      <strong>${formatNumber(indexed)} / ${formatNumber(summary.total)}</strong>
+    </span>
+    <span class="index-runtime-metric" title="自本次頁面開始觀察的累計平均；中途加入以首次觀察時間與筆數為基準。後段若以新 embedding 為主，速度會下降。">
+      <span>本次平均</span>
+      <strong>${averageRate > 0 ? `${averageRate.toFixed(1)} 筆/秒` : "—"}</strong>
+    </span>
+    <span class="index-runtime-metric" title="自本次索引 run 開始時間 ${escapeHtml(
+      formatDateTime(runtime.started_at),
+    )} 起算；中途停止後重新執行會重新計時。">
+      <span>Elapsed Time</span>
+      <strong>${duration("elapsedMs")}</strong>
+    </span>
+    <span class="index-runtime-metric" title="Elapsed Time 加上依剩餘件數與本次平均速度估算的剩餘時間；停止後重新執行會從 0 重新計時。">
+      <span>Estimated Total</span>
+      <strong>${duration("estimatedTotalMs")}</strong>
+    </span>
+    <span class="index-runtime-metric" title="${escapeHtml(rateHint)}">
+      <span>Time Remaining</span>
+      <strong>${duration("remainingMs")}</strong>
+    </span>
+  </div>`;
   const selectedUrl = selected.url || "";
   const activeUrl = active.url || "";
   const hostRows = hosts
@@ -3567,14 +4180,9 @@ function indexRuntimeMarkup(workflow) {
     }
   </section>
   <section class="report-card processing-card index-files-card">
-    <div class="side-card-head">
+    <div class="side-card-head index-runtime-head">
       <span class="side-card-title">${icon("table", 14)}索引檔案時間表</span>
-      <span class="index-runtime-counts">
-        <span class="badge badge-neutral">${formatNumber(
-          summary.indexed,
-        )} / ${formatNumber(summary.total)} 筆</span>
-        ${rateMarkup}
-      </span>
+      ${metricsMarkup}
     </div>
     <div class="index-runtime-summary">
       <span>版本 <strong class="mono">v${escapeHtml(
@@ -6116,6 +6724,60 @@ export async function render(root) {
       }
       timeline.stage_summary = summary;
     };
+    const patchProcessingTimelines = (snapshot) => {
+      const indexWorkflow = (snapshot.workflows || []).find(
+        (workflow) => workflow.id === "index_versions",
+      );
+      const runtime = indexWorkflow?.index_runtime;
+      if (!runtime || !Array.isArray(runtime.months)) return;
+      const timeline = (snapshot.file_timelines || []).find(
+        (item) => item.key === "judgment",
+      );
+      if (!timeline || !Array.isArray(timeline.months)) return;
+      const validateStage = (indexWorkflow.progress?.stages || []).find(
+        (stage) => stage.key === "validate",
+      );
+      const aliasComplete =
+        ["success", "no_change"].includes(
+          String(runtime.run_status || ""),
+        ) ||
+        (String(runtime.run_status || "") !== "running" &&
+          /alias\s*已切換/.test(String(validateStage?.message || "")));
+      const currentMonth = String(runtime.current?.month || "");
+      const byMonth = new Map(
+        timeline.months.map((month) => [String(month.month), month]),
+      );
+      for (const runtimeMonth of runtime.months) {
+        const month = byMonth.get(String(runtimeMonth.month || ""));
+        if (!month) continue;
+        const stages = month.stages || (month.stages = {});
+        const status = String(runtimeMonth.status || "");
+        if (
+          status === "running" ||
+          String(runtimeMonth.month) === currentMonth
+        ) {
+          stages.qdrant = "processing";
+          month.overall = "processing";
+        } else if (status === "success" && stages.qdrant !== "complete") {
+          stages.qdrant = aliasComplete ? "complete" : "incomplete";
+          month.overall = aliasComplete ? "complete" : "incomplete";
+        }
+      }
+      const summary = {
+        complete: 0,
+        incomplete: 0,
+        processing: 0,
+        empty: 0,
+        update: 0,
+      };
+      for (const month of timeline.months) {
+        const overall = String(month.overall || "empty");
+        summary[overall] = Number(summary[overall] || 0) + 1;
+        if (month.has_update) summary.update += 1;
+      }
+      timeline.summary = summary;
+    };
+    patchProcessingTimelines(lastSnapshot);
     patchTimeline(lastSnapshot.import_timeline);
     for (const workflow of lastSnapshot.workflows || []) {
       if (workflow.id === "judgment_import") {
@@ -6542,6 +7204,17 @@ export async function render(root) {
   };
 
   const onStageToggle = (event) => {
+    const indexDetails = event.target.closest?.(
+      ".index-wf-stage[data-index-stage]",
+    );
+    if (indexDetails && content.contains(indexDetails)) {
+      const key = indexDetails.dataset.indexStage || "";
+      if (key) {
+        if (indexDetails.open) INDEX_WF_OPEN_STAGES.add(key);
+        else INDEX_WF_OPEN_STAGES.delete(key);
+      }
+      return;
+    }
     const details = event.target.closest?.(
       ".processing-wf-stage[data-processing-stage]",
     );

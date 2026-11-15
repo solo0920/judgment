@@ -12773,56 +12773,6 @@ button.chip:hover {
   overflow: hidden;
 }
 
-.processing-timeline-head-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  min-width: 0;
-}
-
-.processing-timeline-models {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.processing-timeline-model {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 7px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: 8.5px;
-  white-space: nowrap;
-}
-
-.processing-timeline-model > span {
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 7.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.processing-timeline-model strong {
-  color: var(--ink);
-  font-size: 8.5px;
-  font-weight: 600;
-}
-
-.processing-timeline-model em {
-  color: var(--warning);
-  font-size: 7.5px;
-  font-style: normal;
-  font-weight: 600;
-}
-
 .processing-months-table {
   min-width: 680px;
   table-layout: fixed;
@@ -12832,11 +12782,21 @@ button.chip:hover {
   width: 46px;
 }
 
-.processing-months-table .processing-month {
+.processing-months-table .processing-month:not(.index-month) {
   padding: 3px 2px;
   border-color: transparent;
   background: transparent;
   vertical-align: middle;
+}
+
+.processing-month.index-month {
+  vertical-align: middle;
+}
+
+.processing-month.index-month.is-neutral {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
 }
 
 .processing-month-number {
@@ -12878,22 +12838,22 @@ button.chip:hover {
   outline-offset: 1px;
 }
 
-.processing-month-stage.is-green,
+.processing-month:not(.index-month) .processing-month-stage.is-green,
 .processing-timeline-swatch.is-green {
   background: var(--success);
 }
 
-.processing-month-stage.is-red,
+.processing-month:not(.index-month) .processing-month-stage.is-red,
 .processing-timeline-swatch.is-red {
   background: var(--danger);
 }
 
-.processing-month-stage.is-gray,
+.processing-month:not(.index-month) .processing-month-stage.is-gray,
 .processing-timeline-swatch.is-gray {
   background: var(--line-strong);
 }
 
-.processing-month-stage.is-empty {
+.processing-month:not(.index-month) .processing-month-stage.is-empty {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line);
   opacity: 0.4;
@@ -12915,6 +12875,27 @@ button.chip:hover {
   font-weight: 700;
 }
 
+/* Index-style processing cells use the same active treatment as the index
+   file timeline, while keeping the cell's overall status background. */
+.processing-month.index-month.is-current {
+  z-index: 1;
+  border-color: var(--accent);
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+  animation: judgment-month-pulse 1.6s ease-in-out infinite;
+}
+
+.processing-month.index-month.is-current .index-month-number {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processing-month.index-month.is-current {
+    animation: none;
+  }
+}
+
 .processing-month.is-processing-current:not(.is-current) {
   outline: 2px dashed var(--info);
   outline-offset: -3px;
@@ -12930,22 +12911,6 @@ button.chip:hover {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
 }
 
-.processing-timeline-key {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
-  margin-top: 10px;
-  color: var(--faint);
-  font-size: 9px;
-}
-
-.processing-timeline-key > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .processing-timeline-swatch {
   width: 8px;
   height: 8px;
@@ -12953,16 +12918,13 @@ button.chip:hover {
   border-radius: 2px;
 }
 
-.processing-timeline-key-order {
-  margin-left: auto;
-  color: var(--faint);
+.processing-timeline-legend-label {
+  color: var(--muted);
+  font-weight: 600;
 }
 
-@media (max-width: 720px) {
-  .processing-timeline-key-order {
-    flex: 1 0 100%;
-    margin-left: 0;
-  }
+.processing-timeline-legend + .processing-timeline-legend {
+  margin-top: -2px;
 }
 
 .processing-workflow-command-grid {
@@ -16291,74 +16253,8 @@ a.qb-bank-law:hover {
   font-weight: 600;
 }
 
-.index-wf-list {
-  display: flex;
-  flex-direction: column;
-  padding: 14px 16px;
+.index-wf-chart {
   border-bottom: 1px solid var(--line);
-}
-
-.index-wf-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 10px;
-  padding-bottom: 12px;
-}
-
-.index-wf-row:last-child {
-  padding-bottom: 0;
-}
-
-.index-wf-rail {
-  position: relative;
-  display: flex;
-  justify-content: center;
-}
-
-.index-wf-rail::after {
-  content: "";
-  position: absolute;
-  top: 16px;
-  bottom: -12px;
-  width: 1px;
-  background: var(--line);
-}
-
-.index-wf-row:last-child .index-wf-rail::after {
-  display: none;
-}
-
-.index-wf-dot {
-  width: 9px;
-  height: 9px;
-  margin-top: 5px;
-  border: 2px solid var(--stage-color, var(--accent));
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: 0 0 0 2px var(--surface);
-}
-
-.index-wf-row.is-running .index-wf-dot,
-.index-wf-row.is-success .index-wf-dot {
-  background: var(--stage-color, var(--accent));
-}
-
-.index-wf-row.is-failed .index-wf-dot,
-.index-wf-row.is-stale .index-wf-dot {
-  border-color: var(--danger);
-  background: var(--danger);
-}
-
-.index-wf-body {
-  min-width: 0;
-}
-
-.index-wf-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
 }
 
 .index-wf-step {
@@ -16367,40 +16263,23 @@ a.qb-bank-law:hover {
   font-size: 8.5px;
 }
 
-.index-wf-head > strong {
-  color: var(--ink);
-  font-size: 11.5px;
-  font-weight: 650;
+/* The six index stages reuse the RAG pipeline waterfall structure so the
+   axis, stage rows, bars, expanded details and hover tooltip stay identical. */
+.index-wf-stage .index-wf-step {
+  margin-right: 4px;
 }
 
-.index-wf-duration {
-  margin-left: auto;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
+/* The unprocessed tail of a running or partial stage stays hollow so only the
+   completed portion is colored, matching the waterfall's progress semantics. */
+.index-wf-bar.is-hollow {
+  border: 1px solid var(--bar-color, var(--stage-color));
+  background: transparent;
+  box-sizing: border-box;
 }
 
-.index-wf-track {
-  height: 5px;
-  margin-top: 5px;
-  overflow: hidden;
-  border-radius: 3px;
-  background: var(--surface-3);
-}
-
-.index-wf-track > span {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.25s ease;
-}
-
-.index-wf-detail {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 9.5px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
+.index-wf-stage.is-pending .rag-wf-track,
+.index-wf-stage.is-skipped .rag-wf-track {
+  opacity: 0.55;
 }
 
 .index-wf-overall {
@@ -16432,20 +16311,46 @@ a.qb-bank-law:hover {
   .index-wf-summary {
     padding: 10px 12px;
   }
-
-  .index-wf-list {
-    padding: 12px;
-  }
-
-  .index-wf-duration {
-    margin-left: 0;
-  }
 }
 
 /* Index month ARE blocks */
 .index-months-table .index-month-are {
   min-width: 36px;
   padding: 3px 2px;
+  background-repeat: no-repeat;
+  background-position: left bottom;
+  background-size: 100% var(--month-progress, 0%);
+  transition: background-size 0.35s ease;
+}
+
+/* The month being indexed doubles as a progress bar.  The fill uses a stronger
+   green over the completed-month background, so the active cell stays in the
+   same green family as completed months while still showing progress. */
+.index-month-are.is-progressing {
+  --month-progress-color: color-mix(
+    in srgb,
+    var(--success) 28%,
+    transparent
+  );
+  background-image: linear-gradient(
+    to top,
+    var(--month-progress-color),
+    var(--month-progress-color)
+  );
+}
+
+/* Use the completed-month background for the active month's unfilled track;
+   the outline and percent still identify it as the month being indexed. */
+.index-month-are.is-active {
+  background-color: var(--success-soft);
+}
+
+.index-month-are.is-active .index-month-block.is-incomplete {
+  background: linear-gradient(
+    to top,
+    var(--block-color, var(--line-strong)) var(--fill, 0%),
+    transparent var(--fill, 0%)
+  );
 }
 
 .index-month-number {
@@ -16489,8 +16394,63 @@ a.qb-bank-law:hover {
 }
 
 .index-month-block.is-incomplete {
-  background: var(--bg);
+  background: linear-gradient(
+    to top,
+    var(--block-color, var(--line-strong)) var(--fill, 0%),
+    var(--bg) var(--fill, 0%)
+  );
   box-shadow: inset 0 0 0 1px var(--block-color, var(--line-strong));
+}
+
+/* Processing overview timelines reuse the index month-cell geometry. Each
+   stage keeps its own colour; completed stages are solid, unfinished stages
+   are hollow, and a running stage shows a vertical progress fill. */
+.processing-month-stage.is-download {
+  --block-color: #22c55e;
+}
+
+.processing-month-stage.is-parquet {
+  --block-color: #ec4899;
+}
+
+.processing-month-stage.is-postgres {
+  --block-color: #3b82f6;
+}
+
+.processing-month-stage.is-qdrant {
+  --block-color: #f59e0b;
+}
+
+.processing-month.index-month .processing-month-stage.is-complete {
+  background: var(--block-color);
+  box-shadow: none;
+}
+
+.processing-month.index-month .processing-month-stage.is-incomplete {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--block-color);
+}
+
+.processing-month.index-month .processing-month-stage.is-running {
+  background: linear-gradient(
+    to top,
+    var(--block-color) var(--stage-progress, 0%),
+    color-mix(in srgb, var(--block-color) 14%, transparent)
+      var(--stage-progress, 0%)
+  );
+  box-shadow: inset 0 0 0 1px var(--block-color);
+}
+
+.processing-month.index-month .processing-month-stage.is-partial {
+  background: color-mix(in srgb, var(--block-color) 42%, var(--surface-2));
+  box-shadow: inset 0 0 0 1px var(--block-color);
+}
+
+.processing-month.index-month .processing-month-stage.is-empty {
+  --block-color: var(--line);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  opacity: 0.4;
 }
 
 .index-month-are-key {
@@ -16539,6 +16499,62 @@ a.qb-bank-law:hover {
   box-shadow: inset 0 0 0 1px var(--faint);
 }
 
+.index-month-are-key i.is-progress {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--success) 28%, transparent) 55%,
+    var(--success-soft) 55%
+  );
+  box-shadow: inset 0 0 0 1px var(--success);
+}
+
+/* Processing timeline legend reuses the index key layout with stage colours
+   and neutral solid/hollow/progress state swatches. */
+.processing-timeline-legend .processing-timeline-swatch.is-download {
+  background: #22c55e;
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-parquet {
+  background: #ec4899;
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-postgres {
+  background: #3b82f6;
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-qdrant {
+  background: #f59e0b;
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-solid-state {
+  background: var(--ink);
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-hollow-state {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-progress-state {
+  background: linear-gradient(
+    to top,
+    var(--ink) 50%,
+    transparent 50%
+  );
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-partial-state {
+  background: color-mix(in srgb, #f59e0b 42%, var(--surface-2));
+  box-shadow: inset 0 0 0 1px #f59e0b;
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-empty {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  opacity: 0.5;
+}
+
 /* Law / order index version timelines */
 .law-index-timelines {
   display: flex;
@@ -16550,15 +16566,66 @@ a.qb-bank-law:hover {
   margin-bottom: 0;
 }
 
-/* Index runtime count and cumulative average */
-.index-runtime-counts {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+/* Index runtime metrics: months, rows, rate and timings share one 2x3 grid */
+.index-runtime-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-left: auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--line);
 }
 
-.index-runtime-rate {
+.index-runtime-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 10px;
+  background: var(--surface-2);
   white-space: nowrap;
+}
+
+.index-runtime-metric > span {
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.index-runtime-metric strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keep the metrics inside the timeline header.  The title takes the free
+   space so the grid stays right aligned until the header wraps. */
+.index-runtime-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.index-runtime-head .side-card-title {
+  margin-right: auto;
+}
+
+@media (max-width: 560px) {
+  .index-runtime-head {
+    align-items: stretch;
+  }
+
+  .index-runtime-head .side-card-title {
+    width: 100%;
+  }
+
+  .index-runtime-metrics {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .index-runtime-metric {
+    padding: 5px 8px;
+  }
 }

@@ -523,6 +523,44 @@ def test_static_console_is_served(web_client) -> None:
     assert "update_mechanism" in processing_js.text
     assert "processing-run-strip" in processing_js.text
     assert "中止執行" in processing_js.text
+    assert "index-wf-chart" in processing_js.text
+    assert "index-wf-stage" in processing_js.text
+    assert "data-index-stage" in processing_js.text
+    assert "index-wf-bar is-hollow" in processing_js.text
+    assert "minBarPercent" in processing_js.text
+    assert "rag-wf-axis" in processing_js.text
+    assert "index-wf-row" not in processing_js.text
+    assert "index-runtime-metrics" in processing_js.text
+    assert "index-runtime-metric" in processing_js.text
+    assert "index-runtime-head" in processing_js.text
+    assert "已處理月份" in processing_js.text
+    assert "Elapsed Time" in processing_js.text
+    assert "Estimated Total" in processing_js.text
+    assert "Time Remaining" in processing_js.text
+    assert "停止後重新執行會重新計時" in processing_js.text
+    assert "is-progressing" in processing_js.text
+    assert "--month-progress" in processing_js.text
+    assert "月份格底色顯示該月目前進度" in processing_js.text
+    assert "processingTimelineMetricsMarkup" in processing_js.text
+    assert "FILE_TIMELINE_STAGE_PROGRESS_KEYS" in processing_js.text
+    assert "processingTimelineProgressContext" in processing_js.text
+    assert "processing-timeline-legend" in processing_js.text
+    assert "index-month-block" in processing_js.text
+    assert "processing-month-stage" in processing_js.text
+    assert "is-download" in processing_js.text
+    assert "is-parquet" in processing_js.text
+    assert "is-postgres" in processing_js.text
+    assert "is-qdrant" in processing_js.text
+    assert "is-running" in processing_js.text
+    assert "is-complete" in processing_js.text
+    assert "is-partial" in processing_js.text
+    assert "is-partial-state" in processing_js.text
+    assert "patchProcessingTimelines" in processing_js.text
+    assert "active_coverage" in processing_js.text
+    assert "--stage-progress" in processing_js.text
+    assert "完成月份" in processing_js.text
+    assert "完成率" in processing_js.text
+    assert "完成階段" in processing_js.text
     tests_js = web_client.get("/assets/js/pages/tests.js")
     assert tests_js.status_code == 200
     assert "tests-rerank" in tests_js.text
@@ -538,6 +576,15 @@ def test_static_console_is_served(web_client) -> None:
     css = web_client.get("/assets/styles.css")
     assert css.status_code == 200
     assert "--accent" in css.text
+    assert ".index-month-are.is-active" in css.text
+    assert "background-color: var(--success-soft)" in css.text
+    assert ".index-wf-bar.is-hollow" in css.text
+    assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
+    assert ".processing-month-stage.is-download" in css.text
+    assert ".processing-month.index-month .processing-month-stage.is-running" in css.text
+    assert ".processing-month-stage.is-partial" in css.text
+    assert ".processing-timeline-swatch.is-partial-state" in css.text
+    assert ".processing-timeline-legend" in css.text
 
     themes = web_client.get("/assets/themes.css")
     assert themes.status_code == 200
