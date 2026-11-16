@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,15 @@ from judgment import ollama_hosts
 from judgment.config import Settings
 from judgment.models import Base, OllamaHost
 from judgment.runtime_settings import set_llm_model_preference
+
+ALLOWED_HOSTS = (
+    "127.0.0.1:11434",
+    "x570:11500",
+    "first.test:11434",
+    "second.test:11434",
+    "third.test:11434",
+    "host.test:11434",
+)
 
 
 @pytest.fixture()
@@ -39,6 +49,7 @@ def _settings() -> Settings:
         llm_model="env-chat",
         embedding_url="http://env-embedding:11434",
         embedding_model="env-embedding",
+        ollama_allowed_hosts=ALLOWED_HOSTS,
     )
 
 
@@ -62,12 +73,14 @@ def test_ollama_host_lifecycle_and_runtime_settings(
         name="Local",
         url="127.0.0.1",
         port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
     )
     second = ollama_hosts.add_host(
         session_factory,
         name="x570",
         url="http://x570",
         port=11500,
+        allowed_hosts=ALLOWED_HOSTS,
     )
     assert first["base_url"] == "http://127.0.0.1:11434"
     assert second["base_url"] == "http://x570:11500"
@@ -78,6 +91,7 @@ def test_ollama_host_lifecycle_and_runtime_settings(
             name="Duplicate",
             url="http://127.0.0.1:11434",
             port=11434,
+            allowed_hosts=ALLOWED_HOSTS,
         )
 
     activated = ollama_hosts.activate_host(session_factory, first["id"])
@@ -101,7 +115,7 @@ def test_ollama_host_lifecycle_and_runtime_settings(
     assert runtime.embedding_url == "http://127.0.0.1:11434"
     assert runtime.embedding_model == "bge-m3:latest"
 
-    listing = ollama_hosts.list_hosts(session_factory)
+    listing = ollama_hosts.list_hosts(session_factory, allowed_hosts=ALLOWED_HOSTS)
     assert listing["active_host_id"] == first["id"]
     assert len(listing["hosts"]) == 2
     assert listing["hosts"][0]["status"] == "operational"
@@ -140,13 +154,25 @@ def test_ollama_host_priority_reorder_and_embedding_failover(
         },
     )
     first = ollama_hosts.add_host(
-        session_factory, name="First", url="http://first.test", port=11434
+        session_factory,
+        name="First",
+        url="http://first.test",
+        port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
     )
     second = ollama_hosts.add_host(
-        session_factory, name="Second", url="http://second.test", port=11434
+        session_factory,
+        name="Second",
+        url="http://second.test",
+        port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
     )
     third = ollama_hosts.add_host(
-        session_factory, name="Third", url="http://third.test", port=11434
+        session_factory,
+        name="Third",
+        url="http://third.test",
+        port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
     )
     assert [first["priority"], second["priority"], third["priority"]] == [
         0,
@@ -165,7 +191,7 @@ def test_ollama_host_priority_reorder_and_embedding_failover(
     )
     assert result["active_host_id"] == third["id"]
 
-    listing = ollama_hosts.list_hosts(session_factory)
+    listing = ollama_hosts.list_hosts(session_factory, allowed_hosts=ALLOWED_HOSTS)
     assert [host["id"] for host in listing["hosts"]] == [
         third["id"],
         first["id"],
@@ -196,7 +222,7 @@ def test_ollama_host_priority_reorder_and_embedding_failover(
 
     activated = ollama_hosts.activate_host(session_factory, first["id"])
     assert activated["priority"] == 0
-    listing = ollama_hosts.list_hosts(session_factory)
+    listing = ollama_hosts.list_hosts(session_factory, allowed_hosts=ALLOWED_HOSTS)
     assert [host["id"] for host in listing["hosts"]] == [
         first["id"],
         third["id"],
@@ -215,6 +241,127 @@ def test_ollama_host_priority_reorder_and_embedding_failover(
         )
 
 
+def test_runtime_settings_keeps_openai_primary_and_appends_ollama_fallback(
+    session_factory, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        ollama_hosts,
+        "_probe_host",
+        lambda base_url, timeout: {
+            "status": "operational",
+            "detail": "2 個模型",
+            "models": [
+                {"name": "gemma3:4b", "size": 100, "modified_at": None},
+                {"name": "bge-m3:latest", "size": 200, "modified_at": None},
+            ],
+        },
+    )
+    host = ollama_hosts.add_host(
+        session_factory,
+        name="Local",
+        url="127.0.0.1",
+        port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
+    )
+    ollama_hosts.activate_host(session_factory, host["id"])
+    ollama_hosts.select_model(
+        session_factory,
+        host["id"],
+        model="gemma3:4b",
+        role="chat",
+    )
+    ollama_hosts.select_model(
+        session_factory,
+        host["id"],
+        model="bge-m3:latest",
+        role="embedding",
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=Path("data/laws"),
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        llm_url="http://x570:11436",
+        llm_api="openai",
+        llm_model="gemma3:4b",
+        embedding_url="http://x570:11437",
+        embedding_api="openai",
+        embedding_model="bge-m3",
+        ollama_allowed_hosts=ALLOWED_HOSTS,
+    )
+    runtime = ollama_hosts.runtime_settings(settings, session_factory)
+    assert runtime.llm_url == "http://x570:11436"
+    assert runtime.llm_api == "openai"
+    assert runtime.llm_model == "gemma3:4b"
+    assert runtime.llm_fallback_url == "http://127.0.0.1:11434"
+    assert runtime.llm_fallback_model == "gemma3:4b"
+    assert runtime.llm_fallback_api == "ollama"
+    assert runtime.embedding_url == "http://x570:11437"
+    assert runtime.embedding_api == "openai"
+    assert runtime.embedding_fallback_url == "http://127.0.0.1:11434"
+    assert runtime.embedding_fallback_api == "ollama"
+
+
+def test_ollama_host_rejects_hostname_resolving_to_metadata_ip(monkeypatch) -> None:
+    monkeypatch.setattr(
+        ollama_hosts.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                ("169.254.169.254", 80),
+            )
+        ],
+    )
+    with pytest.raises(ollama_hosts.OllamaHostError):
+        ollama_hosts._ensure_safe_target("http://metadata-host.test:80")
+
+
+def test_ollama_host_rejects_unlisted_and_link_local_targets(session_factory) -> None:
+    with pytest.raises(ollama_hosts.OllamaHostError):
+        ollama_hosts.add_host(
+            session_factory,
+            name="Unlisted",
+            url="http://evil.test",
+            port=11434,
+            allowed_hosts=ALLOWED_HOSTS,
+        )
+
+    with pytest.raises(ollama_hosts.OllamaHostError):
+        ollama_hosts.add_host(
+            session_factory,
+            name="Metadata",
+            url="http://169.254.169.254",
+            port=80,
+            allowed_hosts=("169.254.169.254:80",),
+        )
+
+
+def test_ollama_host_list_blocks_existing_unlisted_host(session_factory, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        ollama_hosts,
+        "_probe_host",
+        lambda base_url, timeout: calls.append(base_url)
+        or {"status": "operational", "detail": "ok", "models": []},
+    )
+    ollama_hosts.add_host(
+        session_factory,
+        name="Allowed",
+        url="http://first.test",
+        port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
+    )
+    listing = ollama_hosts.list_hosts(
+        session_factory, allowed_hosts=("second.test:11434",)
+    )
+    assert listing["hosts"][0]["status"] == "blocked"
+    assert calls == []
+
+
 def test_llm_model_preference_uses_env_provider_until_host_chat_model(
     session_factory,
 ) -> None:
@@ -229,7 +376,11 @@ def test_llm_model_preference_uses_env_provider_until_host_chat_model(
     assert runtime.llm_model == "gemma3:27b"
 
     host = ollama_hosts.add_host(
-        session_factory, name="Embedding only", url="http://host.test", port=11434
+        session_factory,
+        name="Embedding only",
+        url="http://host.test",
+        port=11434,
+        allowed_hosts=ALLOWED_HOSTS,
     )
     runtime = ollama_hosts.runtime_settings(settings, session_factory)
     assert runtime.llm_url == "http://env-llm:11434"

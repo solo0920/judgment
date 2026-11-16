@@ -36,6 +36,7 @@ INSTALL_DIR="${RERANK_INSTALL_DIR:-/opt/judgment}"
 MODEL_DIR="${INSTALL_DIR}/models"
 MODEL_TARGET="${MODEL_DIR}/bge-reranker-v2-m3-q8_0.gguf"
 OLLAMA_MODEL="${RERANK_OLLAMA_MODEL:-qllama/bge-reranker-v2-m3:latest}"
+RERANK_ALIAS="${RERANK_ALIAS:-bge-reranker-v2-m3}"
 SERVICE_USER="${JUDGMENT_SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
 
 usage() {
@@ -246,7 +247,7 @@ Group=${SERVICE_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=LD_LIBRARY_PATH=${LLAMA_LIB_DIR}
 ${BACKEND_ENV}
-ExecStart=${LLAMA_SERVER} --model ${MODEL_TARGET} --host ${RERANK_HOST} --port ${RERANK_PORT} --reranking --pooling rank --gpu-layers all --ctx-size 8192 --batch-size 2048 --ubatch-size 1024 --no-webui
+ExecStart=${LLAMA_SERVER} --model ${MODEL_TARGET} --alias ${RERANK_ALIAS} --host ${RERANK_HOST} --port ${RERANK_PORT} --reranking --pooling rank --gpu-layers all --ctx-size 8192 --batch-size 2048 --ubatch-size 1024 --no-webui
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65535

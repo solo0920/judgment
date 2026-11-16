@@ -13,6 +13,7 @@
 - [x] Service overview load pipeline, architecture SVG, data version cards and dynamic API endpoint catalog are covered.
 - [x] Processing overview, judgment import, index versions, law/order index timelines and download timelines match current UI behavior.
 - [x] Homepage live summary (`/api/home`), 99-law 11-column checklist, RAG capability/provenance and homepage pipeline waterfall match current UI/API behavior.
+- [x] P0 security controls are documented: explicit CORS, admin-token middleware, SSE ticket, Ollama SSRF allowlist, loopback-only Docker ports, PostgreSQL/Qdrant credentials and `.env`/log permissions.
 - [x] RAG, reranker, test mode, question bank, benchmark, settings sidebar and standalone frontend behavior are covered.
 - [x] SSE topics, IndexedDB stores, SQLite state/event journal and current deployment scripts are documented.
 - [x] Current data/UI snapshot records today's counts and marks API responses as authoritative when values change.

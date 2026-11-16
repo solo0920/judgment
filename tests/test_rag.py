@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -19,11 +20,16 @@ from judgment.models import (
 )
 from judgment.observability import clear_flow, start_flow
 from judgment.rag import (
+    _best_judgment_snippet,
+    _raise_for_llm_status,
+    _judgment_list_answer,
+    _llm_request_payload,
     _search_legal_articles,
     _valid_citation_markers,
     answer_question,
     extract_excerpt,
     generate_answer_with_model,
+    is_judgment_list_question,
     is_list_all_question,
 )
 from judgment.rerank import RerankOutcome, RerankResult
@@ -63,6 +69,28 @@ def _session_factory():
     return sessionmaker(
         bind=engine, autoflush=False, expire_on_commit=False, future=True
     )
+
+
+def test_llm_request_payload_sends_numeric_keep_alive_as_number() -> None:
+    numeric, _ = _llm_request_payload(
+        settings=_settings(llm_keep_alive="-1"),
+        model="gemma3:4b",
+        question="測試",
+        contexts=[],
+        strict=False,
+        stream=False,
+    )
+    assert numeric["keep_alive"] == -1
+
+    duration, _ = _llm_request_payload(
+        settings=_settings(llm_keep_alive="30m"),
+        model="gemma3:4b",
+        question="測試",
+        contexts=[],
+        strict=False,
+        stream=False,
+    )
+    assert duration["keep_alive"] == "30m"
 
 
 def _seed_judgments(session_factory, count: int = 3) -> None:
@@ -287,6 +315,20 @@ def test_extract_excerpt_prefers_paragraph_with_question_terms() -> None:
     assert "吸收存款" in excerpt
 
 
+def test_extract_excerpt_handles_term_split_across_lines() -> None:
+    text = "第一段無關。\n主文：被告犯詐\r\n欺取財罪。\n第三段無關。"
+    excerpt = extract_excerpt(text, "詐欺取財罪", budget=200)
+    assert "詐" in excerpt
+    assert "欺取財罪" in excerpt
+
+
+def test_extract_excerpt_preserves_original_spacing() -> None:
+    text = "第一段無關。\n被告使用 Telegram 暱稱，詐騙新臺幣 10 萬元。"
+    excerpt = extract_excerpt(text, "詐騙金額與聯絡方式", budget=200)
+    assert "Telegram 暱稱" in excerpt
+    assert "新臺幣 10 萬元" in excerpt
+
+
 def test_valid_citation_markers_accepts_lists_and_grounded_refusals() -> None:
     assert _valid_citation_markers("依判決片段 [1] 可知。", 3)
     assert _valid_citation_markers("依判決片段 [1, 2, 3] 可知。", 3)
@@ -320,7 +362,15 @@ def test_index_judgments_is_resumable_and_reports_coverage() -> None:
     assert first["indexed_count"] == 3
     assert first["dimensions"] == 4
     assert store.collection_created is True
-    assert set(store.indexes) == {"jid", "court", "jdate", "source_archive"}
+    assert set(store.indexes) == {
+        "jid",
+        "court",
+        "jdate",
+        "source_archive",
+        "title",
+        "source_year",
+        "jdate_num",
+    }
     assert first["coverage"]["indexed_judgments"] == 3
     assert first["coverage"]["remaining_judgments"] == 0
     assert first["batch_count"] == 2
@@ -399,6 +449,346 @@ def test_is_list_all_question_detects_exhaustive_judgment_requests() -> None:
     assert not is_list_all_question("原告如何請求返還借款?")
 
 
+def test_judgment_list_answer_has_fraud_caveat_and_complete_list_hint() -> None:
+    answer = _judgment_list_answer(
+        "2000年至2010年在板橋地方法院相關詐騙的判決有那些",
+        [
+            {
+                "index": 1,
+                "jid": "PCDM,96,簡,1,20070504,1",
+                "court": "臺灣新北地方法院",
+                "jdate": "20070504",
+                "title": "洗錢防制法",
+                "snippet": "被告幫助洗錢。",
+            }
+        ],
+        total_matches=210,
+        filter_meta={
+            "courts": ["臺灣新北地方法院", "臺灣板橋地方法院"],
+            "year_from": 2000,
+            "year_to": 2010,
+            "topics": ["詐欺"],
+        },
+    )
+    assert "查詢條件（可複製）" in answer
+    assert "案由含詐欺" in answer
+    assert "不含案由不同但內容涉及詐欺" in answer
+    assert "完整 210 筆清單" in answer
+    assert "資料庫查詢" in answer
+
+
+def test_semantic_query_uses_legal_term_expansion() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory, count=1)
+    embedder = FakeEmbedder()
+    payload = answer_question(
+        session_factory=session_factory,
+        question="人頭帳戶有什麼實務見解",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+            rag_legal_expansion_enabled=True,
+        ),
+        store=FakeStore(),
+        embedder=embedder,
+        enable_law_retrieval=False,
+    )
+    embedded_queries = [call[0] for call in embedder.calls if call]
+    assert embedded_queries
+    assert any("幫助詐欺" in query for query in embedded_queries)
+    assert payload["retrieval"]["query_expansion"]["enabled"] is True
+
+
+def test_semantic_query_legal_expansion_is_off_by_default() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory, count=1)
+    embedder = FakeEmbedder()
+    payload = answer_question(
+        session_factory=session_factory,
+        question="人頭帳戶有什麼實務見解",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+        ),
+        store=FakeStore(),
+        embedder=embedder,
+        enable_law_retrieval=False,
+    )
+    embedded_queries = [call[0] for call in embedder.calls if call]
+    assert embedded_queries
+    assert all("幫助詐欺" not in query for query in embedded_queries)
+    assert payload["retrieval"]["query_expansion"]["enabled"] is False
+
+
+def test_answer_question_uses_exact_keyword_list_for_settlement_default() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        target_text = (
+            "臺灣士林地方法院民事判決 八十九年度訴字第三六七號\n"
+            "原告主張被告未依約給付交割款，為避免違約交割，"
+            "乃調度資金存入客戶帳戶。\n"
+            "本院審酌兩造陳述與交易紀錄，認原告主張為有理由。"
+        )
+        session.add(
+            JudgmentDocument(
+                jid="SLDV,89,訴,367,20000728",
+                jyear="89",
+                jcase="訴",
+                jno="367",
+                jdate="20000728",
+                court="臺灣士林地方法院民事",
+                court_normalized="臺灣士林地方法院",
+                title="侵權行為損害賠償",
+                full_text=target_text,
+                full_text_length=len(target_text),
+                content_hash="target",
+                matched_laws=[],
+                matched_laws_text="",
+                citations=[],
+                citation_count=0,
+                source_archive="test.rar",
+            )
+        )
+        noise_text = (
+            "臺灣士林地方法院民事判決 八十八年度訴字第四五八號\n"
+            "兩造約定違約金二百萬元，被告未履行契約，原告請求給付違約金。"
+        )
+        session.add(
+            JudgmentDocument(
+                jid="SLDV,88,訴,458,20000706",
+                jyear="88",
+                jcase="訴",
+                jno="458",
+                jdate="20000706",
+                court="臺灣士林地方法院民事",
+                court_normalized="臺灣士林地方法院",
+                title="給付違約金",
+                full_text=noise_text,
+                full_text_length=len(noise_text),
+                content_hash="noise",
+                matched_laws=[],
+                matched_laws_text="",
+                citations=[],
+                citation_count=0,
+                source_archive="test.rar",
+            )
+        )
+        session.commit()
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+        settings=_settings(qdrant_url=""),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["answer_source"] == "retrieval_list"
+    assert payload["retrieval"]["retrieval_mode"] == "keyword_list"
+    assert payload["retrieval"]["total_matches"] == 1
+    assert payload["judgments"][0]["jid"] == "SLDV,89,訴,367,20000728"
+    assert "違約交割" in payload["answer"]
+    assert "給付違約金" not in payload["answer"]
+
+
+def test_answer_question_refuses_when_exact_keyword_has_no_match() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        text = (
+            "臺灣士林地方法院民事判決 八十八年度訴字第四五八號\n"
+            "兩造約定違約金二百萬元，被告未履行契約，原告請求給付違約金。"
+        )
+        session.add(
+            JudgmentDocument(
+                jid="SLDV,88,訴,458,20000706",
+                jyear="88",
+                jcase="訴",
+                jno="458",
+                jdate="20000706",
+                court="臺灣士林地方法院民事",
+                court_normalized="臺灣士林地方法院",
+                title="給付違約金",
+                full_text=text,
+                full_text_length=len(text),
+                content_hash="noise",
+                matched_laws=[],
+                matched_laws_text="",
+                citations=[],
+                citation_count=0,
+                source_archive="test.rar",
+            )
+        )
+        session.commit()
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+        settings=_settings(qdrant_url=""),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] == "keyword_list"
+    assert payload["retrieval"]["total_matches"] == 0
+    assert "查無" in payload["answer"]
+    assert "沒有改用其他近似詞" in payload["answer"]
+    assert payload["judgments"] == []
+
+
+def test_external_scope_term_zero_hit_uses_semantic_disclosure() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="臺灣臺北地方法院2026年借款糾紛案件有哪些",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+        ),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] != "keyword_list"
+    probe = payload["retrieval"]["scope_probe"]
+    assert probe["zero_terms"][0]["term"] == "借款糾紛"
+    assert "借款糾紛" in payload["notice"]
+    assert "語意" in payload["notice"]
+    assert "沒有改用其他近似詞" not in payload["answer"]
+
+
+def test_external_scope_term_zero_hit_skips_structured_list() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+
+    class StructuredButUnsafeStore(FakeStore):
+        def facet(
+            self,
+            collection,
+            key,
+            *,
+            query_filter=None,
+            limit=500,
+            exact=True,
+        ):
+            return [{"value": "清償借款", "count": 1}]
+
+        def count(self, collection, *, query_filter=None, exact=True):
+            raise AssertionError("external zero-hit must not enumerate titles")
+
+        def scroll(self, collection, **kwargs):
+            raise AssertionError("external zero-hit must not enumerate titles")
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="臺灣臺北地方法院2026年借款糾紛案件有哪些",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+        ),
+        store=StructuredButUnsafeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] != "structured_list"
+    assert payload["retrieval"]["scope_probe"]["zero_terms"][0][
+        "term"
+    ] == "借款糾紛"
+    assert "語意" in payload["notice"]
+
+
+def test_external_scope_term_hit_returns_keyword_list() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        text = (
+            "臺灣臺北地方法院民事判決 114年度訴字第9號\n"
+            "原告主張兩造間有借款糾紛，被告屆期未清償。\n"
+            "本院審酌借據與匯款紀錄，認原告主張為有理由。"
+        )
+        session.add(
+            JudgmentDocument(
+                jid="TPDV,114,訴,9,20260101,1",
+                jyear="114",
+                jcase="訴",
+                jno="9",
+                jdate="20260101",
+                court="臺灣臺北地方法院民事",
+                court_normalized="臺灣臺北地方法院",
+                title="返還借款",
+                full_text=text,
+                full_text_length=len(text),
+                content_hash="external-scope-hit",
+                matched_laws=[],
+                matched_laws_text="",
+                citations=[],
+                citation_count=0,
+                source_archive="test.rar",
+            )
+        )
+        session.commit()
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="臺灣臺北地方法院2026年借款糾紛案件有哪些",
+        settings=_settings(qdrant_url=""),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] == "keyword_list"
+    assert payload["retrieval"]["total_matches"] == 1
+    assert payload["judgments"][0]["jid"] == "TPDV,114,訴,9,20260101,1"
+    probe = payload["retrieval"]["scope_probe"]
+    assert probe["hit_terms"][0]["term"] == "借款糾紛"
+    assert "非 active" in payload["notice"]
+
+
+def test_must_term_hit_still_discloses_zero_external_phrase() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        text = (
+            "臺灣士林地方法院民事判決 89年度訴字第367號\n"
+            "原告主張被告未依約給付交割款，為避免違約交割，"
+            "乃調度資金存入客戶帳戶。"
+        )
+        session.add(
+            JudgmentDocument(
+                jid="SLDV,89,訴,367,20000728",
+                jyear="89",
+                jcase="訴",
+                jno="367",
+                jdate="20000728",
+                court="臺灣士林地方法院民事",
+                court_normalized="臺灣士林地方法院",
+                title="侵權行為損害賠償",
+                full_text=text,
+                full_text_length=len(text),
+                content_hash="must-external",
+                matched_laws=[],
+                matched_laws_text="",
+                citations=[],
+                citation_count=0,
+                source_archive="test.rar",
+            )
+        )
+        session.commit()
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="士林地方法院2000年違約交割與借款糾紛案件有哪些",
+        settings=_settings(qdrant_url=""),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] == "keyword_list"
+    assert payload["retrieval"]["total_matches"] == 1
+    probe = payload["retrieval"]["scope_probe"]
+    assert probe["zero_terms"][0]["term"] == "借款糾紛"
+    assert "借款糾紛" in payload["notice"]
+    assert "未在" in payload["notice"]
+
+
 def test_answer_question_suggests_database_for_all_results() -> None:
     session_factory = _session_factory()
     _seed_judgments(session_factory)
@@ -421,8 +811,10 @@ def test_answer_question_suggests_database_for_all_results() -> None:
         enable_law_retrieval=False,
     )
 
-    assert payload["status"] == "retrieval_only"
+    assert payload["status"] == "operational"
+    assert payload["answer_source"] == "retrieval_list"
     assert len(payload["judgments"]) == 1
+    assert "TPDV,114,訴,1,20260101,1" in payload["answer"]
     assert payload["retrieval"]["unique_judgments"] == 3
     assert "資料庫查詢" in payload["notice"]
     assert "全部" in payload["notice"]
@@ -1775,3 +2167,384 @@ def test_llm_flow_records_tokens_ttft_and_finish_times(monkeypatch) -> None:
     assert segment["metadata"]["eval_duration_ms"] == 1.2
     assert segment["finished_at"]
     assert segment["end_offset_ms"] >= segment["offset_ms"]
+
+
+def _rag_context() -> list[dict]:
+    return [
+        {
+            "index": 1,
+            "jid": "TEST,114,訴,1,20260101,1",
+            "court": "測試法院",
+            "jdate": "20260101",
+            "title": "測試案由",
+            "matched_laws": ["銀行法"],
+            "text": "測試內容",
+        }
+    ]
+
+
+def test_raise_for_llm_status_keeps_response_body() -> None:
+    response = httpx.Response(400, text='{"error":"context length exceeded"}')
+    with pytest.raises(RuntimeError, match="context length exceeded"):
+        _raise_for_llm_status(response)
+
+
+def test_generate_answer_uses_openai_chat_completions(monkeypatch) -> None:
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "llama-server 回答 [1]"}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 4},
+            }
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs["json"]))
+        return FakeResponse()
+
+    monkeypatch.setattr("judgment.rag.httpx.post", fake_post)
+    answer = generate_answer_with_model(
+        settings=_settings(
+            llm_url="http://x570:11436",
+            llm_api="openai",
+            llm_model="gemma3:4b",
+        ),
+        model="gemma3:4b",
+        question="測試問題",
+        contexts=_rag_context(),
+        timeout=10,
+    )
+    assert answer == "llama-server 回答 [1]"
+    assert calls[0][0] == "http://x570:11436/v1/chat/completions"
+    payload = calls[0][1]
+    assert payload["model"] == "gemma3:4b"
+    assert payload["max_tokens"] == 384
+    assert "options" not in payload
+
+
+def test_generate_answer_streams_openai_sse(monkeypatch) -> None:
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"測試"}}]}'
+            yield ""
+            yield 'data: {"choices":[{"delta":{"content":"回答 [1]"}}]}'
+            yield "data: [DONE]"
+
+    calls = []
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs["json"]))
+        return FakeStream()
+
+    monkeypatch.setattr("judgment.rag.httpx.stream", fake_stream)
+    tokens: list[str] = []
+    answer = generate_answer_with_model(
+        settings=_settings(
+            llm_url="http://x570:11436",
+            llm_api="openai",
+            llm_model="gemma3:4b",
+        ),
+        model="gemma3:4b",
+        question="測試問題",
+        contexts=_rag_context(),
+        timeout=10,
+        on_token=tokens.append,
+    )
+    assert answer == "測試回答 [1]"
+    assert tokens == ["測試", "回答 [1]"]
+    assert calls[0][0] == "POST"
+    assert calls[0][1] == "http://x570:11436/v1/chat/completions"
+    assert calls[0][2]["stream"] is True
+
+
+def test_generate_answer_falls_back_to_ollama_before_any_token(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class OllamaResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"message": {"content": "Ollama 回答 [1]"}}
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs["json"]))
+        if "x570" in url:
+            raise httpx.ConnectError("x570 offline")
+        return OllamaResponse()
+
+    monkeypatch.setattr("judgment.rag.httpx.post", fake_post)
+    answer = generate_answer_with_model(
+        settings=_settings(
+            llm_url="http://x570:11436",
+            llm_api="openai",
+            llm_model="gemma3:4b",
+            llm_fallback_url="http://127.0.0.1:11434",
+            llm_fallback_model="gemma3:4b",
+            llm_fallback_api="ollama",
+        ),
+        model="gemma3:4b",
+        question="測試問題",
+        contexts=_rag_context(),
+        timeout=10,
+    )
+    assert answer == "Ollama 回答 [1]"
+    assert [url for url, _ in calls] == [
+        "http://x570:11436/v1/chat/completions",
+        "http://127.0.0.1:11434/api/chat",
+    ]
+    assert calls[0][1]["max_tokens"] == 384
+    assert calls[1][1]["options"]["num_predict"] == 384
+
+
+def test_is_judgment_list_question_detects_judgment_queries() -> None:
+    assert is_judgment_list_question(
+        "在板橋地方法院相關詐騙的判決有那些"
+    )
+    assert is_judgment_list_question("請列出近五年的詐欺判決")
+    assert is_judgment_list_question("有哪些洗錢案例")
+    assert not is_judgment_list_question("詐騙判決的法律責任有哪些")
+    assert not is_judgment_list_question("違約交割有那些罰則?")
+    assert not is_judgment_list_question("原告如何請求返還借款?")
+
+
+def test_llm_prompt_for_judgment_list_requests_case_details() -> None:
+    payload, _ = _llm_request_payload(
+        settings=_settings(llm_keep_alive="30m"),
+        model="gemma3:4b",
+        question="在板橋地方法院相關詐騙的判決有那些",
+        contexts=[
+            {
+                "kind": "judgment",
+                "index": 1,
+                "jid": "PCDM,114,審金訴,482,20251222,2",
+                "court": "臺灣新北地方法院",
+                "jdate": "20251222",
+                "title": "詐欺等",
+                "matched_laws": ["洗錢防制法"],
+                "text": "被告加入詐騙集團擔任面交車手。",
+            }
+        ],
+        strict=False,
+        stream=False,
+    )
+    user_prompt = payload["messages"][1]["content"]
+    assert "參考資料（以判決為主）" in user_prompt
+    assert "逐筆列出案號、法院、裁判日期與案由" in user_prompt
+    assert "不要重複參考資料原文、案號清單" not in user_prompt
+    system_prompt = payload["messages"][0]["content"]
+    assert "不得以法規條文取代判決清單" in system_prompt
+
+
+def test_answer_question_drops_incidental_law_sources_for_judgment_list(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    settings = _settings(
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    monkeypatch.setattr(
+        "judgment.rag.law_sources_for_question",
+        lambda *args, **kwargs: [
+            {
+                "law_name": "地方法院及其分院處務規程",
+                "source_type": "order",
+                "articles": [
+                    {
+                        "article_no": "第 2 條",
+                        "article_content": "地方法院及其分院處理事務，依本規程行之。",
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("judgment list must not call the LLM")
+        ),
+    )
+    payload = answer_question(
+        session_factory=session_factory,
+        question="在法院相關的判決有那些",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+    assert payload["retrieval"]["mode"] == "judgment_first"
+    assert payload["law_sources"] == []
+    assert payload["matched_terms"] == []
+    assert len(payload["judgments"]) == 1
+    assert payload["answer_source"] == "retrieval_list"
+    assert payload["llm_model"] is None
+    assert "TPDV,114,訴,1,20260101,1" in payload["answer"]
+    assert "這不是法律意見" in payload["answer"]
+
+
+def test_best_judgment_snippet_joins_pdf_lines_and_skips_boilerplate() -> None:
+    text = (
+        "臺灣新北地方法院刑事判決\n"
+        "公  訴  人  臺灣新北地方檢察署檢察官\n"
+        "11號），本院判決如下：\n"
+        "入詐騙集團擔任面交車手之工作，侵害他人之財產法益，助\n"
+        "長詐騙歪風，嚴重影響社會治安及交易秩序，所為實值非難。\n"
+        "如不服本判決應於收受判決後20日內向本院提出上訴書狀。\n"
+    )
+    snippet = _best_judgment_snippet(
+        text,
+        "在板橋地方法院相關詐騙的判決有那些",
+        limit=200,
+    )
+    assert "詐騙集團" in snippet
+    assert "公  訴  人" not in snippet
+    assert "如不服本判決" not in snippet
+
+
+def test_best_judgment_snippet_keeps_latin_and_amount_spaces() -> None:
+    text = (
+        "被告使用 Telegram 暱稱，向被害人詐騙新臺幣 10 萬元。\n"
+        "如不服本判決應於收受判決後20日內向本院提出上訴書狀。"
+    )
+    snippet = _best_judgment_snippet(
+        text,
+        "詐騙金額與聯絡方式",
+        limit=200,
+    )
+    assert "Telegram 暱稱" in snippet
+    assert "新臺幣 10 萬元" in snippet
+    assert "Telegram暱稱" not in snippet
+
+
+def test_answer_question_uses_structured_list_filter() -> None:
+    session_factory = _session_factory()
+    jid = "PCDM,96,簡,1,20070504,1"
+    text = (
+        "臺灣新北地方法院刑事判決 96年度簡字第1號\n"
+        "被告加入詐騙集團擔任車手，向被害人收取款項。\n"
+        "主文：被告犯詐欺取財罪，處有期徒刑陸月。"
+    )
+    with session_factory() as session:
+        session.add(
+            JudgmentDocument(
+                jid=jid,
+                jyear="96",
+                jcase="簡",
+                jno="1",
+                jdate="20070504",
+                court="臺灣板橋地方法院刑事",
+                court_normalized="臺灣新北地方法院",
+                title="詐欺等",
+                full_text=text,
+                full_text_length=len(text),
+                content_hash="a" * 64,
+                matched_laws=["洗錢防制法"],
+                matched_laws_text="洗錢防制法",
+                citations=[],
+                citation_count=0,
+                source_archive="200705.rar",
+            )
+        )
+        session.commit()
+
+    class StructuredStore(FakeStore):
+        def facet(self, collection, key, *, query_filter=None, limit=500, exact=True):
+            return [{"value": "詐欺等", "count": 1}]
+
+        def count(self, collection, *, query_filter=None, exact=True):
+            return 1
+
+        def scroll(
+            self,
+            collection,
+            *,
+            query_filter=None,
+            limit=20,
+            offset=None,
+            order_by=None,
+            with_payload=True,
+        ):
+            return (
+                [
+                    {
+                        "id": 1,
+                        "payload": {
+                            "jid": jid,
+                            "court": "臺灣新北地方法院",
+                            "title": "詐欺等",
+                            "jdate": "20070504",
+                            "jdate_num": 20070504,
+                        },
+                    }
+                ],
+                None,
+            )
+
+        def search(self, collection, vector, **kwargs):
+            raise AssertionError("structured list must not run vector search")
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="2000年至2010年板橋地院詐欺判決有哪些",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+        ),
+        store=StructuredStore(),
+        embedder=FakeEmbedder(),
+    )
+    assert payload["retrieval"]["retrieval_mode"] == "structured_list"
+    assert payload["retrieval"]["total_matches"] == 1
+    assert payload["answer"].startswith("符合條件的判決共 1 筆")
+    assert payload["judgments"][0]["jid"] == jid
+    assert payload["judgments"][0]["court"] == "臺灣新北地方法院"
+    assert payload["judgments"][0]["title"] == "詐欺等"
+
+
+def test_lexical_rrf_reorders_dense_candidates() -> None:
+    hits = [
+        {
+            "score": 0.9,
+            "payload": {
+                "jid": "A",
+                "title": "本票裁定",
+                "court": "臺灣臺北地方法院",
+                "matched_laws": ["票據法"],
+                "snippet": "本票准許強制執行。",
+            },
+        },
+        {
+            "score": 0.8,
+            "payload": {
+                "jid": "B",
+                "title": "詐欺等",
+                "court": "臺灣新北地方法院",
+                "matched_laws": ["洗錢防制法"],
+                "snippet": "被告加入詐騙集團擔任車手，向被害人收取款項。",
+            },
+        },
+    ]
+    from judgment.rag import _apply_lexical_rrf
+
+    reordered, meta = _apply_lexical_rrf(hits, "詐騙判決")
+    assert meta["applied"] is True
+    assert [hit["payload"]["jid"] for hit in reordered] == ["B", "A"]
+    assert reordered[0]["_lexical_score"] > 0

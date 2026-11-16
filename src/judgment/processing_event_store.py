@@ -94,11 +94,53 @@ class ProcessingEventStore:
             "CREATE INDEX IF NOT EXISTS idx_processing_events_run_seq "
             "ON processing_events(run_id, seq)"
         )
+        self._ensure_unique_run_seq_index(conn)
+        conn.commit()
+        self._conn = conn
+        self._migrate_legacy_jsonl()
+        self._prune()
+
+    def _ensure_unique_run_seq_index(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Create the unique event index without rejecting legacy rows.
+
+        Older journals contain many anonymous events (``run_id=''``) from
+        different processes that legitimately share the same ``seq``.  They
+        are separate runs, not duplicate appends.  The unique index therefore
+        only covers identified runs.  Genuine duplicates for an identified
+        run are collapsed to the newest row before the index is created.
+        """
+
+        index_name = "idx_processing_events_unique_run_seq"
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND name = ?",
+            (index_name,),
+        ).fetchone()
+        normalized = " ".join(str(row[0] or "").split()) if row else ""
+        matches_scope = (
+            "run_id <> ''" in normalized
+            or "run_id != ''" in normalized
+        )
+        if row is not None and not matches_scope:
+            conn.execute(f"DROP INDEX {index_name}")
+            row = None
+        if row is not None:
+            return
         try:
             conn.execute(
+                "DELETE FROM processing_events "
+                "WHERE run_id <> '' AND seq > 0 AND id NOT IN ("
+                "SELECT MAX(id) FROM processing_events "
+                "WHERE run_id <> '' AND seq > 0 "
+                "GROUP BY run_id, seq"
+                ")"
+            )
+            conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS "
-                "idx_processing_events_unique_run_seq "
-                "ON processing_events(run_id, seq) WHERE seq > 0"
+                f"{index_name} ON processing_events(run_id, seq) "
+                "WHERE seq > 0 AND run_id <> ''"
             )
         except sqlite3.IntegrityError:
             logger.warning(
@@ -106,10 +148,6 @@ class ProcessingEventStore:
                 "保留既有資料但無法建立唯一索引",
                 exc_info=True,
             )
-        conn.commit()
-        self._conn = conn
-        self._migrate_legacy_jsonl()
-        self._prune()
 
     def _secure_files(self) -> None:
         for candidate in (

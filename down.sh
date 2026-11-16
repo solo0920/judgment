@@ -99,6 +99,12 @@ stop_agent() {
 
 stop_reranker() {
   echo "停止本機 reranker…"
+  local agent_label="${RERANK_AGENT_LABEL:-com.judgment.rerank}"
+  local agent_plist="${HOME}/Library/LaunchAgents/${agent_label}.plist"
+  if [[ -f "${agent_plist}" ]] && command -v launchctl >/dev/null 2>&1; then
+    echo "停止 reranker LaunchAgent（${agent_label}）…"
+    launchctl bootout "gui/$(id -u)/${agent_label}" >/dev/null 2>&1 || true
+  fi
   if [[ -f "${RERANK_PID_FILE}" ]]; then
     local pid
     pid="$(cat "${RERANK_PID_FILE}" 2>/dev/null || true)"

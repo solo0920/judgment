@@ -1,0 +1,241 @@
+[
+  {
+    "id": "dated_banqiao_fraud_2000_2010",
+    "question": "2000年至2010年在板橋地方法院相關詐騙的判決有那些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "mode": "judgment_first",
+      "min_judgments": 1,
+      "answer_prefix": "符合條件的判決共",
+      "max_latency_ms": 20000
+    }
+  },
+  {
+    "id": "dated_banqiao_fraud_2002_2009",
+    "question": "2002年到2009年板橋地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1,
+      "answer_prefix": "符合條件的判決共"
+    }
+  },
+  {
+    "id": "year_2005_newtaipei_fraud",
+    "question": "2005年新北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1,
+      "answer_prefix": "符合條件的判決共"
+    }
+  },
+  {
+    "id": "year_2006_newtaipei_fraud",
+    "question": "2006年新北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "year_2007_newtaipei_fraud",
+    "question": "2007年新北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "year_2008_newtaipei_fraud",
+    "question": "2008年新北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "dated_banqiao_money_2000_2010",
+    "question": "2000年至2010年板橋地院洗錢判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "no_match_early_years",
+    "question": "1990年至1991年新北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "no_match": true
+    }
+  },
+  {
+    "id": "no_match_lianjiang_money",
+    "question": "2000年至2010年連江地院洗錢判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "no_match": true
+    }
+  },
+  {
+    "id": "year_2026_newtaipei_fraud",
+    "question": "2026年新北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "year_2026_taipei_fraud",
+    "question": "2026年台北地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "year_2026_taichung_fraud",
+    "question": "2026年台中地院詐欺判決有哪些",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "law_bank_staff",
+    "question": "銀行法對從業人員有哪些規定",
+    "expect": {
+      "mode": "law_first",
+      "min_law_sources": 1
+    }
+  },
+  {
+    "id": "law_securities_insider",
+    "question": "證券交易法對內線交易有哪些規定",
+    "expect": {
+      "mode": "law_first",
+      "min_law_sources": 1
+    }
+  },
+  {
+    "id": "law_money_19",
+    "question": "洗錢防制法第19條的規定是什麼",
+    "expect": {
+      "mode": "law_first",
+      "min_law_sources": 1
+    }
+  },
+  {
+    "id": "law_insurance_107",
+    "question": "保險法第107條的規定是什麼",
+    "expect": {
+      "mode": "law_first",
+      "min_law_sources": 1
+    }
+  },
+  {
+    "id": "semantic_third_party_fraud_burden",
+    "question": "第三人詐欺的舉證責任有哪些實務見解",
+    "expect": {
+      "min_judgments": 1,
+      "answer_source": "llm"
+    }
+  },
+  {
+    "id": "semantic_cash_mule_forfeiture",
+    "question": "詐欺車手面交的犯罪所得沒收範圍",
+    "expect": {
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "semantic_help_fraud_intent",
+    "question": "幫助詐欺與不確定故意的認定",
+    "expect": {
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "structured_semantic_2007_issue",
+    "question": "2007年新北地院詐欺判決的爭點",
+    "expect": {
+      "retrieval_mode": "vector",
+      "min_judgments": 1,
+      "answer_source": "llm"
+    }
+  },
+  {
+    "id": "route_fraud_elements_law",
+    "question": "詐欺罪有哪些構成要件？",
+    "expect": {
+      "mode": "law_first",
+      "min_law_sources": 1
+    }
+  },
+  {
+    "id": "route_money_patterns_semantic",
+    "question": "洗錢有哪些常見態樣？",
+    "expect": {
+      "retrieval_mode": "vector",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "route_sentencing_semantic_with_filter",
+    "question": "新北地院的詐欺判決通常怎麼量刑？",
+    "expect": {
+      "retrieval_mode": "vector",
+      "mode": "judgment_first",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "variant_banqiao_fraud_2000_2010_2",
+    "question": "板橋地院在 2000 至 2010 年間有哪些詐騙案件？",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "variant_banqiao_fraud_2000_2010_4",
+    "question": "涉及詐欺的板橋地院判決，時間限定在 2000–2010 年",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "variant_banqiao_before_rename",
+    "question": "新北地院改制前，板橋地院的詐欺案件有哪些？",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "structured_list",
+      "min_judgments": 1
+    }
+  },
+  {
+    "id": "exact_keyword_violation_settlement",
+    "question": "士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+    "expect": {
+      "answer_source": "retrieval_list",
+      "retrieval_mode": "keyword_list",
+      "min_judgments": 1,
+      "answer_prefix": "符合條件的判決共",
+      "max_latency_ms": 10000
+    }
+  }
+]

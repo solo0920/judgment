@@ -2,6 +2,7 @@ const DEFAULT_TIMEOUT = 30000;
 const RAG_TIMEOUT = 300000;
 const POWER_AGENT_PORT = 9201;
 const API_BASE_STORAGE_KEY = "judgment.api_base";
+const ADMIN_TOKEN_STORAGE_KEY = "judgment.admin_token";
 export const DEFAULT_FILE_API_BASE = "http://127.0.0.1:9200";
 
 export class ApiError extends Error {
@@ -133,6 +134,32 @@ export function setApiBase(value) {
   return base;
 }
 
+export function getAdminToken() {
+  try {
+    return String(window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "").trim();
+  } catch (error) {
+    return "";
+  }
+}
+
+export function setAdminToken(value) {
+  const token = String(value || "").trim();
+  try {
+    if (token) window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    else window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+  } catch (error) {
+    /* storage may be unavailable */
+  }
+  return token;
+}
+
+function adminTokenForRequest() {
+  // Never send the admin token to an API base supplied by ?api= — that URL
+  // could be an attacker-controlled endpoint.
+  if (getApiBaseSource() === "query") return "";
+  return getAdminToken();
+}
+
 export function apiBaseLabel(base = getApiBase()) {
   return base || "同源（目前網域）";
 }
@@ -140,6 +167,25 @@ export function apiBaseLabel(base = getApiBase()) {
 export function apiUrl(path, base = getApiBase()) {
   if (!base) return path;
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+async function sseTicketForRequest() {
+  const token = adminTokenForRequest();
+  if (!token) return "";
+  try {
+    const response = await fetch(apiUrl("/api/auth/sse-ticket"), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "X-Judgment-Admin-Token": token,
+      },
+    });
+    if (!response.ok) return "";
+    const payload = await response.json();
+    return String(payload.ticket || "");
+  } catch (error) {
+    return "";
+  }
 }
 
 export function subscribeRefresh(
@@ -153,13 +199,11 @@ export function subscribeRefresh(
   if (!list.length || typeof EventSource === "undefined") {
     return () => {};
   }
-  const source = new EventSource(
-    apiUrl(`/api/events/stream?topic=${encodeURIComponent(list.join(","))}`),
-  );
+  let source = null;
   let opened = 0;
-  source.onopen = () => {
-    opened += 1;
-  };
+  let closed = false;
+  let retryTimer = null;
+
   const handleRefresh = (event) => {
     let payload = {};
     try {
@@ -182,17 +226,49 @@ export function subscribeRefresh(
     }
     onProgress?.(payload.topic || list[0], payload);
   };
-  source.addEventListener("refresh", handleRefresh);
-  source.addEventListener("progress", handleProgress);
-  source.onerror = () => {
-    // EventSource reconnects automatically and the backend resends the
-    // current refresh events as soon as the stream is re-established.
-    onError?.();
+
+  const connect = async () => {
+    if (closed) return;
+    const ticket = await sseTicketForRequest();
+    if (closed) return;
+    const params = new URLSearchParams({ topic: list.join(",") });
+    if (ticket) params.set("ticket", ticket);
+    source = new EventSource(apiUrl(`/api/events/stream?${params.toString()}`));
+    source.onopen = () => {
+      opened += 1;
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+    source.addEventListener("refresh", handleRefresh);
+    source.addEventListener("progress", handleProgress);
+    source.onerror = () => {
+      onError?.();
+      if (closed || !source) return;
+      source.close();
+      source = null;
+      if (retryTimer) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, 3000);
+    };
   };
+
+  connect();
   return () => {
-    source.removeEventListener("refresh", handleRefresh);
-    source.removeEventListener("progress", handleProgress);
-    source.close();
+    closed = true;
+    if (retryTimer) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (source) {
+      source.removeEventListener("refresh", handleRefresh);
+      source.removeEventListener("progress", handleProgress);
+      source.close();
+      source = null;
+    }
   };
 }
 
@@ -217,6 +293,9 @@ async function request(path, options = {}) {
     ...(options.body ? { "Content-Type": "application/json" } : {}),
     "X-Judgment-Request-Id": requestId,
     "X-Judgment-Client-Started-At": String(clientStartedAt),
+    ...(adminTokenForRequest()
+      ? { "X-Judgment-Admin-Token": adminTokenForRequest() }
+      : {}),
     ...(options.headers || {}),
   };
 

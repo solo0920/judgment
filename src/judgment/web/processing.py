@@ -5265,6 +5265,10 @@ class ProcessingManager:
             ]
             log_handle = log_path.open("ab")
             try:
+                os.chmod(log_path, 0o600)
+            except OSError:
+                pass
+            try:
                 process = subprocess.Popen(
                     command,
                     cwd=str(self.root),
@@ -5369,6 +5373,10 @@ class ProcessingManager:
             if index:
                 command.append("--index")
             log_handle = log_path.open("ab")
+            try:
+                os.chmod(log_path, 0o600)
+            except OSError:
+                pass
             try:
                 process = subprocess.Popen(
                     command,

@@ -89,6 +89,115 @@ def test_probe_embedding_hosts_reports_no_usable_host(monkeypatch) -> None:
     assert result["error"]
 
 
+def test_probe_embedding_hosts_uses_openai_endpoints(monkeypatch) -> None:
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if url.endswith("/v1/models"):
+            return TagsResponse(["bge-m3"])
+        if url.endswith("/health"):
+            return TagsResponse([])
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("judgment.embeddings.httpx.get", fake_get)
+    result = probe_embedding_hosts(
+        primary_url="http://x570:11437",
+        fallback_url="http://127.0.0.1:11434",
+        model="bge-m3",
+        primary_api="openai",
+        fallback_api="ollama",
+    )
+    assert result["status"] == "operational"
+    assert result["selected"]["url"] == "http://x570:11437"
+    assert result["selected"]["api"] == "openai"
+    assert "http://x570:11437/v1/models" in calls
+
+
+def test_openai_embedding_orders_vectors_by_index_and_records_usage(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class OpenAIResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": [
+                    {"index": 1, "embedding": [0.4, 0.3, 0.2]},
+                    {"index": 0, "embedding": [0.1, 0.2, 0.3]},
+                ],
+                "usage": {"prompt_tokens": 7},
+            }
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return OpenAIResponse()
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://x570:11437", "bge-m3", api="openai", timeout=10
+    )
+    vectors = embedder.embed(["a", "b"])
+    assert calls == ["http://x570:11437/v1/embeddings"]
+    assert vectors == [[0.1, 0.2, 0.3], [0.4, 0.3, 0.2]]
+    assert embedder.last_call["api"] == "openai"
+    assert embedder.last_call["prompt_eval_count"] == 7
+    assert embedder.last_call["total_duration_ms"] is None
+
+
+def test_embedding_fallback_can_switch_api_kind(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if "x570" in url:
+            raise httpx.ConnectError("primary offline")
+        return FakeResponse([[0.1, 0.2, 0.3, 0.4]])
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://x570:11437",
+        "bge-m3",
+        api="openai",
+        timeout=10,
+        fallback_base_url="http://127.0.0.1:11434",
+        fallback_api="ollama",
+    )
+    vectors = embedder.embed(["測試"])
+    assert vectors == [[0.1, 0.2, 0.3, 0.4]]
+    assert calls == [
+        "http://x570:11437/v1/embeddings",
+        "http://127.0.0.1:11434/api/embed",
+    ]
+    assert embedder.last_call["fallback"] is True
+    assert embedder.last_call["active_base_url"] == "http://127.0.0.1:11434"
+
+
+def test_openai_embedding_context_error_is_input_error(monkeypatch) -> None:
+    request = httpx.Request("POST", "http://x570:11437/v1/embeddings")
+
+    def fake_post(url, **kwargs):
+        response = httpx.Response(
+            400,
+            request=request,
+            text="input is too long for context",
+        )
+        raise httpx.HTTPStatusError(
+            "bad request", request=request, response=response
+        )
+
+    monkeypatch.setattr("judgment.embeddings.httpx.post", fake_post)
+    embedder = OllamaEmbedder(
+        "http://x570:11437", "bge-m3", api="openai", timeout=10
+    )
+    with pytest.raises(EmbeddingInputError):
+        embedder.embed(["x" * 100])
+
+
+
 def test_embedding_records_call_metrics(monkeypatch) -> None:
     class MetricsResponse:
         def raise_for_status(self):

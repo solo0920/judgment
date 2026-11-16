@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -396,3 +397,119 @@ def test_event_publisher_sends_socket_json_line(tmp_path: Path) -> None:
             shutil.rmtree(socket_dir, ignore_errors=True)
 
     asyncio.run(scenario())
+
+
+def _create_event_table(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """
+        CREATE TABLE processing_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL DEFAULT '',
+            seq INTEGER NOT NULL DEFAULT 0,
+            type TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT '',
+            payload TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _insert_event(
+    path: Path,
+    run_id: str,
+    seq: int,
+    event_type: str,
+    created_at: str = "",
+) -> None:
+    conn = sqlite3.connect(path)
+    payload = json.dumps(
+        {
+            "version": 1,
+            "run_id": run_id,
+            "seq": seq,
+            "type": event_type,
+            "timestamp": created_at,
+        }
+    )
+    conn.execute(
+        "INSERT INTO processing_events "
+        "(run_id, seq, type, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+        (run_id, seq, event_type, created_at, payload),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_processing_event_store_dedupes_identified_runs_only(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "events.db"
+    _create_event_table(path)
+    _insert_event(path, "run-1", 1, "archive_started", "2026-01-01")
+    _insert_event(path, "run-1", 1, "archive_started", "2026-01-02")
+    _insert_event(path, "", 1, "archive_started", "2026-01-03")
+    _insert_event(path, "", 1, "archive_started", "2026-01-04")
+    _insert_event(path, "run-2", 2, "archive_completed", "2026-01-05")
+
+    store = ProcessingEventStore(path)
+    store.start()
+    try:
+        rows = store.connection.execute(
+            "SELECT run_id, seq, COUNT(*) FROM processing_events "
+            "GROUP BY run_id, seq ORDER BY run_id, seq"
+        ).fetchall()
+        assert rows == [("", 1, 2), ("run-1", 1, 1), ("run-2", 2, 1)]
+        index_sql = store.connection.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE name = 'idx_processing_events_unique_run_seq'"
+        ).fetchone()[0]
+        assert "run_id <> ''" in " ".join(index_sql.split())
+
+        event_id = store.append(
+            {
+                "version": 1,
+                "run_id": "run-1",
+                "seq": 1,
+                "type": "archive_started",
+            }
+        )
+        assert event_id == 2
+        count = store.connection.execute(
+            "SELECT COUNT(*) FROM processing_events"
+        ).fetchone()[0]
+        assert count == 4
+        events, complete = store.replay_after(1)
+        assert complete is True
+        assert len(events) == 4
+    finally:
+        store.close()
+
+
+def test_processing_event_store_rebuilds_old_unique_index_scope(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "events.db"
+    _create_event_table(path)
+    _insert_event(path, "run-1", 1, "archive_started")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_processing_events_unique_run_seq "
+        "ON processing_events(run_id, seq) WHERE seq > 0"
+    )
+    conn.commit()
+    conn.close()
+
+    store = ProcessingEventStore(path)
+    store.start()
+    try:
+        index_sql = store.connection.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE name = 'idx_processing_events_unique_run_seq'"
+        ).fetchone()[0]
+        normalized = " ".join(index_sql.split())
+        assert "run_id <> ''" in normalized
+    finally:
+        store.close()

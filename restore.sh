@@ -99,6 +99,14 @@ load_env() {
   fi
 }
 
+qdrant_curl() {
+  if [[ -n "${QDRANT_API_KEY:-}" ]]; then
+    curl -H "api-key: ${QDRANT_API_KEY}" "$@"
+  else
+    curl "$@"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -d|--dest|--project-dir)
@@ -332,14 +340,14 @@ docker compose up -d postgres qdrant
 
 for _ in {1..60}; do
   if docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-judgment}" \
+    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
 for _ in {1..60}; do
-  if curl -fsS --max-time 2 "$QDRANT_URL/collections" >/dev/null 2>&1; then
+  if qdrant_curl -fsS --max-time 2 "$QDRANT_URL/collections" >/dev/null 2>&1; then
     break
   fi
   sleep 1
@@ -348,15 +356,15 @@ done
 if [[ "$SKIP_POSTGRES" != "1" ]]; then
   info "還原 PostgreSQL"
   docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-judgment}" \
+    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
     -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' >/dev/null
   docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-judgment}" \
+    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     pg_restore -U "$PG_USER" -d "$PG_DB" \
     --no-owner --no-privileges --exit-on-error < "$PG_DUMP"
   JUDGMENT_COUNT="$(docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-judgment}" \
+    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     psql -U "$PG_USER" -d "$PG_DB" -tAc \
     'select count(*) from judgment_documents;' 2>/dev/null || echo '?')"
   printf 'PostgreSQL judgment_documents：%s 筆\n' "$JUDGMENT_COUNT"
@@ -364,11 +372,11 @@ fi
 
 if [[ "$SKIP_QDRANT" != "1" ]]; then
   info "還原 Qdrant snapshot"
-  curl -sS -X DELETE "$QDRANT_URL/collections/$QDRANT_COLLECTION" >/dev/null 2>&1 || true
-  curl -fsS -X POST \
+  qdrant_curl -sS -X DELETE "$QDRANT_URL/collections/$QDRANT_COLLECTION" >/dev/null 2>&1 || true
+  qdrant_curl -fsS -X POST \
     "$QDRANT_URL/collections/$QDRANT_COLLECTION/snapshots/upload?priority=snapshot" \
     -F "snapshot=@$QDRANT_SNAPSHOT" >/dev/null
-  RESTORED_INFO="$(curl -fsS "$QDRANT_URL/collections/$QDRANT_COLLECTION")"
+  RESTORED_INFO="$(qdrant_curl -fsS "$QDRANT_URL/collections/$QDRANT_COLLECTION")"
   RESTORED_POINTS="$(printf '%s' "$RESTORED_INFO" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("result") or {}).get("points_count") or 0)')"
   printf 'Qdrant points：%s（備份 %s）\n' "$RESTORED_POINTS" "$QDRANT_POINTS"
   if [[ "$QDRANT_POINTS" != "0" && "$RESTORED_POINTS" != "$QDRANT_POINTS" ]]; then
@@ -376,11 +384,11 @@ if [[ "$SKIP_QDRANT" != "1" ]]; then
   fi
   if [[ -n "$QDRANT_ALIAS" ]]; then
     info "建立 Qdrant alias"
-    curl -sS -X POST "$QDRANT_URL/collections/aliases" \
+    qdrant_curl -sS -X POST "$QDRANT_URL/collections/aliases" \
       -H 'Content-Type: application/json' \
       -d "{\"actions\":[{\"delete_alias\":{\"alias_name\":\"$QDRANT_ALIAS\"}}]}" \
       >/dev/null 2>&1 || true
-    curl -fsS -X POST "$QDRANT_URL/collections/aliases" \
+    qdrant_curl -fsS -X POST "$QDRANT_URL/collections/aliases" \
       -H 'Content-Type: application/json' \
       -d "{\"actions\":[{\"create_alias\":{\"collection_name\":\"$QDRANT_COLLECTION\",\"alias_name\":\"$QDRANT_ALIAS\"}}]}" \
       >/dev/null
@@ -402,7 +410,9 @@ if [[ "$SKIP_QDRANT" == "1" && "$SKIP_POSTGRES" != "1" ]]; then
 警告：已還原 PostgreSQL，但未還原 Qdrant。
 PostgreSQL 的 judgment_vector_index 會顯示部分索引已完成，但 Qdrant 可能是空的。
 重新索引前請執行：
-  docker compose exec -T postgres psql -U judgment -d judgment \
+  docker compose exec -T postgres \
+    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+    psql -U judgment -d judgment \
     -c 'DELETE FROM judgment_vector_index;'
 EOF
 fi

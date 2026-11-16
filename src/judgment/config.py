@@ -50,8 +50,14 @@ class Settings:
     log_level: str = "INFO"
     auto_create_schema: bool = True
     max_uncompressed_bytes: int = 512 * 1024 * 1024
-    cors_allow_origins: tuple[str, ...] = ("*",)
-    forwarded_allow_ips: str = "*"
+    cors_allow_origins: tuple[str, ...] = (
+        "http://127.0.0.1:9200",
+        "http://localhost:9200",
+        "null",
+    )
+    forwarded_allow_ips: str = "127.0.0.1"
+    admin_token: str = ""
+    ollama_allowed_hosts: tuple[str, ...] = ()
     qdrant_url: str = ""
     qdrant_api_key: str = ""
     judgment_vector_collection: str = "judgment_documents"
@@ -61,13 +67,20 @@ class Settings:
     judgment_index_recipe_version: str = "doc-head-tail-v1"
     judgment_point_id_version: str = "jid-uuid5-v1"
     embedding_url: str = ""
+    embedding_api: str = "ollama"
     embedding_fallback_url: str = ""
+    embedding_fallback_api: str = "ollama"
     embedding_failover_urls: tuple[str, ...] = ()
+    embedding_failover_apis: tuple[str, ...] = ()
     embedding_model: str = "bge-m3"
     embedding_timeout_seconds: float = 120.0
     embedding_query_timeout_seconds: float = 2.0
     embedding_health_timeout_seconds: float = 2.0
     llm_url: str = ""
+    llm_api: str = "ollama"
+    llm_fallback_url: str = ""
+    llm_fallback_model: str = ""
+    llm_fallback_api: str = "ollama"
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
     llm_num_ctx: int = 4096
@@ -76,6 +89,10 @@ class Settings:
     rag_top_k: int = 4
     rag_score_threshold: float = 0.35
     rag_max_context_chars: int = 4000
+    rag_lexical_rrf_enabled: bool = False
+    rag_lexical_rrf_weight: float = 2.0
+    rag_legal_expansion_enabled: bool = False
+    rag_legal_expansion_terms: int = 4
     rag_rerank_enabled: bool = False
     rag_rerank_candidates: int = 30
     rag_law_first_judgment_limit: int = 1
@@ -150,8 +167,20 @@ class Settings:
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             auto_create_schema=_env_bool("AUTO_CREATE_SCHEMA", True),
             max_uncompressed_bytes=_env_int("MAX_UNCOMPRESSED_BYTES", 512 * 1024 * 1024),
-            cors_allow_origins=_env_csv("CORS_ALLOW_ORIGINS", ("*",)),
-            forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "*").strip() or "*",
+            cors_allow_origins=_env_csv(
+                "CORS_ALLOW_ORIGINS",
+                (
+                    "http://127.0.0.1:9200",
+                    "http://localhost:9200",
+                    "null",
+                ),
+            ),
+            forwarded_allow_ips=(
+                os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1").strip()
+                or "127.0.0.1"
+            ),
+            admin_token=os.getenv("JUDGMENT_ADMIN_TOKEN", "").strip(),
+            ollama_allowed_hosts=_env_csv("OLLAMA_ALLOWED_HOSTS", ()),
             qdrant_url=os.getenv("QDRANT_URL", "").rstrip("/"),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
             judgment_vector_collection=os.getenv(
@@ -212,13 +241,25 @@ class Settings:
                 "LEGAL_ARTICLE_PAYLOAD_MAX_CHARS", 8000
             ),
             embedding_url=os.getenv("EMBEDDING_URL", "").rstrip("/"),
+            embedding_api=(
+                os.getenv("EMBEDDING_API", "ollama").strip().lower() or "ollama"
+            ),
             embedding_fallback_url=os.getenv(
                 "EMBEDDING_FALLBACK_URL", ""
             ).rstrip("/"),
+            embedding_fallback_api=(
+                os.getenv("EMBEDDING_FALLBACK_API", "ollama").strip().lower()
+                or "ollama"
+            ),
             embedding_failover_urls=tuple(
                 url.rstrip("/")
                 for url in _env_csv("EMBEDDING_FAILOVER_URLS", ())
                 if url.rstrip("/")
+            ),
+            embedding_failover_apis=tuple(
+                api.strip().lower()
+                for api in _env_csv("EMBEDDING_FAILOVER_APIS", ())
+                if api.strip()
             ),
             embedding_model=os.getenv("EMBEDDING_MODEL", "bge-m3").strip()
             or "bge-m3",
@@ -230,6 +271,13 @@ class Settings:
                 "EMBEDDING_HEALTH_TIMEOUT_SECONDS", 2.0
             ),
             llm_url=os.getenv("LLM_URL", "").rstrip("/"),
+            llm_api=os.getenv("LLM_API", "ollama").strip().lower() or "ollama",
+            llm_fallback_url=os.getenv("LLM_FALLBACK_URL", "").rstrip("/"),
+            llm_fallback_model=os.getenv("LLM_FALLBACK_MODEL", "").strip(),
+            llm_fallback_api=(
+                os.getenv("LLM_FALLBACK_API", "ollama").strip().lower()
+                or "ollama"
+            ),
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             llm_timeout_seconds=_env_float("LLM_TIMEOUT_SECONDS", 180.0),
             llm_num_ctx=_env_int("LLM_NUM_CTX", 4096),
@@ -238,6 +286,18 @@ class Settings:
             rag_top_k=_env_int("RAG_TOP_K", 4),
             rag_score_threshold=_env_float("RAG_SCORE_THRESHOLD", 0.35),
             rag_max_context_chars=_env_int("RAG_MAX_CONTEXT_CHARS", 4000),
+            rag_lexical_rrf_enabled=_env_bool(
+                "RAG_LEXICAL_RRF_ENABLED", False
+            ),
+            rag_lexical_rrf_weight=_env_float(
+                "RAG_LEXICAL_RRF_WEIGHT", 2.0
+            ),
+            rag_legal_expansion_enabled=_env_bool(
+                "RAG_LEGAL_EXPANSION_ENABLED", False
+            ),
+            rag_legal_expansion_terms=_env_int(
+                "RAG_LEGAL_EXPANSION_TERMS", 4
+            ),
             rag_rerank_enabled=_env_bool("RAG_RERANK_ENABLED", False),
             rag_rerank_candidates=_env_int("RAG_RERANK_CANDIDATES", 30),
             rag_law_first_judgment_limit=_env_int(
@@ -315,6 +375,20 @@ class Settings:
             test_llm_models=_env_csv("TEST_LLM_MODELS", ()),
         )
 
+    @property
+    def llm_keep_alive_value(self) -> str | int:
+        """Return a value Ollama accepts for keep_alive.
+
+        Ollama accepts a JSON number for -1/seconds and a duration string for
+        values like ``30m``.  A string ``"-1"`` is rejected as a duration, so
+        numeric settings must be sent as numbers.
+        """
+
+        text = str(self.llm_keep_alive or "").strip()
+        if text.lstrip("-").isdigit() and text.count("-") <= 1:
+            return int(text)
+        return text
+
     def with_overrides(
         self,
         *,
@@ -334,9 +408,16 @@ class Settings:
         legal_article_vector_alias: str | None = None,
         legal_article_vector_collection_prefix: str | None = None,
         embedding_url: str | None = None,
+        embedding_api: str | None = None,
         embedding_fallback_url: str | None = None,
+        embedding_fallback_api: str | None = None,
+        embedding_failover_apis: tuple[str, ...] | None = None,
         embedding_model: str | None = None,
         llm_url: str | None = None,
+        llm_api: str | None = None,
+        llm_fallback_url: str | None = None,
+        llm_fallback_model: str | None = None,
+        llm_fallback_api: str | None = None,
         llm_model: str | None = None,
         log_level: str | None = None,
     ) -> "Settings":
@@ -381,14 +462,36 @@ class Settings:
             )
         if embedding_url is not None:
             changes["embedding_url"] = embedding_url.rstrip("/")
+        if embedding_api is not None:
+            changes["embedding_api"] = embedding_api.strip().lower() or "ollama"
         if embedding_fallback_url is not None:
             changes["embedding_fallback_url"] = (
                 embedding_fallback_url.rstrip("/")
+            )
+        if embedding_fallback_api is not None:
+            changes["embedding_fallback_api"] = (
+                embedding_fallback_api.strip().lower() or "ollama"
+            )
+        if embedding_failover_apis is not None:
+            changes["embedding_failover_apis"] = tuple(
+                api.strip().lower()
+                for api in embedding_failover_apis
+                if api.strip()
             )
         if embedding_model:
             changes["embedding_model"] = embedding_model
         if llm_url is not None:
             changes["llm_url"] = llm_url.rstrip("/")
+        if llm_api is not None:
+            changes["llm_api"] = llm_api.strip().lower() or "ollama"
+        if llm_fallback_url is not None:
+            changes["llm_fallback_url"] = llm_fallback_url.rstrip("/")
+        if llm_fallback_model is not None:
+            changes["llm_fallback_model"] = llm_fallback_model.strip()
+        if llm_fallback_api is not None:
+            changes["llm_fallback_api"] = (
+                llm_fallback_api.strip().lower() or "ollama"
+            )
         if llm_model is not None:
             changes["llm_model"] = llm_model
         if log_level:

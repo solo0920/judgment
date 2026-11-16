@@ -5,9 +5,11 @@ import {
   apiUrl,
   getApiBase,
   getApiBaseSource,
+  getAdminToken,
   isValidApiBase,
   needsApiConfiguration,
   normalizeApiBase,
+  setAdminToken,
   setApiBase,
   subscribeRefresh,
   testApiConnection,
@@ -307,6 +309,13 @@ export async function render(root, ctx, { embedded = false } = {}) {
               placeholder="http://127.0.0.1:9200" />
             <span class="field-help">留空代表同源；以 file:// 開啟時留空會使用 http://127.0.0.1:9200。</span>
           </label>
+          <label class="field" for="tests-admin-token-input">
+            <span class="field-label">管理權杖 <span class="field-tag">remote admin</span></span>
+            <input class="input mono" id="tests-admin-token-input" name="admin-token"
+              type="password" autocomplete="off" spellcheck="false"
+              placeholder="JUDGMENT_ADMIN_TOKEN" />
+            <span class="field-help">本機 127.0.0.1 可直接使用；透過 cloudflared 或其他主機連線時，遠端管理 API 需要此權杖。權杖不會送往 ?api= 指定的位址。</span>
+          </label>
           <div class="api-dialog-preview" id="tests-api-preview"></div>
           <div class="api-dialog-status" id="tests-api-status" role="status"></div>
           <div class="api-dialog-note" id="tests-api-note"></div>
@@ -401,6 +410,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
   const modeStatus = root.querySelector("#tests-mode-status");
   const apiForm = root.querySelector("#tests-api-form");
   const apiInput = root.querySelector("#tests-api-input");
+  const adminTokenInput = root.querySelector("#tests-admin-token-input");
   const apiPreview = root.querySelector("#tests-api-preview");
   const apiStatus = root.querySelector("#tests-api-status");
   const apiNote = root.querySelector("#tests-api-note");
@@ -419,6 +429,8 @@ export async function render(root, ctx, { embedded = false } = {}) {
   const rerankFailures = root.querySelector("#tests-rerank-failures");
   const rerankStatusBox = root.querySelector("#tests-rerank-status");
   const rerankTest = root.querySelector("#tests-rerank-test");
+
+  if (adminTokenInput) adminTokenInput.value = getAdminToken();
 
   const setStatus = (element, text, tone = "") => {
     if (!element) return;
@@ -467,6 +479,9 @@ export async function render(root, ctx, { embedded = false } = {}) {
       text =
         "以 file:// 直接開啟時，預設連到 http://127.0.0.1:9200。若後端使用其他連接埠，請在此修改並儲存。";
     }
+    text += (adminTokenInput?.value || getAdminToken()).trim()
+      ? " 管理權杖：已設定，會送往目前設定的 API Base。"
+      : " 管理權杖：未設定；本機 loopback 可直接使用，遠端管理 API 會被拒絕。";
     apiNote.textContent = text;
     apiNote.className = `api-dialog-note${tone ? ` ${tone}` : ""}`;
     const locked = source === "query";
@@ -843,6 +858,10 @@ export async function render(root, ctx, { embedded = false } = {}) {
     setApiStatus("尚未測試此位址。");
   });
 
+  adminTokenInput?.addEventListener("input", () => {
+    updateNote();
+  });
+
   apiTest?.addEventListener("click", async () => {
     const candidate = validateApi();
     if (candidate === null) return;
@@ -873,6 +892,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
     const candidate = validateApi();
     if (candidate === null) return;
     setApiBase(candidate);
+    setAdminToken(adminTokenInput?.value || "");
     toast(`後端 API 已設為 ${apiBaseLabel(candidate)}，重新載入中…`, "ok", 1600);
     window.setTimeout(() => window.location.reload(), 120);
   });

@@ -819,7 +819,9 @@ function renderRagModeCard({
             ? ""
             : String(option.hostId),
         )}"
-        title="${escapeHtml(label)}"
+        title="${escapeHtml(
+          option.baseUrl ? `${label} · ${option.baseUrl}` : label,
+        )}"
         aria-pressed="${active}" ${busy || refreshing ? "disabled" : ""}>
         <span class="rag-model-state" aria-hidden="true"></span>
         <span>${escapeHtml(label)}</span>
@@ -2005,25 +2007,39 @@ export async function render(root) {
     const providers = Array.isArray(modeModelState?.providers)
       ? modeModelState.providers
       : [];
-    const models = [];
+    const modelOptions = new Map();
     for (const provider of providers) {
       if (!provider || !Array.isArray(provider.chat_models)) continue;
       for (const model of provider.chat_models) {
-        models.push({
+        const providerName = String(provider.name || "").trim();
+        const label = providerName ? `${providerName}:${model}` : model;
+        const option = {
           model,
-          providerName: String(provider.name || "").trim(),
+          providerName,
           hostId:
             provider.host_id === null || provider.host_id === undefined
               ? null
               : Number(provider.host_id),
-        });
+          baseUrl: String(provider.base_url || "").trim(),
+          isEffective: Boolean(provider.is_effective),
+        };
+        const existing = modelOptions.get(label);
+        // The effective provider wins when two backends share a display name,
+        // e.g. x570 Ollama on :11434 and x570 llama-server on :11436.
+        if (!existing || (option.isEffective && !existing.isEffective)) {
+          modelOptions.set(label, option);
+        }
       }
     }
+    const models = [...modelOptions.values()];
     if (!models.length && Array.isArray(modeModelState?.chat_models)) {
       const fallbackProvider = String(
         modeModelState?.provider_name || "",
       ).trim();
       const fallbackHostId = modeModelState?.provider?.host_id;
+      const fallbackBaseUrl = String(
+        modeModelState?.base_url || "",
+      ).trim();
       for (const model of modeModelState.chat_models) {
         models.push({
           model,
@@ -2032,6 +2048,8 @@ export async function render(root) {
             fallbackHostId === null || fallbackHostId === undefined
               ? null
               : Number(fallbackHostId),
+          baseUrl: fallbackBaseUrl,
+          isEffective: true,
         });
       }
     }

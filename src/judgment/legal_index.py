@@ -955,11 +955,14 @@ def build_legal_article_index(
         embedder = OllamaEmbedder(
             settings.embedding_url,
             settings.embedding_model,
+            api=settings.embedding_api,
             timeout=settings.embedding_timeout_seconds,
             query_timeout=settings.embedding_query_timeout_seconds,
             health_timeout=settings.embedding_health_timeout_seconds,
             fallback_base_url=settings.embedding_fallback_url,
+            fallback_api=settings.embedding_fallback_api,
             fallback_base_urls=settings.embedding_failover_urls,
+            fallback_apis=settings.embedding_failover_apis,
         )
     if not embedder.configured:
         raise EmbeddingError("EMBEDDING_URL 未設定")
@@ -1266,7 +1269,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--law-data-dir", default=None, help="法規 Parquet 根目錄")
     parser.add_argument("--alias", default=None, help="alias 名稱")
     parser.add_argument("--prefix", default=None, help="版本 collection 前綴")
-    parser.add_argument("--embedding-url", default=None, help="Ollama base URL")
+    parser.add_argument("--embedding-url", default=None, help="Embedding base URL")
     parser.add_argument("--embedding-fallback-url", default=None, help="Ollama fallback URL")
     parser.add_argument("--embedding-model", default=None, help="Embedding 模型")
     parser.add_argument("--batch-size", type=int, default=None, help="每批條文數")

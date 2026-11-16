@@ -96,6 +96,14 @@ load_env() {
   fi
 }
 
+qdrant_curl() {
+  if [[ -n "${QDRANT_API_KEY:-}" ]]; then
+    curl -H "api-key: ${QDRANT_API_KEY}" "$@"
+  else
+    curl "$@"
+  fi
+}
+
 copy_tree() {
   local source="$1"
   local destination="$2"
@@ -192,7 +200,7 @@ JUDGMENT_VECTOR_ALIAS="${JUDGMENT_VECTOR_ALIAS:-judgments_current}"
 JUDGMENT_PG_SERVICE="${JUDGMENT_PG_SERVICE:-postgres}"
 JUDGMENT_PG_USER="${JUDGMENT_PG_USER:-judgment}"
 JUDGMENT_PG_DB="${JUDGMENT_PG_DB:-judgment}"
-JUDGMENT_PG_PASSWORD="${JUDGMENT_PG_PASSWORD:-judgment}"
+JUDGMENT_PG_PASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}"
 
 JUDGMENT_DATA_ABS="$(abs_path "$JUDGMENT_DATA_DIR")"
 LAW_DATA_ABS="$(abs_path "$LAW_DATA_DIR")"
@@ -243,10 +251,10 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
 fi
 
 if [[ "$SKIP_QDRANT" != "1" ]]; then
-  if ! curl -fsS --max-time 3 "$QDRANT_URL/collections" >/dev/null 2>&1; then
+  if ! qdrant_curl -fsS --max-time 3 "$QDRANT_URL/collections" >/dev/null 2>&1; then
     die "Qdrant 無法連線：$QDRANT_URL"
   fi
-  ALIAS_TARGET="$(curl -fsS "$QDRANT_URL/aliases" 2>/dev/null | python3 -c '
+  ALIAS_TARGET="$(qdrant_curl -fsS "$QDRANT_URL/aliases" 2>/dev/null | python3 -c '
 import json,sys
 alias=sys.argv[1]
 try:
@@ -262,7 +270,7 @@ for item in (data.get("result") or {}).get("aliases") or []:
     JUDGMENT_VECTOR_COLLECTION="$ALIAS_TARGET"
     printf 'Alias %s -> %s\n' "$JUDGMENT_VECTOR_ALIAS" "$JUDGMENT_VECTOR_COLLECTION"
   fi
-  curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION" >/dev/null 2>&1 \
+  qdrant_curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION" >/dev/null 2>&1 \
     || die "找不到 Qdrant collection：$JUDGMENT_VECTOR_COLLECTION（尚未建立索引時可用 --skip-qdrant）"
 fi
 
@@ -339,22 +347,22 @@ fi
 
 if [[ "$SKIP_QDRANT" != "1" ]]; then
   info "建立 Qdrant snapshot"
-  COLLECTION_INFO="$(curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION")"
+  COLLECTION_INFO="$(qdrant_curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION")"
   QDRANT_POINTS="$(printf '%s' "$COLLECTION_INFO" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("result") or {}).get("points_count") or 0)')"
-  SNAPSHOT_RESPONSE="$(curl -fsS -X POST "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots")" \
+  SNAPSHOT_RESPONSE="$(qdrant_curl -fsS -X POST "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots")" \
     || die "建立 Qdrant snapshot 失敗"
   QDRANT_COLLECTION_SNAPSHOT="$(printf '%s' "$SNAPSHOT_RESPONSE" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("result") or {}).get("name") or "")')"
   [[ -n "$QDRANT_COLLECTION_SNAPSHOT" ]] || die "Qdrant 未回傳 snapshot 名稱"
   ENCODED_SNAPSHOT="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$QDRANT_COLLECTION_SNAPSHOT")"
   QDRANT_SNAPSHOT_REL="qdrant/$QDRANT_COLLECTION_SNAPSHOT"
-  curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots/$ENCODED_SNAPSHOT" \
+  qdrant_curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots/$ENCODED_SNAPSHOT" \
     -o "$TARGET_DIR/$QDRANT_SNAPSHOT_REL" || die "下載 Qdrant snapshot 失敗"
   [[ -s "$TARGET_DIR/$QDRANT_SNAPSHOT_REL" ]] || die "Qdrant snapshot 是空檔案"
   QDRANT_SNAPSHOT_SHA="$(sha256_file "$TARGET_DIR/$QDRANT_SNAPSHOT_REL")"
   printf '%s  %s\n' "$QDRANT_SNAPSHOT_SHA" "$QDRANT_SNAPSHOT_REL" >> "$TARGET_DIR/checksums.sha256"
   printf 'Qdrant snapshot：%s bytes（%s points）\n' \
     "$(file_size "$TARGET_DIR/$QDRANT_SNAPSHOT_REL")" "$QDRANT_POINTS"
-  curl -sS -X DELETE "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots/$ENCODED_SNAPSHOT" >/dev/null 2>&1 || true
+  qdrant_curl -sS -X DELETE "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION/snapshots/$ENCODED_SNAPSHOT" >/dev/null 2>&1 || true
 fi
 
 if [[ "$SKIP_DATA" != "1" ]]; then

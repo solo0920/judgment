@@ -12,7 +12,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
-from .embeddings import OllamaEmbedder, ollama_models_detail
+from .embeddings import (
+    OllamaEmbedder,
+    ollama_models_detail,
+    provider_models_detail,
+)
 from .law_rag import law_source_text
 from .llm_capabilities import (
     model_capability_status,
@@ -147,11 +151,11 @@ def available_test_models(
     *,
     refresh: bool = True,
 ) -> Dict[str, Any]:
-    """Return embedding/LLM candidates from Ollama, with configured fallbacks.
+    """Return embedding/LLM candidates from the provider, with configured fallbacks.
 
     When a session factory is supplied, chat capabilities are read from the
     service-test cache and only chat-capable LLMs are exposed. With
-    ``refresh=True`` (used before evaluation runs) new Ollama models are probed
+    ``refresh=True`` (used before evaluation runs) new models are probed
     first; read-only pages use ``refresh=False`` to avoid probing on page load.
     """
     llm_base_url = str(settings.llm_url or settings.embedding_url or "").rstrip("/")
@@ -170,7 +174,13 @@ def available_test_models(
         )
         embedding_available = llm_available
         if embedding_base_url and embedding_base_url != llm_base_url:
-            embedding_detail = ollama_models_detail(embedding_base_url)
+            embedding_detail = (
+                provider_models_detail(
+                    embedding_base_url, settings.embedding_api
+                )
+                if settings.embedding_api == "openai"
+                else ollama_models_detail(embedding_base_url)
+            )
             embedding_available = _dedupe_model_names(
                 [
                     str(item)
@@ -178,21 +188,39 @@ def available_test_models(
                     if str(item).strip()
                 ]
             )
+            if (
+                not embedding_available
+                and settings.embedding_api == "openai"
+                and settings.embedding_model
+            ):
+                embedding_available = [settings.embedding_model]
         ollama_status = capability.get("status")
         ollama_detail = capability.get("detail")
     else:
         detail = (
-            ollama_models_detail(embedding_base_url)
+            (
+                provider_models_detail(
+                    embedding_base_url, settings.embedding_api
+                )
+                if settings.embedding_api == "openai"
+                else ollama_models_detail(embedding_base_url)
+            )
             if embedding_base_url
             else {
                 "status": "not_configured",
                 "models": [],
-                "detail": "未設定 Ollama URL",
+                "detail": "未設定 Embedding URL",
             }
         )
         llm_available = _dedupe_model_names(
             [str(item) for item in (detail.get("models") or []) if str(item).strip()]
         )
+        if (
+            not llm_available
+            and settings.embedding_api == "openai"
+            and settings.embedding_model
+        ):
+            llm_available = [settings.embedding_model]
         embedding_available = llm_available
         ollama_status = detail.get("status")
         ollama_detail = detail.get("detail")
@@ -673,9 +701,14 @@ def run_test_mode(
                 embedder = OllamaEmbedder(
                     settings.embedding_url,
                     model,
+                    api=settings.embedding_api,
                     timeout=None,
                     query_timeout=None,
                     health_timeout=None,
+                    fallback_base_url=settings.embedding_fallback_url,
+                    fallback_api=settings.embedding_fallback_api,
+                    fallback_base_urls=settings.embedding_failover_urls,
+                    fallback_apis=settings.embedding_failover_apis,
                 )
                 vector = embedder.embed_query(question)
                 vectors[model] = vector

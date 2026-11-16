@@ -155,7 +155,13 @@ def _payload_hash(payload: Dict[str, Any]) -> str:
     stable = {
         key: value
         for key, value in payload.items()
-        if key not in {"valid_from_version_id", "valid_to_version_id", "is_current"}
+        if key
+        not in {
+            "valid_from_version_id",
+            "valid_to_version_id",
+            "is_current",
+            "jdate_num",
+        }
     }
     return hashlib.sha256(
         json.dumps(stable, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -165,6 +171,26 @@ def _payload_hash(payload: Dict[str, Any]) -> str:
 def _source_year(jdate: Any) -> str:
     text = str(jdate or "").strip()
     return text[:4] if text[:4].isdigit() else ""
+
+
+def _jdate_num(jdate: Any) -> Optional[int]:
+    text = str(jdate or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return int(text)
+    return None
+
+
+def _ensure_judgment_payload_indexes(store, collection: str) -> None:
+    for field in (
+        "jid",
+        "court",
+        "jdate",
+        "source_archive",
+        "title",
+        "source_year",
+    ):
+        store.ensure_payload_index(collection, field, "keyword")
+    store.ensure_payload_index(collection, "jdate_num", "integer")
 
 
 def _collapse_whitespace(text: str) -> str:
@@ -757,9 +783,12 @@ def index_judgments(
     embedder = embedder or OllamaEmbedder(
         settings.embedding_url,
         model,
+        api=settings.embedding_api,
         timeout=settings.embedding_timeout_seconds,
         fallback_base_url=settings.embedding_fallback_url,
+        fallback_api=settings.embedding_fallback_api,
         fallback_base_urls=settings.embedding_failover_urls,
+        fallback_apis=settings.embedding_failover_apis,
     )
     scan_all = bool(all_rows or recreate)
 
@@ -926,8 +955,7 @@ def index_judgments(
             dimensions = dimensions or len(vectors[0])
             qdrant_started = time.perf_counter()
             if store.ensure_collection(collection, size=dimensions):
-                for field in ("jid", "court", "jdate", "source_archive"):
-                    store.ensure_payload_index(collection, field, "keyword")
+                _ensure_judgment_payload_indexes(store, collection)
             qdrant_points = []
             for row, text, vector in zip(rows, texts, vectors):
                 qdrant_points.append(
@@ -939,6 +967,8 @@ def index_judgments(
                             "court": str(row["court_normalized"] or ""),
                             "title": str(row["title"] or ""),
                             "jdate": str(row["jdate"] or ""),
+                            "jdate_num": _jdate_num(row["jdate"]),
+                            "source_year": _source_year(row["jdate"]),
                             "matched_laws": list(row["matched_laws"] or []),
                             "citation_count": int(row["citation_count"] or 0),
                             "source_archive": str(row["source_archive"] or ""),
@@ -1230,6 +1260,9 @@ def build_index_version(
             fallback_urls=settings.embedding_failover_urls,
             model=model,
             timeout=min(3.0, settings.embedding_timeout_seconds),
+            primary_api=settings.embedding_api,
+            fallback_api=settings.embedding_fallback_api,
+            fallback_apis=settings.embedding_failover_apis,
         )
         selected = host_probe.get("selected")
         if not selected:
@@ -1239,7 +1272,7 @@ def build_index_version(
                 for host in host_probe.get("hosts") or []
             )
             message = (
-                f"{host_probe.get('error') or 'Ollama 連線測試失敗'}"
+                f"{host_probe.get('error') or 'Embedding 連線測試失敗'}"
                 + (f"（{detail}）" if detail else "")
             )
             if track_state:
@@ -1285,7 +1318,7 @@ def build_index_version(
                         failed_run_id,
                         "ollama",
                         total=total_hosts,
-                        message="測試 Ollama 主機與 embedding 模型。",
+                        message="測試 embedding 主機與模型。",
                     )
                     failed_state.finish_stage(
                         failed_run_id,
@@ -1302,22 +1335,29 @@ def build_index_version(
                     )
                 except Exception:
                     logger.warning(
-                        "無法記錄 Ollama 測試失敗狀態", exc_info=True
+                        "無法記錄 embedding 測試失敗狀態", exc_info=True
                     )
             raise EmbeddingError(message)
-        fallback_urls = [
-            str(host.get("url") or "")
+        fallback_hosts = [
+            host
             for host in host_probe.get("hosts") or []
             if host.get("status") == "operational"
             and host.get("url")
             and host.get("url") != selected.get("url")
         ]
+        fallback_urls = [str(host.get("url") or "") for host in fallback_hosts]
+        fallback_apis = [
+            str(host.get("api") or "ollama") for host in fallback_hosts
+        ]
         embedder = OllamaEmbedder(
             str(selected.get("url") or ""),
             model,
+            api=str(selected.get("api") or "ollama"),
             timeout=settings.embedding_timeout_seconds,
             fallback_base_url=fallback_urls[0] if fallback_urls else "",
+            fallback_api=fallback_apis[0] if fallback_apis else "ollama",
             fallback_base_urls=fallback_urls[1:],
+            fallback_apis=fallback_apis[1:],
         )
     else:
         host_probe = _provided_embedding_probe(embedder, model)
@@ -1575,7 +1615,7 @@ def build_index_version(
                 state_run_id,
                 "ollama",
                 total=max(1, len(hosts)),
-                message="測試 Ollama 主機與 embedding 模型。",
+                message="測試 embedding 主機與模型。",
             )
             state.finish_stage(
                 state_run_id,
@@ -1675,8 +1715,7 @@ def build_index_version(
                 batch_size=256,
                 on_progress=on_copy_progress,
             )
-            for field in ("jid", "court", "jdate", "source_archive"):
-                store.ensure_payload_index(collection, field, "keyword")
+            _ensure_judgment_payload_indexes(store, collection)
             update_version_progress(
                 session_factory,
                 version_id=version_id,
@@ -1761,6 +1800,7 @@ def build_index_version(
                     "court": str(row["court_normalized"] or ""),
                     "title": str(row["title"] or ""),
                     "jdate": str(row["jdate"] or ""),
+                    "jdate_num": _jdate_num(row["jdate"]),
                     "matched_laws": list(row["matched_laws"] or []),
                     "citation_count": int(row["citation_count"] or 0),
                     "source_archive": str(row["source_archive"] or ""),
@@ -1855,8 +1895,7 @@ def build_index_version(
                 qdrant_started = time.perf_counter()
                 created = store.ensure_collection(collection, size=dimensions)
                 if created or first_batch:
-                    for field in ("jid", "court", "jdate", "source_archive"):
-                        store.ensure_payload_index(collection, field, "keyword")
+                    _ensure_judgment_payload_indexes(store, collection)
                 points = []
                 for vector, index in zip(vectors, changed_indices):
                     row = rows[index]
@@ -2500,7 +2539,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--qdrant-url", default=None, help="Qdrant base URL")
     parser.add_argument("--qdrant-api-key", default=None, help="Qdrant API key")
     parser.add_argument("--collection", default=None, help="Qdrant collection 名稱")
-    parser.add_argument("--embedding-url", default=None, help="Ollama base URL")
+    parser.add_argument("--embedding-url", default=None, help="Embedding base URL")
     parser.add_argument("--embedding-model", default=None, help="Embedding 模型")
     parser.add_argument("--limit", type=int, default=None, help="最多索引筆數")
     parser.add_argument("--since", default=None, help="只索引此裁判日期之後（YYYYMMDD）")

@@ -37,6 +37,7 @@ def _settings(**overrides) -> Settings:
         "embedding_model": "bge-m3",
         "legal_article_vector_alias": "legal_articles_current",
         "legal_article_vector_collection_prefix": "legal_articles",
+        "ollama_allowed_hosts": ("env-host:11434", "ui-host:11434"),
     }
     values.update(overrides)
     return Settings(**values)

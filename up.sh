@@ -16,6 +16,10 @@ RERANK_PID_FILE="${RUN_DIR}/rerank_server.pid"
 TMUX_SESSION="${JUDGMENT_WEB_TMUX_SESSION:-judgment-web}"
 
 mkdir -p "${RUN_DIR}"
+chmod 700 "${RUN_DIR}" 2>/dev/null || true
+chmod 600 .env 2>/dev/null || true
+touch "${WEB_LOG}" 2>/dev/null || true
+chmod 600 "${WEB_LOG}" 2>/dev/null || true
 
 read_env_value() {
   local key="$1"
@@ -56,6 +60,9 @@ if [[ -z "${RERANK_MODEL_PATH:-}" ]]; then
 fi
 if [[ -z "${LLAMA_SERVER_BIN:-}" ]]; then
   LLAMA_SERVER_BIN="$(read_env_value LLAMA_SERVER_BIN)"
+fi
+if [[ -z "${QDRANT_API_KEY:-}" ]]; then
+  QDRANT_API_KEY="$(read_env_value QDRANT_API_KEY)"
 fi
 
 RERANK_PORT="${RERANK_PORT:-11435}"
@@ -189,6 +196,28 @@ start_reranker() {
     echo "Reranker：已在執行（${health_url}）"
     return 0
   fi
+
+  local agent_label="${RERANK_AGENT_LABEL:-com.judgment.rerank}"
+  local agent_plist="${HOME}/Library/LaunchAgents/${agent_label}.plist"
+  if [[ -f "${agent_plist}" ]] && command -v launchctl >/dev/null 2>&1; then
+    echo "啟動本機 reranker LaunchAgent（${agent_label}）…"
+    launchctl bootstrap "gui/$(id -u)" "${agent_plist}" >/dev/null 2>&1 || true
+    launchctl kickstart -k "gui/$(id -u)/${agent_label}" >/dev/null 2>&1 || true
+    local agent_ready=0
+    for _ in {1..360}; do
+      if curl -fsS --max-time 2 "${health_url}" >/dev/null 2>&1; then
+        agent_ready=1
+        break
+      fi
+      sleep 0.5
+    done
+    if [[ "${agent_ready}" == "1" ]]; then
+      echo "Reranker：${health_url}（LaunchAgent）"
+      return 0
+    fi
+    echo "警告：LaunchAgent reranker 未就緒，改用手動啟動。"
+  fi
+
   if lsof -nP -iTCP:"${RERANK_PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "警告：連接埠 ${RERANK_PORT} 已被其他程式占用，略過本機 reranker。"
     return 1
@@ -268,7 +297,12 @@ else
     echo -n "等待 Qdrant"
     qdrant_ready=0
     for _ in {1..30}; do
-      if curl -fsS --max-time 2 "http://127.0.0.1:6333/collections" >/dev/null 2>&1; then
+      if [[ -n "${QDRANT_API_KEY:-}" ]]; then
+        qdrant_ok="$(curl -fsS -H "api-key: ${QDRANT_API_KEY}" --max-time 2 "http://127.0.0.1:6333/collections" >/dev/null 2>&1 && echo 1 || true)"
+      else
+        qdrant_ok="$(curl -fsS --max-time 2 "http://127.0.0.1:6333/collections" >/dev/null 2>&1 && echo 1 || true)"
+      fi
+      if [[ "${qdrant_ok}" == "1" ]]; then
         qdrant_ready=1
         echo " OK"
         break
@@ -301,37 +335,115 @@ probe_ollama_model() {
   printf '%s' "${tags}" | grep -q "${model}" 2>/dev/null
 }
 
-X570_EMBEDDING_URL="${JUDGMENT_X570_EMBEDDING_URL:-http://x570:11434}"
-LOCAL_EMBEDDING_URL="${JUDGMENT_LOCAL_EMBEDDING_URL:-http://127.0.0.1:11434}"
+probe_openai_model() {
+  local url="$1"
+  local model="$2"
+  local timeout="${JUDGMENT_EMBEDDING_PROBE_TIMEOUT:-2}"
+  local models
+  models="$(curl -fsS --max-time "${timeout}" "${url}/v1/models" 2>/dev/null || true)"
+  if [[ -n "${models}" ]]; then
+    printf '%s' "${models}" | grep -q "\"${model}\"" 2>/dev/null && return 0
+    return 1
+  fi
+  curl -fsS --max-time "${timeout}" "${url}/health" >/dev/null 2>&1
+}
+
+X570_LLM_URL="${JUDGMENT_X570_LLM_URL:-http://x570:11436}"
+X570_EMBEDDING_URL="${JUDGMENT_X570_EMBEDDING_URL:-http://x570:11437}"
+X570_OLLAMA_URL="${JUDGMENT_X570_OLLAMA_URL:-http://x570:11434}"
+LOCAL_OLLAMA_URL="${JUDGMENT_LOCAL_EMBEDDING_URL:-http://127.0.0.1:11434}"
+LLM_MODEL="${LLM_MODEL:-$(read_env_value LLM_MODEL)}"
+LLM_MODEL="${LLM_MODEL:-gemma3:4b}"
+EMBEDDING_MODEL="${EMBEDDING_MODEL:-$(read_env_value EMBEDDING_MODEL)}"
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-bge-m3}"
 
-remote_embedding_ok=0
+local_llm_ok=0
 local_embedding_ok=0
-if probe_ollama_model "${X570_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
-  remote_embedding_ok=1
+if probe_ollama_model "${LOCAL_OLLAMA_URL}" "${LLM_MODEL}"; then
+  local_llm_ok=1
 fi
-if probe_ollama_model "${LOCAL_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+if probe_ollama_model "${LOCAL_OLLAMA_URL}" "${EMBEDDING_MODEL}"; then
   local_embedding_ok=1
 fi
 
-if [[ "${remote_embedding_ok}" == "1" ]]; then
-  export EMBEDDING_URL="${X570_EMBEDDING_URL}"
-  if [[ "${local_embedding_ok}" == "1" ]]; then
-    export EMBEDDING_FALLBACK_URL="${LOCAL_EMBEDDING_URL}"
-    echo "Embedding：x570（${X570_EMBEDDING_URL}）· fallback：本機 Ollama"
+if probe_openai_model "${X570_LLM_URL}" "${LLM_MODEL}"; then
+  export LLM_URL="${X570_LLM_URL}"
+  export LLM_API="openai"
+  export LLM_MODEL
+  if [[ "${local_llm_ok}" == "1" ]]; then
+    export LLM_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
+    export LLM_FALLBACK_MODEL="${LLM_MODEL}"
+    export LLM_FALLBACK_API="ollama"
+    echo "LLM：x570 llama-server（${X570_LLM_URL}）· fallback：本機 Ollama"
   else
-    export EMBEDDING_FALLBACK_URL=""
-    echo "Embedding：x570（${X570_EMBEDDING_URL}）· 本機 Ollama 未就緒"
+    export LLM_FALLBACK_URL=""
+    echo "LLM：x570 llama-server（${X570_LLM_URL}）· 本機 Ollama 未就緒"
+  fi
+elif probe_ollama_model "${X570_OLLAMA_URL}" "${LLM_MODEL}"; then
+  export LLM_URL="${X570_OLLAMA_URL}"
+  export LLM_API="ollama"
+  export LLM_MODEL
+  if [[ "${local_llm_ok}" == "1" ]]; then
+    export LLM_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
+    export LLM_FALLBACK_MODEL="${LLM_MODEL}"
+    export LLM_FALLBACK_API="ollama"
+    echo "x570 llama-server 不可用，LLM 改用 x570 Ollama（${X570_OLLAMA_URL}）"
+  else
+    export LLM_FALLBACK_URL=""
+    echo "x570 llama-server 不可用，LLM 改用 x570 Ollama（${X570_OLLAMA_URL}）"
   fi
 else
-  export EMBEDDING_URL="${LOCAL_EMBEDDING_URL}"
+  export LLM_URL="${LOCAL_OLLAMA_URL}"
+  export LLM_API="ollama"
+  export LLM_MODEL
+  export LLM_FALLBACK_URL=""
+  if [[ "${local_llm_ok}" == "1" ]]; then
+    echo "x570 LLM 不可用，改用本機 Ollama（${LOCAL_OLLAMA_URL}）"
+  else
+    echo "警告：x570 與本機 LLM 都無法使用，RAG 會降級為檢索結果。"
+  fi
+fi
+
+if probe_openai_model "${X570_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+  export EMBEDDING_URL="${X570_EMBEDDING_URL}"
+  export EMBEDDING_API="openai"
+  export EMBEDDING_MODEL
+  if [[ "${local_embedding_ok}" == "1" ]]; then
+    export EMBEDDING_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
+    export EMBEDDING_FALLBACK_API="ollama"
+    echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· fallback：本機 Ollama"
+  else
+    export EMBEDDING_FALLBACK_URL=""
+    echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· 本機 Ollama 未就緒"
+  fi
+elif probe_ollama_model "${X570_OLLAMA_URL}" "${EMBEDDING_MODEL}"; then
+  export EMBEDDING_URL="${X570_OLLAMA_URL}"
+  export EMBEDDING_API="ollama"
+  export EMBEDDING_MODEL
+  if [[ "${local_embedding_ok}" == "1" ]]; then
+    export EMBEDDING_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
+    export EMBEDDING_FALLBACK_API="ollama"
+    echo "x570 llama-server embedding 不可用，改用 x570 Ollama（${X570_OLLAMA_URL}）"
+  else
+    export EMBEDDING_FALLBACK_URL=""
+    echo "x570 llama-server embedding 不可用，改用 x570 Ollama（${X570_OLLAMA_URL}）"
+  fi
+else
+  export EMBEDDING_URL="${LOCAL_OLLAMA_URL}"
+  export EMBEDDING_API="ollama"
+  export EMBEDDING_MODEL
   export EMBEDDING_FALLBACK_URL=""
   if [[ "${local_embedding_ok}" == "1" ]]; then
-    echo "x570 Ollama 不可用，Embedding 改用本機 Ollama（${LOCAL_EMBEDDING_URL}）"
+    echo "x570 embedding 不可用，改用本機 Ollama（${LOCAL_OLLAMA_URL}）"
   else
     echo "警告：x570 與本機 Ollama 都無法使用，Embedding 會降級。"
   fi
 fi
+
+# up.sh owns the embedding failover chain; clear stale comma-separated values
+# from .env so the detected primary/fallback pair is exactly what is used.
+export EMBEDDING_FAILOVER_URLS=""
+export EMBEDDING_FAILOVER_APIS=""
 
 health="$(curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/health" 2>/dev/null || true)"
 if [[ "${health}" == *'"status":"ok"'* ]]; then

@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Preload an Ollama model at boot on x570 (Linux/systemd).
+# Preload Ollama models at boot on x570 (Linux/systemd).
 #
-# Ollama does not keep a model in memory across reboots by itself.  This
-# installs a small oneshot service that calls /api/generate with an empty
-# prompt after ollama.service starts.  keep_alive=-1 keeps the model resident
-# until it is explicitly unloaded or Ollama restarts.
+# Ollama does not keep models in memory across reboots by itself.  This
+# installs a small oneshot service that loads each requested model after
+# ollama.service starts.  Chat models are loaded through /api/generate;
+# embedding-only models (which reject /api/generate) fall back to /api/embed.
+# keep_alive=-1 keeps the models resident until they are explicitly unloaded
+# or Ollama restarts.
 #
 # Recommended usage from the MBP:
 #   scp scripts/deploy_ollama_preload_systemd.sh x570:/tmp/
 #   ssh -t x570 'sudo bash /tmp/deploy_ollama_preload_systemd.sh'
 #
 # Optional environment variables:
-#   OLLAMA_MODEL=gemma3:4b
+#   OLLAMA_MODELS="gemma3:4b bge-m3:latest"   # space-separated list
 #   OLLAMA_URL=http://127.0.0.1:11434
 #   OLLAMA_KEEP_ALIVE=-1          # -1 = keep loaded; "30m" also works
 #   OLLAMA_SERVICE=ollama         # systemd unit name without .service
@@ -20,12 +22,12 @@
 #
 # Examples:
 #   sudo bash /tmp/deploy_ollama_preload_systemd.sh
-#   sudo OLLAMA_MODEL=gemma3:4b OLLAMA_KEEP_ALIVE=-1 \
+#   sudo OLLAMA_MODELS="gemma3:4b bge-m3:latest" OLLAMA_KEEP_ALIVE=-1 \
 #     bash /tmp/deploy_ollama_preload_systemd.sh
 #   sudo bash /tmp/deploy_ollama_preload_systemd.sh --uninstall
 set -euo pipefail
 
-MODEL="${OLLAMA_MODEL:-gemma3:4b}"
+MODELS="${OLLAMA_MODELS:-gemma3:4b bge-m3:latest}"
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
 KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"
 OLLAMA_SERVICE="${OLLAMA_SERVICE:-ollama}"
@@ -37,7 +39,7 @@ PRELOAD_SCRIPT="${INSTALL_DIR}/ollama-preload.sh"
 
 usage() {
   cat <<'EOF'
-Preload an Ollama model at boot on x570 (Linux/systemd).
+Preload Ollama models at boot on x570 (Linux/systemd).
 
 Usage:
   scp scripts/deploy_ollama_preload_systemd.sh x570:/tmp/
@@ -48,13 +50,39 @@ Options:
   --help         Show this help.
 
 Optional environment variables:
-  OLLAMA_MODEL=gemma3:4b
+  OLLAMA_MODELS="gemma3:4b bge-m3:latest"
   OLLAMA_URL=http://127.0.0.1:11434
   OLLAMA_KEEP_ALIVE=-1
   OLLAMA_SERVICE=ollama
   OLLAMA_PRELOAD_SERVICE_NAME=judgment-ollama-preload
   OLLAMA_PRELOAD_WAIT_SECONDS=300
 EOF
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "${value}"
+}
+
+if [[ "${KEEP_ALIVE}" =~ ^-?[0-9]+$ ]]; then
+  KEEP_ALIVE_JSON="${KEEP_ALIVE}"
+else
+  KEEP_ALIVE_JSON="\"${KEEP_ALIVE}\""
+fi
+
+unload_model() {
+  local model="$1"
+  local model_json
+  model_json="$(json_escape "${model}")"
+  curl -fsS --max-time 30 -X POST "${OLLAMA_URL}/api/generate" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"${model_json}\",\"keep_alive\":0}" >/dev/null 2>&1 || true
+  # Embedding-only models reject /api/generate; /api/embed can unload them too.
+  curl -fsS --max-time 30 -X POST "${OLLAMA_URL}/api/embed" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"${model_json}\",\"input\":\"unload\",\"keep_alive\":0}" >/dev/null 2>&1 || true
 }
 
 uninstall() {
@@ -64,10 +92,10 @@ uninstall() {
   rm -f "${SERVICE_FILE}" "${PRELOAD_SCRIPT}"
   rmdir "${INSTALL_DIR}" 2>/dev/null || true
   systemctl daemon-reload 2>/dev/null || true
-  curl -fsS --max-time 30 -X POST "${OLLAMA_URL}/api/generate" \
-    -H 'Content-Type: application/json' \
-    -d "{\"model\":\"${MODEL}\",\"keep_alive\":0}" >/dev/null 2>&1 || true
-  echo "已移除 ${SERVICE_NAME}.service，並嘗試卸載 ${MODEL}。"
+  for model in ${MODELS}; do
+    unload_model "${model}"
+  done
+  echo "已移除 ${SERVICE_NAME}.service，並嘗試卸載 ${MODELS}。"
 }
 
 case "${1:-}" in
@@ -118,11 +146,18 @@ if ! curl -fsS --max-time 5 "${OLLAMA_URL}/api/version" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! curl -fsS --max-time 10 "${OLLAMA_URL}/api/tags" \
-  | tr -d ' ' | grep -F "\"name\":\"${MODEL}\"" >/dev/null; then
-  echo "找不到模型 ${MODEL}。" >&2
-  echo "請先在 x570 執行：" >&2
-  echo "  ollama pull ${MODEL}" >&2
+TAGS="$(curl -fsS --max-time 10 "${OLLAMA_URL}/api/tags")"
+MISSING=""
+for model in ${MODELS}; do
+  if ! printf '%s' "${TAGS}" | tr -d ' ' | grep -F "\"name\":\"${model}\"" >/dev/null; then
+    MISSING="${MISSING} ${model}"
+  fi
+done
+if [[ -n "${MISSING}" ]]; then
+  echo "找不到下列模型：${MISSING}" >&2
+  for model in ${MISSING}; do
+    echo "  ollama pull ${model}" >&2
+  done
   exit 1
 fi
 
@@ -131,10 +166,15 @@ cat >"${PRELOAD_SCRIPT}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL="${1:?usage: ollama-preload.sh <model>}"
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
 KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"
 WAIT_SECONDS="${OLLAMA_PRELOAD_WAIT_SECONDS:-300}"
+MODELS="$*"
+
+if [[ -z "${MODELS}" ]]; then
+  echo "usage: ollama-preload.sh <model> [model...]" >&2
+  exit 2
+fi
 
 # keep_alive is a JSON number for -1/seconds and a JSON string for "30m".
 if [[ "${KEEP_ALIVE}" =~ ^-?[0-9]+$ ]]; then
@@ -143,21 +183,101 @@ else
   KEEP_ALIVE_JSON="\"${KEEP_ALIVE}\""
 fi
 
-curl -fsS \
-  --retry 60 \
-  --retry-delay 2 \
-  --retry-connrefused \
-  --max-time "${WAIT_SECONDS}" \
-  -X POST "${OLLAMA_URL}/api/generate" \
-  -H 'Content-Type: application/json' \
-  -d "{\"model\":\"${MODEL}\",\"keep_alive\":${KEEP_ALIVE_JSON},\"stream\":false}" \
-  >/dev/null
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "${value}"
+}
+
+api_ready() {
+  curl -fsS --max-time 3 "${OLLAMA_URL}/api/version" >/dev/null 2>&1
+}
+
+load_model() {
+  local model="$1"
+  local model_json payload
+  model_json="$(json_escape "${model}")"
+  payload="$(curl -sS --max-time "${WAIT_SECONDS}" -X POST "${OLLAMA_URL}/api/generate" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"${model_json}\",\"prompt\":\"\",\"stream\":false,\"keep_alive\":${KEEP_ALIVE_JSON},\"options\":{\"num_predict\":1}}" \
+    2>&1 || true)"
+  if ! printf '%s' "${payload}" | grep -qE '"(done|embeddings)"'; then
+    # Embedding-only models reject /api/generate; load them through /api/embed.
+    payload="$(curl -sS --max-time "${WAIT_SECONDS}" -X POST "${OLLAMA_URL}/api/embed" \
+      -H 'Content-Type: application/json' \
+      -d "{\"model\":\"${model_json}\",\"input\":\"warmup\",\"keep_alive\":${KEEP_ALIVE_JSON}}" \
+      2>&1 || true)"
+  fi
+  if printf '%s' "${payload}" | grep -qE '"(done|embeddings)"'; then
+    return 0
+  fi
+  echo "ERROR ${model}: $(printf '%s' "${payload}" | tr '\n' ' ' | cut -c1-300)" >&2
+  return 1
+}
+
+waited=0
+while ! api_ready; do
+  if (( waited >= WAIT_SECONDS )); then
+    echo "Ollama API 未就緒：${OLLAMA_URL}" >&2
+    exit 1
+  fi
+  sleep 2
+  waited=$((waited + 2))
+done
+
+failures=0
+load_errors=""
+for model in ${MODELS}; do
+  if ! load_model "${model}"; then
+    failures=$((failures + 1))
+    load_errors="${load_errors} ${model}=error"
+  fi
+done
+
+sleep 1
+PS_JSON="$(curl -sS --max-time 5 "${OLLAMA_URL}/api/ps" 2>/dev/null || true)"
+status=""
+for model in ${MODELS}; do
+  if ! printf '%s' "${PS_JSON}" | tr -d ' ' | grep -F "\"name\":\"${model}\"" >/dev/null; then
+    failures=$((failures + 1))
+    status="${status} ${model}=not-loaded"
+    continue
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    if ! printf '%s' "${PS_JSON}" | python3 -c '
+import json
+import sys
+
+try:
+    loaded = {item.get("name"): item for item in json.load(sys.stdin).get("models", [])}
+except Exception:
+    sys.exit(1)
+value = str((loaded.get(sys.argv[1]) or {}).get("expires_at") or "")
+if not value[:4].isdigit() or int(value[:4]) < 2100:
+    sys.exit(1)
+' "${model}"; then
+      failures=$((failures + 1))
+      status="${status} ${model}=keep_alive-not-applied"
+      continue
+    fi
+  fi
+  status="${status} ${model}=ok"
+done
+
+status="${load_errors}${status}"
+if (( failures > 0 )); then
+  echo "FAILED${status}" >&2
+  exit 1
+fi
+
+echo "OK${status} keep_alive=${KEEP_ALIVE}"
 EOF
 chmod 0755 "${PRELOAD_SCRIPT}"
 
 cat >"${SERVICE_FILE}" <<EOF
 [Unit]
-Description=Preload ${MODEL} into Ollama
+Description=Preload Ollama models (${MODELS})
 Documentation=https://github.com/solo0920/judgment
 After=network-online.target ${OLLAMA_SERVICE}.service
 Wants=network-online.target
@@ -169,9 +289,9 @@ Type=oneshot
 Environment=OLLAMA_URL=${OLLAMA_URL}
 Environment=OLLAMA_KEEP_ALIVE=${KEEP_ALIVE}
 Environment=OLLAMA_PRELOAD_WAIT_SECONDS=${WAIT_SECONDS}
-ExecStart=${PRELOAD_SCRIPT} ${MODEL}
+ExecStart=${PRELOAD_SCRIPT} ${MODELS}
 RemainAfterExit=yes
-TimeoutStartSec=${WAIT_SECONDS}
+TimeoutStartSec=$((WAIT_SECONDS + 300))
 Nice=5
 
 [Install]
@@ -186,11 +306,35 @@ if ! systemctl restart "${SERVICE_NAME}.service"; then
   exit 1
 fi
 
-echo -n "等待 ${MODEL} 載入"
+echo -n "等待模型載入：${MODELS}"
 ready=0
-for _ in $(seq 1 60); do
-  if curl -fsS --max-time 2 "${OLLAMA_URL}/api/ps" \
-    | tr -d ' ' | grep -F "\"name\":\"${MODEL}\"" >/dev/null; then
+for _ in $(seq 1 90); do
+  PS_JSON="$(curl -fsS --max-time 3 "${OLLAMA_URL}/api/ps" 2>/dev/null || true)"
+  missing=0
+  for model in ${MODELS}; do
+    if ! printf '%s' "${PS_JSON}" | tr -d ' ' | grep -F "\"name\":\"${model}\"" >/dev/null; then
+      missing=1
+    fi
+  done
+  infinite=1
+  if command -v python3 >/dev/null 2>&1; then
+    if ! printf '%s' "${PS_JSON}" | python3 -c '
+import json
+import sys
+
+try:
+    loaded = {item.get("name"): item for item in json.load(sys.stdin).get("models", [])}
+except Exception:
+    sys.exit(1)
+for name in sys.argv[1:]:
+    value = str((loaded.get(name) or {}).get("expires_at") or "")
+    if not value[:4].isdigit() or int(value[:4]) < 2100:
+        sys.exit(1)
+' ${MODELS}; then
+      infinite=0
+    fi
+  fi
+  if (( missing == 0 && infinite == 1 )); then
     ready=1
     echo " OK"
     break
@@ -201,7 +345,7 @@ done
 
 if [[ "${ready}" != "1" ]]; then
   echo
-  echo "警告：${MODEL} 尚未載入，最近 log：" >&2
+  echo "警告：部分模型尚未載入或 keep_alive 尚未生效，最近 log：" >&2
   journalctl -u "${SERVICE_NAME}.service" -n 60 --no-pager 2>/dev/null || true
   exit 1
 fi
@@ -209,7 +353,7 @@ fi
 echo
 echo "完成。"
 echo "服務：${SERVICE_NAME}.service（已設為開機自動啟動）"
-echo "模型：${MODEL}（keep_alive=${KEEP_ALIVE}）"
+echo "模型：${MODELS}（keep_alive=${KEEP_ALIVE}）"
 echo "Ollama：${OLLAMA_URL}"
 echo
 echo "目前載入狀態："

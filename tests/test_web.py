@@ -460,6 +460,11 @@ def web_client(tmp_path: Path, monkeypatch):
         judgment_data_dir=tmp_path / "judgments",
         judgment_law_list=Path(__file__).resolve().parents[1] / "documents" / "金融法規.md",
         auto_create_schema=False,
+        ollama_allowed_hosts=(
+            "127.0.0.1:11434",
+            "first.test:11434",
+            "second.test:11434",
+        ),
     )
     _write_raw_judgments(settings.judgment_data_dir)
     app = create_app(
@@ -617,6 +622,14 @@ def test_static_console_is_served(web_client) -> None:
     assert tests_js.status_code == 200
     assert "tests-rerank" in tests_js.text
     assert "Reranker 服務測試" in tests_js.text
+    assert "tests-admin-token-input" in tests_js.text
+    assert "getAdminToken" in tests_js.text
+    assert "setAdminToken" in tests_js.text
+    api_js = web_client.get("/assets/js/api.js")
+    assert api_js.status_code == 200
+    assert "X-Judgment-Admin-Token" in api_js.text
+    assert "/api/auth/sse-ticket" in api_js.text
+    assert "adminTokenForRequest" in api_js.text
     performance_js = web_client.get("/assets/js/pages/performance.js")
     assert performance_js.status_code == 200
     assert "判決向量索引 Pipeline" in performance_js.text
@@ -2297,24 +2310,33 @@ def test_settings_parse_cors_and_forwarded_ips(monkeypatch) -> None:
     assert settings.forwarded_allow_ips == "127.0.0.1"
 
 
-def test_cors_allows_separately_hosted_frontend(web_client) -> None:
-    origin = "https://judgment.pages.dev"
+def test_cors_defaults_to_local_origins(web_client) -> None:
+    local = "http://127.0.0.1:9200"
 
-    simple = web_client.get("/api/health", headers={"Origin": origin})
+    simple = web_client.get("/api/health", headers={"Origin": "https://evil.example"})
     assert simple.status_code == 200
-    assert simple.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-origin" not in simple.headers
+
+    allowed = web_client.get("/api/health", headers={"Origin": local})
+    assert allowed.headers["access-control-allow-origin"] == local
+
+    file_origin = web_client.get("/api/health", headers={"Origin": "null"})
+    assert file_origin.headers["access-control-allow-origin"] == "null"
 
     preflight = web_client.options(
         "/api/query",
         headers={
-            "Origin": origin,
+            "Origin": local,
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Headers": "content-type,x-judgment-admin-token",
         },
     )
     assert preflight.status_code == 200
-    assert preflight.headers["access-control-allow-origin"] == "*"
+    assert preflight.headers["access-control-allow-origin"] == local
     assert "POST" in preflight.headers["access-control-allow-methods"]
+    assert "x-judgment-admin-token" in preflight.headers[
+        "access-control-allow-headers"
+    ].lower()
 
 
 def test_cors_honors_explicit_origin_configuration(web_client) -> None:
@@ -2335,6 +2357,92 @@ def test_cors_honors_explicit_origin_configuration(web_client) -> None:
 
         denied = client.get("/api/health", headers={"Origin": "https://other.example"})
         assert "access-control-allow-origin" not in denied.headers
+
+
+def test_cors_wildcard_is_ignored(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        cors_allow_origins=("*",),
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/health", headers={"Origin": "https://evil.example"}
+        )
+        assert response.status_code == 200
+        assert "access-control-allow-origin" not in response.headers
+
+
+def test_remote_admin_api_requires_configured_token(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-token",
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    remote_client = ("203.0.113.9", 50000)
+    with TestClient(app, client=remote_client) as remote:
+        assert remote.get("/api/health").status_code == 200
+        assert remote.get("/api/home").status_code == 200
+
+        denied = remote.get("/api/question-bank/stats")
+        assert denied.status_code == 401
+
+        wrong = remote.get(
+            "/api/question-bank/stats",
+            headers={"X-Judgment-Admin-Token": "wrong"},
+        )
+        assert wrong.status_code == 401
+
+        allowed = remote.get(
+            "/api/question-bank/stats",
+            headers={"X-Judgment-Admin-Token": "secret-token"},
+        )
+        assert allowed.status_code == 200
+
+        ticket = remote.post(
+            "/api/auth/sse-ticket",
+            headers={"X-Judgment-Admin-Token": "secret-token"},
+        )
+        assert ticket.status_code == 200
+        assert ticket.json()["ticket"]
+        assert ticket.json()["expires_in"] > 0
+
+
+def test_remote_admin_api_without_token_is_forbidden(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="",
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app, client=("203.0.113.9", 50000)) as remote:
+        denied = remote.get("/api/catalog")
+        assert denied.status_code == 403
+
+
+def test_ollama_host_rejects_unlisted_and_metadata_targets(web_client) -> None:
+    unlisted = web_client.post(
+        "/api/ollama/hosts",
+        json={"name": "Unlisted", "url": "http://evil.test", "port": 11434},
+    )
+    assert unlisted.status_code == 422
+
+    metadata = web_client.post(
+        "/api/ollama/hosts",
+        json={"name": "Metadata", "url": "http://169.254.169.254", "port": 80},
+    )
+    assert metadata.status_code == 422
 
 
 def test_ollama_host_priority_reorder_api(web_client) -> None:

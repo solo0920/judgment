@@ -19,6 +19,7 @@ def _settings(db_path: Path) -> Settings:
         order_api_url="https://example.test/order",
         embedding_url="http://env-host:11434",
         embedding_model="env-embedding",
+        ollama_allowed_hosts=("env-host:11434", "ui-host:11434"),
     )
 
 

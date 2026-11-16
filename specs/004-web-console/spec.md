@@ -6,7 +6,7 @@
 
 **Last Updated**: 2026-11-16
 
-**Status**: Implemented · code-aligned 2026-11-16. 本規格以目前程式為唯一事實來源，涵蓋 `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 八個路由；首頁即時摘要（`/api/home`）、99 條金融法規 11 欄清單、首頁 Pipeline waterfall、服務總覽載入 Pipeline、前後端架構與 SVG 流程圖、資料版本（PostgreSQL／IndexedDB／Qdrant／Parquet）、FastAPI route table 動態 API 端點目錄、判決匯入 waterfall、Qdrant A／R／E 索引月份、RAG／reranker、題庫與 benchmark、SSE 即時更新、standalone `file://` 部署與設定 sidebar 均已納入。
+**Status**: Implemented · code-aligned 2026-11-16. 本規格以目前程式為唯一事實來源，涵蓋 `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 八個路由；首頁即時摘要（`/api/home`）、99 條金融法規 11 欄清單、首頁 Pipeline waterfall、服務總覽載入 Pipeline、前後端架構與 SVG 流程圖、資料版本（PostgreSQL／IndexedDB／Qdrant／Parquet）、FastAPI route table 動態 API 端點目錄、判決匯入 waterfall、Qdrant A／R／E 索引月份、RAG／reranker、題庫與 benchmark、SSE 即時更新、standalone `file://` 部署、設定 sidebar、明確 CORS、遠端管理權杖與 SSE ticket、Ollama SSRF allowlist、Docker loopback 綁定與資料庫／Qdrant 憑證均已納入。
 
 **Pipeline Waterfall 規格**: [`pipeline-waterfall.md`](pipeline-waterfall.md)（全站所有以時間軸呈現 pipeline 的視圖 MUST 依此建置）
 
@@ -139,7 +139,7 @@
 
 **Why this priority**: 使用者需要快速判斷資料是否可用、哪些元件尚未接入、頁面載入時間花在哪裡，以及最近的匯入是否成功。
 
-**Independent Test**: 在 PostgreSQL 正常但 Qdrant／RAG／LLM 未設定的環境開啟狀態頁，確認核心服務顯示正常、AI 元件顯示未設定、資料量與最近執行紀錄來自實際資料；再切換資料版本、架構與 API 端點分類，確認五張資料版本卡、四層架構與 SVG、99 個動態端點皆可顯示。
+**Independent Test**: 在 PostgreSQL 正常但 Qdrant／RAG／LLM 未設定的環境開啟狀態頁，確認核心服務顯示正常、AI 元件顯示未設定、資料量與最近執行紀錄來自實際資料；再切換資料版本、架構與 API 端點分類，確認五張資料版本卡、四層架構與 SVG、100 個動態端點皆可顯示。
 
 **Acceptance Scenarios**:
 
@@ -408,7 +408,7 @@
 - **FR-095**: 測試模式開關 MUST 位於 `#/status` 的「系統測試」分類或 `#/tests`；header 不再提供電源或測試模式膠囊開關。後端電源 MUST 由 `./up.sh`／`./down.sh` 或本機電源控制器管理。
 - **FR-096**: 判決 Parquet 匯出 workflow（`python -m judgment.judgment_parquet`）MAY 將 `judgment_documents` 匯出為過濾後的 Parquet 快照；但 `GET /api/judgment?source=parquet`、資料頁與 Schema 模式 MUST 讀取原始判決 Parquet（`parquet/raw_judgments/.../raw.parquet`），找不到時回傳 404 並提示先建立原始備份。
 - **FR-097**: RAG 引用卡 MUST 可點擊案號標題（`citation-head`）開啟原文，點擊後 MUST 以 dialog 顯示原始判決 Parquet 中的完整判決、案號、法院、日期、案由、命中法規與 PDF 連結；不得以 PostgreSQL 或虛構內容冒充 Parquet；dialog MUST 可透過右上角 X、「返回回答」或點擊 dialog 外部關閉。
-- **FR-098**: RAG 一般模式 MUST 使用可設定的快速 profile（程式預設 `RAG_TOP_K=4`、`RAG_RERANK_ENABLED=false`；目前 `.env` 覆寫為 `RAG_TOP_K=8`、`RAG_RERANK_ENABLED=true`、`LLM_MODEL=gemma3:4b`。`RAG_SCORE_THRESHOLD=0.35`、`RAG_MAX_CONTEXT_CHARS=4000`、`LLM_NUM_CTX=4096`、`LLM_NUM_PREDICT=384`、`LLM_KEEP_ALIVE=30m`；程式未設定 LLM 時只回傳檢索結果），並 MUST 允許改回 27B 品質模式；測試模式不受快速 profile 限制。
+- **FR-098**: RAG 一般模式 MUST 使用可設定的快速 profile（程式預設 `RAG_TOP_K=4`、`RAG_RERANK_ENABLED=false`；目前 `.env` 覆寫為 `RAG_TOP_K=8`、`RAG_RERANK_ENABLED=true`、`LLM_MODEL=gemma3:4b`。`RAG_SCORE_THRESHOLD=0.35`、`RAG_MAX_CONTEXT_CHARS=4000`、`LLM_NUM_CTX=4096`、`LLM_NUM_PREDICT=384`、`LLM_KEEP_ALIVE=-1`；程式未設定 LLM 時只回傳檢索結果），並 MUST 允許改回 27B 品質模式；測試模式不受快速 profile 限制。
 - **FR-099**: RAG 回答標頭 MUST 在狀態與耗時旁顯示實際使用的 LLM 模型名稱；測試模式 MUST 顯示 `test_run.primary_model`，tooltip MUST 同時提供 LLM 與 embedding 模型資訊。
 - **FR-100**: 法規／命令／判決下載 workflow 的「執行此流程」MUST 先以 `POST /api/updates/check` 只檢查該來源；若結果為 `up_to_date`，MUST 顯示「已是最新版本，仍要強制重新下載？」確認，取消時不得啟動流程。檢查失敗 MAY 顯示警告後允許執行。
 - **FR-101**: 每個 workflow 面板 MUST 顯示實際階段的獨立進度條、狀態、筆數／bytes、耗時與訊息，並以不同顏色標記；下方 MUST 顯示由各階段加總的整體進度堆疊條與 legend。滑鼠移到階段、色塊或 legend 時 MUST 只保留該項目並以浮動提示顯示名稱、進度、整體占比、耗時與訊息。不得顯示流程未實際執行或不存在的階段（例如法規／命令下載不得虛構 Qdrant／IndexedDB 階段）。
@@ -433,7 +433,7 @@
 - **FR-114**: 路由切換時舊頁面 MUST 保持顯示直到新頁面內容同步就緒，不得先插入整頁 skeleton、白屏或重播頁面進場動畫。裝飾性固定背景 MUST 使用獨立固定圖層或等效方式呈現，不得讓主要捲動容器在每次 scroll 時重繪固定背景。
 - **FR-115**: `#/processing` 中含 embedding 的流程執行資訊 MUST 顯示「Embedding 主機／模型」按鈕列，按鈕文字 MUST 為「主機:模型」，列出所有線上且已確認具備 `embedding` 能力的模型；目前使用中的模型 MUST 以 active 按鈕標示。點選按鈕 MUST 以 `role=embedding` 儲存該主機的模型、將該主機設為第一優先並持久化，其餘主機依序作為備援；第一優先主機無法提供 embedding 時，系統 MUST 依序自動嘗試下一台，直到成功或全部失敗。後續的法規／命令索引、判決向量索引與完整資料更新 MUST 使用此持久化設定，不得只套用到部分工作流程；CLI 明確指定的 embedding URL／模型 MAY 覆寫此設定。MUST NOT 再顯示拖移主機卡片或上下箭頭作為主要選擇方式。離線主機與未確認 embedding 能力的模型 MUST NOT 出現在按鈕列。
 - **FR-116**: `#/performance` MUST 提供 RAG Pipeline waterfall，且每次 `#/rag` 回答的最下方 MUST 以相同規格與相同視覺格式嵌入該次請求的 waterfall；二者 MUST 共用同一套階段、摘要、時間軸與展開明細。Waterfall MUST 將單次 RAG Trace 的 Parsing、Embedding、Qdrant、Reranker、Context、LLM 與 Response 依執行順序由左至右緊密排列，每一階段 bar MUST 從上一階段 bar 的結束位置接續開始，不得留下未追蹤空隙或互相重疊；實際 `started_at`／`finished_at`／`offset_ms`／`end_offset_ms` MUST 保留在展開明細與 hover 資訊中。每個 span SHOULD 記錄模組、函式、參數與階段監控欄位：Parsing 輸入長度、Embedding Model／Token／Batch、Qdrant Collection／Filter／Top K、Reranker Model／候選數、Context Chunk／Token、LLM Model／Input／Output Token／TTFT、Response 總耗時／引用數／Abstain。點選階段 MUST 可查看上述欄位與開始／結束時間。
-- **FR-117**: `#/rag` 首頁狀態區 MUST 彙整所有可用主機已確認支援 chat 的模型按鈕，按鈕名稱 MUST 使用「主機名稱:模型名稱」（例如 `mbp:gemma3:4b`、`x570:gemma3:4b`）；可用模型 MUST 以綠色呈現，目前使用中的 provider／模型 MUST 有明確標示，點選其他模型 MUST 切換並持久化，且下一次提問 MUST 立即使用新模型。切換 LLM provider MUST NOT 改變 embedding 主機的優先順序。若模型尚未測試 chat 能力，介面 MUST 提供重新檢查入口；不得把未測試或確定不支援 chat 的模型標示為可用。
+- **FR-117**: `#/rag` 首頁狀態區 MUST 彙整所有可用主機已確認支援 chat 的模型按鈕，按鈕名稱 MUST 使用「主機名稱:模型名稱」（例如 `mbp:gemma3:4b`、`x570:gemma3:4b`）；可用模型 MUST 以綠色呈現，目前使用中的 provider／模型 MUST 有明確標示，點選其他模型 MUST 切換並持久化，且下一次提問 MUST 立即使用新模型。切換 LLM provider MUST NOT 改變 embedding 主機的優先順序。同一主機名稱同時對應 Ollama 與 llama-server 兩種 provider 時（例如 `x570:11434` 與 `x570:11436`），MUST 以實際 effective provider 顯示該模型按鈕，MUST NOT 產生重複的「主機:模型」按鈕；按鈕 hover title MUST 顯示實際 base URL，讓使用者可區分同名主機。若模型尚未測試 chat 能力，介面 MUST 提供重新檢查入口；不得把未測試或確定不支援 chat 的模型標示為可用。
 - **FR-118**: `#/status` 的 Model Provider 主機模型清單 MUST 顯示每個模型已測試的能力標籤（至少 Chat、Embedding、Vision、Tools、Thinking、Speech、Reranker 中適用的項目）；尚未測試的模型 MUST 明確標示「未測試」，不得推測其能力。介面 MUST 提供「檢查模型能力」動作，檢查所有可用主機並更新快取。
 - **FR-119**: 全站所有「以時間呈現執行流程」的視圖 MUST 共用同一套 waterfall 元件與視覺規格（以 [`pipeline-waterfall.md`](pipeline-waterfall.md) 為準；axis、階段列、bar、可展開明細、hover 資訊卡）；至少涵蓋 `#/rag` 回答底部、`#/rag` 後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow 紀錄、測試 Flow、`#/processing` 的 Qdrant 判決向量索引版本建置 Pipeline、判決匯入與非索引 workflow 流程進度、`#/status` 服務總覽載入 Pipeline，以及 `#/home` 即時摘要載入 Pipeline。RAG Pipeline MUST 採依執行順序接續的水平排列；效能 Flow 與測試 Flow MAY 依實際 offset 呈現平行 span。靜態架構圖與資料流程圖不屬於時間軸流程，可維持原呈現。`#/processing` 的處理總覽 MUST NOT 使用 waterfall；改用 FR-142 的「法規」「命令」「判決」三張四階段月份時間表。
 - **FR-120**: waterfall 中任何使用模型的 span（Embedding、LLM、Reranker 等）與其 Model Load 區段 MUST 在階段列、明細與 hover 資訊中標註「主機名稱:模型名稱」；主機名稱取自 Model Provider 設定，舊資料找不到名稱時才退回 URL hostname。
@@ -442,11 +442,14 @@
 - **FR-123**: 根網址與預設路由 MUST 顯示獨立 `#/home` 首頁；品牌標誌 MUST 導回首頁。首頁 MUST 包含主視覺、可直接輸入問題的輸入框、七個主要分頁的介紹 section，以及包含 MIT 授權、Copyright 與法律免責聲明的 footer。首頁送出問題後 MUST 導向 `#/rag` 並自動以該題目發問。首頁 MUST 另包含即時資料卡、重要數據卡、RAG 能力與引用追溯區、司法院 OpenData／全國法規資料庫來源卡、金融法規清單，以及 `/api/home` 載入 Pipeline waterfall；實際內容與資料契約見 FR-166–FR-168。
 - **FR-124**: RAG MUST 支援 cross-encoder reranker。程式預設 `RAG_RERANK_ENABLED=false`，目前 `.env` 覆寫為 `true`。啟用時 MUST 先向 Qdrant 取得 `RAG_RERANK_CANDIDATES` 筆候選，依序嘗試 `RERANK_URL` 與 `RERANK_FALLBACK_URL` 的 `/v1/rerank` 或 `/rerank`，再依 rerank 分數取 `RAG_TOP_K` 筆進入 Context；不得把 reranker 當成 Ollama chat 模型。`rag.rerank` Flow MUST 記錄 model、provider、候選數、選用數、top score、fallback 與錯誤。主要與 fallback 都失敗時 MUST 保留原本 Qdrant 排序並將 `retrieval.rerank.status` 標示為 `degraded`，不得因此讓回答失敗。第一輪預設模型為 `bge-reranker-v2-m3`。
 - **FR-125**: `#/rag` 的模型狀態區 MUST 另列 Rerank models，顯示主要與 fallback reranker 的「主機:模型」；可用者 MUST 以綠色呈現，離線、degraded 或未啟用者 MUST 以灰色呈現，並標示目前實際使用的 reranker。區塊 MUST 提供重新檢查健康狀態的動作；reranker 設定未啟用時 MUST 顯示「未啟用」，不得把離線模型標示為可用。
-- **FR-126**: RAG MUST 區分法規優先（law-first）與判決優先（judgment-first）。問題含明確法規名稱或法規導向詞彙（規定、條文、義務、責任、限制、罰則、從業人員、負責人、職員等）時 MUST 採 law-first；含判決、案例、法院、實務等詞彙時 MUST 採 judgment-first。law-first 時法規／命令 context MUST 排在判決前、法規 citation MUST 從 `[1]` 開始、判決最多保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT` 筆；LLM prompt MUST 要求以現行法規／命令條文為主要依據，判決僅作實務補充。`那些規定`／`有哪些規定` 不得被誤判為「列出相關法規」，且未實際回傳結構化清單前 MUST NOT 清空已選出的法規 articles。
+- **FR-126**: RAG MUST 區分法規優先（law-first）與判決優先（judgment-first）。問題含明確法規名稱或法規導向詞彙（規定、條文、義務、責任、限制、罰則、從業人員、負責人、職員等）時 MUST 採 law-first；含判決、案例、法院、實務等詞彙時 MUST 採 judgment-first。law-first 時法規／命令 context MUST 排在判決前、法規 citation MUST 從 `[1]` 開始、判決最多保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT` 筆；LLM prompt MUST 要求以現行法規／命令條文為主要依據，判決僅作實務補充。`那些規定`／`有哪些規定` 不得被誤判為「列出相關法規」，且未實際回傳結構化清單前 MUST NOT 清空已選出的法規 articles。純判決列表問題（例如「在板橋地方法院相關詐騙的判決有那些」）MUST 採 judgment-first，MUST 以檢索到的判決產生 `retrieval_list` 清單，逐筆包含案號、法院、裁判日期、案由與和問題相關的事實句；MUST NOT 讓僅因法院名稱命中的法規／命令（例如「地方法院…處務規程」）進入最終 `law_sources`，且 MUST NOT 以法規條文取代判決清單。
 - **FR-127**: 法規／命令條文 MUST 使用獨立於判決的 Qdrant collection 與 alias（預設 `legal_articles_vNNN`／`legal_articles_current`），MUST NOT 寫入判決 collection。索引 MUST 使用 `bge-m3`，只收錄有條號與內容的現行條文，payload MUST 包含 `source_type`、`law_key`、`law_name`、`article_no`、`article_content`、`content_hash` 與版本 metadata。CLI MUST 支援全量建置、`--incremental`、`--if-changed`、`--dry-run`、`--status`、`--list-versions`、`--rollback`、`--no-activate` 與 `--discard-version`；建置 MUST 驗證 Qdrant 筆數、維度與取樣 payload 後才切換 alias，舊版本 MUST 保留供 rollback。
 - **FR-128**: RAG 的法規／命令檢索 MUST 與判決檢索共用同一個查詢 embedding，MUST NOT 為兩邊重複呼叫 embedding。法規候選 MUST 以 BM25／概念排名與 dense 排名做 RRF（Reciprocal Rank Fusion）融合，`RAG_LAW_RRF_K` 與 `RAG_LAW_DENSE_WEIGHT` MUST 可調整；問題明確指名法規時，該法規 MUST 作為 anchor，dense 分數只用於排序其條文。法規與命令條文 MUST 分組 rerank，且法規條文 rerank MUST 與判決 rerank 分開執行；`retrieval.law_vector`、`retrieval.law_fusion` 與 `retrieval.law_rerank` MUST 記錄 alias／collection、候選數、top score、provider、延遲、fallback 與各 `source_type` 分組結果。alias 不存在、Qdrant 或 embedding 失敗時 MUST 退回 PostgreSQL／Parquet + BM25，不得讓 RAG 中斷。
-- **FR-129**: Ollama MUST 以 systemd 服務管理；x570 的 `ollama.service` MUST 開機啟動，`judgment-ollama-preload.service` MUST 在 Ollama 就緒後以 `keep_alive=-1` 預載 `gemma3:4b`，並以 `/api/ps` 驗證模型已載入且 `size_vram` 等於 `size`。預載服務 MUST 可重啟、查詢 journal 與解除安裝，且 MUST NOT 以假造狀態通過驗證。應用端 `LLM_KEEP_ALIVE` 預設 `30m`；設為 `-1` 時後續請求 MUST NOT 縮短預載模型的保留時間。
-- **FR-130**: BGE reranker MUST 以獨立的 `llama-server` systemd 服務提供，MUST NOT 由 Ollama 載入或與 Ollama 共用 process。服務 MUST 開機啟動，啟動參數 MUST 以 `--model` 載入 `bge-reranker-v2-m3` GGUF 並啟用 `--reranking`；模型 MUST 在 process 生命週期內常駐，沒有 Ollama 式 `keep_alive` 或閒置卸載。`/health`、`/props`、`/v1/models`、`/slots` MUST 可查詢；`/metrics` 未以 `--metrics` 啟動時回傳 501，MUST NOT 視為服務失敗。應用端 MUST 以 `RERANK_URL` 為主要端點、`RERANK_FALLBACK_URL` 為備援，主要端點失敗時 MUST 自動 fallback。
+- **FR-129**: x570 MUST 以 llama-server 作為 `gemma3:4b`、`bge-m3` 與 `bge-reranker-v2-m3` 的主要推論服務。`judgment-llm-chat.service` MUST 以 `--alias gemma3:4b` 提供 `/v1/chat/completions`（預設 `11436`），`judgment-llm-embedding.service` MUST 以 `--embedding --pooling cls --alias bge-m3` 提供 `/v1/embeddings`（預設 `11437`），`judgment-reranker.service` MUST 以 `--reranking --pooling rank` 提供 `/v1/rerank`（預設 `11435`）；三個 unit MUST 開機自動啟動並在 process 生命週期內常駐模型（llama-server 無 `keep_alive` 參數，此常駐語意等同 `keep_alive=-1`，詳見 FR-173）。`ollama.service` MUST 保留，但 `judgment-ollama-preload.service` MUST 停用，避免與 llama-server 重複占用 VRAM。MBP MUST 以 per-user launchd LaunchAgent `com.judgment.ollama-preload` 在使用者登入後預載 `gemma3:4b` 與 `bge-m3:latest` 作為 fallback，兩者皆使用 `keep_alive=-1`；reranker MUST NOT 由 Ollama 預載。LaunchAgent MUST 每 120 秒重新確認，並在模型被卸載或 Ollama 重新啟動後自動重新載入。預載服務 MUST 可重啟、查詢日誌與解除安裝，且 MUST NOT 以假造狀態通過驗證。應用端 MUST 以 `LLM_API`／`EMBEDDING_API` 區分 OpenAI 相容與 Ollama API；`LLM_KEEP_ALIVE` 預設 `30m`，設為 `-1` 時以 JSON 數字送出，後續 Ollama fallback 請求 MUST NOT 縮短預載模型的保留時間。
+- **FR-130**: BGE reranker MUST 以獨立的 `llama-server` 服務提供，MUST NOT 由 Ollama 載入或與 Ollama 共用 process。x570 MUST 使用 `judgment-reranker.service` systemd 服務開機啟動；MBP MUST 使用 per-user LaunchAgent `com.judgment.rerank` 於登入後啟動 llama-server。兩者啟動參數 MUST 以 `--model` 載入 `bge-reranker-v2-m3` GGUF 並啟用 `--reranking`；模型 MUST 在 process 生命週期內常駐，沒有 Ollama 式 `keep_alive` 或閒置卸載。`/health`、`/props`、`/v1/models`、`/slots` MUST 可查詢；`/metrics` 未以 `--metrics` 啟動時回傳 501，MUST NOT 視為服務失敗。應用端 MUST 以 `RERANK_URL` 為主要端點、`RERANK_FALLBACK_URL` 為備援，主要端點失敗時 MUST 自動 fallback。MBP 部署腳本 MUST 可查詢狀態、重啟與解除安裝，且 MUST 以實際 `/v1/rerank` 分數回應驗證服務。
+- **FR-173**: x570 的三個 llama-server 模型 MUST 以「等同 Ollama `keep_alive=-1`」的方式預載並常駐，但 MUST NOT 假造 llama-server 不存在的 `keep_alive` 參數。實作 MUST 為：`scripts/deploy_llama_services_systemd.sh` 建立 `judgment-llm-chat.service`、`judgment-llm-embedding.service`、`judgment-reranker.service`，三個 unit 皆使用 `Type=simple`，`ExecStart` 一次載入 GGUF，`Restart=on-failure`、`RestartSec=3`，並 `systemctl enable`；service 存活期間 MUST NOT 閒置卸載模型，MUST NOT 傳入 `--idle-timeout` 或其他卸載旗標。安裝腳本 MUST 支援 `--skip-rerank`、`--uninstall`，並以 `JUDGMENT_INSTALL_RERANK`、`JUDGMENT_DISABLE_OLLAMA_PRELOAD`、`CHAT_PORT`、`EMBEDDING_PORT`、`RERANK_PORT`、`CHAT_ALIAS`、`EMBEDDING_ALIAS`、`RERANK_ALIAS`、`JUDGMENT_INSTALL_DIR`、`JUDGMENT_SERVICE_USER`、`LLAMA_SERVER_BIN`、`LLAMA_LIB_DIR` 等環境變數覆寫預設值。應用端 `LLM_KEEP_ALIVE=-1` 只用於 Ollama fallback；OpenAI 相容的 chat payload MUST NOT 包含 `keep_alive` 或 `options`。`up.sh` MUST 優先探測 `11436`／`11437`，設定 `LLM_API=openai`／`EMBEDDING_API=openai`，llama-server 不可用時才退回 x570 Ollama 或 MBP Ollama。
+- **FR-174**: RAG MUST 在向量檢索前解析判決的結構化條件。`parse_judgment_query()` MUST 支援西元與民國年份、年份範圍、法院新舊名稱、主題（詐騙→詐欺、洗錢）與列舉意圖；法院別名 MUST 同時涵蓋歷史與現行名稱，並搭配 `jdate_num` 日期範圍避免把改制後判決納入舊年份查詢。Qdrant payload MUST 有整數 `jdate_num`（YYYYMMDD）與 `source_year`；`jdate_num` MUST 回填至所有 point 並建立 integer payload index，新匯入資料 MUST 同步寫入，MUST NOT 只依賴有缺漏的 `source_year` 做年份 filter。案由 MUST 在法院／日期 filter 範圍內用 `facet(title)` 動態取得含主題子字串的實際 title 值，MUST NOT 以手寫清單取代。`_search_hits()` MUST 將 `query_filter` 傳給 `QdrantStore.search()`；列舉意圖且 filter 生效時 MUST 以 `count()` + `scroll(order_by=jdate_num)` 回傳總筆數與前 20 筆，MUST NOT 用未套用條件的向量結果補位。回傳前 MUST 以 `violations()` 逐筆檢查年份、法院與案由；不符者 MUST 剔除。查無結果時 MUST 明確回答查無符合條件的判決，不得退回無 filter 的相似度結果。
+- **FR-175**: RAG MUST 在檢索前建立 Query Plan，至少區分 `judgment_list`、`law_first`、`structured_semantic`、`semantic`，並記錄 structured／dense／lexical／enumerate／rerank 決策與原因。Query Plan MUST 寫入 `rag.query_plan` span 與 `retrieval.query_plan`。`judgment_list` MUST 使用 count + scroll 列舉；其餘路徑 MUST 先執行 dense 檢索。Dense 候選上的中文 bigram BM25＋weighted RRF lexical rescoring MAY 啟用，預設 MUST 為關閉（`RAG_LEXICAL_RRF_ENABLED=false`），直到 A/B Benchmark 顯示可量測的排序收益；啟用時 MUST 記錄 `retrieval.hybrid` 的 method、applied、candidates、lexical_matches、top score、rrf_k 與 lexical_weight。P1 的 lexical 通道是 dense 候選上的 RRF rescoring；真正的 sparse／BM25 索引需重建 collection，MUST 標示為 P1.5，不得把候選內 rescoring 宣稱為完整 BM25 retrieval。`scripts/rag_query_benchmark.py` MUST 可重跑分層測試，逐題檢查 filter violation、answer source、retrieval mode、no-match 與延遲。
 - **FR-131**: RAG 判決引用卡 MUST 以該判決 `citations` 中實際引用的法規／命令顯示「法規名稱＋條號」；判決全文在條號後緊接「第 n 項」時 MUST 一併顯示項次，同一法規／條號／項次 MUST NOT 重複。點選任一引用 MUST 開啟該法規／命令的完整條文，且 `第136條之1` 與本地 Parquet 的 `第 136-1 條` MUST 視為同一條文。回答上方已顯示「法規／命令檢索結果」時，回答下方 MUST NOT 再重複整張法規來源卡；結構化 framework 或 structured answer 仍可保留法規來源區塊。
 - **FR-132**: Header MUST 在右上角提供齒輪「設定選項」按鈕，MUST NOT 另設 Style／調色盤按鈕；設定按鈕 MUST 使用 36px 圓形、與 header 一致的邊框與 accent 齒輪 icon，並以 `aria-expanded`／`aria-controls` 表示 sidebar 狀態。點擊後 MUST 從右側開啟設定 sidebar；桌機寬度 MUST 為 `380px`，`≤1100px` 時 MUST 縮為 `340px`，`≤760px` 時 MUST 改為全寬。Sidebar 開啟時 MUST 將 `.app-shell` 的 header、main、footer 與 toast 區域往左推，不得以覆蓋方式遮住目前頁面內容。Sidebar 上方 MUST 列出多個設定分類按鈕，按鈕區下方 MUST 有分隔線，分隔線下方 MUST 顯示目前分類的功能表；第一個分類 MUST 為「字型大小」。Sidebar MUST 支援齒輪再次點擊、右上角 X 與 Esc 關閉；關閉後 MUST 將焦點還給齒輪按鈕，隱藏時 MUST 使用 `inert`／`aria-hidden` 避免焦點進入。
 - **FR-133**: 「字型大小」功能表 MUST 只列出目前頁面實際有匹配元素的文字區塊，以及已有儲存覆寫的區塊；分類至少 MUST 涵蓋頁面標題、首頁主視覺標題、區塊標題、內文與說明、表格內容、標籤與輔助文字、按鈕與導覽、表單與輸入、程式碼與數值、法規條文（頁面）、法規條文（彈出視窗）與判決全文（彈出視窗）。每列 MUST 有區塊名稱、說明、滑桿、可直接輸入的 px 數值與即時預覽；數值 MUST 限制在該區塊的合法範圍內，並允許小數。拉動滑桿或輸入數值時 MUST 立即套用到頁面對應 elements，MUST NOT 需要重新載入或按儲存才預覽。
@@ -485,51 +488,144 @@
 - **FR-166**: `/api/home` MUST 回傳首頁即時摘要，包含 `data.laws`（現行法規／命令與條文數、資料版本數、下載執行數）、`data.judgments`（原始判決總數、金融 current 判決數、金融佔比、裁判日期與年份範圍）、`data.raw`（原始 manifest 的 archive 數、筆數與壓縮容量）、`data.rag.judgment_index`（已索引／總筆數、覆蓋率、alias、collection、version、model、最近索引時間）、`data.rag.legal_index`（points、條文數、法規數、alias、collection、version、dimension）、`data.rag.models`（embedding／LLM／reranker 名稱與 rerank 啟用狀態）、`data.financial_laws`（清單筆數、法規名稱、原始內容、來源路徑、SHA-256、修改時間）與 `data.sources`（司法院 OpenData、全國法規資料庫、金融法規清單）。金融判決總數與佔比 MUST 與 `/api/judgment-stats`、processing snapshot 使用相同的 `judgment_stats_from_counts` 定義；法規／命令數 MUST 與 `/api/status` 的 PostgreSQL current 統計一致；法規清單 MUST 直接讀取 `documents/金融法規.md`，不得在前端或後端複製固定名單。端點 MUST NOT 等待 `/api/status`、`/api/processing` 或 `/api/quality`，任一階段失敗時 MUST 回傳其餘可用資料、`status` 標示 `degraded`、`errors` 說明失敗原因，不得捏造數值。
 - **FR-167**: `#/home` MUST 以 `/api/home` 顯示即時資料卡：法規／命令數、金融判決數、裁判年份與年數、判決向量索引筆數與覆蓋率；並顯示六張重要數據卡（判決總件數、金融相關總件數、金融案件佔比、法規、命令、法規／命令條文）與三項事實（原始判決備份、金融判決年份、向量索引覆蓋）。RAG 能力區 MUST 顯示判決索引、法規／命令索引、Embedding／LLM／Reranker、判決與法規引用追溯路徑，並提供 `#/rag`、`#/data`、`#/performance` 入口。來源區 MUST 顯示司法院資料開放平臺與全國法規資料庫的實際筆數與外部連結，並以 `<details>` 收合金融法規清單；展開後 MUST 列出 `documents/金融法規.md` 全部 99 條法規，固定每列 11 條（共 9 列），顯示編號、名稱、來源路徑、SHA-256 與修改時間，並可下載原始清單。390px viewport MUST 仍維持 11 欄且無水平溢出。
 - **FR-168**: `#/home` MUST 以 [`pipeline-waterfall.md`](pipeline-waterfall.md) 的共用 `.rag-wf-*` 結構顯示 `/api/home` 載入 Pipeline，階段 MUST 依實際執行順序排列，至少包含 `laws`、`judgments`、`raw`、`judgment_index`、`legal_index`、`financial_laws` 與 `assemble`；每個階段 MUST 有穩定 `key`、`label`、`caption`、`color`、`status`、`started_at`、`finished_at`、`duration_ms` 與 `message`。前端 MUST 顯示階段總耗時、HTTP 往返、傳輸／排隊、最慢階段、完成階段數與更新時間，並在階段列標示「最慢」；bar MUST 依階段耗時接續排列，極短階段 MUST 保留最小可見寬度，點擊階段 MUST 可展開開始／結束、耗時、占比與說明。首頁 MUST 訂閱 `processing` SSE，收到非 initial 更新時重新取得 `/api/home` 並就地更新數據與 waterfall；為避免執行中的索引每 2 秒觸發一次完整摘要查詢，前端 MUST 以 15 秒最小間隔節流並保留最後一次更新，手動重新整理不受節流限制。已展開階段 MUST 保持展開，不得重設法規清單收合狀態或捲動位置。390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **FR-169**: CORS MUST 使用明確來源清單，MUST NOT 採用 `*`；預設允許 `http://127.0.0.1:9200`、`http://localhost:9200` 與 `null`（供 `file://`），其他來源需加入 `CORS_ALLOW_ORIGINS`。`allow_headers` MUST 明確包含 `X-Judgment-Request-Id`、`X-Judgment-Client-Started-At`、`X-Judgment-Admin-Token` 與 `Authorization`；`expose_headers` MUST 只暴露 `X-Judgment-Request-Id`。設定含 `*` 時 MUST 忽略並記錄 warning，不得回傳 wildcard CORS header。
+- **FR-170**: `/api/health` 與 `/api/home` MUST 保持公開；其餘 `/api/*` 在非 loopback 來源 MUST 要求 `JUDGMENT_ADMIN_TOKEN`，並接受 `X-Judgment-Admin-Token` 或 `Authorization: Bearer`。未設定權杖時非 loopback 請求 MUST 回 403；權杖錯誤 MUST 回 401。`127.0.0.1`、`::1`、`localhost` 與測試用 `testclient` 可直接使用，以保留本機與 `file://` 工作流程。遠端 SSE MUST 先以管理權杖取得 `/api/auth/sse-ticket` 的 120 秒短效 ticket，EventSource URL 只放 ticket，不得放長期權杖。`#/tests` 的「後端 API 連線」MUST 提供管理權杖輸入，權杖 MUST 存在瀏覽器儲存並以 `X-Judgment-Admin-Token` 送出；`?api=` 指定的 API Base MUST NOT 收到權杖。`X-Judgment-Actor` MUST NOT 作為遠端稽核身分，遠端操作者 MUST 記為 `admin`。
+- **FR-171**: Ollama 主機新增與更新 MUST 只允許 `OLLAMA_ALLOWED_HOSTS` 中的 `host:port`，以及由 `EMBEDDING_URL`、`EMBEDDING_FALLBACK_URL`、`EMBEDDING_FAILOVER_URLS`、`LLM_URL`、`RERANK_URL`、`RERANK_FALLBACK_URL` 自動加入的目標。MUST 封鎖 link-local、metadata、multicast、unspecified 與 reserved 位址；主機名稱解析後亦 MUST 檢查。主機數量上限 MUST 為 20。既有的未列入主機 MUST 在列表顯示 `blocked` 且不得發出探測請求；`/api/ollama/hosts`、capabilities 與 LLM model 測試 MUST 只探測允許的主機。
+- **FR-172**: Docker Compose 的 PostgreSQL 與 Qdrant MUST 只綁定 `127.0.0.1`，MUST NOT 使用 `0.0.0.0` 或未指定 host 的 port mapping。PostgreSQL 密碼 MUST 由 `POSTGRES_PASSWORD` 提供，不得使用 `judgment/judgment` 預設值；`pg_hba.conf` 的 `127.0.0.1/32` 與 `::1/128` MUST 使用 `scram-sha-256`，不得使用 `trust`。Qdrant MUST 以 `QDRANT__SERVICE__API_KEY` 啟用 API key，後端、`up.sh`、`backup.sh`、`restore.sh` MUST 在請求中帶 `api-key`。`.env`、`.run` 與日誌 MUST 分別使用 0600／0700／0600 權限。備份與還原腳本 MUST 使用相同的 PostgreSQL 密碼來源與 Qdrant 認證。
 - **FR-050**: 文件 MUST 說明電源控制器的啟動方式、日誌位置、停用設定，以及由後端提供頁面時停止後重新整理的限制。
 
 ### Runtime Deployment Baseline（2026-11-16）
 
 以下為 2026-11-16 以現行 `.env`、`/api/home`、`/api/status`、`/api/quality` 與測試套件驗證的建置值；systemd 的 enable／active 狀態若未登入主機確認，會標示為待 shell 驗證。變更主機、模型、版本或啟動參數時 MUST 同步更新本節與相關 FR／SC。
 
-#### Ollama
+#### x570 llama-server
 
 | 項目 | 目前值 |
 |---|---|
-| 主機／API | x570 · `http://x570:11434` |
+| 主要 runtime | `llama-server`（Ollama 內附的 llama.cpp 執行檔） |
+| Chat | `judgment-llm-chat.service` · `gemma3:4b` · `0.0.0.0:11436` · `/v1/chat/completions` |
+| Embedding | `judgment-llm-embedding.service` · `bge-m3` · `0.0.0.0:11437` · `/v1/embeddings`（1024 維） |
+| Reranker | `judgment-reranker.service` · `bge-reranker-v2-m3` · `0.0.0.0:11435` · `/v1/rerank` |
+| Embedding 參數 | `--embedding --pooling cls`（與 Ollama bge-m3 向量 cosine `1.00000000`） |
+| Reranker 參數 | `--reranking --pooling rank` |
+| Chat 參數 | `--alias gemma3:4b --ctx-size 4096`；OpenAI 路徑不送 `keep_alive` |
+| GPU | `--gpu-layers all`；啟動前偵測 `libggml-cuda.so` 並設定 `GGML_BACKEND_PATH` |
+| 模型路徑 | `/opt/judgment/models/gemma3-4b-q4_k_m.gguf`、`bge-m3-f16.gguf`、`bge-reranker-v2-m3-q8_0.gguf` |
+| 模型來源 | 由 Ollama 已下載的 GGUF 取出後複製 |
+| systemd | 三個 unit 皆 `Type=simple`、`Restart=on-failure`、`enable`；enable／active 待 shell 驗證 |
+| 常駐行為 | 等同 Ollama `keep_alive=-1`：process 存活期間模型常駐，無閒置卸載；MUST NOT 傳入 `--idle-timeout` |
+| Ollama 預載 | `judgment-ollama-preload.service` MUST 停用，避免重複占用 VRAM |
+| 部署腳本 | `scripts/deploy_llama_services_systemd.sh`（x570 自包含）、`scripts/deploy_x570_llama_services.sh`（MBP scp／ssh） |
+| 舊 reranker 腳本 | `scripts/deploy_rerank_systemd.sh` 保留為只安裝 reranker 的相容路徑 |
+
+#### Ollama（fallback／模型來源）
+
+| 項目 | 目前值 |
+|---|---|
+| 主機／API | x570 · `http://x570:11434`（llama-server 不可用時的第二順位） |
 | Ollama 版本 | `0.40.2` |
-| systemd | `ollama.service`（API 正提供服務；enable／active 待 shell 驗證） |
-| 開機預載 | `judgment-ollama-preload.service`（oneshot；`After`／`Requires` `ollama.service`；部署腳本預設 enable；enable 狀態待 shell 驗證） |
-| 預載模型 | `gemma3:4b` |
-| 模型格式 | GGUF · Q4_K_M · 3.9B |
+| systemd | `ollama.service`（保留；不再是三個模型的主要 runtime） |
+| 開機預載 | `judgment-ollama-preload.service`（保留但停用；需要時可手動 enable） |
+| 模型格式 | GGUF · Q4_K_M · 3.9B（`gemma3:4b`） |
 | 模型大小 | `2,876,191,538` bytes |
-| VRAM | `size_vram = 2,876,191,538`（100% GPU） |
+| VRAM | `size_vram = 2,876,191,538`（100% GPU，僅在 Ollama 實際載入時） |
 | Context | `4096` |
 | Runner | `llamacpp` |
-| 預載 keep_alive | `-1`（`expires_at` 為長期） |
-| 應用端 keep_alive | `30m`（`.env` 目前值） |
+| 應用端 keep_alive | `-1`（Ollama fallback 請求使用；以 JSON 數字送出） |
+| MBP 開機預載 | `com.judgment.ollama-preload` LaunchAgent（登入後執行；每 120 秒重新確認） |
+| MBP 預載模型 | `gemma3:4b`、`bge-m3:latest`（皆 `keep_alive=-1`） |
 | 其他模型 | `gemma3:12b`、`gpt-oss:20b`、`bge-m3:latest`、`nomic-embed-text-v2-moe:latest`、`qllama/bge-reranker-v2-m3:latest` |
-| Embedding | `bge-m3` · 1024 維 · primary x570、fallback `http://127.0.0.1:11434` |
-| 部署腳本 | `scripts/deploy_ollama_preload_systemd.sh` |
+| Embedding fallback | `bge-m3` · 1024 維 · `http://127.0.0.1:11434`（MBP） |
+| 部署腳本 | `scripts/deploy_ollama_preload_systemd.sh`（x570 舊路徑）、`scripts/deploy_ollama_preload_macos.sh`（MBP） |
 
 應用端相關設定：
 
 ```dotenv
-EMBEDDING_URL=http://x570:11434
+LLM_URL=http://x570:11436
+LLM_API=openai
+LLM_FALLBACK_URL=http://127.0.0.1:11434
+LLM_FALLBACK_MODEL=gemma3:4b
+LLM_FALLBACK_API=ollama
+EMBEDDING_URL=http://x570:11437
+EMBEDDING_API=openai
 EMBEDDING_FALLBACK_URL=http://127.0.0.1:11434
+EMBEDDING_FALLBACK_API=ollama
 EMBEDDING_MODEL=bge-m3
 LLM_MODEL=gemma3:4b
 LLM_NUM_CTX=4096
 LLM_NUM_PREDICT=384
-LLM_KEEP_ALIVE=30m
+LLM_KEEP_ALIVE=-1
 ```
 
-`LLM_URL` 依實際回答主機設定；x570 為 `http://x570:11434`，MBP 本機為 `http://127.0.0.1:11434`。
+`LLM_NUM_CTX` 只用於 Ollama fallback；llama-server 的 context 由 `--ctx-size` 決定。
+
+##### llama-server 預載與 `keep_alive=-1` 等價設定
+
+llama-server 沒有 Ollama 的 `keep_alive` 參數，因此 x570 不以請求欄位控制保留時間，而是用 systemd 讓 llama-server process 永久存活；這在行為上等同 `keep_alive=-1`：
+
+| 行為 | Ollama `keep_alive=-1` | x570 llama-server 等價做法 |
+|---|---|---|
+| 開機載入 | `judgment-ollama-preload.service` 呼叫 API | 三個 unit 的 `ExecStart` 直接以 `--model` 載入 GGUF |
+| 永久保留 | `expires_at` 為長期 | `Type=simple`，process 存活期間模型常駐 |
+| 避免閒置卸載 | `keep_alive=-1` | MUST NOT 傳入 `--idle-timeout` 或任何卸載旗標 |
+| 重新載入 | 再次呼叫 API／重啟預載服務 | `systemctl restart` 或 `Restart=on-failure` |
+| 開機自動啟動 | `systemctl enable` | 三個 unit 皆 `systemctl enable` |
+| 應用端請求 | 可送 `keep_alive=-1` | OpenAI payload MUST NOT 送 `keep_alive`／`options` |
+
+安裝腳本 `scripts/deploy_llama_services_systemd.sh` 的預設設定：
+
+| 環境變數 | 預設值 | 用途 |
+|---|---|---|
+| `CHAT_PORT` | `11436` | chat llama-server 監聽埠 |
+| `CHAT_HOST` | `0.0.0.0` | chat 綁定位址 |
+| `CHAT_ALIAS` | `gemma3:4b` | OpenAI `model` 別名 |
+| `CHAT_OLLAMA_MODEL` | `gemma3:4b` | 取出 GGUF 的 Ollama tag |
+| `CHAT_CTX_SIZE` | `4096` | chat context |
+| `EMBEDDING_PORT` | `11437` | embedding llama-server 監聽埠 |
+| `EMBEDDING_HOST` | `0.0.0.0` | embedding 綁定位址 |
+| `EMBEDDING_ALIAS` | `bge-m3` | OpenAI `model` 別名 |
+| `EMBEDDING_OLLAMA_MODEL` | `bge-m3:latest` | 取出 GGUF 的 Ollama tag |
+| `EMBEDDING_CTX_SIZE` | `8192` | embedding context |
+| `RERANK_PORT` | `11435` | reranker 監聽埠 |
+| `RERANK_HOST` | `0.0.0.0` | reranker 綁定位址 |
+| `RERANK_ALIAS` | `bge-reranker-v2-m3` | `/v1/rerank` 模型名稱 |
+| `RERANK_OLLAMA_MODEL` | `qllama/bge-reranker-v2-m3:latest` | 取出 GGUF 的 Ollama tag |
+| `JUDGMENT_INSTALL_DIR` | `/opt/judgment` | 模型與工作目錄 |
+| `JUDGMENT_SERVICE_USER` | `sudo` 使用者或目前使用者 | systemd `User=`／`Group=` |
+| `JUDGMENT_INSTALL_RERANK` | `1` | 設 `0` 或 `--skip-rerank` 只安裝 chat／embedding |
+| `JUDGMENT_DISABLE_OLLAMA_PRELOAD` | `1` | 停用 `judgment-ollama-preload.service` |
+| `LLAMA_SERVER_BIN` | 自動尋找 | llama-server 執行檔 |
+| `LLAMA_LIB_DIR` | llama-server 目錄 | shared library／CUDA backend 路徑 |
+
+三個 unit 的 `ExecStart` 核心參數：
+
+```text
+judgment-llm-chat:
+  --model /opt/judgment/models/gemma3-4b-q4_k_m.gguf
+  --alias gemma3:4b --host 0.0.0.0 --port 11436
+  --jinja --gpu-layers all --ctx-size 4096
+  --batch-size 1024 --ubatch-size 512 --no-webui
+
+judgment-llm-embedding:
+  --model /opt/judgment/models/bge-m3-f16.gguf
+  --alias bge-m3 --host 0.0.0.0 --port 11437
+  --embedding --pooling cls --gpu-layers all --ctx-size 8192
+  --batch-size 2048 --ubatch-size 2048 --no-webui
+
+judgment-reranker:
+  --model /opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf
+  --alias bge-reranker-v2-m3 --host 0.0.0.0 --port 11435
+  --reranking --pooling rank --gpu-layers all --ctx-size 8192
+  --batch-size 2048 --ubatch-size 1024 --no-webui
+```
+
+`--jinja`／`--no-webui` 只在 llama-server `--help` 支援時加入；CUDA backend 由安裝腳本自動偵測 `libggml-cuda.so` 並設定 `GGML_BACKEND_PATH`。
 
 #### llama-server reranker
 
 | 項目 | 目前值 |
 |---|---|
-| 主機／API | x570 · `http://x570:11435` |
+| 主機／API | x570 · `http://x570:11435`（primary）；MBP · `http://127.0.0.1:11435`（fallback） |
 | systemd | `judgment-reranker.service`（`Type=simple`；API 正提供服務；`Restart=on-failure`、`RestartSec=3`；enable／active 待 shell 驗證） |
 | 服務使用者 | `solo` |
 | 模型路徑 | `/opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf` |
@@ -542,9 +638,13 @@ LLM_KEEP_ALIVE=30m
 | Build | `b1-631109b34` |
 | Metrics | `/metrics` 未啟用（`endpoint_metrics=false`；回傳 501） |
 | 常駐行為 | 啟動時載入模型，process 存活期間常駐；停止服務或 crash 重啟才重新載入 |
+| MBP LaunchAgent | `com.judgment.rerank`（登入後啟動；停止或 crash 時 `KeepAlive` 自動重啟；每 5 秒節流） |
+| MBP llama-server | Homebrew `llama-server 1.0.0`（build 12359；Metal；`-ngl 99`） |
+| MBP 模型路徑 | `~/Library/Application Support/Judgment/models/bge-reranker-v2-m3-q8_0.gguf`（自 Ollama blob 複製，`0600`） |
+| MBP 監聽 | `127.0.0.1:11435`（不對外開放） |
 | 應用端設定 | `RAG_RERANK_ENABLED=true`、`RERANK_URL=http://x570:11435`、`RERANK_FALLBACK_URL=http://127.0.0.1:11435`、`RERANK_MODEL=bge-reranker-v2-m3` |
 | 法規 rerank | `RAG_LAW_RERANK_WEIGHT=0.15`、`RAG_LAW_CANDIDATE_ARTICLE_LIMIT=8` |
-| 部署腳本 | `scripts/deploy_rerank_systemd.sh` |
+| 部署腳本 | `scripts/deploy_llama_services_systemd.sh`（x570 三服務）、`scripts/deploy_x570_llama_services.sh`（MBP wrapper）、`scripts/deploy_rerank_systemd.sh`（x570 reranker-only）、`scripts/deploy_rerank_macos.sh`（MBP） |
 
 #### 資料流程設定基線（2026-11-15）
 
@@ -563,10 +663,10 @@ LLM_KEEP_ALIVE=30m
 | 判決索引批次 | `judgment.judgment_index --build-version --activate --batch-size 64`；`JUDGMENT_INDEX_MAX_CHARS=1600` |
 | 法規／命令索引 | `legal_articles_vNNN`，alias `legal_articles_current`，prefix `legal_articles`；`LEGAL_ARTICLE_INDEX_BATCH_SIZE=32`、`LEGAL_ARTICLE_INDEX_MAX_CHARS=4000` |
 | 法規／命令索引 workflow | `judgment.legal_index --incremental --if-changed` |
-| Embedding | `bge-m3`、1024 維；primary `x570:11434`、fallback `127.0.0.1:11434`；UI 選擇的主機／模型持久化後 MUST 套用到法規索引、判決索引與完整更新 |
+| Embedding | `bge-m3`、1024 維；primary `x570:11437`（llama-server，`EMBEDDING_API=openai`）、fallback `127.0.0.1:11434`（Ollama）；UI 選擇的主機／模型持久化後 MUST 套用到法規索引、判決索引與完整更新 |
 | RAG 檢索 | 程式預設 `RAG_TOP_K=4`；目前 `.env` 覆寫 `RAG_TOP_K=8`、`RAG_SCORE_THRESHOLD=0.35`、`RAG_MAX_CONTEXT_CHARS=4000` |
 | Reranker | 程式預設 `RAG_RERANK_ENABLED=false`；目前 `.env` 覆寫 `true`、候選 30、`bge-reranker-v2-m3`、primary `x570:11435`、fallback `127.0.0.1:11435` |
-| LLM | 程式預設空（只回傳檢索結果）；目前 `.env` 為 `gemma3:4b`、`LLM_NUM_CTX=4096`、`LLM_NUM_PREDICT=384`、`LLM_KEEP_ALIVE=30m` |
+| LLM | 程式預設空（只回傳檢索結果）；目前 `.env` 為 `LLM_URL=http://x570:11436`、`LLM_API=openai`、`gemma3:4b`、fallback `127.0.0.1:11434`（`LLM_FALLBACK_API=ollama`）、`LLM_NUM_CTX=4096`、`LLM_NUM_PREDICT=384`、`LLM_KEEP_ALIVE=-1` |
 | 更新檢查 | 法規／命令比較遠端 `Content-Length` 與本機 ZIP 大小；判決比較司法院 resources／fileset 與本機 `raw_rar`／manifest；`Last-Modified`／`ETag` 只記錄 |
 | 更新檢查排程 | `up.sh` 啟動後檢查一次；定期檢查由外部 cron／`scripts/run_scheduled_update.sh` 執行，程式本身沒有內建排程器 |
 | 完整資料更新 | `download → legal_qdrant → postgres → qdrant` |
@@ -585,22 +685,23 @@ LLM_KEEP_ALIVE=30m
 |---|---|
 | 原始判決 | 368 個 archive、22,630,347 筆（DuckDB raw Parquet） |
 | PostgreSQL current 判決 | 4,681,502 筆 |
-| Qdrant 判決索引 | 738,743 / 4,681,502（15.8%）、剩餘 3,942,759、`judgments_current → judgments_v002`、version #4、`bge-m3` |
+| Qdrant 判決索引 | 4,681,502 / 4,681,502（100%）、剩餘 0、`judgments_current → judgments_v003`、version #5、`bge-m3` |
 | 法規／命令 | 1,351 法規、10,454 命令、222,126 條文、4 個資料版本、14 次下載執行 |
 | Qdrant 法規索引 | 222,126 / 222,126、`legal_articles_current → legal_articles_v006`、version #9、1,024 維 |
 | 服務總覽 Pipeline | 11 個後端檢查階段＋彙整；目前最慢階段為 `staleness`（約 3.2–3.5 秒） |
 | 首頁即時摘要 Pipeline | 7 個階段（法規／命令、金融判決、原始 manifest、判決索引、法規索引、金融法規清單、彙整）；目前最慢階段為 `judgments`（約 0.6–1.4 秒） |
 | 金融法規清單 | `documents/金融法規.md` · 99 條 · 11 欄 × 9 列 |
-| API 端點目錄 | 99 個端點、9 個分類（GET 59／POST 33／PATCH 3／DELETE 4） |
+| API 端點目錄 | 100 個端點、9 個分類（GET 59／POST 34／PATCH 3／DELETE 4） |
 | IndexedDB | `judgment-console` v2；`query_history` 上限 120、`audit_events` 上限 2,000、`settings` |
-| 測試 | 350 tests collected |
+| 測試 | 358 tests collected |
 
 ### Key Entities
 
 - **Console Route**: 主控台的主要頁面與 URL 片段，包含 RAG、資料庫、資料品質、效能報表、資料處理、系統狀態，以及獨立的 `#/tests` 系統測試路由。
 - **Service Status**: 單一服務元件的識別、名稱、類型、狀態、延遲與說明；狀態必須來自實際檢查或明確設定。
 - **Legal Article Index**: 法規／命令條文的版本化 Qdrant collection、alias、embedding／recipe 版本、法規數、條文數、驗證結果與增量建置 snapshot；不得與判決索引共用 collection。
-- **Ollama Runtime**: x570 上由 systemd 管理的 Ollama 服務、開機預載 service、模型清單、keep_alive、VRAM／context 與 embedding／LLM 設定。
+- **Llama Server Runtime**: x570 上三個由 systemd 管理的 `llama-server` 服務（chat、embedding、reranker），包含模型路徑、alias、量化格式、port、context、GPU layers、API 種類（OpenAI 相容）與常駐行為；Ollama 僅保留為 fallback／模型來源。
+- **Ollama Runtime**: x570 上由 systemd 管理的 `ollama.service`（備援）與 MBP 上由 launchd 管理的 Ollama.app、MBP 開機預載服務、模型清單、keep_alive、VRAM／context 與 embedding／LLM fallback 設定。
 - **Reranker Service**: x570 上獨立的 `llama-server` process，包含模型路徑、量化格式、context、slots、啟動參數、常駐行為與 health／props／models 端點。
 - **Database Catalog**: 可用資料來源、狀態、說明與動態 metadata 欄位定義。
 - **Query Report**: 一次查詢的資料庫、資料表、條件、摘要、分布、查詢語句、資料列、分頁、警告與耗時。
@@ -665,7 +766,7 @@ LLM_KEEP_ALIVE=30m
 - **SC-039**: 連續在七個主要頁面之間切換路由至少 10 次時，不得先出現整頁 skeleton、白屏或頁面進場動畫；header 與固定背景 MUST 保持穩定，舊頁面 MUST 直接由新頁面內容取代。
 - **SC-040**: 在 `#/processing` 的 `legal_index_versions`、`judgment_import` 或 `index_versions` 執行資訊中，至少兩台線上主機各具備 `bge-m3:latest` 時，MUST 顯示 `x570:bge-m3:latest`、`mbp:bge-m3:latest` 按鈕，目前使用中的模型 MUST 為 active；點選另一台按鈕後 MUST 儲存該主機 embedding model、將該主機移到第一優先，重新整理後仍保持。MUST NOT 顯示主機卡片、拖移把手或上下箭頭；離線主機與未確認 embedding 能力的模型 MUST NOT 出現在按鈕列。第一優先主機無法提供 embedding 時，系統 MUST 依序自動嘗試下一台，且不得回傳模擬向量。
 - **SC-041**: 在 `#/performance` 的 RAG Pipeline 分頁選擇任一含 Flow 的 RAG Trace 時，以及 `#/rag` 每次完成回答後，waterfall MUST 依序顯示 Parsing、Embedding、Qdrant、Reranker、Context、LLM、Response；每列 MUST 顯示耗時，且 bar MUST 依執行順序接續排列，上一階段 bar 的結束位置 MUST 等於下一階段 bar 的開始位置。Embedding／LLM 的 bar MUST 以藍色前段標示 Model Load。點選階段後 MUST 顯示該 span 的實際開始／結束時間、module／function 與可用監控欄位。RAG 回答中的 waterfall MUST 位於回答內容與來源清單之後，且與效能頁使用相同階段與摘要格式。
-- **SC-042**: 在 `#/rag` 首頁至少有兩台主機、每台各有一個已確認支援 chat 的模型時，模型按鈕 MUST 以「主機:模型」顯示並全部為綠色，目前 provider／模型 MUST 標示使用中；點選另一台主機的模型後，按鈕選取狀態與「目前」文字 MUST 更新，重新整理頁面後仍保持，且 `/api/status` 的 LLM model／URL 與下一次 RAG 請求使用的 provider 模型 MUST 一致，embedding 主機順序 MUST 不變。
+- **SC-042**: 在 `#/rag` 首頁至少有兩台主機、每台各有一個已確認支援 chat 的模型時，模型按鈕 MUST 以「主機:模型」顯示並全部為綠色，目前 provider／模型 MUST 標示使用中；點選另一台主機的模型後，按鈕選取狀態與「目前」文字 MUST 更新，重新整理頁面後仍保持，且 `/api/status` 的 LLM model／URL 與下一次 RAG 請求使用的 provider 模型 MUST 一致，embedding 主機順序 MUST 不變。當 `x570` 同時有 Ollama `http://x570:11434` 與 llama-server `http://x570:11436` 時，`x570:gemma3:4b` MUST 只出現一次，且該按鈕 MUST 指向 effective 的 llama-server provider；滑鼠移入時 title MUST 顯示 base URL。390px viewport 無水平溢出，console error MUST 為 0。
 - **SC-043**: Model Provider 至少兩台可用主機時，主機模型清單 MUST 顯示各模型已測試能力標籤；Chat、Embedding、Vision、Tools、Speech、Reranker 範例各自出現於對應模型，未測試模型 MUST 顯示「未測試」。按下「檢查模型能力」後，新安裝但尚未快取的模型 MUST 更新為其實際能力，且重新載入頁面後仍保留。
 - **SC-044**: 在 `#/performance` 的 RAG Pipeline、任一 Flow 紀錄、測試 Flow，以及 `#/rag` 回答底部與後端處理流程中，時間軸 MUST 使用相同的 `.rag-wf-*` waterfall 結構；不得再使用舊的 `flow-timeline` 或 `test-flow-time` 作為主要流程呈現。RAG Pipeline MUST 依階段耗時接續排列，效能 Flow 與測試 Flow MAY 依實際 offset 定位並重疊平行 span。階段可展開且資料不足時顯示「未記錄」。
 - **SC-045**: 任一含模型呼叫的 waterfall 在 Embedding、LLM、Reranker 階段列，以及 Embedding／LLM bar 的 Model Load 區段 MUST 顯示「主機:模型」，例如 `mbp:bge-m3`、`x570:gemma3:4b`；展開明細與 hover 資訊 MUST 顯示相同主機與模型。舊 Flow 缺少 `provider_name` 時 MUST 從 endpoint URL 顯示 hostname。
@@ -674,10 +775,16 @@ LLM_KEEP_ALIVE=30m
 - **SC-048**: 啟用 reranker 且主要端點可用時，RAG 回覆的判決順序 MUST 依 rerank 分數排列，`retrieval.rerank.status` MUST 為 `ok`，`rag.rerank` Flow MUST 顯示「主機:模型」、候選數、選用數與 top score。主要端點失敗但 fallback 可用時 MUST 自動改用 fallback，並將 `fallback_used` 標示為真。兩者都失敗時 MUST 保留 Qdrant 原排序、只取 `RAG_TOP_K` 筆，且 `retrieval.rerank.status` MUST 為 `degraded`，回答不得因 reranker 失敗而中斷。
 - **SC-049**: 當主要 reranker 離線、fallback 可用時，`#/rag` 的 Rerank models MUST 將主要模型顯示為灰色「離線」、fallback 顯示為綠色「使用中」，並以 fallback 作為目前 reranker。兩者都離線時 MUST 全部灰色並顯示「無可用模型」；`RAG_RERANK_ENABLED=false` 時 MUST 顯示「未啟用」。按下重新檢查後 MUST 依最新健康狀態更新顏色與目前使用標示。
 - **SC-050**: 當使用者詢問「銀行法對從業人員有那些規定？」時，RAG MUST 判定為 law-first、保留銀行法已選出的 articles、將法規 source 編號為 `[1]`，並讓判決從 `[2]` 開始；`retrieval.mode` MUST 為 `law_first`，判決 context 數 MUST 不超過 `RAG_LAW_FIRST_JUDGMENT_LIMIT`。同時，「有哪些法規和壽險及產險相關？」仍 MUST 觸發 related-laws 結構化清單；「銀行法有哪些規定？」MUST NOT 被當成相關法規清單。
-- **SC-051**: 以現行法規／命令 Parquet 建置時，`legal_articles_current` MUST 指向新版本 collection，索引筆數 MUST 等於可檢索條文數（目前 222,126），維度 MUST 為 1,024，且判決 collection `judgments_v002` 的 points 數 MUST 不變。第二次以未變更來源執行 `--incremental --if-changed` MUST 回傳 `unchanged` 且不新增 collection；變更一部法規後執行 `--incremental` MUST 只替換該法規的 points，未變動法規的 points 與向量 MUST 保留。
+- **SC-051**: 以現行法規／命令 Parquet 建置時，`legal_articles_current` MUST 指向新版本 collection，索引筆數 MUST 等於可檢索條文數（目前 222,126），維度 MUST 為 1,024，且判決 collection `judgments_v003` 的 points 數 MUST 不變。第二次以未變更來源執行 `--incremental --if-changed` MUST 回傳 `unchanged` 且不新增 collection；變更一部法規後執行 `--incremental` MUST 只替換該法規的 points，未變動法規的 points 與向量 MUST 保留。
 - **SC-052**: 啟用法規向量檢索時，同一次 RAG 查詢 MUST 只呼叫一次 `bge-m3` embedding；`retrieval.law_vector.status` MUST 為 `ok` 並包含命中的法規，`retrieval.law_rerank` MUST 獨立記錄法規 rerank。把 `legal_articles_current` alias 移除後，同一題 MUST 仍能由 PostgreSQL／Parquet + BM25 產出法規來源，且不得回傳 5xx。
 - **SC-053**: 同一題同時有法規與命令候選時，`retrieval.law_fusion.method` MUST 為 `rrf` 並包含 `rrf_k`／`dense_weight`；`retrieval.law_rerank.groups` MUST 至少包含 `law` 與 `order` 兩組。兩組 MUST 使用不同的 rerank 批次；其中一組失敗時，另一組 MUST 仍套用 rerank，失敗組 MUST 保留原順序，整體 `status` MUST 標示 `degraded`。
-- **SC-054**: x570 開機後 `systemctl is-enabled judgment-ollama-preload` MUST 為 `enabled`；`/api/ps` MUST 顯示 `gemma3:4b`、`size_vram == size`、`context_length=4096`，且 `keep_alive=-1` 時 `expires_at` 為長期。應用端 `LLM_KEEP_ALIVE=30m` 時模型 MAY 在閒置後卸載；設為 `-1` 時 MUST 保持載入。
+- **SC-054**: x570 開機後 `systemctl is-enabled judgment-llm-chat judgment-llm-embedding judgment-reranker` MUST 皆為 `enabled` 且 `is-active` 皆為 `active`；`judgment-ollama-preload.service` MUST NOT 為 `enabled`。`/v1/models` MUST 顯示 `gemma3:4b` 與 `bge-m3`；`/v1/chat/completions` MUST 回傳非空 `choices[0].message.content`；`/v1/embeddings` MUST 回傳 1024 維向量；`/v1/rerank` MUST 回傳至少一筆 `relevance_score`。process 清單 MUST 顯示三個 `llama-server`，且模型由 service 常駐，不依賴 Ollama 的 `keep_alive`。應用端 OpenAI 路徑 MUST NOT 送出 `options` 或 `keep_alive`；Ollama fallback 的 `LLM_KEEP_ALIVE=-1` MUST 以 JSON 數字送出。
+- **SC-094**: MBP 登入後 `launchctl print gui/$(id -u)/com.judgment.ollama-preload` MUST 顯示已載入的 LaunchAgent；`/api/ps` MUST 顯示 `gemma3:4b` 與 `bge-m3:latest`，兩者的 `expires_at` 年份 MUST 至少為 2100，且 MUST NOT 顯示 `qllama/bge-reranker-v2-m3:latest`。以 `ollama stop` 卸載兩者後執行 `launchctl kickstart -k`，兩者 MUST 自動重新載入並恢復長期保留；`--status` MUST 顯示模型與日誌路徑，`--uninstall` MUST 移除 LaunchAgent 並卸載模型。
+- **SC-095**: MBP 登入後 `launchctl print gui/$(id -u)/com.judgment.rerank` MUST 顯示已載入的 LaunchAgent，且程序 MUST 為 `llama-server`；`/health` MUST 回傳 200，`/v1/rerank` MUST 回傳至少一筆 `relevance_score`。`/api/ps` MUST NOT 因 reranker 而載入 `qllama/bge-reranker-v2-m3:latest`。停止 llama-server 後 launchd MUST 自動重啟；`--status` MUST 顯示 LaunchAgent、模型與日誌路徑並完成實際 rerank；`--uninstall` MUST 移除 LaunchAgent，且 MUST NOT 刪除已複製的 GGUF。
+- **SC-096**: x570 執行 `scripts/deploy_llama_services_systemd.sh` 後，三個 unit MUST 存在且 `systemctl is-enabled` 皆為 `enabled`；重新開機後 `systemctl is-active` 皆為 `active`，`ps -C llama-server` MUST 顯示三個 process，且分別載入 `gemma3-4b-q4_k_m.gguf`、`bge-m3-f16.gguf`、`bge-reranker-v2-m3-q8_0.gguf`。閒置至少 10 分鐘後再次查詢 MUST 仍為 `active`，模型 MUST NOT 被卸載；這等同 Ollama `keep_alive=-1`。`systemctl show -p ExecStart` MUST 顯示 `--gpu-layers all`，且 MUST NOT 顯示 `--idle-timeout`。`judgment-ollama-preload.service` MUST NOT 為 `enabled`；`ollama.service` MAY 保持 `active`。`/v1/chat/completions`、`/v1/embeddings`（1024 維）與 `/v1/rerank` MUST 在重開機後直接可用，無需先呼叫 Ollama。`up.sh` 在兩個 llama-server endpoint 可用時 MUST 匯出 `LLM_API=openai`、`EMBEDDING_API=openai`，並將 MBP Ollama 設為 fallback。
+- **SC-097**: 詢問「在板橋地方法院相關詐騙的判決有那些」時，`retrieval.mode` MUST 為 `judgment_first`、`retrieval.retrieval_mode` MUST 為 `structured_list`、`answer_source` MUST 為 `retrieval_list`、`llm_model` MUST 為 `null`、`law_sources` MUST 為空陣列；`retrieval.total_matches` MUST 等於 filter 後的 `count()`，回答 MUST 以「符合條件的判決共 N 筆」開頭，且列出的每一筆 `court` MUST 為 `臺灣新北地方法院` 或 `臺灣板橋地方法院`、`title` MUST 含「詐欺」。回答 MUST 說明板橋地方法院已改制為臺灣新北地方法院，並提醒不是法律意見；MUST NOT 出現「地方法院及其分院處務規程」「晉敘」「審查委員會」等無關法規內容。相同請求 MUST NOT 呼叫 LLM，完成時間 SHOULD 低於 5 秒。
+- **SC-098**: 詢問「2000年至2010年在板橋地方法院相關詐騙的判決有那些」時，`retrieval.retrieval_mode` MUST 為 `structured_list`，`retrieval.total_matches` MUST 等於 filter 後的 `count()`；回答開頭 MUST 顯示「符合條件的判決共 N 筆」，且列出的每一筆 `jdate` 年份 MUST 在 2000–2010、`court` MUST 為 `臺灣新北地方法院` 或 `臺灣板橋地方法院`、`title` MUST 含「詐欺」；MUST NOT 出現年份、法院或案由不符的判決，也 MUST NOT 出現無關法規。詢問無結果的「1990年至1991年新北地院詐欺判決有哪些」時 MUST 明確回覆查無符合條件的判決，`judgments` MUST 為空，且 MUST NOT 退回未套用 filter 的向量結果。`source_year`／`jdate_num` 缺值 MUST 於回填後為 0，新 point MUST 同時寫入 `jdate_num` 與 `source_year`。
+- **SC-099**: 對「2000年至2010年在板橋地方法院相關詐騙的判決有那些」，`retrieval.query_plan.intent` MUST 為 `judgment_list`、`enumerate=true`、`dense=false`。對語意問題，`retrieval.query_plan` MUST 不為 null；`RAG_LEXICAL_RRF_ENABLED=false`（預設）時 `retrieval.query_plan.lexical` MUST 為 `false` 且不執行 lexical RRF；設為 `true` 時 `retrieval.hybrid.method` MUST 為 `dense_lexical_rrf`、`applied=true`，並包含 `rrf_k` 與 `lexical_weight`，Flow MUST 出現 `rag.query_plan` 與 `rag.lexical_rrf` span。`scripts/rag_query_benchmark.py` 對 `tests/benchmarks/rag_query_suite.json` 的 23 題 MUST 全部通過，Filter Violation Rate MUST 為 0，且輸出 pass rate、average latency 與 max latency；正式驗收 SHOULD 擴充至 100–300 題分層題庫。
 - **SC-055**: `systemctl is-enabled judgment-reranker` MUST 為 `enabled`；`/health` MUST 回傳 200；`/props` MUST 顯示 `/opt/judgment/models/bge-reranker-v2-m3-q8_0.gguf`、`default_generation_settings.n_ctx=8192`、`total_slots=4`、`is_sleeping=false`；`/v1/models` meta MUST 顯示 `n_ctx=8192`、`n_ctx_train=8192`、567,753,729 params、628,831,364 bytes、Q8_0。`/metrics` 在未加 `--metrics` 時回傳 501 MUST NOT 被判定為服務失敗；停止服務後 MUST 不再提供 rerank，重啟後 MUST 重新載入模型。
 - **SC-056**: 詢問「銀行法對從業人員有那些規定？」時，判決卡 MUST 顯示該判決實際引用的 `銀行法第125條第1項、第3項`、`銀行法第29條第1項`、`銀行法第136條之1`、`公司法第8條第3項` 等條號，且不得只顯示「銀行法」、「公司法」；點選 `銀行法第136條之1` MUST 成功開啟本地 Parquet 的 `第 136-1 條` 完整條文。同一回答上方已有法規檢索結果時，下方 MUST NOT 再出現「引用法規／命令」的重複來源卡。
 - **SC-057**: 在資料庫頁打開「設定選項」後，sidebar MUST 佔用右側 `380px`，`.app-header`、`.app-main`、`.app-footer` 的右緣 MUST 位於 sidebar 左緣；字型大小清單 MUST 只包含目前頁面有匹配元素的區塊。將「頁面標題」滑桿改為 `32px` 時，頁面 h1 MUST 立即變成 `32px`；滑鼠移到「表格內容」列時，所有 `.data-table th/td` MUST 出現固定紅色 `#ef4444` outline 與半透明背景，移出後 MUST 全部移除；按「儲存」後重新載入 MUST 維持 `32px`；按「取消」或直接關閉 sidebar MUST 回到上次儲存值；按「回復預設值」後再儲存 MUST 清除本機覆寫。390px viewport 開啟 sidebar MUST 無水平溢出，且 MUST NOT 出現 console error。
@@ -705,10 +812,13 @@ LLM_KEEP_ALIVE=30m
 - **SC-084**: 開啟 `#/processing` 的「判決匯入」workflow 面板時，流程進度 MUST 以 pipeline waterfall 顯示 RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata 四個階段；標頭 MUST 以 2×3 指標顯示完成階段、執行中、等待、略過、總耗時與整體進度；axis MUST 顯示 `0 ms` 與總耗時，四個 bar MUST 依階段耗時接續排列，上一階段結束位置 MUST 等於下一階段開始位置，極短階段 MUST 保留最小可見寬度；已完成階段 MUST 填滿階段色，執行中階段 MUST 只填滿 `percent`，其餘為同色 1px 空心框；展開明細 MUST 顯示狀態、開始、結束、耗時、進度、筆數與訊息。SSE 更新後已展開階段 MUST 保持展開；390px viewport MUST 無水平溢出，console error MUST 為 0。
 - **SC-085**: 開啟 `#/status` 的「服務總覽」時，MUST 顯示「服務總覽載入 Pipeline」waterfall；在目前資料下，`/api/status` 的 `pipeline.stages` MUST 依序包含 11 個後端檢查階段，且索引鮮度（`staleness`）的耗時 MUST 反映實際查詢時間，例如約 3.3 秒；前端 MUST 顯示總耗時、Server、HTTP 傳輸、最慢階段與完成階段等指標，axis MUST 從 `0 ms` 到實際總耗時，階段 bar MUST 由左至右接續排列，並可展開查看開始／結束、耗時、占比與說明。SSE 更新後已展開階段 MUST 保持展開；390px viewport MUST 無水平溢出，console error MUST 為 0。
 - **SC-086**: 開啟 `#/status` 的「前後端架構」時，MUST 顯示 Client、Application、Pipelines、Data 四層與目前專案節點（RAG Console SPA、SSE Broker、RAG Orchestrator、Processing Runtime、PostgreSQL、Qdrant、Parquet、Ollama 等）；下方 MUST 顯示內嵌 SVG 流程方向示意圖，包含 REST、SSE、RAG、workflow run、資料讀寫、排程與 IndexedDB 方向，並有 `role="img"`、title／desc 與圖例。亮色與暗色主題皆可辨識；390px viewport 的 SVG MUST 只在卡片內水平捲動，頁面 MUST 無水平溢出，console error MUST 為 0。以 `file:///…/frontend/index.html#/status` 開啟 standalone frontend 時，架構頁與 SVG MUST 同樣可顯示。
-- **SC-087**: 開啟 `#/status` 的「資料版本」時，MUST 顯示 hero、判決索引覆蓋圓環（目前為 15.8%）、2×3 指標與五張 `data-version-card`：PostgreSQL 資料版本、IndexedDB 本機資料、Qdrant 判決向量索引、Qdrant 法規／命令向量索引、Parquet 與執行狀態。Hero 標題 MUST 顯示「判決索引尚缺 3,942,759 筆」時使用 warning 色；PostgreSQL 卡 MUST 顯示 4 個資料版本、14 次下載執行與版本 #4 current；IndexedDB 卡 MUST 顯示 `judgment-console v2`、indexeddb 模式、query_history 0/120、audit_events 0/2,000、settings 0 與可用配額；判決向量索引卡 MUST 顯示 `judgments_current → judgments_v002`、版本 #4、模型 bge-m3、738,743 / 4,681,502 筆與剩餘 3,942,759 筆；法規／命令索引卡 MUST 顯示 `legal_articles_current → legal_articles_v006`、版本 #9、222,126 / 222,126 條、1,024 維與 fresh；Parquet 卡 MUST 顯示 4 個檔案、174.6 MB、最近下載執行與耗時。390px viewport MUST 無水平溢出，console error MUST 為 0。
-- **SC-088**: 開啟 `#/status` 的「API 端點」時，MUST 顯示「API 端點目錄」hero 與 `api-endpoint-groups`；目前 `/api/status` 的 `endpoints` MUST 至少包含 99 個端點、9 個分類，且 MUST 包含 `GET /api/home`、`GET /api/status`、`GET /api/events/stream`、`POST /api/processing/workflows/{workflow_id}/run`、`GET /api/versioning/audit`、`POST /api/benchmark/runs`、`POST /api/rag/query/stream`、`GET /api/docs` 與 `GET /api/openapi.json`。分類 MUST 依序顯示系統與即時狀態、資料處理與更新、查詢與資料、RAG 問答、版本與索引、模型與服務、測試與效能、題庫、Benchmark；method summary MUST 顯示 GET／POST／PATCH／DELETE 數量。以 `file:///…/frontend/index.html#/status` 開啟時 MUST 同樣載入 99 個端點；390px viewport MUST 無水平溢出，console error MUST 為 0。
-- **SC-089**: `GET /api/home` 在目前資料集 MUST 回傳 `data.laws.law_count=1,351`、`order_count=10,454`、`article_count=222,126`，`data.judgments.financial_total=4,681,502`、`raw_total=22,630,347`、`financial_ratio=20.7`、年份 `1996–2026`（31 年），`data.rag.judgment_index.indexed=738,743`、`total=4,681,502`、`coverage_pct=15.8`，`data.financial_laws.count=99` 且第一筆為 `民法`；`pipeline.stages` MUST 包含 `laws`、`judgments`、`raw`、`judgment_index`、`legal_index`、`financial_laws`。以 `file:///…/frontend/index.html#/home` 開啟時，展開金融法規清單 MUST 顯示 99 筆、11 欄 × 9 列、無水平溢出，並可下載原始清單；console error MUST 為 0。
+- **SC-087**: 開啟 `#/status` 的「資料版本」時，MUST 顯示 hero、判決索引覆蓋圓環（目前為 100%）、2×3 指標與五張 `data-version-card`：PostgreSQL 資料版本、IndexedDB 本機資料、Qdrant 判決向量索引、Qdrant 法規／命令向量索引、Parquet 與執行狀態。Hero 標題 MUST 顯示「判決索引已完整」時使用正常色；PostgreSQL 卡 MUST 顯示 4 個資料版本、14 次下載執行與版本 #4 current；IndexedDB 卡 MUST 顯示 `judgment-console v2`、indexeddb 模式、query_history 0/120、audit_events 0/2,000、settings 0 與可用配額；判決向量索引卡 MUST 顯示 `judgments_current → judgments_v003`、版本 #5、模型 bge-m3、4,681,502 / 4,681,502 筆與剩餘 0 筆；法規／命令索引卡 MUST 顯示 `legal_articles_current → legal_articles_v006`、版本 #9、222,126 / 222,126 條、1,024 維與 fresh；Parquet 卡 MUST 顯示 4 個檔案、174.6 MB、最近下載執行與耗時。390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **SC-088**: 開啟 `#/status` 的「API 端點」時，MUST 顯示「API 端點目錄」hero 與 `api-endpoint-groups`；目前 `/api/status` 的 `endpoints` MUST 至少包含 100 個端點、9 個分類，且 MUST 包含 `GET /api/home`、`GET /api/status`、`GET /api/events/stream`、`POST /api/auth/sse-ticket`、`POST /api/processing/workflows/{workflow_id}/run`、`GET /api/versioning/audit`、`POST /api/benchmark/runs`、`POST /api/rag/query/stream`、`GET /api/docs` 與 `GET /api/openapi.json`。分類 MUST 依序顯示系統與即時狀態、資料處理與更新、查詢與資料、RAG 問答、版本與索引、模型與服務、測試與效能、題庫、Benchmark；method summary MUST 顯示 GET／POST／PATCH／DELETE 數量。以 `file:///…/frontend/index.html#/status` 開啟時 MUST 同樣載入 100 個端點；390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **SC-089**: `GET /api/home` 在目前資料集 MUST 回傳 `data.laws.law_count=1,351`、`order_count=10,454`、`article_count=222,126`，`data.judgments.financial_total=4,681,502`、`raw_total=22,630,347`、`financial_ratio=20.7`、年份 `1996–2026`（31 年），`data.rag.judgment_index.indexed=4,681,502`、`total=4,681,502`、`coverage_pct=100.0`，`data.financial_laws.count=99` 且第一筆為 `民法`；`pipeline.stages` MUST 包含 `laws`、`judgments`、`raw`、`judgment_index`、`legal_index`、`financial_laws`。以 `file:///…/frontend/index.html#/home` 開啟時，展開金融法規清單 MUST 顯示 99 筆、11 欄 × 9 列、無水平溢出，並可下載原始清單；console error MUST 為 0。
 - **SC-090**: `#/home` 的「首頁即時資料載入 Pipeline」MUST 顯示 `/api/home` 的 7 個實際階段（含 `assemble`）、階段總耗時、HTTP 往返、傳輸／排隊、最慢階段與完成階段數；最慢階段 MUST 標示「最慢」並有 warning 色，展開後 MUST 顯示開始、結束、耗時、占比與說明。`processing` SSE 非 initial 更新後 MUST 重新取得 `/api/home`，但同一頁面 15 秒內最多一次；重新取得後 MUST 保留已展開階段；390px viewport MUST 無水平溢出，console error MUST 為 0。
+- **SC-091**: 以 `Origin: https://evil.example` 呼叫 `/api/health` MUST NOT 回傳 `access-control-allow-origin`；以 `Origin: http://127.0.0.1:9200` 或 `Origin: null` MUST 回傳對應的 `access-control-allow-origin`。即使 `CORS_ALLOW_ORIGINS=*`，也 MUST 忽略 wildcard 並不回傳 `*`。390px viewport 無水平溢出，console error 為 0。
+- **SC-092**: 設定 `JUDGMENT_ADMIN_TOKEN` 後，非 loopback 請求（例如 `X-Forwarded-For: 203.0.113.9`）呼叫 `/api/catalog` MUST 回 401；帶正確 `X-Judgment-Admin-Token` MUST 回 200；錯誤權杖 MUST 回 401；未設定權杖時 MUST 回 403。`/api/health` 與 `/api/home` MUST 保持 200。以正確權杖呼叫 `/api/auth/sse-ticket` MUST 取得 120 秒 ticket；EventSource URL MUST 只含 ticket，不含長期權杖。`file:///…/frontend/index.html#/home` 與本機 `http://127.0.0.1:9200` MUST 仍可正常使用。
+- **SC-093**: 新增 Ollama 主機時，未列入 `OLLAMA_ALLOWED_HOSTS` 的 `evil.test:11434` MUST 回 422；`169.254.169.254:80` MUST 回 422；既有但未列入的主機在 `/api/ollama/hosts` MUST 顯示 `blocked` 且不得發出 `/api/tags` 請求。Docker Compose 的 PostgreSQL／Qdrant MUST 只顯示 `127.0.0.1:5432`、`127.0.0.1:6333`、`127.0.0.1:6334`；未帶 `api-key` 的 Qdrant `/collections` MUST 回 401，帶正確 key MUST 回 200；PostgreSQL 的 `127.0.0.1/32` 與 `::1/128` MUST 使用 `scram-sha-256`，預設 `judgment/judgment` MUST 無法連線。
 - **SC-079**: 執行 `./down.sh` 後再執行 `./up.sh`，後端 MUST 在 tmux session `judgment-web` 啟動，`/api/health` MUST 回應 ok，`.run/web.pid` MUST 指向 9200 的 listener PID。後端健康時再次執行 `./up.sh` MUST NOT 建立第二個 session 或 process。`./down.sh` MUST 停止該 session 並關閉 9200。tmux 不可用時 `./up.sh` MUST 顯示警告並回退 `nohup`；`./down.sh` MUST 仍能停止 listener。自訂 `JUDGMENT_WEB_TMUX_SESSION` 時兩個腳本 MUST 使用同一名稱。
 - **SC-080**: 開啟 `#/tests` 時 MUST 顯示「Reranker 服務測試」卡；`RAG_RERANK_ENABLED=false` 或未設定 URL 時 MUST 顯示 `not_configured` 與原因，不得誤報可用。設定 primary／fallback 且至少一端可用時，按下「執行 Reranker 服務測試」MUST 顯示各端點 status、latency、top score、scores 與文件片段；失敗端點 MUST 顯示錯誤。測試 Flow 的 Reranker 階段 MUST 顯示於 Qdrant 檢索與 PostgreSQL 取文之間。390px viewport 無水平溢出，console error 為 0。
 - **SC-081**: 新的 test-mode run MUST 在 waterfall 顯示 `x570:bge-m3`、`x570:bge-reranker-v2-m3`、`mbp:gemma3:4b` 等「主機:模型」標籤，PostgreSQL 取文階段 MUST 顯示 `mbp:judgment` 形式的「主機:DB名稱」；RAG 引擎答案標頭與 footer primary MUST 使用相同模型格式。歷史 run 若沒有 host metadata，MAY 只顯示原始模型或 DB 名稱，不得推測或偽造主機。390px viewport 無水平溢出，console error 為 0。

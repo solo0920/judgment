@@ -1971,11 +1971,14 @@ def _query_qdrant(
     embedder = OllamaEmbedder(
         settings.embedding_url,
         settings.embedding_model,
+        api=settings.embedding_api,
         timeout=settings.embedding_timeout_seconds,
         query_timeout=settings.embedding_query_timeout_seconds,
         health_timeout=settings.embedding_health_timeout_seconds,
         fallback_base_url=settings.embedding_fallback_url,
+        fallback_api=settings.embedding_fallback_api,
         fallback_base_urls=settings.embedding_failover_urls,
+        fallback_apis=settings.embedding_failover_apis,
     )
     embed_started = time.perf_counter()
     try:

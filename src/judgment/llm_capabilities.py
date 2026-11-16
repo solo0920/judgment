@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
-from .embeddings import ollama_models_detail
+from .embeddings import ollama_models_detail, provider_models_detail
+from .llm_backends import OLLAMA_API, is_openai_api
 from .models import OllamaModelCapability
 
 RERANK_HINTS = ("rerank", "reranker")
@@ -29,6 +30,19 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
 
 def _base_url(settings: Settings) -> str:
     return str(settings.llm_url or settings.embedding_url or "").rstrip("/")
+
+
+def _models_detail(settings: Settings) -> Dict[str, Any]:
+    base_url = _base_url(settings)
+    if not base_url:
+        return {
+            "status": "not_configured",
+            "models": [],
+            "detail": "未設定 LLM URL",
+        }
+    if is_openai_api(settings.llm_api):
+        return provider_models_detail(base_url, settings.llm_api)
+    return ollama_models_detail(base_url)
 
 
 def _dedupe(names: Sequence[str]) -> List[str]:
@@ -93,13 +107,28 @@ def probe_model_capability(
     base_url: str,
     model: str,
     *,
+    api: str = OLLAMA_API,
     timeout: float = SHOW_TIMEOUT_SECONDS,
 ) -> Dict[str, Any]:
-    """Return the Ollama-declared chat capability for one model.
+    """Return the provider-declared chat capability for one model.
 
     A result with ``ok`` false is transient (network error or unknown status)
     and must not be persisted, so the next service test retries it.
     """
+    if is_openai_api(api):
+        detail = provider_models_detail(base_url, api, timeout=timeout)
+        if detail.get("status") != "operational":
+            return {
+                "ok": False,
+                "error": str(detail.get("detail") or "OpenAI 相容端點無法連線"),
+            }
+        return {
+            "ok": True,
+            "supports_chat": True,
+            "capabilities": ["completion"],
+            "detail": "OpenAI 相容 llama-server 模型，支援 chat。",
+            "method": "openai",
+        }
     url = f"{base_url.rstrip('/')}/api/show"
     try:
         response = httpx.post(url, json={"model": model}, timeout=timeout)
@@ -236,21 +265,28 @@ def refresh_model_capabilities(
 ) -> Dict[str, Any]:
     """Check Ollama for new models and record chat support once per model."""
     base_url = _base_url(settings)
-    detail = ollama_models_detail(base_url) if base_url else {
-        "status": "not_configured",
-        "models": [],
-        "detail": "未設定 Ollama URL",
-    }
+    detail = _models_detail(settings)
     available = _dedupe(
         [str(item) for item in (detail.get("models") or []) if str(item).strip()]
     )
+    if (
+        is_openai_api(settings.llm_api)
+        and detail.get("status") == "operational"
+        and settings.llm_model
+        and settings.llm_model not in available
+    ):
+        # The configured alias is authoritative for a single-model
+        # llama-server; /v1/models may return a file path instead.
+        available.append(settings.llm_model)
     with _CAPABILITY_LOCK:
         records = _load_records(session_factory, base_url)
         new_models = [name for name in available if name not in records]
         tested_now: List[str] = []
         failures: List[Dict[str, Any]] = []
         for name in new_models:
-            probe = probe_model_capability(base_url, name)
+            probe = probe_model_capability(
+                base_url, name, api=settings.llm_api
+            )
             if not probe.get("ok"):
                 failures.append(
                     {
@@ -306,14 +342,19 @@ def model_capability_status(
 ) -> Dict[str, Any]:
     """Return current Ollama models merged with recorded chat capabilities."""
     base_url = _base_url(settings)
-    detail = ollama_models_detail(base_url) if base_url else {
-        "status": "not_configured",
-        "models": [],
-        "detail": "未設定 Ollama URL",
-    }
+    detail = _models_detail(settings)
     available = _dedupe(
         [str(item) for item in (detail.get("models") or []) if str(item).strip()]
     )
+    if (
+        is_openai_api(settings.llm_api)
+        and detail.get("status") == "operational"
+        and settings.llm_model
+        and settings.llm_model not in available
+    ):
+        # The configured alias is authoritative for a single-model
+        # llama-server; /v1/models may return a file path instead.
+        available.append(settings.llm_model)
     records = _load_records(session_factory, base_url)
     return _snapshot(
         base_url=base_url,

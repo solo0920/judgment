@@ -41,6 +41,10 @@ def _configure_logging(verbose: bool = False) -> None:
         handlers=handlers,
         force=True,
     )
+    try:
+        os.chmod(AGENT_LOG_FILE, 0o600)
+    except OSError:
+        pass
 
 
 def _probe_health(host: str, port: int, timeout: float = 1.5) -> bool:
@@ -459,6 +463,10 @@ def ensure_power_agent(
     environment = os.environ.copy()
     environment["JUDGMENT_POWER_AGENT_CHILD"] = "1"
     log_handle = open(AGENT_LOG_FILE, "ab", buffering=0)
+    try:
+        os.chmod(AGENT_LOG_FILE, 0o600)
+    except OSError:
+        pass
     try:
         subprocess.Popen(
             command,

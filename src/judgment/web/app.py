@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -18,7 +21,7 @@ from uuid import uuid4
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -95,6 +98,7 @@ from ..ollama_hosts import (
     OllamaHostError,
     activate_host,
     add_host,
+    allowed_hosts_from_settings,
     clear_model,
     deactivate_hosts,
     delete_host,
@@ -251,6 +255,78 @@ def _incoming_request_id(request: Request) -> str:
     ):
         return raw
     return uuid4().hex
+
+
+PUBLIC_API_PATHS = {"/api/health", "/api/home"}
+LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+SSE_TICKET_TTL_SECONDS = 120
+
+
+def _is_local_request(request: Request) -> bool:
+    host = str(getattr(request.client, "host", "") or "").strip()
+    if host in LOCAL_CLIENT_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _provided_admin_token(request: Request) -> str:
+    token = str(request.headers.get("X-Judgment-Admin-Token") or "").strip()
+    if token:
+        return token
+    authorization = str(request.headers.get("Authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+def _make_sse_ticket(secret: str) -> str:
+    if not secret:
+        return ""
+    expires = int(time.time()) + SSE_TICKET_TTL_SECONDS
+    nonce = uuid4().hex
+    payload = f"{expires}:{nonce}"
+    signature = hmac.new(
+        secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def _valid_sse_ticket(ticket: str, secret: str) -> bool:
+    if not ticket or not secret:
+        return False
+    try:
+        expires_text, nonce, signature = str(ticket).split(":", 2)
+        expires = int(expires_text)
+    except (TypeError, ValueError):
+        return False
+    if expires < int(time.time()) or not nonce or not signature:
+        return False
+    payload = f"{expires}:{nonce}"
+    expected = hmac.new(
+        secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def _cors_origins(values: tuple[str, ...]) -> tuple[str, ...]:
+    """Never honor a wildcard CORS origin.
+
+    The console has write-capable admin endpoints and no browser credentials;
+    a wildcard therefore grants every website the same access as a local
+    operator.  Keep explicit origins (including the literal file:// origin
+    ``null``) and ignore ``*`` with a warning.
+    """
+
+    origins = tuple(dict.fromkeys(value for value in values if value and value != "*"))
+    if "*" in values:
+        logger.warning(
+            "CORS_ALLOW_ORIGINS contains '*' and was ignored; configure explicit "
+            "origins such as http://127.0.0.1:9200 or https://your-frontend.example"
+        )
+    return origins
 
 
 PERFORMANCE_TARGETS = {
@@ -472,7 +548,11 @@ def _llm_provider_name(session_factory, base_url: str) -> str:
     return hostname or str(base_url or "") or "env"
 
 
-def _llm_models_payload(session_factory, settings: Settings) -> Dict[str, Any]:
+def _llm_models_payload(
+    session_factory,
+    settings: Settings,
+    allowed_hosts=None,
+) -> Dict[str, Any]:
     state = model_capability_status(session_factory, settings)
     base_url = str(state.get("base_url") or "").rstrip("/")
     provider_name = _llm_provider_name(session_factory, base_url)
@@ -486,7 +566,9 @@ def _llm_models_payload(session_factory, settings: Settings) -> Dict[str, Any]:
     }
     providers: List[Dict[str, Any]] = []
     seen_urls = set()
-    for item in list_hosts(session_factory).get("hosts") or []:
+    for item in list_hosts(
+        session_factory, allowed_hosts=allowed_hosts
+    ).get("hosts") or []:
         item_url = str(item.get("base_url") or "").rstrip("/")
         if not item_url:
             continue
@@ -670,6 +752,19 @@ def create_app(
         payload["endpoints"] = _api_endpoint_catalog(app)
         return payload
 
+    def _ollama_allowed_hosts() -> tuple[str, ...]:
+        return allowed_hosts_from_settings(
+            runtime_settings(
+                app.state.settings, app.state.session_factory
+            )
+        )
+
+    def _ollama_host_list() -> Dict[str, Any]:
+        return list_hosts(
+            app.state.session_factory,
+            allowed_hosts=_ollama_allowed_hosts(),
+        )
+
     app.state.event_broker = build_event_broker(
         settings_provider=lambda: app.state.settings,
         session_factory_provider=lambda: app.state.session_factory,
@@ -700,9 +795,7 @@ def create_app(
             data_dir=app.state.data_dir,
             settings=app.state.settings,
         ),
-        ollama_payload_provider=lambda: list_hosts(
-            app.state.session_factory
-        ),
+        ollama_payload_provider=lambda: _ollama_host_list(),
         court_check_payload_provider=lambda: check_court_normalization(
             app.state.session_factory
         ),
@@ -721,16 +814,65 @@ def create_app(
         broker=app.state.event_broker,
     )
 
-    if settings.cors_allow_origins:
+    cors_origins = _cors_origins(settings.cors_allow_origins)
+    if cors_origins:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=list(settings.cors_allow_origins),
+            allow_origins=list(cors_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["*"],
+            allow_headers=[
+                "Accept",
+                "Content-Type",
+                "Authorization",
+                "X-Judgment-Request-Id",
+                "X-Judgment-Client-Started-At",
+                "X-Judgment-Admin-Token",
+            ],
+            expose_headers=["X-Judgment-Request-Id"],
             max_age=600,
         )
+
+    @app.middleware("http")
+    async def admin_auth_middleware(request: Request, call_next):
+        path = request.url.path
+        if request.method == "OPTIONS" or not path.startswith("/api/"):
+            return await call_next(request)
+        if path in PUBLIC_API_PATHS:
+            return await call_next(request)
+        if _is_local_request(request):
+            return await call_next(request)
+
+        expected = str(app.state.settings.admin_token or "")
+        if not expected:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": (
+                        "遠端管理 API 尚未設定 JUDGMENT_ADMIN_TOKEN；"
+                        "本機 127.0.0.1 可直接使用。"
+                    )
+                },
+            )
+        provided = _provided_admin_token(request)
+        if provided and hmac.compare_digest(provided, expected):
+            return await call_next(request)
+        if path == "/api/events/stream":
+            ticket = str(request.query_params.get("ticket") or "")
+            if _valid_sse_ticket(ticket, expected):
+                return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "需要有效的 X-Judgment-Admin-Token 管理權杖。"},
+        )
+
+    @app.post("/api/auth/sse-ticket")
+    def sse_ticket() -> Dict[str, Any]:
+        ticket = _make_sse_ticket(str(app.state.settings.admin_token or ""))
+        return {
+            "ticket": ticket,
+            "expires_in": SSE_TICKET_TTL_SECONDS if ticket else 0,
+        }
 
     @app.middleware("http")
     async def performance_middleware(request: Request, call_next):
@@ -858,7 +1000,7 @@ def create_app(
 
     @app.get("/api/ollama/hosts")
     def ollama_hosts() -> Dict[str, Any]:
-        return list_hosts(app.state.session_factory)
+        return _ollama_host_list()
 
     @app.post("/api/ollama/hosts")
     def ollama_host_create(payload: OllamaHostRequest) -> Dict[str, Any]:
@@ -868,6 +1010,7 @@ def create_app(
                 name=payload.name,
                 url=payload.url,
                 port=payload.port,
+                allowed_hosts=_ollama_allowed_hosts(),
             )
             _sync_runtime_settings()
             return host
@@ -885,6 +1028,7 @@ def create_app(
                 name=payload.name,
                 url=payload.url,
                 port=payload.port,
+                allowed_hosts=_ollama_allowed_hosts(),
             )
             _sync_runtime_settings()
             return host
@@ -916,7 +1060,7 @@ def create_app(
     @app.post("/api/ollama/hosts/capabilities/test")
     def ollama_host_capabilities_test() -> Dict[str, Any]:
         refreshed_urls = set()
-        for host in list_hosts(app.state.session_factory).get("hosts") or []:
+        for host in _ollama_host_list().get("hosts") or []:
             if host.get("status") != "operational":
                 continue
             host_url = str(host.get("base_url") or "").rstrip("/")
@@ -925,9 +1069,11 @@ def create_app(
             refreshed_urls.add(host_url)
             refresh_model_capabilities(
                 app.state.session_factory,
-                app.state.settings.with_overrides(llm_url=host_url),
+                app.state.settings.with_overrides(
+                    llm_url=host_url, llm_api="ollama"
+                ),
             )
-        return list_hosts(app.state.session_factory)
+        return _ollama_host_list()
 
     @app.post("/api/ollama/hosts/reorder")
     def ollama_host_reorder(payload: OllamaHostOrderRequest) -> Dict[str, Any]:
@@ -1441,8 +1587,10 @@ def create_app(
             ) from exc
 
     def _actor(request: Request, fallback: str = "") -> str:
+        if not _is_local_request(request):
+            return "admin"
         header = str(request.headers.get("X-Judgment-Actor") or "").strip()
-        return (header or fallback or "anonymous")[:120]
+        return (header or fallback or "local")[:120]
 
     def _question_bank_error(exc: QuestionBankError) -> HTTPException:
         return HTTPException(
@@ -1855,6 +2003,7 @@ def create_app(
             runtime_settings(
                 app.state.settings, app.state.session_factory
             ),
+            allowed_hosts=_ollama_allowed_hosts(),
         )
 
     @app.post("/api/llm/models/test")
@@ -1863,7 +2012,7 @@ def create_app(
             app.state.settings, app.state.session_factory
         )
         refreshed_urls = set()
-        for host in list_hosts(app.state.session_factory).get("hosts") or []:
+        for host in _ollama_host_list().get("hosts") or []:
             if host.get("status") != "operational":
                 continue
             host_url = str(host.get("base_url") or "").rstrip("/")
@@ -1872,7 +2021,9 @@ def create_app(
             refreshed_urls.add(host_url)
             refresh_model_capabilities(
                 app.state.session_factory,
-                app.state.settings.with_overrides(llm_url=host_url),
+                app.state.settings.with_overrides(
+                    llm_url=host_url, llm_api="ollama"
+                ),
             )
         runtime_url = str(runtime.llm_url or "").rstrip("/")
         if runtime_url and runtime_url not in refreshed_urls:
@@ -1880,7 +2031,9 @@ def create_app(
                 app.state.session_factory, runtime
             )
         return _llm_models_payload(
-            app.state.session_factory, runtime
+            app.state.session_factory,
+            runtime,
+            allowed_hosts=_ollama_allowed_hosts(),
         )
 
     @app.get("/api/rerank/status")
@@ -1911,10 +2064,12 @@ def create_app(
                     status_code=404, detail="找不到 Ollama 主機。"
                 )
             provider_settings = app.state.settings.with_overrides(
-                llm_url=host["base_url"]
+                llm_url=host["base_url"], llm_api="ollama"
             )
             state = _llm_models_payload(
-                app.state.session_factory, provider_settings
+                app.state.session_factory,
+                provider_settings,
+                allowed_hosts=_ollama_allowed_hosts(),
             )
             base_url = str(host["base_url"]).rstrip("/")
             provider_name = str(host.get("name") or state.get("provider_name") or "")
@@ -1923,7 +2078,9 @@ def create_app(
                 app.state.settings, app.state.session_factory
             )
             state = _llm_models_payload(
-                app.state.session_factory, runtime
+                app.state.session_factory,
+                runtime,
+                allowed_hosts=_ollama_allowed_hosts(),
             )
             base_url = str(state.get("base_url") or "").rstrip("/")
             provider_name = str(state.get("provider_name") or "")

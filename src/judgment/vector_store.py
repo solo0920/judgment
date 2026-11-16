@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -388,3 +388,88 @@ class QdrantStore:
             timeout=max(self.timeout, 60.0),
         )
         return list(payload.get("result") or [])
+
+    def count(
+        self,
+        collection: str,
+        *,
+        query_filter: Optional[Dict[str, Any]] = None,
+        exact: bool = True,
+    ) -> int:
+        body: Dict[str, Any] = {"exact": bool(exact)}
+        if query_filter:
+            body["filter"] = query_filter
+        payload = self._request(
+            "POST",
+            f"/collections/{collection}/points/count",
+            json=body,
+            timeout=max(self.timeout, 60.0),
+        )
+        return int((payload.get("result") or {}).get("count") or 0)
+
+    def facet(
+        self,
+        collection: str,
+        key: str,
+        *,
+        query_filter: Optional[Dict[str, Any]] = None,
+        limit: int = 500,
+        exact: bool = True,
+    ) -> List[Dict[str, Any]]:
+        body: Dict[str, Any] = {
+            "key": str(key),
+            "limit": max(1, int(limit)),
+            "exact": bool(exact),
+        }
+        if query_filter:
+            body["filter"] = query_filter
+        payload = self._request(
+            "POST",
+            f"/collections/{collection}/facet",
+            json=body,
+            timeout=max(self.timeout, 60.0),
+        )
+        return list((payload.get("result") or {}).get("hits") or [])
+
+    def scroll(
+        self,
+        collection: str,
+        *,
+        query_filter: Optional[Dict[str, Any]] = None,
+        limit: int = 20,
+        offset: Any = None,
+        order_by: Optional[Dict[str, Any]] = None,
+        with_payload: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], Any]:
+        """Scroll points with an optional filter and ordering.
+
+        Qdrant does not return ``next_page_offset`` when ``order_by`` is
+        used.  To paginate ordered results, pass ``start_from`` inside
+        ``order_by`` using the last point's ordered key value and dedupe
+        equal-key rows by ``jid`` at the caller.
+        """
+
+        body: Dict[str, Any] = {
+            "limit": max(1, int(limit)),
+            "with_payload": bool(with_payload),
+            "with_vector": False,
+        }
+        if query_filter:
+            body["filter"] = query_filter
+        if offset is not None:
+            body["offset"] = offset
+        if order_by:
+            body["order_by"] = order_by
+        payload = self._request(
+            "POST",
+            f"/collections/{collection}/points/scroll",
+            json=body,
+            timeout=max(self.timeout, 120.0),
+        )
+        result = payload.get("result") or {}
+        points = [
+            item
+            for item in result.get("points") or []
+            if isinstance(item, dict)
+        ]
+        return points, result.get("next_page_offset")

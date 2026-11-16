@@ -9,6 +9,12 @@ from sqlalchemy import select
 
 from .config import Settings
 from .law_rag import law_sources_for_question
+from .llm_backends import (
+    chat_content,
+    chat_payload,
+    chat_providers,
+    chat_url,
+)
 from .models import QuestionBankItem
 from .question_bank import (
     DIFFICULTIES,
@@ -201,39 +207,46 @@ def _ollama_chat(
     num_predict: int,
     num_ctx: int,
 ) -> str:
-    if not settings.llm_url or not settings.llm_model:
+    providers = chat_providers(settings, settings.llm_model)
+    if not providers:
         raise QuestionBankError(
-            "本機 Ollama 未設定。",
+            "本機 LLM 未設定。",
             errors=["請設定 LLM_URL 與 LLM_MODEL 後再使用 AI 出題。"],
         )
-    url = f"{settings.llm_url.rstrip('/')}/api/chat"
-    payload = {
-        "model": settings.llm_model,
-        "messages": list(messages),
-        "stream": False,
-        "keep_alive": settings.llm_keep_alive,
-        "options": {
-            "temperature": 0.1,
-            "num_ctx": max(int(num_ctx or 0), 4096),
-            "num_predict": num_predict,
-        },
-    }
-    if json_mode:
-        payload["format"] = "json"
-    try:
-        response = httpx.post(
-            url,
-            json=payload,
-            timeout=settings.llm_timeout_seconds,
+    last_error: Optional[Exception] = None
+    for provider in providers:
+        payload = chat_payload(
+            api=provider.api,
+            model=provider.model,
+            messages=messages,
+            stream=False,
+            temperature=0.1,
+            num_predict=num_predict,
+            num_ctx=max(int(num_ctx or 0), 4096),
+            json_mode=json_mode,
+            keep_alive=settings.llm_keep_alive_value,
         )
-        response.raise_for_status()
-        body = response.json()
-    except Exception as exc:
+        try:
+            response = httpx.post(
+                chat_url(provider.base_url, provider.api),
+                json=payload,
+                timeout=settings.llm_timeout_seconds,
+            )
+            response.raise_for_status()
+            body = response.json()
+        except Exception as exc:
+            last_error = exc
+            continue
+        return chat_content(provider.api, body).strip()
+    if last_error is not None:
         raise QuestionBankError(
-            "Ollama 產生失敗。",
-            errors=[f"{exc.__class__.__name__}: {exc}"],
-        ) from exc
-    return str((body.get("message") or {}).get("content") or "").strip()
+            "LLM 產生失敗。",
+            errors=[f"{last_error.__class__.__name__}: {last_error}"],
+        ) from last_error
+    raise QuestionBankError(
+        "LLM 沒有產生回答。",
+        errors=["沒有可用的 LLM provider。"],
+    )
 
 
 def _ollama_answer(

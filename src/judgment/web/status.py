@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .. import __version__
 from ..config import Settings
-from ..embeddings import ollama_model_available, ollama_models_detail
+from ..embeddings import (
+    provider_model_available,
+    provider_models_detail,
+)
 from ..index_versions import active_version
 from ..judgment_index import index_coverage, index_staleness
 from ..legal_index import assess_legal_index_freshness, legal_index_status
@@ -301,8 +304,11 @@ def _embedding_metrics(
     *,
     base_url: str,
     model: str,
+    api: str = "ollama",
     fallback_url: str = "",
+    fallback_api: str = "ollama",
     fallback_urls: tuple[str, ...] = (),
+    fallback_apis: tuple[str, ...] = (),
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     base_url = base_url.rstrip("/")
@@ -314,48 +320,63 @@ def _embedding_metrics(
             "detail": f"未設定 EMBEDDING_URL（模型：{model}）",
             "model": model,
         }
-    candidates: List[str] = []
-    for url in (base_url, fallback_url, *fallback_urls):
+    candidates: List[tuple[str, str]] = []
+    for index, url in enumerate((base_url, fallback_url, *fallback_urls)):
         text = str(url or "").strip().rstrip("/")
-        if text and text not in candidates:
-            candidates.append(text)
-    primary_detail = ollama_models_detail(base_url)
+        if not text or any(text == seen for seen, _ in candidates):
+            continue
+        if index == 0:
+            api_value = api
+        elif index == 1:
+            api_value = fallback_api
+        else:
+            api_value = (
+                fallback_apis[index - 2]
+                if index - 2 < len(fallback_apis or ())
+                else fallback_api
+            )
+        candidates.append((text, str(api_value or "ollama")))
+    primary_url, primary_api = candidates[0]
+    primary_detail = provider_models_detail(primary_url, primary_api)
     primary_available = (
         primary_detail["status"] == "operational"
-        and ollama_model_available(base_url, model)
+        and provider_model_available(primary_url, model, primary_api)
     )
     if primary_available:
         return {
             "status": "operational",
             "latency_ms": _ms(started),
-            "detail": f"模型：{model} · {base_url}",
+            "detail": f"模型：{model} · {primary_url}",
             "model": model,
             "models": primary_detail["models"],
+            "api": primary_api,
         }
-    for url in candidates[1:]:
-        fallback_detail = ollama_models_detail(url)
-        if fallback_detail["status"] == "operational" and ollama_model_available(
-            url, model
+    for url, url_api in candidates[1:]:
+        fallback_detail = provider_models_detail(url, url_api)
+        if fallback_detail["status"] == "operational" and provider_model_available(
+            url, model, url_api
         ):
             return {
                 "status": "operational",
                 "latency_ms": _ms(started),
                 "detail": (
-                    f"主要 {base_url} 不可用；fallback 模型：{model} · {url}"
+                    f"主要 {primary_url} 不可用；fallback 模型：{model} · {url}"
                 ),
                 "model": model,
                 "models": fallback_detail["models"],
+                "api": url_api,
             }
     return {
         "status": "degraded",
         "latency_ms": _ms(started),
         "detail": (
-            f"已連線 {base_url}，但找不到模型 {model}"
+            f"已連線 {primary_url}，但找不到模型 {model}"
             if primary_detail["status"] == "operational"
-            else f"{primary_detail['detail']} · {base_url}"
+            else f"{primary_detail['detail']} · {primary_url}"
         ),
         "model": model,
         "models": primary_detail["models"],
+        "api": primary_api,
     }
 
 
@@ -472,7 +493,15 @@ def rerank_status(settings: Settings) -> Dict[str, Any]:
     return _rerank_metrics(settings)
 
 
-def _llm_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
+def _llm_metrics(
+    *,
+    base_url: str,
+    model: str,
+    api: str = "ollama",
+    fallback_url: str = "",
+    fallback_model: str = "",
+    fallback_api: str = "ollama",
+) -> Dict[str, Any]:
     started = time.perf_counter()
     base_url = base_url.rstrip("/")
     model = model.strip()
@@ -490,25 +519,47 @@ def _llm_metrics(*, base_url: str, model: str) -> Dict[str, Any]:
             "detail": f"未設定 LLM_URL（模型：{model}）",
             "model": model,
         }
-    detail = ollama_models_detail(base_url)
-    if detail["status"] != "operational":
+    detail = provider_models_detail(base_url, api)
+    if detail["status"] == "operational" and provider_model_available(
+        base_url, model, api
+    ):
         return {
-            "status": "degraded",
+            "status": "operational",
             "latency_ms": _ms(started),
-            "detail": f"{detail['detail']} · {base_url}",
+            "detail": f"模型：{model} · {base_url}",
             "model": model,
+            "models": detail["models"],
+            "api": api,
         }
-    available = ollama_model_available(base_url, model)
+    fallback_url = str(fallback_url or "").strip().rstrip("/")
+    fallback_model = str(fallback_model or model).strip()
+    if fallback_url and fallback_url != base_url:
+        fallback_detail = provider_models_detail(fallback_url, fallback_api)
+        if fallback_detail["status"] == "operational" and provider_model_available(
+            fallback_url, fallback_model, fallback_api
+        ):
+            return {
+                "status": "operational",
+                "latency_ms": _ms(started),
+                "detail": (
+                    f"主要 {base_url} 不可用；fallback 模型："
+                    f"{fallback_model} · {fallback_url}"
+                ),
+                "model": fallback_model,
+                "models": fallback_detail["models"],
+                "api": fallback_api,
+            }
     return {
-        "status": "operational" if available else "degraded",
+        "status": "degraded",
         "latency_ms": _ms(started),
         "detail": (
-            f"模型：{model} · {base_url}"
-            if available
-            else f"已連線 {base_url}，但找不到模型 {model}"
+            f"已連線 {base_url}，但找不到模型 {model}"
+            if detail["status"] == "operational"
+            else f"{detail['detail']} · {base_url}"
         ),
         "model": model,
         "models": detail["models"],
+        "api": api,
     }
 
 
@@ -675,8 +726,11 @@ def build_status(
         lambda: _embedding_metrics(
             base_url=settings.embedding_url,
             model=settings.embedding_model,
+            api=settings.embedding_api,
             fallback_url=settings.embedding_fallback_url,
+            fallback_api=settings.embedding_fallback_api,
             fallback_urls=settings.embedding_failover_urls,
+            fallback_apis=settings.embedding_failover_apis,
         )
     )
     (
@@ -686,7 +740,12 @@ def build_status(
         llm_ms,
     ) = _timed_call(
         lambda: _llm_metrics(
-            base_url=settings.llm_url, model=settings.llm_model
+            base_url=settings.llm_url,
+            model=settings.llm_model,
+            api=settings.llm_api,
+            fallback_url=settings.llm_fallback_url,
+            fallback_model=settings.llm_fallback_model,
+            fallback_api=settings.llm_fallback_api,
         )
     )
     (
@@ -824,7 +883,7 @@ def build_status(
         _pipeline_stage(
             key="embedding",
             label="Embedding 檢查",
-            caption="Ollama embedding 模型",
+            caption="Embedding 模型",
             color="#0ea5e9",
             status=_service_stage_status(embedding.get("status")),
             started_at=embedding_started_at,
@@ -835,7 +894,7 @@ def build_status(
         _pipeline_stage(
             key="llm",
             label="LLM 檢查",
-            caption="Ollama chat 模型",
+            caption="Chat 模型",
             color="#16a34a",
             status=_service_stage_status(llm.get("status")),
             started_at=llm_started_at,

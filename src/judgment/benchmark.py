@@ -18,6 +18,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
 from .index_versions import active_version
+from .llm_backends import (
+    chat_content,
+    chat_payload,
+    chat_providers,
+    chat_url,
+)
 from .models import (
     BenchmarkCaseResult,
     BenchmarkRun,
@@ -251,54 +257,63 @@ def judge_answer(
     item: Dict[str, Any],
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    if not model or not settings.llm_url:
+    providers = chat_providers(settings, model)
+    if not providers:
         return {"status": "skipped", "reason": "未設定 judge model 或 LLM URL"}
-    url = f"{settings.llm_url.rstrip('/')}/api/chat"
     started = time.perf_counter()
-    try:
-        response = httpx.post(
-            url,
-            json={
-                "model": model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是嚴謹的法律 RAG 評審，只輸出合法 JSON。",
-                    },
-                    {"role": "user", "content": _judge_prompt(item, payload)},
-                ],
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.0, "num_predict": 700},
-            },
-            timeout=180.0,
+    errors: List[str] = []
+    for provider in providers:
+        request_payload = chat_payload(
+            api=provider.api,
+            model=provider.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是嚴謹的法律 RAG 評審，只輸出合法 JSON。",
+                },
+                {"role": "user", "content": _judge_prompt(item, payload)},
+            ],
+            stream=False,
+            temperature=0.0,
+            num_predict=700,
+            json_mode=True,
+            keep_alive=settings.llm_keep_alive_value,
         )
-        response.raise_for_status()
-        content = str(
-            (response.json().get("message") or {}).get("content") or ""
-        )
+        try:
+            response = httpx.post(
+                chat_url(provider.base_url, provider.api),
+                json=request_payload,
+                timeout=180.0,
+            )
+            response.raise_for_status()
+            content = chat_content(provider.api, response.json())
+        except Exception as exc:
+            errors.append(
+                f"{provider.role} ({provider.base_url}): "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+            continue
         parsed = _parse_json_object(content)
         if parsed is None:
             return {
                 "status": "error",
-                "model": model,
+                "model": provider.model,
                 "duration_ms": int((time.perf_counter() - started) * 1000),
                 "raw": content[:4000],
                 "reason": "judge 回應不是 JSON",
             }
         return {
             "status": "ok",
-            "model": model,
+            "model": provider.model,
             "duration_ms": int((time.perf_counter() - started) * 1000),
             **parsed,
         }
-    except Exception as exc:
-        return {
-            "status": "error",
-            "model": model,
-            "duration_ms": int((time.perf_counter() - started) * 1000),
-            "reason": f"{exc.__class__.__name__}: {exc}",
-        }
+    return {
+        "status": "error",
+        "model": model,
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+        "reason": "; ".join(errors) or "judge provider 沒有回應",
+    }
 
 
 def _stage_ms(flow: Dict[str, Any]) -> Dict[str, Any]:
