@@ -903,6 +903,7 @@ function renderAnswerBody(payload) {
   const status = payload.status || "preview";
   const partial = Boolean(payload.partial);
   const streaming = Boolean(payload.streaming);
+  const rerankDegraded = Boolean(payload.rerank_degraded);
   const showSources = Boolean(payload.show_sources) || !partial;
   const structuredAnswer = payload.answer_source === "structured";
   const lawAnswer = String(payload.law_answer || "").trim();
@@ -1118,6 +1119,11 @@ function renderAnswerBody(payload) {
           answerContent,
         )}</p>
       </div>
+      ${
+        rerankDegraded
+          ? `<div class="answer-notice" data-rerank-degraded="true">排序精簡模式：本次 rerank 逾時或降級，來源目前以向量順序顯示。</div>`
+          : ""
+      }
       ${
         payload.notice
           ? `<div class="answer-notice">${escapeHtml(payload.notice)}</div>`

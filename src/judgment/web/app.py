@@ -765,6 +765,11 @@ def create_app(
                 or 0.0
             )
             if ttl <= 0:
+                app.state.readiness.update(
+                    ready=True,
+                    coverage_warmed=False,
+                    detail="coverage_cache_disabled",
+                )
                 return
             interval = max(30.0, ttl / 2.0)
             while True:
@@ -775,6 +780,11 @@ def create_app(
                         app.state.session_factory,
                         app.state.settings,
                     )
+                    app.state.readiness.update(
+                        ready=True,
+                        coverage_warmed=True,
+                        detail="coverage_warmed",
+                    )
                     logger.debug(
                         "coverage cache warmed in %.0f ms",
                         (time.perf_counter() - started) * 1000,
@@ -782,6 +792,11 @@ def create_app(
                 except asyncio.CancelledError:
                     raise
                 except Exception:
+                    app.state.readiness.update(
+                        ready=True,
+                        coverage_warmed=False,
+                        detail="coverage_warmup_failed",
+                    )
                     logger.warning(
                         "coverage cache warmup failed", exc_info=True
                     )
@@ -865,6 +880,14 @@ def create_app(
     app.state.engine = None
     app.state.llm_context = None
     app.state.rerank_heartbeat = None
+    app.state.readiness = {
+        "ready": (
+            not owns_session_factory
+            or not bool(settings.rag_coverage_warmup_enabled)
+        ),
+        "coverage_warmed": False,
+        "detail": "starting",
+    }
     app.state.processing_manager = ProcessingManager(
         settings=settings,
         session_factory=session_factory,
@@ -1140,8 +1163,16 @@ def create_app(
         return FileResponse(STATIC_DIR / "favicon.svg")
 
     @app.get("/api/health")
-    def health() -> Dict[str, Any]:
-        return {"status": "ok", "version": __version__}
+    def health():
+        readiness = app.state.readiness
+        payload = {
+            "status": "ok" if readiness.get("ready") else "starting",
+            "version": __version__,
+            "readiness": readiness,
+        }
+        if not readiness.get("ready"):
+            return JSONResponse(status_code=503, content=payload)
+        return payload
 
     @app.get("/api/home")
     def home_summary() -> Dict[str, Any]:

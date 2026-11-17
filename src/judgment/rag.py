@@ -330,6 +330,33 @@ def _rerank_text(
     return text[: max(200, int(max_chars))]
 
 
+def _unranked_judgment_preview(
+    hits: Sequence[Dict[str, Any]], limit: int
+) -> List[Dict[str, Any]]:
+    """Build a lightweight citation payload before rerank finishes."""
+
+    preview: List[Dict[str, Any]] = []
+    for index, hit in enumerate(hits[: max(1, int(limit))], start=1):
+        payload = hit.get("payload") or {}
+        jid = str(payload.get("jid") or "")
+        if not jid:
+            continue
+        preview.append(
+            {
+                "index": index,
+                "jid": jid,
+                "court": str(payload.get("court") or ""),
+                "jdate": str(payload.get("jdate") or ""),
+                "title": str(payload.get("title") or ""),
+                "score": hit.get("score"),
+                "matched_laws": list(payload.get("matched_laws") or []),
+                "snippet": str(payload.get("snippet") or "")[:240],
+                "pdf_url": str(payload.get("pdf_url") or ""),
+            }
+        )
+    return preview
+
+
 def _rerank_hits(
     *,
     settings: Settings,
@@ -2932,6 +2959,7 @@ def answer_question(
                 "duration_ms": _elapsed_ms(started),
             }
 
+    rerank_degraded = str(law_rerank.get("status") or "") == "degraded"
     if on_partial is not None and law_sources and not test_mode_enabled:
         try:
             partial_sources = [{**source} for source in law_sources]
@@ -2972,6 +3000,7 @@ def answer_question(
                     "partial": True,
                     "streaming": False,
                     "show_sources": False,
+                    "rerank_degraded": rerank_degraded,
                 }
             )
         except Exception:
@@ -3302,6 +3331,68 @@ def answer_question(
             if removed:
                 retrieval["filter_violations_removed"] = removed
             hits = valid_hits
+        if (
+            on_partial is not None
+            and rerank_active
+            and not structured_list_path
+            and hits
+        ):
+            preview = _unranked_judgment_preview(
+                hits, settings.rag_top_k
+            )
+            if preview:
+                try:
+                    partial_law_sources = [
+                        {
+                            key: value
+                            for key, value in source.items()
+                            if key != "index"
+                        }
+                        for source in law_sources
+                    ]
+                    emit_partial(
+                        {
+                            "status": "retrieving",
+                            "answer": (
+                                "向量檢索結果已先顯示；"
+                                "rerank 完成後會更新排序。"
+                            ),
+                            "notice": (
+                                "以下是向量相似度排序；"
+                                "交叉編碼 rerank 完成後會自動更新。"
+                            ),
+                            "citations": [],
+                            "judgments": preview,
+                            "law_sources": partial_law_sources,
+                            "law_answer": _law_answer_summary(
+                                partial_law_sources
+                            ),
+                            "law_framework": None,
+                            "matched_terms": [
+                                source["law_name"]
+                                for source in partial_law_sources
+                            ],
+                            "answer_source": "retrieval_unranked",
+                            "llm_model": settings.llm_model or None,
+                            "embedding_model": (
+                                settings.embedding_model or None
+                            ),
+                            "retrieval": {
+                                "status": "ranking",
+                                "hits": len(hits),
+                            },
+                            "coverage": coverage,
+                            "duration_ms": _elapsed_ms(started),
+                            "partial": True,
+                            "streaming": False,
+                            "show_sources": True,
+                            "rerank_degraded": False,
+                        }
+                    )
+                except Exception:
+                    logger.debug(
+                        "unranked judgment partial failed", exc_info=True
+                    )
         if rerank_active and not structured_list_path:
             with trace_segment(
                 "rag.rerank",
@@ -3345,6 +3436,8 @@ def answer_question(
                         }
                     )
             retrieval["rerank"] = rerank_outcome.to_dict()
+            if rerank_outcome.status == "degraded":
+                rerank_degraded = True
         elif structured_list_path:
             retrieval["rerank"] = {
                 "status": "skipped",
@@ -3577,6 +3670,7 @@ def answer_question(
                 "partial": True,
                 "streaming": True,
                 "show_sources": True,
+                "rerank_degraded": rerank_degraded,
             }
         )
     if structured_judgment_list:
@@ -3700,4 +3794,5 @@ def answer_question(
         "retrieval": retrieval,
         "coverage": coverage,
         "duration_ms": _elapsed_ms(started),
+        "rerank_degraded": rerank_degraded,
     }

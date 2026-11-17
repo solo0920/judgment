@@ -1768,6 +1768,124 @@ def test_answer_question_streams_law_partial_and_tokens(
     assert "返還借款" in payload["answer"]
 
 
+def test_answer_question_streams_unranked_preview_before_rerank(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+        rag_rerank_enabled=True,
+        rerank_url="http://reranker.test",
+        rerank_fallback_url="",
+    )
+    partials = []
+
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def rerank(self, query, documents, *, top_n, deadline=None):
+            return RerankOutcome(
+                status="ok",
+                results=[
+                    RerankResult(index=0, score=9.0),
+                ],
+                model="bge-reranker-v2-m3",
+                provider="x570",
+                latency_ms=1,
+                candidate_count=len(documents),
+                selected_count=1,
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "依法規與判決，原告可請求返還借款 [1]。",
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        on_partial=partials.append,
+    )
+
+    unranked = [
+        partial
+        for partial in partials
+        if partial.get("answer_source") == "retrieval_unranked"
+    ]
+    assert len(unranked) == 1
+    assert unranked[0]["partial"] is True
+    assert unranked[0]["show_sources"] is True
+    assert unranked[0]["judgments"][0]["jid"] == "TPDV,114,訴,1,20260101,1"
+    assert unranked[0]["rerank_degraded"] is False
+    assert any(
+        partial.get("answer_source") == "streaming"
+        for partial in partials
+    )
+    assert payload["rerank_degraded"] is False
+
+
+def test_answer_question_marks_degraded_rerank(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+        rag_rerank_enabled=True,
+        rerank_url="http://reranker.test",
+        rerank_fallback_url="",
+    )
+
+    class FakeReranker:
+        configured = True
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def rerank(self, query, documents, *, top_n, deadline=None):
+            return RerankOutcome(
+                status="degraded",
+                model="bge-reranker-v2-m3",
+                errors=["deadline"],
+                candidate_count=len(documents),
+            )
+
+    monkeypatch.setattr("judgment.rag.RerankerClient", FakeReranker)
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "依法規與判決，原告可請求返還借款 [1]。",
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["rerank_degraded"] is True
+    assert payload["retrieval"]["rerank"]["status"] == "degraded"
+
+
 def test_answer_question_resets_tokens_before_strict_retry(
     monkeypatch, tmp_path: Path
 ) -> None:
