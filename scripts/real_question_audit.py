@@ -70,6 +70,8 @@ def _classify(
     elif mode == "vector":
         tags.append("semantic")
     scope_probe = retrieval.get("scope_probe") or {}
+    if scope_probe.get("status") not in (None, "ok"):
+        tags.append(f"scope_probe_{scope_probe['status']}")
     if scope_probe.get("zero_terms"):
         tags.append("scope_probe_zero")
     if scope_probe.get("hit_terms"):
