@@ -1,0 +1,1453 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "app": "MBP FastAPI loopback, single uvicorn worker",
+    "llm_primary": "x570 llama-server :11436",
+    "llm_fallback": "MBP llama-server 127.0.0.1:11436 (OpenAI API, not Ollama)",
+    "reranker": "x570 :11435 primary, MBP :11435 fallback",
+    "rerank_timeout_seconds": 3.0,
+    "rerank_total_timeout_seconds": 4.0,
+    "rerank_heartbeat_seconds": 60.0,
+    "coverage_cache_ttl_seconds": 300.0
+  },
+  "changes": [
+    "request-level rerank deadline shared by law groups and judgment rerank",
+    "judgment-list questions skip law rerank"
+  ],
+  "stream20_after_request_deadline": [
+    {
+      "tag": "Q4-15",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 293.9,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-17",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 362.3,
+      "coverage_ms": 0.05,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-13",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 372.5,
+      "coverage_ms": 0.05,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-19",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 693.2,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-11",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 1823.1,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-18",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2062.6,
+      "first_token_ms": null,
+      "result_ms": 2096.4,
+      "coverage_ms": 0.06,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-10",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2366.5,
+      "first_token_ms": null,
+      "result_ms": 2368.8,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-16",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2367.4,
+      "first_token_ms": null,
+      "result_ms": 2369.0,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-14",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2410.7,
+      "first_token_ms": null,
+      "result_ms": 2424.0,
+      "coverage_ms": 0.07,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-12",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2871.9,
+      "first_token_ms": null,
+      "result_ms": 2882.2,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q1-0",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1335.9,
+      "first_token_ms": 3475.7,
+      "result_ms": 5752.2,
+      "coverage_ms": 0.05,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1813.49,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1544.09,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q2-4",
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1729.6,
+      "first_token_ms": 5128.3,
+      "result_ms": 6914.8,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1546.59,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1235.18,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q5-8",
+      "key": "Q5",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "llm",
+      "first_partial_ms": 6023.7,
+      "first_token_ms": 7172.4,
+      "result_ms": 9290.9,
+      "coverage_ms": 0.05,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1237.25,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "ok",
+          "duration_ms": 1759.32,
+          "error": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-6",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1346.5,
+      "first_token_ms": 3879.7,
+      "result_ms": 16015.9,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1780.37,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1541.98,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 10316.49,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q2-7",
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1854.8,
+      "first_token_ms": 6351.9,
+      "result_ms": 24740.7,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1222.63,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 628.95,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 17205.27,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-3",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1301.7,
+      "first_token_ms": null,
+      "result_ms": 24742.7,
+      "coverage_ms": 0.03,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1552.39,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 11853.72,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 830.4,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 7885.84,
+          "error": "RuntimeError: LLM HTTP 500: {\"error\":{\"code\":500,\"message\":\"Context size has been exceeded.\",\"type\":\"server_error\"}}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q5-5",
+      "key": "Q5",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 6655.1,
+      "first_token_ms": 23480.7,
+      "result_ms": 25759.4,
+      "coverage_ms": 0.11,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 645.48,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 17182.55,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1011.1,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q2-1",
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1824.2,
+      "first_token_ms": 30017.1,
+      "result_ms": 33633.0,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1167.39,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 9074.4,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 843.78,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16728.97,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q5-2",
+      "key": "Q5",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1774.2,
+      "first_token_ms": null,
+      "result_ms": 33633.5,
+      "coverage_ms": 0.06,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 415.84,
+          "error": "RuntimeError: LLM HTTP 500: {\"error\":{\"code\":500,\"message\":\"Context size has been exceeded.\",\"type\":\"server_error\"}}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 10285.14,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 863.58,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16736.37,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-9",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 2364.1,
+      "first_token_ms": null,
+      "result_ms": 33632.9,
+      "coverage_ms": 0.05,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1166.56,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 17808.55,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1005.31,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 7854.72,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    }
+  ],
+  "critical_traces": [
+    {
+      "performance_id": 14052,
+      "question": "保險法對於業務員不當招攬的責任規定？",
+      "duration_ms": 25297,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 47.52,
+          "duration_ms": 0.13,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 68.21,
+          "duration_ms": 116.55,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 184.78,
+          "duration_ms": 122.67,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 307.48,
+          "duration_ms": 580.39,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_rerank",
+          "offset_ms": 887.9,
+          "duration_ms": 327.74,
+          "status": "ok",
+          "provider": null,
+          "errors": []
+        },
+        {
+          "name": "rag.qdrant_search",
+          "offset_ms": 1683.27,
+          "duration_ms": 84.96,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 1768.27,
+          "duration_ms": 58.94,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.rerank",
+          "offset_ms": 1827.23,
+          "duration_ms": 3026.4,
+          "status": "ok",
+          "provider": null,
+          "errors": []
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 4853.67,
+          "duration_ms": 21.11,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 4853.71,
+          "duration_ms": 20.29,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 4975.5,
+          "duration_ms": 851.13,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 5844.26,
+          "duration_ms": 10483.76,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 16339.31,
+          "duration_ms": 856.03,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 17205.69,
+          "duration_ms": 8091.8,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14055,
+      "question": "保險法對於業務員不當招攬的責任規定？",
+      "duration_ms": 35944,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 64.7,
+          "duration_ms": 0.03,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 75.55,
+          "duration_ms": 123.29,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 198.86,
+          "duration_ms": 98.93,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 297.81,
+          "duration_ms": 585.68,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_rerank",
+          "offset_ms": 883.51,
+          "duration_ms": 290.17,
+          "status": "ok",
+          "provider": null,
+          "errors": []
+        },
+        {
+          "name": "rag.qdrant_search",
+          "offset_ms": 1667.94,
+          "duration_ms": 88.99,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 1757.0,
+          "duration_ms": 185.17,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.rerank",
+          "offset_ms": 1942.2,
+          "duration_ms": 4091.46,
+          "status": "ok",
+          "provider": null,
+          "errors": [
+            "http://x570:11435/v1/rerank: ReadTimeout: timed out",
+            "http://127.0.0.1:11435/v1/rerank: ReadTimeout: timed out"
+          ]
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 6033.72,
+          "duration_ms": 15.54,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 6033.78,
+          "duration_ms": 14.55,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 6150.04,
+          "duration_ms": 843.03,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 7002.15,
+          "duration_ms": 9327.11,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 16338.12,
+          "duration_ms": 857.63,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 17216.92,
+          "duration_ms": 18727.21,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14065,
+      "question": "在板橋地方法院相關詐騙的判決有那些",
+      "duration_ms": 1730,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 76.17,
+          "duration_ms": 0.06,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 87.12,
+          "duration_ms": 174.45,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 261.6,
+          "duration_ms": 101.2,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 362.83,
+          "duration_ms": 349.22,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 1633.28,
+          "duration_ms": 20.93,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 1654.25,
+          "duration_ms": 24.61,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 1654.27,
+          "duration_ms": 18.59,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14066,
+      "question": "在板橋地方法院相關詐騙的判決有那些",
+      "duration_ms": 1939,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 63.63,
+          "duration_ms": 0.04,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 76.18,
+          "duration_ms": 208.09,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 284.28,
+          "duration_ms": 86.81,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 371.1,
+          "duration_ms": 885.2,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 1839.51,
+          "duration_ms": 15.49,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 1855.11,
+          "duration_ms": 66.72,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 1855.17,
+          "duration_ms": 62.97,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14067,
+      "question": "在板橋地方法院相關詐騙的判決有那些",
+      "duration_ms": 1965,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 63.91,
+          "duration_ms": 0.03,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 77.0,
+          "duration_ms": 193.86,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 270.89,
+          "duration_ms": 77.18,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 348.1,
+          "duration_ms": 875.98,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 1901.78,
+          "duration_ms": 26.34,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 1928.16,
+          "duration_ms": 21.6,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 1928.18,
+          "duration_ms": 18.14,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14068,
+      "question": "在板橋地方法院相關詐騙的判決有那些",
+      "duration_ms": 2231,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 91.19,
+          "duration_ms": 0.07,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 107.02,
+          "duration_ms": 175.88,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 282.91,
+          "duration_ms": 86.35,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 369.29,
+          "duration_ms": 1039.32,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 2112.23,
+          "duration_ms": 67.98,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 2180.25,
+          "duration_ms": 21.63,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 2180.27,
+          "duration_ms": 18.13,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14069,
+      "question": "在板橋地方法院相關詐騙的判決有那些",
+      "duration_ms": 893,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 249.39,
+          "duration_ms": 0.04,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 345.58,
+          "duration_ms": 103.44,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 449.05,
+          "duration_ms": 50.71,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 499.8,
+          "duration_ms": 114.82,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 846.29,
+          "duration_ms": 3.2,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 849.54,
+          "duration_ms": 25.78,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 849.56,
+          "duration_ms": 21.06,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14072,
+      "question": "保險法對於業務員不當招攬的責任規定？",
+      "duration_ms": 8883,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 140.43,
+          "duration_ms": 0.05,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 177.16,
+          "duration_ms": 165.22,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 342.41,
+          "duration_ms": 304.87,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 647.31,
+          "duration_ms": 869.41,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_rerank",
+          "offset_ms": 1516.76,
+          "duration_ms": 4050.56,
+          "status": "ok",
+          "provider": null,
+          "errors": [
+            "http://x570:11435/v1/rerank: ReadTimeout: timed out",
+            "http://127.0.0.1:11435/v1/rerank: ReadTimeout: timed out"
+          ]
+        },
+        {
+          "name": "rag.qdrant_search",
+          "offset_ms": 5664.15,
+          "duration_ms": 29.26,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 5693.49,
+          "duration_ms": 8.71,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.rerank",
+          "offset_ms": 5702.23,
+          "duration_ms": 61.14,
+          "status": "ok",
+          "provider": null,
+          "errors": [
+            "http://x570:11435/v1/rerank: rerank deadline exhausted"
+          ]
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 5763.38,
+          "duration_ms": 8.07,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 5763.39,
+          "duration_ms": 7.52,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 5865.5,
+          "duration_ms": 1237.25,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 7124.09,
+          "duration_ms": 1759.32,
+          "status": "ok",
+          "provider": "primary",
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14076,
+      "question": "保險法對於業務員不當招攬的責任規定？",
+      "duration_ms": 23912,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 135.37,
+          "duration_ms": 0.11,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 186.78,
+          "duration_ms": 231.35,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 418.16,
+          "duration_ms": 143.6,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 561.78,
+          "duration_ms": 171.01,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_rerank",
+          "offset_ms": 732.85,
+          "duration_ms": 4014.47,
+          "status": "ok",
+          "provider": null,
+          "errors": [
+            "http://x570:11435/v1/rerank: ReadTimeout: timed out",
+            "http://127.0.0.1:11435/v1/rerank: ReadTimeout: timed out",
+            "http://x570:11435/v1/rerank: rerank deadline exhausted"
+          ]
+        },
+        {
+          "name": "rag.qdrant_search",
+          "offset_ms": 4851.75,
+          "duration_ms": 25.17,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 4876.99,
+          "duration_ms": 8.53,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.rerank",
+          "offset_ms": 4885.55,
+          "duration_ms": 62.33,
+          "status": "ok",
+          "provider": null,
+          "errors": [
+            "http://x570:11435/v1/rerank: rerank deadline exhausted"
+          ]
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 4947.89,
+          "duration_ms": 8.22,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 4947.9,
+          "duration_ms": 7.67,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 5052.74,
+          "duration_ms": 645.48,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 5709.5,
+          "duration_ms": 17182.55,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 22900.86,
+          "duration_ms": 1011.1,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        }
+      ]
+    },
+    {
+      "performance_id": 14079,
+      "question": "保險法對於業務員不當招攬的責任規定？",
+      "duration_ms": 33537,
+      "status": "success",
+      "segments": [
+        {
+          "name": "rag.coverage",
+          "offset_ms": 72.14,
+          "duration_ms": 0.06,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.embed_query",
+          "offset_ms": 88.05,
+          "duration_ms": 192.59,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_vector_search",
+          "offset_ms": 280.65,
+          "duration_ms": 78.82,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_retrieval",
+          "offset_ms": 359.51,
+          "duration_ms": 598.56,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.law_rerank",
+          "offset_ms": 958.11,
+          "duration_ms": 322.74,
+          "status": "ok",
+          "provider": null,
+          "errors": []
+        },
+        {
+          "name": "rag.qdrant_search",
+          "offset_ms": 1758.39,
+          "duration_ms": 180.76,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.fetch_documents",
+          "offset_ms": 1939.19,
+          "duration_ms": 124.31,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.rerank",
+          "offset_ms": 2063.53,
+          "duration_ms": 2994.91,
+          "status": "ok",
+          "provider": null,
+          "errors": [
+            "http://x570:11435/v1/rerank: ReadTimeout: timed out",
+            "http://127.0.0.1:11435/v1/rerank: rerank deadline exhausted"
+          ]
+        },
+        {
+          "name": "rag.context",
+          "offset_ms": 5058.5,
+          "duration_ms": 15.76,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.build_citations",
+          "offset_ms": 5058.54,
+          "duration_ms": 14.51,
+          "status": "ok",
+          "provider": null,
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 5184.54,
+          "duration_ms": 415.84,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 5609.43,
+          "duration_ms": 10285.14,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 15914.9,
+          "duration_ms": 863.58,
+          "status": "error",
+          "provider": "primary",
+          "errors": null
+        },
+        {
+          "name": "rag.llm_request",
+          "offset_ms": 16801.29,
+          "duration_ms": 16736.37,
+          "status": "error",
+          "provider": "fallback",
+          "errors": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "first_partial_ms": {
+      "n": 15,
+      "p50": 2062.6,
+      "p95": 6023.7,
+      "max": 6655.1
+    },
+    "first_token_ms": {
+      "n": 7,
+      "p50": 6351.9,
+      "p95": 30017.1,
+      "max": 30017.1
+    },
+    "result_ms": {
+      "n": 20,
+      "p50": 5752.2,
+      "p95": 33633.0,
+      "max": 33633.5
+    },
+    "statuses": {
+      "operational": 11,
+      "retrieval_only": 9
+    },
+    "errors": 0,
+    "provider_ok": {
+      "primary|http://x570:11436": 1
+    },
+    "provider_error": {
+      "primary|http://x570:11436": 19,
+      "fallback|http://127.0.0.1:11436": 11
+    }
+  }
+}

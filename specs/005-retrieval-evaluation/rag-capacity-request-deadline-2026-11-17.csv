@@ -1,0 +1,8 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+20 mixed stream after request deadline,first_partial_ms,15,2062.6,6023.7,6655.1,shared 4s rerank deadline; list questions skip law rerank
+20 mixed stream after request deadline,first_token_ms,7,6351.9,30017.1,30017.1,shared 4s rerank deadline; list questions skip law rerank
+20 mixed stream after request deadline,result_ms,20,5752.2,33633.0,33633.5,shared 4s rerank deadline; list questions skip law rerank
+20 mixed stream after request deadline,statuses,20,,,,"{""operational"": 11, ""retrieval_only"": 9}"
+20 mixed stream after request deadline,errors,20,,,,0
+20 mixed stream after request deadline,provider_ok,20,,,,"{""primary|http://x570:11436"": 1}"
+20 mixed stream after request deadline,provider_error,20,,,,"{""primary|http://x570:11436"": 19, ""fallback|http://127.0.0.1:11436"": 11}"

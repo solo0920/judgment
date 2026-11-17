@@ -50,7 +50,7 @@ cold run 3.76 秒，warm run 8.68 秒。
 不是 token gate。
 ```
 
-追加（同日）：暖機、60 秒 heartbeat、單次總 deadline 已實作並驗證；first_partial p50 1.73 秒、p95 6.83 秒。下一個瓶頸是 `rag.law_rerank` 的第二段 rerank 與 strict retry，見第九節。
+追加（同日）：暖機、60 秒 heartbeat、單次總 deadline、request-level rerank deadline、列表題跳過 law rerank 已實作並驗證；first_partial p50 2.06 秒、p95 6.02 秒。下一個瓶頸是 Q5 reranker 併發容量與 strict retry，見第九節。
 
 ## 一、逐項判定
 
@@ -462,11 +462,43 @@ coverage 已暖、heartbeat 已跑、總 deadline=4 秒：
 
 所以下一步不是再加大 reranker timeout，而是：
 
-1. 在 `answer_question` 內建一個 request-level rerank deadline，讓 law rerank 的所有 group 與 judgment rerank 共用。
-2. 判決列表題跳過或大幅縮短 law rerank；列表答案不需要法規 cross-encoder 排序。
-3. 再決定 strict citation retry 是否應在 first partial 之後才發生（目前 Q5 會先送 token 再 strict retry，final partial 被延後）。
+1. 在 `answer_question` 內建一個 request-level rerank deadline，讓 law rerank 的所有 group 與 judgment rerank 共用（已完成，見第 6 節）。
+2. 判決列表題跳過或大幅縮短 law rerank；列表答案不需要法規 cross-encoder 排序（已完成，見第 6 節）。
+3. 再決定 strict citation retry 是否應在 first partial 之後才發生（目前 Q5 會先送 token 再 strict retry，final partial 被延後；待做）。
 
-做完這三項再重測，才有機會讓 first_partial p95 穩定 ≤4 秒；在那之前，token gate 仍會量到這個尾。
+第 1、2 項完成後的重測見第 6 節；第 3 項仍待做。
+
+### 6. Request-level deadline 與列表題跳過 law rerank
+
+commit `27584d4` 追加兩項修正：
+
+- `RerankerClient.rerank()` 接受外部絕對 `deadline`；`answer_question` 在 law rerank 前建立一次 4 秒預算，law rerank 的所有 group 與 judgment rerank 共用，不會每個 group 各拿 4 秒。
+- `is_judgment_list_question()` 為真時不做 law rerank，避免判決列表題白等一次 4 秒。
+
+20 mixed 重測：
+
+| 指標 | 單次 deadline 後 | request-level deadline 後 |
+|---|---:|---:|
+| first_partial p50 | 1,727 ms | 2,063 ms |
+| first_partial p95 | 6,834 ms | 6,024 ms |
+| first_partial max | 7,034 ms | 6,655 ms |
+| done p50 | 5,873 ms | 5,752 ms |
+| done p95 | 36,039 ms | 33,633 ms |
+| operational／retrieval_only | 11／9 | 11／9 |
+| error | 0 | 0 |
+
+判讀：
+
+- Q3 判決列表（ID 14065–14069）first_partial 1.73–2.23 秒，`rag.law_rerank` 不再出現；先前是 6.83 秒。列表題的 first_partial 尾已被移除。
+- Q5（ID 14072／14076／14079）`rag.law_rerank` 4.01–4.05 秒就吃完整個 4 秒預算，judgment rerank 只剩約 60 ms，直接 `rerank deadline exhausted`；first_partial 仍是 6.0–6.7 秒。
+- done p95 仍 33.6 秒，主因是 fallback 8–18 秒與 context exceeded 的重試，不是檢索。
+- first_partial p50 由 1.73 升到 2.06 秒是單輪變異；p95 與 max 都下降，且列表題尾明顯消失。
+
+下一個瓶頸已不是 deadline，而是 x570 reranker 的併發容量：4 個 Q5 同時送出約 14k-token 的 rerank batch，3 秒內做不完。選項：
+
+1. reranker 專用 semaphore（例如 2）＋`queued`／ETA；超過就跳過 rerank，保留原順序。
+2. 降低 `RAG_RERANK_CANDIDATES` 或 `RERANK_MAX_CHARS`，先做 A/B 確認排序品質不退步。
+3. 把 law citation partial 提前到 law rerank 之前，讓 first_partial 不被 rerank 擋住。
 
 ## 十、修正後的實作順序
 
@@ -474,7 +506,7 @@ coverage 已暖、heartbeat 已跑、總 deadline=4 秒：
 |---|---|---|---|
 | P0-0 | x570 權限、`nvidia-smi`、`/props`、`-c 24576` 或 `32768`、4×3,000／4×Q5 | 4/4 或至少 3/4；VRAM／溫度有紀錄；無 context exceeded | **blocked：沒有 SSH／sudo** |
 | P0-1 | coverage TTL／single-flight 快取；啟動暖機或背景刷新；error span 記 provider | 40 non-LLM p95 < 10 秒；Q4 warm < 100 ms；first burst 不再等 1.1 秒 | **已完成**（Q4 warm 81–173 ms；40 non-LLM p95 5.5–6.7 秒） |
-| P0-2 | reranker 暖機、每 60 秒 heartbeat、3 秒總 deadline／fallback 策略 | 20 mixed first_partial p95 穩定 ≤ 4 秒；不再出現 6.1 秒雙 timeout | **已實作**；6.1 秒雙 timeout 已消除，p95 6.83 秒仍受 `rag.law_rerank` 與 strict retry 影響 |
+| P0-2 | reranker 暖機、每 60 秒 heartbeat、3 秒總 deadline／fallback 策略 | 20 mixed first_partial p95 穩定 ≤ 4 秒；不再出現 6.1 秒雙 timeout | **已實作**；雙 timeout 已消除，request-level deadline 與列表題跳過 law rerank 已完成；p95 6.02 秒仍受 Q5 reranker 併發容量與 strict retry 影響 |
 | P0-3 | exact tokenization；token budget gate；ETA 立即降級；citation-only retry；absolute deadline；SSE `queued`／`degraded`／heartbeat | Q5 不被 estimate 誤擋；500／timeout 不再重試；done p95 < 20 秒；降級 < 10 秒 | 待做 |
 | P0-4 | LLM 改 `httpx.AsyncClient`；retrieval／DB 專用 executor；DB pool 對齊；demo 關閉或獨立 gate MBP fallback | 10 個 LLM 不再占滿 14 workers；非 LLM p95 不受 LLM lane 影響 | 待做 |
 | P1-1 | 字母標籤；27 題＋至少 10 題人工抽查；再評估 grammar | citation 合法率、來源覆蓋、忠實度不退步 | 待做 |
@@ -501,6 +533,7 @@ coverage 已暖、heartbeat 已跑、總 deadline=4 秒：
 - coverage cache 是 process-wide、單 worker；若未來開多 worker，每個 worker 會各自有一份快取，需要共享快取或 sticky routing。
 - 啟動暖機已實作；cold burst 的第一個請求不再等 1.1 秒，但背景刷新仍可能在百萬筆資料上花 1 秒以上，需觀察資料庫負載。
 - 答案快取尚未實作；本輪沒有 cache 命中率、沒有答案忠實度比較。
+- request-level rerank deadline 已把 law groups 與 judgment rerank 合併計算，但 x570 reranker 本身沒有 admission／semaphore；4 個 Q5 同時 rerank 時仍會在 4 秒用完後降級。
 - facet／count 快取尚未做；它不在本次 RAG demo 路徑上。
 - `ground_truth_cases` 仍是 0；本輪不宣稱 Recall／nDCG。
 - registry 未觸碰：429 terms、10 active、419 candidates 維持不變；候選沒有啟用，也沒有 `legal_reviewed` 宣告。
@@ -524,9 +557,8 @@ index_coverage 單次 1.2 秒，Q4 總耗時 1,188 ms，幾乎全是它。
 原因不是 coverage，而是 reranker 6.1 秒雙 endpoint timeout（3 秒＋3 秒）。
 已做 reranker 啟動暖機、60 秒 heartbeat、單次總 deadline 4 秒：
 - 合成雙 timeout 由 6,013 ms 降到 1,010 ms；
-- 20 mixed 重測 p50 1.73／p95 6.83 秒，6.1 秒雙 timeout 不再出現；
-- 但 p95 仍被 rag.law_rerank（4.0 秒）與 strict retry（2.1 秒）拉高，
-  下一步要做 request-level rerank deadline，並讓判決列表題跳過 law rerank。
+- 20 mixed 重測：單次 deadline 後 p50 1.73／p95 6.83 秒；request-level deadline＋列表題跳過 law rerank 後 p50 2.06／p95 6.02 秒；6.1 秒雙 timeout 不再出現；
+- 列表題 first_partial 由 6.8 秒降到 1.7–2.2 秒；Q5 仍受 reranker 併發容量限制，p95 尚未 ≤4 秒。
 
 第 3 點成立：baseline 20 mixed 是 2 次 x570 primary、1 次 MBP fallback、其餘失敗。
 但 fallback 是 MBP llama-server（127.0.0.1:11436，openai API），不是 Ollama。
@@ -543,7 +575,7 @@ sync httpx.stream 會占住 worker，10 個 LLM 就吃掉大部分池子。
 順序調整：
 1. x570 權限（blocked，但持續）
 2. coverage 快取（已完成）＋暖機
-3. reranker 暖機／心跳／單次總 deadline（已完成）；request-level deadline 與 law rerank 預算（下一步）
+3. reranker 暖機／心跳／單次總 deadline（已完成）；request-level deadline 與列表題跳過 law rerank（已完成）；reranker semaphore 與 strict retry（下一步）
 4. token gate＋ETA＋citation-only retry＋absolute deadline＋SSE 事件
 5. async LLM＋executor／DB pool＋關閉 demo fallback
 6. 字母標籤＋27 題＋10 題人工
@@ -558,6 +590,8 @@ sync httpx.stream 會占住 worker，10 個 LLM 就吃掉大部分池子。
 - `specs/005-retrieval-evaluation/rag-capacity-coverage-cache-2026-11-17.csv`：摘要表。
 - `specs/005-retrieval-evaluation/rag-capacity-reranker-deadline-raw-2026-11-17.json`：P0-1／P0-2 追加驗證（coverage 暖機、heartbeat、合成 deadline、20 mixed 重測、`rag.law_rerank` trace）。
 - `specs/005-retrieval-evaluation/rag-capacity-reranker-deadline-2026-11-17.csv`：追加驗證摘要表。
+- `specs/005-retrieval-evaluation/rag-capacity-request-deadline-raw-2026-11-17.json`：request-level deadline 與列表題跳過 law rerank 的重測（20 mixed、Q3／Q5 trace）。
+- `specs/005-retrieval-evaluation/rag-capacity-request-deadline-2026-11-17.csv`：上述重測摘要表。
 - `specs/005-retrieval-evaluation/rag-capacity-burst-raw-2026-11-17.json`：第二輪 20 mixed／40 non-LLM 原始結果。
 - `specs/005-retrieval-evaluation/rag-capacity-second-review-2026-11-17.md`：第二輪評估與共用 KV 池量測。
 - `specs/005-retrieval-evaluation/rag-capacity-context-poc.csv`：`-c 24576` 與 context 壓測。
