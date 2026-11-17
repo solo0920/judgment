@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "host": "MBP",
+    "server": "llama-server",
+    "port": 11440,
+    "model": "gemma3-4b.gguf",
+    "command": "--ctx-size 24576 --parallel 4 --jinja -ngl 99",
+    "ollama_resident_during_first_probe": true,
+    "ollama_stopped_before_second_probe": true
+  },
+  "server_props": {
+    "total_slots": 4,
+    "slot_ctx": 6144,
+    "note": "24576 / 4 = 6144 tokens per slot"
+  },
+  "four_concurrent_5749_token_requests": {
+    "all_http_200": true,
+    "prompt_tokens": 5749,
+    "finish_reason": ["stop", "stop", "stop", "stop"],
+    "completion_tokens": [146, 170, 146, 146],
+    "total_tokens": [5895, 5919, 5895, 5895],
+    "elapsed_ms": [22066.6, 22506.1, 21738.1, 21943.1],
+    "note": "Each request fits within the 6144-token slot; no context exceeded."
+  },
+  "twenty_mixed_attempt": {
+    "completed": false,
+    "stream20_statuses": {"operational": 10, "retrieval_only": 10},
+    "llm_provider_errors": "all 10 LLM requests got ConnectError: [Errno 61] Connection refused on http://127.0.0.1:11440",
+    "note": "The standalone test server exited between the 4x5.7k probe and the 20 mixed run. Its log has no explicit error after the last completed task, so the exit cause is unverified. Do not claim a 20 mixed MBP capacity result."
+  },
+  "ollama_fallback_fix": {
+    "observed": "Ollama app and a child llama-server were present during testing (11434/55584).",
+    "action": "Stopped Ollama before the second probe.",
+    "code_fix": "runtime_settings no longer auto-adds an active Ollama host as the LLM fallback when the primary is OpenAI-compatible; explicit LLM_FALLBACK_* is required.",
+    "test": "tests/test_ollama_hosts.py updated to assert empty auto fallback."
+  }
+}

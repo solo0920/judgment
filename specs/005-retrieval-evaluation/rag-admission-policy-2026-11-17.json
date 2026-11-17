@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "app": "MBP FastAPI loopback, single uvicorn worker",
+    "rerank_config": "20x500 (provisional B)",
+    "note": "40 mixed (20 LLM + 20 non-LLM) per policy. first_partial only counts admitted requests; degraded_notify counts immediate busy responses."
+  },
+  "policies": [
+    {
+      "policy_concurrency/queue/initial_service": "12/24/2",
+      "n": 40,
+      "first_partial_ms": {
+        "n": 28,
+        "p50": 3237.8,
+        "p95": 23903.0,
+        "max": 24067.5
+      },
+      "degraded_notify_ms": {
+        "n": 4,
+        "p50": 161.7,
+        "p95": 171.7,
+        "max": 171.7
+      },
+      "queued": 24,
+      "statuses": {
+        "degraded": 4,
+        "operational": 22,
+        "retrieval_only": 14
+      },
+      "errors": 0
+    },
+    {
+      "policy_concurrency/queue/initial_service": "6/18/2",
+      "n": 40,
+      "first_partial_ms": {
+        "n": 13,
+        "p50": 1801.9,
+        "p95": 6977.8,
+        "max": 7223.6
+      },
+      "degraded_notify_ms": {
+        "n": 22,
+        "p50": 75.0,
+        "p95": 85.3,
+        "max": 97.5
+      },
+      "queued": 12,
+      "statuses": {
+        "degraded": 22,
+        "operational": 13,
+        "retrieval_only": 5
+      },
+      "errors": 0
+    },
+    {
+      "policy_concurrency/queue/initial_service": "6/0/8",
+      "n": 40,
+      "first_partial_ms": {
+        "n": 5,
+        "p50": 690.7,
+        "p95": 1101.0,
+        "max": 1101.0
+      },
+      "degraded_notify_ms": {
+        "n": 34,
+        "p50": 72.9,
+        "p95": 91.5,
+        "max": 93.2
+      },
+      "queued": 0,
+      "statuses": {
+        "degraded": 34,
+        "operational": 5,
+        "retrieval_only": 1
+      },
+      "errors": 0
+    },
+    {
+      "policy_concurrency/queue/initial_service": "12/0/8",
+      "n": 40,
+      "first_partial_ms": {
+        "n": 8,
+        "p50": 1654.6,
+        "p95": 1708.1,
+        "max": 1708.1
+      },
+      "degraded_notify_ms": {
+        "n": 28,
+        "p50": 127.7,
+        "p95": 144.3,
+        "max": 144.7
+      },
+      "queued": 0,
+      "statuses": {
+        "degraded": 28,
+        "operational": 8,
+        "retrieval_only": 4
+      },
+      "errors": 0
+    },
+    {
+      "policy_concurrency/queue/initial_service": "12/8/2",
+      "n": 40,
+      "first_partial_ms": {
+        "n": 15,
+        "p50": 2211.8,
+        "p95": 3959.4,
+        "max": 4057.9
+      },
+      "degraded_notify_ms": {
+        "n": 20,
+        "p50": 140.0,
+        "p95": 151.7,
+        "max": 151.7
+      },
+      "queued": 8,
+      "statuses": {
+        "degraded": 20,
+        "operational": 11,
+        "retrieval_only": 9
+      },
+      "errors": 0
+    }
+  ]
+}

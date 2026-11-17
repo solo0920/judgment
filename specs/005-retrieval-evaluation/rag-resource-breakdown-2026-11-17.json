@@ -1,0 +1,274 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "app": "MBP FastAPI loopback, single uvicorn worker",
+    "default_executor_workers": "min(32, cpu+4) = 14 on 10-core MBP",
+    "rerank_config": "20x500 (provisional B)",
+    "note": "No admission gate in this 40-run; this is the pre-admission baseline."
+  },
+  "span_breakdown": {
+    "20_mixed": {
+      "rag.answer_question": {
+        "n": 20,
+        "p50": 6681.9,
+        "p95": 37045.05,
+        "max": 38866.05
+      },
+      "rag.coverage": {
+        "n": 20,
+        "p50": 0.04,
+        "p95": 0.05,
+        "max": 0.05
+      },
+      "rag.law_retrieval": {
+        "n": 20,
+        "p50": 714.32,
+        "p95": 1182.57,
+        "max": 1184.02
+      },
+      "rag.embed_query": {
+        "n": 15,
+        "p50": 223.56,
+        "p95": 253.45,
+        "max": 256.07
+      },
+      "rag.query_filter": {
+        "n": 5,
+        "p50": 344.23,
+        "p95": 403.09,
+        "max": 403.09
+      },
+      "rag.fetch_documents": {
+        "n": 15,
+        "p50": 42.83,
+        "p95": 133.13,
+        "max": 159.72
+      },
+      "rag.context": {
+        "n": 15,
+        "p50": 8.9,
+        "p95": 22.06,
+        "max": 79.3
+      },
+      "rag.law_rerank": {
+        "n": 10,
+        "p50": 180.7,
+        "p95": 536.98,
+        "max": 536.98
+      },
+      "rag.qdrant_search": {
+        "n": 10,
+        "p50": 142.64,
+        "p95": 287.71,
+        "max": 287.71
+      },
+      "rag.rerank": {
+        "n": 10,
+        "p50": 829.96,
+        "p95": 1384.55,
+        "max": 1384.55
+      },
+      "rag.llm_request": {
+        "n": 34,
+        "p50": 1624.86,
+        "p95": 17139.18,
+        "max": 24997.56
+      },
+      "_record_duration_ms": {
+        "n": 20,
+        "p50": 6747,
+        "p95": 37115,
+        "max": 38919
+      },
+      "_count": 20
+    },
+    "40_mixed": {
+      "rag.answer_question": {
+        "n": 40,
+        "p50": 2448.92,
+        "p95": 48186.75,
+        "max": 55332.06
+      },
+      "rag.coverage": {
+        "n": 40,
+        "p50": 0.04,
+        "p95": 0.08,
+        "max": 0.15
+      },
+      "rag.law_retrieval": {
+        "n": 40,
+        "p50": 167.09,
+        "p95": 1002.65,
+        "max": 1168.17
+      },
+      "rag.embed_query": {
+        "n": 30,
+        "p50": 111.56,
+        "p95": 199.52,
+        "max": 201.25
+      },
+      "rag.query_filter": {
+        "n": 10,
+        "p50": 238.41,
+        "p95": 638.73,
+        "max": 638.73
+      },
+      "rag.fetch_documents": {
+        "n": 30,
+        "p50": 7.53,
+        "p95": 161.03,
+        "max": 181.32
+      },
+      "rag.context": {
+        "n": 30,
+        "p50": 10.59,
+        "p95": 22.22,
+        "max": 22.43
+      },
+      "rag.law_rerank": {
+        "n": 20,
+        "p50": 185.92,
+        "p95": 1618.55,
+        "max": 1841.5
+      },
+      "rag.qdrant_search": {
+        "n": 20,
+        "p50": 80.56,
+        "p95": 482.0,
+        "max": 601.18
+      },
+      "rag.rerank": {
+        "n": 20,
+        "p50": 627.78,
+        "p95": 1436.9,
+        "max": 1794.32
+      },
+      "rag.llm_request": {
+        "n": 59,
+        "p50": 1871.82,
+        "p95": 26563.92,
+        "max": 34125.4
+      },
+      "_record_duration_ms": {
+        "n": 40,
+        "p50": 2457,
+        "p95": 48219,
+        "max": 55401
+      },
+      "_count": 40
+    }
+  },
+  "queue_gap_evidence": {
+    "note": "Q3 performance records start only after a worker thread picks up the request; client-observed first_partial includes executor queue time.",
+    "q3_performance_records": [
+      {
+        "performance_id": 14147,
+        "duration_ms": 2091
+      },
+      {
+        "performance_id": 14148,
+        "duration_ms": 2043
+      },
+      {
+        "performance_id": 14149,
+        "duration_ms": 2175
+      },
+      {
+        "performance_id": 14150,
+        "duration_ms": 2343
+      },
+      {
+        "performance_id": 14153,
+        "duration_ms": 594
+      },
+      {
+        "performance_id": 14158,
+        "duration_ms": 560
+      },
+      {
+        "performance_id": 14161,
+        "duration_ms": 564
+      },
+      {
+        "performance_id": 14164,
+        "duration_ms": 683
+      },
+      {
+        "performance_id": 14165,
+        "duration_ms": 594
+      },
+      {
+        "performance_id": 14169,
+        "duration_ms": 625
+      }
+    ],
+    "q3_client_probe": [
+      {
+        "tag": "Q3-12",
+        "first_partial_ms": 2409.0,
+        "result_ms": 2411.0
+      },
+      {
+        "tag": "Q3-16",
+        "first_partial_ms": 2410.3,
+        "result_ms": 2411.5
+      },
+      {
+        "tag": "Q3-14",
+        "first_partial_ms": 2417.2,
+        "result_ms": 2419.1
+      },
+      {
+        "tag": "Q3-18",
+        "first_partial_ms": 2446.9,
+        "result_ms": 2448.2
+      },
+      {
+        "tag": "Q3-10",
+        "first_partial_ms": 19397.5,
+        "result_ms": 19402.5
+      },
+      {
+        "tag": "Q3-30",
+        "first_partial_ms": 27408.4,
+        "result_ms": 27414.9
+      },
+      {
+        "tag": "Q3-32",
+        "first_partial_ms": 27985.5,
+        "result_ms": 28000.2
+      },
+      {
+        "tag": "Q3-34",
+        "first_partial_ms": 28681.7,
+        "result_ms": 28687.7
+      },
+      {
+        "tag": "Q3-36",
+        "first_partial_ms": 28774.5,
+        "result_ms": 28778.6
+      },
+      {
+        "tag": "Q3-38",
+        "first_partial_ms": 29322.6,
+        "result_ms": 29323.9
+      }
+    ]
+  },
+  "non_llm_40_health_probe": {
+    "elapsed_s": 5.4,
+    "health_ms": {
+      "n": 24,
+      "p50": 113.7,
+      "p95": 275.6,
+      "max": 358.3
+    },
+    "first_partial_ms": {
+      "n": 20,
+      "p50": 4595.8,
+      "p95": 5366.7,
+      "max": 5419.2
+    },
+    "note": "40 non-LLM stream requests without LLM occupancy; default executor still queues, but total elapsed is much shorter."
+  }
+}

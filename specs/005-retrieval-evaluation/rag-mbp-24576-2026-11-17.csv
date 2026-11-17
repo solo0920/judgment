@@ -1,0 +1,6 @@
+scenario,metric,value,notes
+MBP -c 24576 -np 4,slot_ctx,6144,24576 / 4
+MBP 4x5749-token,http_200,4/4,all finish_reason=stop
+MBP 4x5749-token,total_tokens,"5895,5919,5895,5895",fits 6144 per slot
+MBP 4x5749-token,elapsed_ms,"22066.6,22506.1,21738.1,21943.1",Ollama stopped
+MBP 20 mixed,completed,false,test server exited before the run; no capacity claim

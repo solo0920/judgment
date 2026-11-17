@@ -1,0 +1,6 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+40 mixed admission 12/8/2,first_partial_ms,15,2211.8,3959.4,4057.9,first_partial only admitted; degraded notify immediate
+40 mixed admission 12/8/2,degraded_notify_ms,20,140.0,151.7,151.7,first_partial only admitted; degraded notify immediate
+40 mixed admission 12/8/2,result_ms,40,415.8,29974.9,39941.7,first_partial only admitted; degraded notify immediate
+40 mixed admission 12/8/2,statuses,40,,,,"{""degraded"": 20, ""operational"": 11, ""retrieval_only"": 9}"
+40 mixed admission 12/8/2,errors,40,,,,0

@@ -1,5 +1,7 @@
 # RAG 容量第四輪評估：rerank A/B、先送向量結果與 readiness
 
+> 後續評估（第五輪）：`specs/005-retrieval-evaluation/rag-capacity-fifth-review-2026-11-17.md`。
+
 - 日期：2026-11-17
 - 目的：回應第四輪審查，先做 rerank 候選數／每段字數 A/B，再實作「先送向量結果、rerank 後取代」與 `rerank_degraded`，最後補上暖機完成前的 readiness
 - 範圍：只改 RAG rerank 參數、串流 partial、rerank 降級標示與健康檢查；不改 registry、不啟用 expansion、不改 Qdrant／embedding 模型、不進行法律審查、不 push
