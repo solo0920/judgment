@@ -5149,6 +5149,14 @@ button.chip:hover {
   white-space: pre-wrap;
 }
 
+/* RAG question input and answer body share the same 14px reading size. */
+.rag-page .ask-input,
+.rag-page .rag-followup-input,
+.rag-page .answer-text,
+.rag-page .law-answer-block .answer-text {
+  font-size: 14px;
+}
+
 .answer-text.is-streaming::after {
   content: "▍";
   margin-left: 1px;
