@@ -1148,7 +1148,7 @@ def test_answer_question_reranks_candidates_and_traces_provider(
         def __init__(self, *args, **kwargs):
             pass
 
-        def rerank(self, query, documents, *, top_n):
+        def rerank(self, query, documents, *, top_n, deadline=None):
             assert len(documents) == 3
             return RerankOutcome(
                 status="ok",
@@ -1228,7 +1228,7 @@ def test_answer_question_keeps_vector_order_when_reranker_degrades(
         def __init__(self, *args, **kwargs):
             pass
 
-        def rerank(self, query, documents, *, top_n):
+        def rerank(self, query, documents, *, top_n, deadline=None):
             return RerankOutcome(
                 status="degraded",
                 model="bge-reranker-v2-m3",
@@ -2772,6 +2772,14 @@ def test_answer_question_drops_incidental_law_sources_for_judgment_list(
         embedding_url="http://ollama.test",
         llm_url="http://ollama.test",
         llm_model="test-model",
+        rag_rerank_enabled=True,
+        rerank_url="http://reranker.test",
+    )
+    monkeypatch.setattr(
+        "judgment.rag._rerank_law_sources",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("judgment list must not rerank law sources")
+        ),
     )
     monkeypatch.setattr(
         "judgment.rag.law_sources_for_question",

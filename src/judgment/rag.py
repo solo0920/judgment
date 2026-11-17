@@ -336,6 +336,7 @@ def _rerank_hits(
     question: str,
     hits: Sequence[Dict[str, Any]],
     documents: Dict[str, JudgmentDocument],
+    deadline: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], RerankOutcome]:
     """Rerank candidate hits, falling back to the original vector order."""
 
@@ -387,6 +388,7 @@ def _rerank_hits(
         question,
         documents_for_rerank,
         top_n=settings.rag_top_k,
+        deadline=deadline,
     )
     if outcome.status != "ok":
         return fallback_hits, outcome
@@ -434,6 +436,7 @@ def _rerank_law_sources(
     question: str,
     law_sources: Sequence[Dict[str, Any]],
     article_limit: int,
+    deadline: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], RerankOutcome]:
     """Rerank law and order article candidates in separate groups.
 
@@ -530,6 +533,7 @@ def _rerank_law_sources(
             question,
             documents,
             top_n=len(documents),
+            deadline=deadline,
         )
         statuses.append(outcome.status)
         merged_candidates += outcome.candidate_count
@@ -2599,6 +2603,7 @@ def answer_question(
         settings.rag_rerank_enabled
         and (settings.rerank_url or settings.rerank_fallback_url)
         and not structured_law_question
+        and not judgment_list_hint
     )
     law_candidate_limit = (
         max(
@@ -2710,6 +2715,14 @@ def answer_question(
             law_sources = []
             law_stats = {}
 
+    rerank_deadline: Optional[float] = None
+    if settings.rag_rerank_enabled and (
+        settings.rerank_url or settings.rerank_fallback_url
+    ):
+        rerank_deadline = time.perf_counter() + max(
+            0.1, float(settings.rerank_total_timeout_seconds)
+        )
+
     if rerank_law_articles and law_sources:
         try:
             with trace_segment(
@@ -2724,6 +2737,7 @@ def answer_question(
                         for source in law_sources
                     ),
                     "article_limit": law_article_limit,
+                    "deadline_s": settings.rerank_total_timeout_seconds,
                 },
             ) as law_rerank_segment:
                 law_sources, law_rerank_outcome = _rerank_law_sources(
@@ -2731,6 +2745,7 @@ def answer_question(
                     question=question,
                     law_sources=law_sources,
                     article_limit=law_article_limit,
+                    deadline=rerank_deadline,
                 )
                 law_rerank = law_rerank_outcome.to_dict()
                 if law_rerank_segment is not None:
@@ -3304,6 +3319,7 @@ def answer_question(
                     question=question,
                     hits=hits,
                     documents=documents,
+                    deadline=rerank_deadline,
                 )
                 if rerank_segment is not None:
                     top_scores = [

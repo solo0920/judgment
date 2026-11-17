@@ -215,6 +215,32 @@ def test_reranker_total_timeout_caps_primary_plus_fallback(monkeypatch) -> None:
     assert any("deadline" in error for error in outcome.errors)
 
 
+def test_reranker_respects_external_request_deadline(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, *, json, timeout):
+        calls.append(url)
+        return FakeResponse({"results": [{"index": 0, "score": 1.0}]})
+
+    monkeypatch.setattr("judgment.rerank.httpx.post", fake_post)
+    client = RerankerClient(
+        ["http://x570:11435", "http://127.0.0.1:11435"],
+        model="bge-reranker-v2-m3",
+        timeout=3.0,
+        total_timeout=4.0,
+    )
+    outcome = client.rerank(
+        "問題",
+        ["A"],
+        top_n=1,
+        deadline=time.perf_counter() - 1.0,
+    )
+
+    assert calls == []
+    assert outcome.status == "degraded"
+    assert "deadline" in outcome.errors[0]
+
+
 def test_rerank_heartbeat_sends_one_small_request(monkeypatch) -> None:
     calls = []
 
@@ -361,7 +387,7 @@ def test_law_rerank_orders_articles_per_source(monkeypatch) -> None:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def rerank(self, query, documents, *, top_n):
+        def rerank(self, query, documents, *, top_n, deadline=None):
             return RerankOutcome(
                 status="ok",
                 results=[
@@ -411,7 +437,7 @@ def test_law_rerank_separates_law_and_order_groups(monkeypatch) -> None:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def rerank(self, query, documents, *, top_n):
+        def rerank(self, query, documents, *, top_n, deadline=None):
             calls.append(list(documents))
             return RerankOutcome(
                 status="ok",
@@ -477,7 +503,7 @@ def test_law_rerank_keeps_order_group_when_law_group_degrades(
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def rerank(self, query, documents, *, top_n):
+        def rerank(self, query, documents, *, top_n, deadline=None):
             if "命令" in documents[0]:
                 return RerankOutcome(
                     status="degraded",
@@ -540,7 +566,7 @@ def test_law_rerank_keeps_explicit_article_reference(monkeypatch) -> None:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def rerank(self, query, documents, *, top_n):
+        def rerank(self, query, documents, *, top_n, deadline=None):
             return RerankOutcome(
                 status="ok",
                 results=[

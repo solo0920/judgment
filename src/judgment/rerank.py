@@ -163,6 +163,7 @@ class RerankerClient:
         documents: Sequence[str],
         *,
         top_n: int,
+        deadline: Optional[float] = None,
     ) -> RerankOutcome:
         candidate_count = len(documents)
         if not documents:
@@ -180,17 +181,16 @@ class RerankerClient:
 
         errors: List[str] = []
         started = time.perf_counter()
-        deadline = started + self.total_timeout
+        deadline_at = started + self.total_timeout
+        if deadline is not None:
+            deadline_at = min(deadline_at, float(deadline))
         for position, base_url in enumerate(self.urls):
             endpoint = _endpoint(base_url)
             if not endpoint:
                 continue
-            remaining = deadline - time.perf_counter()
+            remaining = deadline_at - time.perf_counter()
             if remaining <= 0.05:
-                errors.append(
-                    f"{endpoint}: total rerank deadline "
-                    f"({self.total_timeout:.2f}s) exhausted"
-                )
+                errors.append(f"{endpoint}: rerank deadline exhausted")
                 break
             attempt_timeout = min(self.timeout, remaining)
             try:
