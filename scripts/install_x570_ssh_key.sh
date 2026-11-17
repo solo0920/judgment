@@ -67,6 +67,7 @@ cat <<EOF
 
 公鑰已送到 ${TAILDROP_HOST}。請在 x570 上執行：
 
+  mkdir -p ~/judgment-ssh
   tailscale file get ~/judgment-ssh
   mkdir -p ~/.ssh
   chmod 700 ~/.ssh
