@@ -5,7 +5,7 @@ import logging
 import math
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 from sqlalchemy import func, or_, select
@@ -1848,6 +1848,24 @@ def _guard_prompt_tokens(
             f"{actual_tokens} > {ctx_tokens} "
             f"(provider={provider.role}, api={provider.api})"
         )
+    if ctx_tokens and actual_tokens >= int(ctx_tokens * 0.98):
+        raise RuntimeError(
+            "LLM prompt is too close to context window: "
+            f"{actual_tokens} >= 98% of {ctx_tokens} "
+            f"(provider={provider.role}, api={provider.api})"
+        )
+    estimated = budget_meta.get("prompt_tokens_estimated")
+    try:
+        estimated_tokens = int(estimated)
+    except (TypeError, ValueError):
+        estimated_tokens = 0
+    if estimated_tokens and actual_tokens:
+        ratio = estimated_tokens / actual_tokens
+        budget_meta["prompt_token_estimate_ratio"] = round(ratio, 4)
+        budget_meta["prompt_tokens_suspected_truncation"] = ratio > 1.25
+    else:
+        budget_meta["prompt_token_estimate_ratio"] = None
+        budget_meta["prompt_tokens_suspected_truncation"] = False
 
 
 def _build_llm_prompt(
@@ -2020,6 +2038,12 @@ def generate_answer_with_model(
                         "context_budget_tokens"
                     ],
                     "contexts_dropped": budget_meta["contexts_dropped"],
+                    "prompt_token_estimate_ratio": budget_meta.get(
+                        "prompt_token_estimate_ratio"
+                    ),
+                    "prompt_tokens_suspected_truncation": budget_meta.get(
+                        "prompt_tokens_suspected_truncation"
+                    ),
                     "context_text_truncated": budget_meta[
                         "text_truncated"
                     ],
@@ -2058,6 +2082,14 @@ def generate_answer_with_model(
                                 "contexts_dropped": budget_meta[
                                     "contexts_dropped"
                                 ],
+                                "prompt_token_estimate_ratio": budget_meta.get(
+                                    "prompt_token_estimate_ratio"
+                                ),
+                                "prompt_tokens_suspected_truncation": (
+                                    budget_meta.get(
+                                        "prompt_tokens_suspected_truncation"
+                                    )
+                                ),
                                 "output_tokens": usage["output_tokens"],
                                 "ttft_ms": None,
                                 "total_duration_ms": _ns_to_ms(
@@ -2244,11 +2276,18 @@ def _generate_answer(
         "citation_count": count,
     },
 )
-def _valid_citation_markers(answer: str, count: int) -> bool:
+def _valid_citation_markers(
+    answer: str,
+    count: int,
+    *,
+    allowed_indexes: Optional[Set[int]] = None,
+) -> bool:
     markers: List[int] = []
     for group in _CITATION_RE.findall(answer):
         markers.extend(int(value) for value in _CITATION_NUMBER_RE.findall(group))
     if markers:
+        if allowed_indexes is not None:
+            return all(value in allowed_indexes for value in markers)
         return all(1 <= value <= count for value in markers)
     # A grounded refusal is acceptable when the retrieved excerpts do not
     # support an answer. It must not invent case numbers or citations.
@@ -3401,6 +3440,42 @@ def answer_question(
         and citations
         and not law_first
     )
+    prompt_contexts = contexts
+    prompt_context_meta: Dict[str, Any] = {}
+    allowed_indexes: Optional[Set[int]] = None
+    if llm_configured and not structured_judgment_list:
+        prompt_contexts, prompt_context_meta = (
+            _fit_contexts_to_prompt_budget(
+                settings=settings,
+                question=question,
+                contexts=contexts,
+            )
+        )
+        allowed_indexes = {
+            int(context.get("index"))
+            for context in prompt_contexts
+            if context.get("index") is not None
+        }
+        for citation in citations:
+            citation["used_for_generation"] = (
+                int(citation.get("index") or 0) in allowed_indexes
+            )
+        for source in law_sources:
+            source["used_for_generation"] = (
+                int(source.get("index") or 0) in allowed_indexes
+            )
+        retrieval["prompt_context"] = {
+            **prompt_context_meta,
+            "used_indexes": sorted(allowed_indexes),
+            "dropped_indexes": sorted(
+                {
+                    int(citation.get("index") or 0)
+                    for citation in citations
+                    if int(citation.get("index") or 0)
+                    not in allowed_indexes
+                }
+            ),
+        }
     if on_partial is not None and (llm_configured or structured_judgment_list):
         emit_partial(
             {
@@ -3459,11 +3534,15 @@ def answer_question(
                 candidate = _generate_answer(
                     settings=settings,
                     question=question,
-                    contexts=contexts,
+                    contexts=prompt_contexts,
                     strict=strict,
                     on_token=on_token,
                 )
-                if not _valid_citation_markers(candidate, citation_total):
+                if not _valid_citation_markers(
+                    candidate,
+                    citation_total,
+                    allowed_indexes=allowed_indexes,
+                ):
                     raise RuntimeError("LLM 回答缺少有效引用標記")
                 answer = candidate
                 break

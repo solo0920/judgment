@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
@@ -110,6 +111,7 @@ from ..ollama_hosts import (
     select_model,
     update_host,
 )
+from ..llm_backends import fetch_context_window
 from ..rag import answer_question
 from ..rerank import rerank_service_test
 from ..vector_store import QdrantStore
@@ -682,6 +684,48 @@ def create_app(
             except Exception:
                 logger.warning("question bank startup revalidation failed", exc_info=True)
         warm_task: Optional[asyncio.Task] = None
+        try:
+            server_ctx = await asyncio.to_thread(
+                fetch_context_window,
+                settings.llm_url,
+                settings.llm_api,
+                timeout=0.75,
+            )
+            configured_ctx = int(settings.llm_num_ctx or 0)
+            if server_ctx:
+                effective_ctx = (
+                    min(configured_ctx, int(server_ctx))
+                    if configured_ctx
+                    else int(server_ctx)
+                )
+                app.state.llm_context = {
+                    "server_tokens": int(server_ctx),
+                    "configured_tokens": configured_ctx,
+                    "effective_tokens": effective_ctx,
+                    "source": "llama-server:/props",
+                }
+                if effective_ctx != configured_ctx:
+                    logger.warning(
+                        "LLM context mismatch: configured=%s server=%s; "
+                        "using effective=%s",
+                        configured_ctx,
+                        server_ctx,
+                        effective_ctx,
+                    )
+                probed_settings = replace(
+                    settings, llm_num_ctx=effective_ctx
+                )
+                app.state.settings = probed_settings
+                app.state.benchmark_manager.settings = probed_settings
+            else:
+                app.state.llm_context = {
+                    "server_tokens": None,
+                    "configured_tokens": configured_ctx,
+                    "effective_tokens": configured_ctx,
+                    "source": "unavailable",
+                }
+        except Exception:
+            logger.warning("LLM context probe failed", exc_info=True)
 
         async def warm_processing_snapshots() -> None:
             while True:
@@ -732,6 +776,7 @@ def create_app(
     app.state.data_dir = resolved_data_dir
     app.state.session_factory = session_factory
     app.state.engine = None
+    app.state.llm_context = None
     app.state.processing_manager = ProcessingManager(
         settings=settings,
         session_factory=session_factory,

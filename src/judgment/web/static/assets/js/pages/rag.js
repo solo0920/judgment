@@ -436,6 +436,12 @@ function judgmentCard(judgment, index) {
     .filter(Boolean)
     .map((value) => `<span>${escapeHtml(value)}</span>`)
     .join("");
+  const promptUsage =
+    judgment.used_for_generation === false
+      ? "<span>僅供參考（未進入生成 prompt）</span>"
+      : judgment.used_for_generation === true
+        ? "<span>用於生成答案</span>"
+        : "";
   const lawCitations = (Array.isArray(judgment.law_citations)
     ? judgment.law_citations
     : []
@@ -472,7 +478,7 @@ function judgmentCard(judgment, index) {
     <div class="citation-body">
       <div class="citation-head"${headAttributes}>
         <h4 class="citation-name">${escapeHtml(judgment.jid || "未知案號")}</h4>
-        <div class="citation-meta">${meta || "<span>判決 metadata</span>"}</div>
+        <div class="citation-meta">${meta || "<span>判決 metadata</span>"}${promptUsage}</div>
         ${
           judgment.title
             ? `<div class="citation-meta"><span>案由：${escapeHtml(judgment.title)}</span></div>`
@@ -908,10 +914,20 @@ function renderAnswerBody(payload) {
   const hasFramework = frameworkRows.length > 0;
   const showLawAnswer = Boolean(lawAnswer) && !structuredAnswer && !hasFramework;
 
+  const usedJudgmentCount = judgments.filter(
+    (judgment) => judgment.used_for_generation === true,
+  ).length;
+  const hasGenerationUsage = judgments.some(
+    (judgment) => judgment.used_for_generation !== undefined,
+  );
   const judgmentSection = judgments.length
     ? `<div class="answer-divider"></div>
       <div class="answer-section-label">
-        <span>引用判決 · ${judgments.length} 筆</span>
+        <span>引用判決 · ${judgments.length} 筆${
+          hasGenerationUsage
+            ? `（${usedJudgmentCount} 筆用於生成）`
+            : ""
+        }</span>
         <span>vector retrieval · [編號] 對應回答引用</span>
       </div>
       <div class="citation-list">${judgments

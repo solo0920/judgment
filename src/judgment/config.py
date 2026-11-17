@@ -95,7 +95,7 @@ class Settings:
     rag_legal_expansion_terms: int = 4
     rag_scope_probe_max_documents: int = 50_000
     rag_scope_probe_max_hits: int = 5_000
-    rag_scope_probe_timeout_ms: int = 10_000
+    rag_scope_probe_timeout_ms: int = 3_000
     rag_rerank_enabled: bool = False
     rag_rerank_candidates: int = 30
     rag_law_first_judgment_limit: int = 1
@@ -308,7 +308,7 @@ class Settings:
                 "RAG_SCOPE_PROBE_MAX_HITS", 5_000
             ),
             rag_scope_probe_timeout_ms=_env_int(
-                "RAG_SCOPE_PROBE_TIMEOUT_MS", 10_000
+                "RAG_SCOPE_PROBE_TIMEOUT_MS", 3_000
             ),
             rag_rerank_enabled=_env_bool("RAG_RERANK_ENABLED", False),
             rag_rerank_candidates=_env_int("RAG_RERANK_CANDIDATES", 30),

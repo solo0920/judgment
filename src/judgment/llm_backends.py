@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+import httpx
+
 OLLAMA_API = "ollama"
 OPENAI_API = "openai"
 
@@ -180,6 +182,43 @@ class ChatProvider:
     base_url: str
     api: str
     model: str
+
+
+def fetch_context_window(
+    base_url: str,
+    api: str | None = OPENAI_API,
+    *,
+    timeout: float = 2.0,
+) -> Optional[int]:
+    """Read llama-server's actual chat context from ``/props``.
+
+    llama-server exposes ``default_generation_settings.n_ctx``.  The value is
+    authoritative because ``--ctx-size`` is a launch flag, not a request
+    parameter.  Return ``None`` when the endpoint is unavailable or the
+    server does not expose the field.
+    """
+
+    if not str(base_url or "").strip() or not is_openai_api(api):
+        return None
+    url = f"{str(base_url).rstrip('/')}/props"
+    try:
+        response = httpx.get(url, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return None
+    candidates = [
+        (payload.get("default_generation_settings") or {}).get("n_ctx"),
+        payload.get("n_ctx"),
+    ]
+    for value in candidates:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
+    return None
 
 
 def chat_providers(settings, model: str | None = None) -> List[ChatProvider]:

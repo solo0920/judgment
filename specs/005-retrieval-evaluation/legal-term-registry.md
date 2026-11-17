@@ -56,7 +56,7 @@ terms_proxy_supported 72（sample df >= 20）
 - 命中：回傳 `keyword_list` 精確清單，`retrieval.scope_probe` 記錄 hit terms；非 active 詞會加註「尚未完成法律審閱」。
 - 零命中：不拒答；改用 semantic 檢索，並在 notice 揭露「判決內文未出現『該詞』字樣，以下為語意相近結果」。
 - Registry 內 candidate 零命中時額外標示「仍是 candidate，尚未啟用精確拒答」。
-- 有法院或年份單獨條件即可 probe；若候選集超過 `RAG_SCOPE_PROBE_MAX_DOCUMENTS`（預設 50,000）、逾時 `RAG_SCOPE_PROBE_TIMEOUT_MS`（10,000ms）或單詞命中超過 `RAG_SCOPE_PROBE_MAX_HITS`（5,000），會跳過精確清單並揭露。
+- 有法院或年份單獨條件即可 probe；若候選集超過 `RAG_SCOPE_PROBE_MAX_DOCUMENTS`（預設 50,000）、逾時 `RAG_SCOPE_PROBE_TIMEOUT_MS`（3,000ms）或單詞命中超過 `RAG_SCOPE_PROBE_MAX_HITS`（5,000），會跳過精確清單並揭露。
 - 零命中／跳過模式不呼叫 LLM，只顯示語意檢索清單與揭露文字；命中很多時顯示總數加前 20 筆。
 - 目前 parser 已解析出 topic（例如 `詐欺`、`洗錢`）時不重複 probe，保留原有 structured list。
 - 測試：`tests/test_legal_term_probe.py`、`tests/test_rag.py` 的 external scope 零命中／命中案例。

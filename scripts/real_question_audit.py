@@ -22,6 +22,7 @@ import argparse
 import csv
 import json
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -70,11 +71,14 @@ def _classify(
     elif mode == "vector":
         tags.append("semantic")
     scope_probe = retrieval.get("scope_probe") or {}
+    if scope_probe.get("status") is not None:
+        tags.append("scope_probe_attempted")
     if scope_probe.get("status") not in (None, "ok"):
         tags.append(f"scope_probe_{scope_probe['status']}")
-    if scope_probe.get("zero_terms"):
+        tags.append("scope_probe_skipped")
+    if scope_probe.get("status") == "ok" and scope_probe.get("zero_terms"):
         tags.append("scope_probe_zero")
-    if scope_probe.get("hit_terms"):
+    if scope_probe.get("status") == "ok" and scope_probe.get("hit_terms"):
         tags.append("scope_probe_hit")
     if not judgments and not law_sources:
         tags.append("no_results")
@@ -152,6 +156,15 @@ def main() -> int:
                     "judgments": len(payload.get("judgments") or []),
                     "law_sources": len(payload.get("law_sources") or []),
                     "total_matches": retrieval.get("total_matches"),
+                    "scope_probe_status": (
+                        retrieval.get("scope_probe") or {}
+                    ).get("status"),
+                    "scope_probe_scope_documents": (
+                        retrieval.get("scope_probe") or {}
+                    ).get("scope_document_count"),
+                    "scope_probe_elapsed_ms": (
+                        retrieval.get("scope_probe") or {}
+                    ).get("elapsed_ms"),
                     "scope_probe_zero_terms": [
                         term.get("term")
                         for term in (
@@ -168,6 +181,10 @@ def main() -> int:
                     "notice_preview": str(
                         payload.get("notice") or ""
                     )[:300],
+                    "quality_label": "",
+                    "quality_reason": "",
+                    "reviewer": "",
+                    "reviewed_at": "",
                 }
             )
             print(
@@ -179,10 +196,33 @@ def main() -> int:
     for result in results:
         for tag in result["failure_tags"]:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    probe_results = [
+        result for result in results
+        if result.get("scope_probe_status") is not None
+    ]
+    probe_skipped = [
+        result for result in probe_results
+        if result["scope_probe_status"] != "ok"
+    ]
     report = {
         "version": "real-question-audit-v1",
         "questions": len(results),
         "tag_counts": tag_counts,
+        "scope_probe_stats": {
+            "attempted": len(probe_results),
+            "skipped": len(probe_skipped),
+            "skipped_ratio": (
+                round(len(probe_skipped) / len(probe_results), 4)
+                if probe_results
+                else 0.0
+            ),
+            "status_counts": dict(
+                Counter(
+                    str(result["scope_probe_status"])
+                    for result in probe_results
+                )
+            ),
+        },
         "results": results,
         "note": (
             "Failure tags are heuristic triage, not relevance labels. "
@@ -213,10 +253,17 @@ def main() -> int:
                 "judgments",
                 "law_sources",
                 "total_matches",
+                "scope_probe_status",
+                "scope_probe_scope_documents",
+                "scope_probe_elapsed_ms",
                 "scope_probe_zero_terms",
                 "failure_tags",
                 "answer_preview",
                 "notice_preview",
+                "quality_label",
+                "quality_reason",
+                "reviewer",
+                "reviewed_at",
             ],
             lineterminator="\n",
         )

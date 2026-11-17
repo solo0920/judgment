@@ -231,7 +231,7 @@ cd /Volumes/USB/judgment-backup-20261108
 | `RAG_LEGAL_EXPANSION_TERMS` | `4` | 每次最多附加幾個 expansion terms；越少越保守 |
 | `RAG_SCOPE_PROBE_MAX_DOCUMENTS` | `50000` | 法院／年份精確探測的候選集上限；超過就跳過並揭露 |
 | `RAG_SCOPE_PROBE_MAX_HITS` | `5000` | 單一詞精確命中上限；超過改走語意摘要 |
-| `RAG_SCOPE_PROBE_TIMEOUT_MS` | `10000` | 精確探測的 PostgreSQL statement timeout |
+| `RAG_SCOPE_PROBE_TIMEOUT_MS` | `3000` | 精確探測的 PostgreSQL statement timeout |
 | `RAG_LAW_FIRST_JUDGMENT_LIMIT` | `1` | 法規優先題最多保留幾筆判決作為輔助 context |
 | `LEGAL_ARTICLE_VECTOR_ALIAS` | `legal_articles_current` | 法規／命令條文索引 alias；與判決 alias 完全分開 |
 | `LEGAL_ARTICLE_VECTOR_COLLECTION` | `legal_articles` | alias 不存在時的後備 collection 名稱 |
@@ -1303,6 +1303,7 @@ uv run python scripts/normalization_embedding_audit.py \
 - 規模：429 個術語，10 個 active、419 個 candidate。
 - Candidate 均 `active=false`、`expansion_enabled=false`、`review_status=engineering_pending`，不會改變目前 retrieval。
 - 分類、法規與審核流程見 `specs/005-retrieval-evaluation/legal-term-registry.md`；完整清單見 `specs/005-retrieval-evaluation/financial-terms-candidates.md`。
+- 暫停／延後工作的負責角色與重啟條件見 `specs/005-retrieval-evaluation/paused-work.md`。
 
 術語證據與優先佇列（唯讀，不改 Registry）：
 
@@ -1800,7 +1801,8 @@ ssh -t x570 'sudo bash /tmp/judgment-llama-services.sh'
 - 從 Ollama 取出 `gemma3:4b`、`bge-m3:latest`、`qllama/bge-reranker-v2-m3:latest` 的 GGUF，複製到穩定路徑
 - 建立三個 systemd unit：chat 使用 `--alias gemma3:4b --ctx-size 8192`；embedding 使用 `--embedding --pooling cls`；reranker 使用 `--reranking --pooling rank`；三者皆 `--gpu-layers all`
 - 2026-11-17 修正 chat context：先前 `--ctx-size 4096` 會讓 4,292–4,652 token 的 RAG prompt 回 `HTTP 400 exceed_context_size_error`；預設改為 8192。
-- Token 估算已改為保守值（中文接近一字一 token，不再用 `chars // 3`）；超過 `num_ctx * 0.9 - num_predict` 時會先丟棄／截斷 context。trace 會記錄 `prompt_tokens_estimated` 與 provider 回傳的 `input_tokens`；實際超過 context 會標記失敗並走 fallback，不再靜默接受。
+- Token 估算已改為保守值（中文接近一字一 token，不再用 `chars // 3`）；超過 `num_ctx * 0.9 - num_predict` 時會先丟棄／截斷 context。trace 會記錄 `prompt_tokens_estimated`、`input_tokens`、estimate/actual 比例；實際超過或達到 98% context 會標記失敗並走 fallback，不再靜默接受。
+- 後端啟動時會讀 llama-server `/props` 的 `default_generation_settings.n_ctx`，以 server 實際值作為上限；若與 `LLM_NUM_CTX` 不一致會在啟動日誌 warning。
 - `systemctl enable` 三個 unit，之後 x570 開機自動載入
 - 停用 `judgment-ollama-preload.service`，避免 Ollama 與 llama-server 重複占用 VRAM（`ollama.service` 仍保留）
 - 等 `/health` 就緒後，實際呼叫 chat、embedding（檢查 1024 維）與 rerank 端點

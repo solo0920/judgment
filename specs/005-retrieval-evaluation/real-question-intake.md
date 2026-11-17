@@ -85,6 +85,21 @@ scope_probe_zero    1
 scope_probe_hit     2
 ```
 
+注意：這批問題來自開發期間的 `performance_records`，主題偏重詐欺、違約交割與各法院年份測試；它適合找 bug，**不能當使用者需求分布**。`failure_tags` 是路由／狀態標籤，不是答案品質標籤。
+
+CSV 已預留以下人工欄位：
+
+```text
+quality_label   （答對／部分／答錯／應拒答未拒）
+quality_reason
+reviewer
+reviewed_at
+```
+
+`scope_probe_stats` 會統計 probe attempted／skipped／status；目前第一批只有 1 題 attempted、0 skipped，樣本太小，不能解讀比例。
+
+另跑 5 題 diagnostic（不是使用者需求）：4 題因年份範圍或大型法院 scope >50,000 被 `scope_too_large` 跳過；1 題窄範圍完成 probe 但零命中。5 題 semantic 總延遲 2.6–3.5 秒，沒有出現 10 秒 probe timeout。這證實「只有年份／大型法院」幾乎一定會跳過探測，也正是 postings 要解決的區間。
+
 觀察：
 
 - 多數問題仍是 structured list（法院／年份／案由）與 semantic；真正走 active `keyword_list` 的只有 1 題。

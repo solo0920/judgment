@@ -12,9 +12,34 @@ from judgment.llm_backends import (
     chat_url,
     chat_usage,
     embeddings_url,
+    fetch_context_window,
     normalize_api,
     stream_delta,
 )
+
+
+def test_fetch_context_window_reads_llama_props(monkeypatch) -> None:
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "default_generation_settings": {"n_ctx": 4096},
+                "n_ctx": 2048,
+            }
+
+    calls = []
+
+    def fake_get(url, *, timeout):
+        calls.append((url, timeout))
+        return Response()
+
+    monkeypatch.setattr("judgment.llm_backends.httpx.get", fake_get)
+    assert fetch_context_window("http://x570:11436", OPENAI_API) == 4096
+    assert calls == [("http://x570:11436/props", 2.0)]
+    assert fetch_context_window("", OPENAI_API) is None
+    assert fetch_context_window("http://x570:11436", OLLAMA_API) is None
 
 
 def _settings(**overrides) -> Settings:

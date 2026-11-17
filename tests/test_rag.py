@@ -97,14 +97,35 @@ def test_fit_contexts_truncates_to_prompt_budget() -> None:
 
 
 def test_prompt_token_guard_rejects_actual_overflow() -> None:
+    provider = type(
+        "Provider", (), {"role": "primary", "api": "openai"}
+    )()
     with pytest.raises(RuntimeError, match="exceeded context window"):
         _guard_prompt_tokens(
             usage={"input_tokens": 4300},
             budget_meta={"ctx_tokens": 4096},
-            provider=type(
-                "Provider", (), {"role": "primary", "api": "openai"}
-            )(),
+            provider=provider,
         )
+    with pytest.raises(RuntimeError, match="too close to context window"):
+        _guard_prompt_tokens(
+            usage={"input_tokens": 4020},
+            budget_meta={
+                "ctx_tokens": 4096,
+                "prompt_tokens_estimated": 3900,
+            },
+            provider=provider,
+        )
+    budget_meta = {
+        "ctx_tokens": 4096,
+        "prompt_tokens_estimated": 2600,
+    }
+    _guard_prompt_tokens(
+        usage={"input_tokens": 2000},
+        budget_meta=budget_meta,
+        provider=provider,
+    )
+    assert budget_meta["prompt_token_estimate_ratio"] == 1.3
+    assert budget_meta["prompt_tokens_suspected_truncation"] is True
 
 
 def test_llm_request_payload_sends_numeric_keep_alive_as_number() -> None:
@@ -2416,6 +2437,55 @@ def test_generate_answer_streams_openai_sse(monkeypatch) -> None:
     assert calls[0][0] == "POST"
     assert calls[0][1] == "http://x570:11436/v1/chat/completions"
     assert calls[0][2]["stream"] is True
+
+
+def test_citation_validation_rejects_dropped_context_indexes() -> None:
+    assert _valid_citation_markers(
+        "依判決 [1] 與 [2]。",
+        4,
+        allowed_indexes={1, 2},
+    )
+    assert not _valid_citation_markers(
+        "依判決 [1] 與 [3]。",
+        4,
+        allowed_indexes={1, 2},
+    )
+
+
+def test_answer_marks_contexts_used_for_generation(
+    monkeypatch,
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory, count=3)
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: "測試回答 [1]",
+    )
+    payload = answer_question(
+        session_factory=session_factory,
+        question="借款糾紛的實務見解是什麼？",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+            llm_url="http://llm.test",
+            llm_model="test-model",
+            llm_num_ctx=1024,
+            llm_num_predict=384,
+            rag_top_k=3,
+            rag_max_context_chars=4000,
+        ),
+        store=MultiHitStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert len(payload["judgments"]) == 3
+    assert any(
+        judgment.get("used_for_generation") is False
+        for judgment in payload["judgments"]
+    )
+    prompt_context = payload["retrieval"]["prompt_context"]
+    assert prompt_context["contexts_dropped"] >= 1
+    assert prompt_context["used_indexes"]
 
 
 def test_generate_answer_rejects_actual_context_overflow(

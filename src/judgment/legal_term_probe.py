@@ -231,10 +231,14 @@ class ScopeProbeResult:
 
     @property
     def hit_terms(self) -> Tuple[ScopeTermCount, ...]:
+        if self.skipped:
+            return ()
         return tuple(term for term in self.terms if term.document_count > 0)
 
     @property
     def zero_terms(self) -> Tuple[ScopeTermCount, ...]:
+        if self.skipped:
+            return ()
         return tuple(term for term in self.terms if term.document_count == 0)
 
     @property
