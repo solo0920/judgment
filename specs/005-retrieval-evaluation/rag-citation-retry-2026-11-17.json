@@ -1,0 +1,459 @@
+{
+  "generated_at": "2026-11-17",
+  "changes": [
+    "letter source labels [A]/[B]/[C] with server-side numeric mapping",
+    "source-marker instruction moved to user prompt; strict retry instruction at prompt end",
+    "streaming token mapper converts complete letter markers to numeric before SSE",
+    "strict retry only for CitationValidationError",
+    "HTTP 500/context overflow/timeouts no longer retry or fall back; only connection errors fall back"
+  ],
+  "twenty_seven_question_sync_benchmark": {
+    "llm_questions": 11,
+    "retried_questions": 0,
+    "retry_rate": 0.0,
+    "operational": 27,
+    "retrieval_only": 0,
+    "errors": 0,
+    "rows": [
+      {
+        "id": "dated_banqiao_fraud_2000_2010",
+        "question": "2000年至2010年在板橋地方法院相關詐騙的判決有那些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 2053.3,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 210 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2000–2010；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n板橋地方法院現已改制為臺灣新北地方法院，以下為新北地",
+        "error": null
+      },
+      {
+        "id": "dated_banqiao_fraud_2002_2009",
+        "question": "2002年到2009年板橋地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 559.9,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 180 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2002–2009；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n板橋地方法院現已改制為臺灣新北地方法院，以下為新北地",
+        "error": null
+      },
+      {
+        "id": "year_2005_newtaipei_fraud",
+        "question": "2005年新北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 465.7,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 44 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2005–2005；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] PCDM,94,簡,467,20050221,",
+        "error": null
+      },
+      {
+        "id": "year_2006_newtaipei_fraud",
+        "question": "2006年新北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 436.2,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 62 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2006–2006；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] PCDM,95,簡,381,20060120,",
+        "error": null
+      },
+      {
+        "id": "year_2007_newtaipei_fraud",
+        "question": "2007年新北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 491.0,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 11 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2007–2007；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] PCDM,96,易,20,20070131,1\n臺灣新北地方法院｜2",
+        "error": null
+      },
+      {
+        "id": "year_2008_newtaipei_fraud",
+        "question": "2008年新北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 372.4,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 19 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2008–2008；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] PCDM,96,易,1200,20080104,1\n臺灣新北地方法院",
+        "error": null
+      },
+      {
+        "id": "dated_banqiao_money_2000_2010",
+        "question": "2000年至2010年板橋地院洗錢判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 471.1,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 129 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2000–2010；案由含「洗錢」\n\n板橋地方法院現已改制為臺灣新北地方法院，以下為新北地院的相關判決。\n\n[1] PCDM,92,簡,3584,20020528,1\n臺灣新北地方法院｜200",
+        "error": null
+      },
+      {
+        "id": "no_match_early_years",
+        "question": "1990年至1991年新北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 325.5,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "在法院 臺灣新北地方法院／臺灣板橋地方法院、裁判年份 1990–1991、案由含 詐欺 的範圍內，查無案由符合的判決。系統沒有改用未套用條件的向量結果，因此不會列出無關案件。",
+        "error": null
+      },
+      {
+        "id": "no_match_lianjiang_money",
+        "question": "2000年至2010年連江地院洗錢判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 321.9,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "在法院 福建連江地方法院、裁判年份 2000–2010、案由含 洗錢 的範圍內，查無案由符合的判決。系統沒有改用未套用條件的向量結果，因此不會列出無關案件。",
+        "error": null
+      },
+      {
+        "id": "year_2026_newtaipei_fraud",
+        "question": "2026年新北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 605.7,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 4,945 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2026–2026；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] PCDM,114,審金訴,3336,20",
+        "error": null
+      },
+      {
+        "id": "year_2026_taipei_fraud",
+        "question": "2026年台北地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 616.6,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 1,817 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣臺北地方法院；裁判年份＝2026–2026；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] TPDM,114,審簡,2728,20260102,1\n臺",
+        "error": null
+      },
+      {
+        "id": "year_2026_taichung_fraud",
+        "question": "2026年台中地院詐欺判決有哪些",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 610.6,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 5,622 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣臺中地方法院；裁判年份＝2026–2026；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n[1] TCDM,114,金訴,2626,20260102,1\n臺",
+        "error": null
+      },
+      {
+        "id": "law_bank_staff",
+        "question": "銀行法對從業人員有哪些規定",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 2648.6,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 1492.04,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "銀行法對從業人員有嚴格規定，禁止他們以任何名義向存戶或借款人收受不當利益 [1]。若銀行負責人或職員意圖為自己或第三人謀取不法利益或損害銀行利益，且構成違背職務行為，將處以三年以上至十年以下有期徒刑，並可科罰鍰 [1]。\n\n此外，法人之負責人、代理人或其他職員因執行業務違反銀行法規定，除依規定處罰其行為負責人外，亦可對",
+        "error": null
+      },
+      {
+        "id": "law_securities_insider",
+        "question": "證券交易法對內線交易有哪些規定",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 2971.1,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 2080.93,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "證券交易法第157-1條規定，在特定人士知悉發行股票公司有重大影響其股票價格之消息時，未公開前或公開後十八小時內，不得對該公司之股票或其他具有股權性質之有價證券，自行或以他人名義買入或賣出 [1]。此條款主要針對董事、監察人、經理人、持有公司股份超過百分之十之股東、以及基於職業或控制關係獲悉消息之人等，在消息明確後未公",
+        "error": null
+      },
+      {
+        "id": "law_money_19",
+        "question": "洗錢防制法第19條的規定是什麼",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 2560.6,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 1366.3,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "洗錢防制法第19條規定，有違反第2條各款所列的洗錢行為者，處三年以上十年以下有期徒刑，併科新臺幣一億元以下罰金。若洗錢之財物或財產上利益未達新臺幣一億元者，處六月以上五年以下有期徒刑，併科新臺幣五千萬元以下罰金 [1]。前項之未遂犯罰之 [1]。\n\n此外，洗錢防制法第19條亦規定，有幫助他人洗錢行為者，亦處同樣的刑罰及",
+        "error": null
+      },
+      {
+        "id": "law_insurance_107",
+        "question": "保險法第107條的規定是什麼",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 2549.7,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 1261.78,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "保險法第107條規定，未滿十五歲之未成年人為被保險人訂立之人壽保險契約，死亡給付於被保險人滿十五歲時生效力 [1]。此條款旨在保障未成年人的權益，避免其在未成年時已約定死亡給付，待成年後卻失去權利 [1]。此外，該條款亦規定喪葬費用之保險金額不得超過遺產及贈與稅法有關遺產稅喪葬費扣除額之一半 [1]。\n\n請注意，這不是",
+        "error": null
+      },
+      {
+        "id": "semantic_third_party_fraud_burden",
+        "question": "第三人詐欺的舉證責任有哪些實務見解",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 2847.2,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 1633.14,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "第三人詐欺的舉證責任，檢索到的資料顯示，刑事訴訟法第161條第1項規定檢察官有提 出證據，並指出證明方法，用以說服法院，使法官得以嫌疑，提起公訴，於起訴書詳列證據清單，負舉證責任 [1]。此外，最高法院判決認為原判決未將檢察官提出的證據充分利用，並未明確指出舉證方法，因此判決有違法 [2]。 另一方面，部分判決認為檢察",
+        "error": null
+      },
+      {
+        "id": "semantic_cash_mule_forfeiture",
+        "question": "詐欺車手面交的犯罪所得沒收範圍",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 3307.5,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 2085.45,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "詐欺車手所得沒收範圍，依據法規第48條規定，犯罪所得不問屬於犯罪行為人與否均沒收，且若有事實足以證明所得支配之前項規定以外之財物或財產上利益係取自其他違法行為所得，亦應沒收 [1]。此外，法規第50條規定，檢察官提起公訴時，可於起訴書記載對被告科刑範圍之意見，並敘明理由，並注意犯罪行為人有無購買、租賃或使用逾越一般人通",
+        "error": null
+      },
+      {
+        "id": "semantic_help_fraud_intent",
+        "question": "幫助詐欺與不確定故意的認定",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 4071.9,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 2861.67,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "根據提供的資料，幫助詐欺與不確定故意認定主要有以下幾點：\n\n臺灣新北地方法院判決案號：PCDM,107,簡,5322,20180919,1 認為被告林妤提供金融帳戶資料，並容任詐欺結果發生，堪認其確實有幫助詐欺之不確定故意 [1]。 臺灣高等法院高雄分院判決案號：KSHM,111,上易,10,20220407,1 認為",
+        "error": null
+      },
+      {
+        "id": "structured_semantic_2007_issue",
+        "question": "2007年新北地院詐欺判決的爭點",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 3954.4,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 3190.64,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "以下針對您提供的資料，回答關於2007年新北地院詐欺判決的爭點：\n\n[1] 根據判決案號：PCDM,96,簡,233,20070425,1，被告甲○○將其中國信託商業銀行雙和分行帳戶之存摺、提款卡及密碼提供予他人使用，並辯稱九十四年十一月騎車時可能掛失，以構成幫助詐欺犯行的行為，經判決處以簡易判決處刑。\n\n[2] 根據",
+        "error": null
+      },
+      {
+        "id": "route_fraud_elements_law",
+        "question": "詐欺罪有哪些構成要件？",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 3060.0,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 1895.47,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "詐欺罪的構成要件包含多項要素。首先，根據法規第4條，主管機關及相關目的事業主管機關得以推動詐欺防制教育宣導，顯示詐欺行為的危害性需要被警惕 [1]。其次，刑法第339條之4規定，犯詐欺罪而有三人以上共同犯之，或以廣播電視、電子通訊、網際網路或其他媒體等傳播工具，對公眾散布而犯之者，處一年以上七年以下有期徒刑，得併科一百",
+        "error": null
+      },
+      {
+        "id": "route_money_patterns_semantic",
+        "question": "洗錢有哪些常見態樣？",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 2631.0,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 1402.7,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "洗錢防制法定義洗錢行為為隱匿或掩飾特定犯罪所得來源，或妨礙或危害特定犯罪所得與他人進行交易 [1]。修正後，洗錢行為的定義更強調犯罪所得具有財產中性外觀，以杜絕爭議 [1]。洗錢行為者處以七年以下有期徒刑，併科新臺幣五百萬元以下罰金 [1]。",
+        "error": null
+      },
+      {
+        "id": "route_sentencing_semantic_with_filter",
+        "question": "新北地院的詐欺判決通常怎麼量刑？",
+        "status": "operational",
+        "answer_source": "llm",
+        "degraded_reason": null,
+        "duration_ms": 3690.0,
+        "llm": [
+          {
+            "strict": false,
+            "status": "ok",
+            "provider": "primary",
+            "base_url": "http://x570:11436",
+            "duration_ms": 2183.86,
+            "error": ""
+          }
+        ],
+        "retried": false,
+        "answer_preview": "新北地院的詐欺判決通常會考量被告的犯罪行為、洗錢行為以及是否自白等因素。簡易判決通常適用於被告自白且犯案輕微的情況，刑度會較輕，例如一年以上七年以下有期徒刑，得併科一千萬元以下罰金 [1]。洗錢防制法也常被作為量刑的考量因素，若被告涉及洗錢行為，刑度會加重 [2]。\n\n此外，新北地院在量刑時會參考最高法院的判決意旨，例",
+        "error": null
+      },
+      {
+        "id": "variant_banqiao_fraud_2000_2010_2",
+        "question": "板橋地院在 2000 至 2010 年間有哪些詐騙案件？",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 497.8,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 210 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2000–2010；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n板橋地方法院現已改制為臺灣新北地方法院，以下為新北地",
+        "error": null
+      },
+      {
+        "id": "variant_banqiao_fraud_2000_2010_4",
+        "question": "涉及詐欺的板橋地院判決，時間限定在 2000–2010 年",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 596.2,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 210 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；裁判年份＝2000–2010；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n板橋地方法院現已改制為臺灣新北地方法院，以下為新北地",
+        "error": null
+      },
+      {
+        "id": "variant_banqiao_before_rename",
+        "question": "新北地院改制前，板橋地院的詐欺案件有哪些？",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 589.5,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 15,333 筆，以下列出前 20 筆：\n\n查詢條件（可複製）：法院＝臺灣新北地方法院／臺灣板橋地方法院；案由含「詐欺」\n\n注意：此清單依「案由含詐欺」篩選，不含案由不同但內容涉及詐欺的判決（例如案由為洗錢或偽造文書者）。\n\n板橋地方法院現已改制為臺灣新北地方法院，以下為新北地院的相關判決。\n\n[1]",
+        "error": null
+      },
+      {
+        "id": "exact_keyword_violation_settlement",
+        "question": "士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "degraded_reason": null,
+        "duration_ms": 771.5,
+        "llm": [],
+        "retried": false,
+        "answer_preview": "符合條件的判決共 1 筆：\n\n查詢條件（可複製）：法院＝臺灣士林地方法院；裁判年份＝1995–2000；正規化全文含「違約交割／交割違約／未履行交割／違約不履行交割」\n\n注意：此清單依正規化全文片語精確比對，不是案由 filter。\n\n[1] SLDV,89,訴,367,20000728\n臺灣士林地方法院｜200007",
+        "error": null
+      }
+    ]
+  },
+  "twenty_mixed_stream_after_fix": {
+    "llm_questions": 8,
+    "llm_attempts": 8,
+    "retried_questions": 0,
+    "retry_rate": 0.0,
+    "first_partial_p50_ms": 2097.4,
+    "first_partial_p95_ms": 2785.6,
+    "done_p50_ms": 3221.4,
+    "done_p95_ms": 4754.9,
+    "statuses": {
+      "operational": 10,
+      "retrieval_only": 10
+    },
+    "errors": 0,
+    "note": "x570 context exceeded now degrades immediately (llm_error); no citation retry."
+  }
+}

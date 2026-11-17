@@ -1,5 +1,7 @@
 # RAG 容量第六輪評估：檢索／摘要分階段與非同步 LLM
 
+> 後續修正（引用重試）：`specs/005-retrieval-evaluation/rag-citation-retry-2026-11-17.md`。
+
 - 日期：2026-11-17
 - 目的：回應第六輪審查，把 RAG stream 拆成「檢索階段」與「摘要階段」，檢索完成即釋放 worker，摘要改用 async HTTP；並補 admission 計數、DB pool 對齊、LLM 斷路器
 - 範圍：只改 RAG stream 執行模型、admission、DB pool 與 LLM 傳輸；不改 registry、不啟用 expansion、不改 Qdrant／embedding／reranker 模型、不進行法律審查、不 push
