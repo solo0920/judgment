@@ -1053,13 +1053,16 @@ cloudflared tunnel run --url http://127.0.0.1:9200 judgment-api
 
 `#/tests`／`#/status` 的「系統測試」可設定 API Base 與管理權杖。本機 `127.0.0.1` 請求可直接使用；透過 cloudflared、LAN 或反向代理連線時，所有非公開 API 需要 `JUDGMENT_ADMIN_TOKEN`，前端會以 `X-Judgment-Admin-Token` 送出。`/api/health` 與 `/api/home` 保持公開，其餘 `/api/*`（含 `/api/status`、`/api/performance`、`/api/system-usage`、SSE）都受保護。SSE 使用短效 ticket，避免把長期權杖放入 EventSource URL。`127.0.0.1`／`localhost` 被視為本機管理員；若主機有多個使用者，請限制本機登入權限或在反向代理前面再加一層驗證。
 
-FastAPI 預設只允許本機與 `file://` 來源：
+FastAPI 預設只允許本機 HTTP 來源，`file://`（`null`）不再預設放行；本機寫入另檢查 `Origin`／`Sec-Fetch-Site`，未帶瀏覽器標頭的 CLI 仍可使用：
 
 ```bash
 CORS_ALLOW_ORIGINS=http://127.0.0.1:9200,http://localhost:9200
+TRUSTED_HOSTS=127.0.0.1,localhost,testserver,::1
 FORWARDED_ALLOW_IPS=127.0.0.1
 JUDGMENT_ADMIN_TOKEN=<以 python -c "import secrets; print(secrets.token_urlsafe(32))" 產生>
 ```
+
+安全驗收狀態與證據見 `specs/security/security-acceptance-matrix.md`；未完成的部署項不會因程式測試通過而標成 verified。
 
 需要 Cloudflare Pages 或其他靜態主機時，把實際網址加入 `CORS_ALLOW_ORIGINS`，例如：
 
