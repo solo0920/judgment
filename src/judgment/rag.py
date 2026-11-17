@@ -1348,7 +1348,7 @@ def _keyword_list_payload(
                     *filters,
                     or_(
                         *[
-                            JudgmentDocument.full_text.contains(phrase)
+                            JudgmentDocument.full_text.contains(phrase, autoescape=True)
                             for phrase in phrases
                         ]
                     ),

@@ -152,3 +152,10 @@ def test_probe_counts_only_normalized_exact_phrase_in_scope() -> None:
     )
     assert too_many.status == "too_many_hits"
     assert too_many.skipped is True
+
+    wildcard = probe_scope_terms(
+        session_factory=session_factory,
+        parsed_query=court_only,
+        terms=[ScopeTerm(term="借款%", scope="external")],
+    )
+    assert wildcard.terms[0].document_count == 0

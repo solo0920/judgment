@@ -493,7 +493,7 @@ def probe_scope_terms(
                         *filters,
                         or_(
                             *[
-                                JudgmentDocument.full_text.contains(phrase)
+                                JudgmentDocument.full_text.contains(phrase, autoescape=True)
                                 for phrase in phrases
                             ]
                         ),

@@ -1148,11 +1148,11 @@ def find_related_law_records(
                 LawDocument.is_current.is_(True),
                 or_(
                     *[
-                        LawDocument.law_name.contains(term)
+                        LawDocument.law_name.contains(term, autoescape=True)
                         for term in terms
                     ],
                     *[
-                        LawDocument.law_category.contains(term)
+                        LawDocument.law_category.contains(term, autoescape=True)
                         for term in terms
                     ],
                 ),
@@ -1237,7 +1237,7 @@ def judgment_law_stats(
         rows = session.execute(
             select(JudgmentDocument.citations, JudgmentDocument.jid)
             .where(
-                JudgmentDocument.matched_laws_text.contains(entity),
+                JudgmentDocument.matched_laws_text.contains(entity, autoescape=True),
                 JudgmentDocument.is_current.is_(True),
             )
             .limit(limit_rows)
@@ -1247,7 +1247,7 @@ def judgment_law_stats(
             rows = session.execute(
                 select(JudgmentDocument.citations, JudgmentDocument.jid)
                 .where(
-                    JudgmentDocument.full_text.contains(entity),
+                    JudgmentDocument.full_text.contains(entity, autoescape=True),
                     JudgmentDocument.is_current.is_(True),
                 )
                 .limit(limit_rows)
