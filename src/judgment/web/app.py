@@ -22,6 +22,7 @@ from uuid import uuid4
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
@@ -859,6 +860,12 @@ def create_app(
         broker=app.state.event_broker,
     )
 
+    if settings.trusted_hosts:
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=list(settings.trusted_hosts),
+        )
+
     cors_origins = _cors_origins(settings.cors_allow_origins)
     if cors_origins:
         app.add_middleware(
@@ -883,6 +890,16 @@ def create_app(
         path = request.url.path
         if request.method == "OPTIONS" or not path.startswith("/api/"):
             return await call_next(request)
+        if (
+            request.method not in {"GET", "HEAD"}
+            and request.headers.get("Origin") == "null"
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "file:// origin 不可修改資料；請使用允許的 http(s) 來源。"
+                },
+            )
         if path in PUBLIC_API_PATHS:
             return await call_next(request)
         if _is_local_request(request):

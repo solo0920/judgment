@@ -53,7 +53,12 @@ class Settings:
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:9200",
         "http://localhost:9200",
-        "null",
+    )
+    trusted_hosts: tuple[str, ...] = (
+        "127.0.0.1",
+        "localhost",
+        "testserver",
+        "::1",
     )
     forwarded_allow_ips: str = "127.0.0.1"
     admin_token: str = ""
@@ -175,7 +180,15 @@ class Settings:
                 (
                     "http://127.0.0.1:9200",
                     "http://localhost:9200",
-                    "null",
+                ),
+            ),
+            trusted_hosts=_env_csv(
+                "TRUSTED_HOSTS",
+                (
+                    "127.0.0.1",
+                    "localhost",
+                    "testserver",
+                    "::1",
                 ),
             ),
             forwarded_allow_ips=(

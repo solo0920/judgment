@@ -2321,7 +2321,7 @@ def test_cors_defaults_to_local_origins(web_client) -> None:
     assert allowed.headers["access-control-allow-origin"] == local
 
     file_origin = web_client.get("/api/health", headers={"Origin": "null"})
-    assert file_origin.headers["access-control-allow-origin"] == "null"
+    assert "access-control-allow-origin" not in file_origin.headers
 
     preflight = web_client.options(
         "/api/query",
@@ -2337,6 +2337,22 @@ def test_cors_defaults_to_local_origins(web_client) -> None:
     assert "x-judgment-admin-token" in preflight.headers[
         "access-control-allow-headers"
     ].lower()
+
+
+def test_trusted_host_rejects_dns_rebinding_host(web_client) -> None:
+    response = web_client.get(
+        "/api/status", headers={"Host": "evil.example"}
+    )
+    assert response.status_code == 400
+
+
+def test_file_origin_cannot_modify_data(web_client) -> None:
+    response = web_client.post(
+        "/api/query",
+        headers={"Origin": "null"},
+        json={"database": "postgres", "filters": {}, "page_size": 10},
+    )
+    assert response.status_code == 403
 
 
 def test_cors_honors_explicit_origin_configuration(web_client) -> None:

@@ -186,7 +186,8 @@ cd /Volumes/USB/judgment-backup-20261108
 | `LOG_LEVEL` | `INFO` | 日誌等級 |
 | `AUTO_CREATE_SCHEMA` | `true` | 啟動時自動建立缺少的資料表 |
 | `MAX_UNCOMPRESSED_BYTES` | `536870912` | 解壓後 JSON 大小上限（512 MiB） |
-| `CORS_ALLOW_ORIGINS` | `http://127.0.0.1:9200,http://localhost:9200,null` | 允許呼叫 API 的前端來源，以逗號分隔；`null` 供 `file://` 使用。`*` 會被忽略 |
+| `CORS_ALLOW_ORIGINS` | `http://127.0.0.1:9200,http://localhost:9200` | 允許呼叫 API 的前端來源，以逗號分隔；`*` 會被忽略。`null`（file://）預設不允許，僅開發時可明確加入 |
+| `TRUSTED_HOSTS` | `127.0.0.1,localhost,testserver,::1` | Host header 白名單；正式網域需明確加入，防止 DNS rebinding |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 只信任本機 cloudflared／反向代理送來的 `X-Forwarded-*`；不要在直接對外時使用 `*` |
 | `JUDGMENT_ADMIN_TOKEN` | 空 | 遠端管理 API 權杖；本機 loopback 可直接使用，非 loopback 請求必須帶 `X-Judgment-Admin-Token` |
 | `OLLAMA_ALLOWED_HOSTS` | 空 | 可新增／探測的 Ollama `host:port` 清單；設定的 `EMBEDDING_URL`／`LLM_URL`／`RERANK_URL` 會自動加入 |
@@ -1055,7 +1056,7 @@ cloudflared tunnel run --url http://127.0.0.1:9200 judgment-api
 FastAPI 預設只允許本機與 `file://` 來源：
 
 ```bash
-CORS_ALLOW_ORIGINS=http://127.0.0.1:9200,http://localhost:9200,null
+CORS_ALLOW_ORIGINS=http://127.0.0.1:9200,http://localhost:9200
 FORWARDED_ALLOW_IPS=127.0.0.1
 JUDGMENT_ADMIN_TOKEN=<以 python -c "import secrets; print(secrets.token_urlsafe(32))" 產生>
 ```
@@ -1063,7 +1064,7 @@ JUDGMENT_ADMIN_TOKEN=<以 python -c "import secrets; print(secrets.token_urlsafe
 需要 Cloudflare Pages 或其他靜態主機時，把實際網址加入 `CORS_ALLOW_ORIGINS`，例如：
 
 ```bash
-CORS_ALLOW_ORIGINS=http://127.0.0.1:9200,http://localhost:9200,null,https://judgment.pages.dev
+CORS_ALLOW_ORIGINS=http://127.0.0.1:9200,http://localhost:9200,https://judgment.pages.dev
 ```
 
 `*` 會被程式忽略。正式環境請務必使用明確來源；若使用 Cloudflare Pages，建議再加上 Cloudflare Access 或同等的身分驗證。
