@@ -117,6 +117,7 @@ from ..ollama_hosts import (
 )
 from ..llm_backends import fetch_context_window
 from ..rag import (
+    _citation_audit,
     _fit_contexts_to_prompt_budget,
     _valid_citation_markers,
     answer_question,
@@ -726,6 +727,8 @@ def _retrieval_final_result(
                 (time.perf_counter() - started_perf) * 1000, 1
             ),
             "degraded_reason": degraded_reason,
+            "citation_retry": False,
+            "citation_audit": None,
         }
     )
     return result
@@ -739,6 +742,8 @@ def _llm_final_result(
     prompt_meta: Dict[str, Any],
     allowed_indexes,
     started_perf: float,
+    *,
+    citation_retry: bool = False,
 ) -> Dict[str, Any]:
     result = dict(retrieval_result)
     retrieval = dict(state.get("retrieval") or {})
@@ -746,6 +751,12 @@ def _llm_final_result(
         **prompt_meta,
         "used_indexes": sorted(allowed_indexes),
     }
+    citation_audit = _citation_audit(
+        answer,
+        state.get("citations") or [],
+        state.get("law_sources") or [],
+        allowed_indexes=allowed_indexes,
+    )
     result.update(
         {
             "status": "operational",
@@ -771,6 +782,8 @@ def _llm_final_result(
             "rerank_degraded": bool(
                 retrieval_result.get("rerank_degraded")
             ),
+            "citation_retry": citation_retry,
+            "citation_audit": citation_audit,
         }
     )
     return result
@@ -814,7 +827,12 @@ def _rag_pipeline_snapshot(flow, session_factory=None) -> Dict[str, Any]:
     metadata = snapshot.get("metadata") or {}
     snapshot["metadata"] = {
         key: metadata[key]
-        for key in ("rag_response", "rag_status")
+        for key in (
+            "rag_response",
+            "rag_status",
+            "citation_retry",
+            "citation_audit",
+        )
         if key in metadata
     }
     summary = snapshot.get("summary") or {}
@@ -2761,6 +2779,12 @@ def create_app(
                     flow.set_metadata(
                         "rag_response", _rag_response_metadata(result)
                     )
+                    flow.set_metadata(
+                        "citation_retry", result.get("citation_retry")
+                    )
+                    flow.set_metadata(
+                        "citation_audit", result.get("citation_audit")
+                    )
                     if isinstance(result.get("test_run"), dict):
                         flow.set_metadata(
                             "test_run_id",
@@ -3105,8 +3129,10 @@ def create_app(
                 )
                 answer: Optional[str] = None
                 last_error: Optional[Exception] = None
+                citation_retry = False
                 for strict in (False, True):
                     if strict:
+                        citation_retry = True
                         queue.put_nowait(("token_reset", {}))
                     try:
                         candidate = (
@@ -3148,6 +3174,7 @@ def create_app(
                         prompt_meta,
                         allowed_indexes,
                         started_perf,
+                        citation_retry=citation_retry,
                     )
                 else:
                     result = _retrieval_final_result(
@@ -3192,6 +3219,12 @@ def create_app(
                 if result is not None:
                     flow.set_metadata(
                         "rag_response", _rag_response_metadata(result)
+                    )
+                    flow.set_metadata(
+                        "citation_retry", result.get("citation_retry")
+                    )
+                    flow.set_metadata(
+                        "citation_audit", result.get("citation_audit")
                     )
                 if isinstance((result or {}).get("test_run"), dict):
                     flow.set_metadata(

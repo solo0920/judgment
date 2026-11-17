@@ -2783,6 +2783,125 @@ def _generate_answer(
     )
 
 
+_CITATION_AUDIT_STOPWORDS = {
+    "因此",
+    "此外",
+    "所以",
+    "並且",
+    "而且",
+    "但是",
+    "如果",
+    "可以",
+    "必須",
+    "應該",
+    "相關",
+    "規定",
+    "內容",
+    "來源",
+    "判決",
+    "法規",
+    "命令",
+    "條文",
+    "第條",
+    "本件",
+    "本案",
+    "依法",
+    "依據",
+    "說明",
+    "顯示",
+    "認為",
+}
+
+
+def _citation_audit(
+    answer: str,
+    citations: Sequence[Dict[str, Any]],
+    law_sources: Sequence[Dict[str, Any]],
+    *,
+    allowed_indexes: Optional[Set[int]] = None,
+) -> Dict[str, Any]:
+    """Heuristic sentence-level citation audit.
+
+    This is an observability aid, not a legal faithfulness score. It counts
+    sentences without markers and cited sentences whose longest Chinese term
+    does not appear in any cited source.
+    """
+
+    source_text: Dict[int, str] = {}
+    for citation in citations:
+        try:
+            index = int(citation.get("index") or 0)
+        except (TypeError, ValueError):
+            continue
+        source_text[index] = " ".join(
+            str(part or "")
+            for part in (
+                citation.get("snippet"),
+                citation.get("title"),
+                citation.get("jid"),
+                " ".join(citation.get("matched_laws") or []),
+            )
+        )
+    for source in law_sources:
+        try:
+            index = int(source.get("index") or 0)
+        except (TypeError, ValueError):
+            continue
+        source_text[index] = law_source_text(source)
+
+    sentences = [
+        part.strip()
+        for part in re.split(r"[。！？!?；;\n]+", str(answer or ""))
+        if part.strip()
+    ]
+    invalid_marker_count = 0
+    uncited_sentence_count = 0
+    unsupported_citation_count = 0
+    unsupported_sentences: List[str] = []
+    for sentence in sentences:
+        if re.search(r"法律意見|請注意|以上回答|資料來源", sentence):
+            continue
+        markers = [
+            int(value)
+            for group in _CITATION_RE.findall(sentence)
+            for value in _CITATION_NUMBER_RE.findall(group)
+        ]
+        if not markers:
+            if len(sentence) >= 8 and not _INSUFFICIENT_RE.search(sentence):
+                uncited_sentence_count += 1
+            continue
+        valid = [
+            marker
+            for marker in markers
+            if allowed_indexes is None or marker in allowed_indexes
+        ]
+        invalid_marker_count += len(markers) - len(valid)
+        if not valid:
+            continue
+        cited_text = " ".join(
+            source_text.get(marker, "") for marker in valid
+        ).strip()
+        terms = [
+            term
+            for term in re.findall(r"[\u4e00-\u9fff]{3,8}", sentence)
+            if term not in _CITATION_AUDIT_STOPWORDS
+        ]
+        if cited_text and terms and not any(
+            term in cited_text for term in terms
+        ):
+            unsupported_citation_count += 1
+            if len(unsupported_sentences) < 5:
+                unsupported_sentences.append(sentence[:120])
+    return {
+        "invalid_marker_count": invalid_marker_count,
+        "uncited_sentence_count": uncited_sentence_count,
+        "unsupported_citation_count": unsupported_citation_count,
+        "unsupported_sentences": unsupported_sentences,
+        "sentence_count": len(sentences),
+        "heuristic": True,
+    }
+
+
 @traced(
     "rag.validate_citations",
     module=__name__,
@@ -4145,6 +4264,7 @@ def answer_question(
             }
         )
     degraded_reason: Optional[str] = None
+    citation_retry = False
     if structured_judgment_list:
         answer = _judgment_list_answer(
             question,
@@ -4173,6 +4293,8 @@ def answer_question(
         else:
             try:
                 for strict in (False, True):
+                    if strict:
+                        citation_retry = True
                     if (
                         strict
                         and on_token is not None
@@ -4271,6 +4393,16 @@ def answer_question(
         )
     retrieval["scope_probe_notice"] = scope_probe_notice or None
     retrieval["scope_probe_skip_notice"] = scope_probe_skip_notice or None
+    citation_audit = (
+        _citation_audit(
+            answer,
+            citations,
+            law_sources,
+            allowed_indexes=allowed_indexes,
+        )
+        if answer
+        else None
+    )
     return {
         "status": status,
         "answer": answer,
@@ -4301,6 +4433,8 @@ def answer_question(
         "duration_ms": _elapsed_ms(started),
         "rerank_degraded": rerank_degraded,
         "degraded_reason": degraded_reason,
+        "citation_retry": citation_retry,
+        "citation_audit": citation_audit,
         **(
             {
                 "_retrieval_state": {

@@ -28,6 +28,7 @@ from judgment.rag import (
     _llm_request_payload,
     _map_letter_markers,
     _CitationMarkerMapper,
+    _citation_audit,
     _search_legal_articles,
     _valid_citation_markers,
     answer_question,
@@ -2992,6 +2993,36 @@ def test_is_judgment_list_question_detects_judgment_queries() -> None:
     assert not is_judgment_list_question("詐騙判決的法律責任有哪些")
     assert not is_judgment_list_question("違約交割有那些罰則?")
     assert not is_judgment_list_question("原告如何請求返還借款?")
+
+
+def test_citation_audit_counts_uncited_and_unsupported_sentences() -> None:
+    citations = [
+        {
+            "index": 1,
+            "jid": "TPDV,114,訴,1,20260101,1",
+            "title": "銀行法",
+            "snippet": "銀行法禁止非銀行收受存款。",
+            "matched_laws": ["銀行法"],
+        }
+    ]
+    audit = _citation_audit(
+        "銀行法禁止非銀行收受存款 [1]。這是一句沒有來源的事實。",
+        citations,
+        [],
+        allowed_indexes={1},
+    )
+    assert audit["invalid_marker_count"] == 0
+    assert audit["uncited_sentence_count"] == 1
+    assert audit["unsupported_citation_count"] == 0
+
+    unsupported = _citation_audit(
+        "保險法要求業務員通過考試 [1]。",
+        citations,
+        [],
+        allowed_indexes={1},
+    )
+    assert unsupported["unsupported_citation_count"] == 1
+    assert unsupported["unsupported_sentences"]
 
 
 def test_citation_marker_mapper_handles_split_tokens() -> None:
