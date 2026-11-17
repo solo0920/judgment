@@ -5447,6 +5447,13 @@ button.chip:hover {
   -webkit-box-orient: vertical;
 }
 
+/* Citation card snippets use the same 14px reading size as the answer. */
+.rag-page .citation-snippet,
+.rag-page .law-source-article-text,
+.rag-page .law-answer-article-text {
+  font-size: 14px;
+}
+
 .citation-link {
   display: inline-flex;
   align-items: center;
