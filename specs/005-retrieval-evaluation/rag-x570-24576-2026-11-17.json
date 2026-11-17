@@ -1,0 +1,562 @@
+{
+  "generated_at": "2026-11-17",
+  "x570_chat": {
+    "ctx_size": 24576,
+    "total_slots": 4,
+    "slot_ctx_props": 24576,
+    "kv_unified": true,
+    "gpu_used_mib": 5408,
+    "gpu_free_mib": 10431,
+    "temperature_c": 44,
+    "ollama": "inactive"
+  },
+  "four_concurrent_q5": {
+    "http_200": 4,
+    "finish_reason_stop": 4,
+    "total_tokens": [
+      5901,
+      5916,
+      5910,
+      5888
+    ],
+    "elapsed_ms": [
+      3857.5,
+      4100.1,
+      4094.1,
+      3817.2
+    ]
+  },
+  "twenty_mixed": {
+    "summary": {
+      "requests": 20,
+      "first_partial_ms": {
+        "n": 20,
+        "p50": 2689.9,
+        "p95": 2736.4,
+        "max": 2739.8
+      },
+      "result_ms": {
+        "n": 20,
+        "p50": 7065.4,
+        "p95": 14529.4,
+        "max": 15751.9
+      },
+      "statuses": {
+        "operational": 20
+      },
+      "errors": 0
+    },
+    "rows": [
+      {
+        "tag": "Q4-17",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 1223.1,
+        "result_ms": 1223.8,
+        "error": null
+      },
+      {
+        "tag": "Q4-13",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 1225.4,
+        "result_ms": 1333.2,
+        "error": null
+      },
+      {
+        "tag": "Q4-15",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 1379.3,
+        "result_ms": 1393.6,
+        "error": null
+      },
+      {
+        "tag": "Q4-11",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 2684.0,
+        "result_ms": 2694.9,
+        "error": null
+      },
+      {
+        "tag": "Q4-19",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 2689.9,
+        "result_ms": 2691.4,
+        "error": null
+      },
+      {
+        "tag": "Q3-18",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 2722.4,
+        "result_ms": 2725.1,
+        "error": null
+      },
+      {
+        "tag": "Q3-14",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 2726.9,
+        "result_ms": 2728.7,
+        "error": null
+      },
+      {
+        "tag": "Q3-12",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 2734.0,
+        "result_ms": 2736.8,
+        "error": null
+      },
+      {
+        "tag": "Q3-10",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 2739.8,
+        "result_ms": 2742.2,
+        "error": null
+      },
+      {
+        "tag": "Q3-16",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 2736.4,
+        "result_ms": 2737.1,
+        "error": null
+      },
+      {
+        "tag": "Q1-6",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 2124.1,
+        "result_ms": 7065.4,
+        "error": null
+      },
+      {
+        "tag": "Q1-9",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 1461.7,
+        "result_ms": 7742.3,
+        "error": null
+      },
+      {
+        "tag": "Q2-1",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 1835.9,
+        "result_ms": 8693.9,
+        "error": null
+      },
+      {
+        "tag": "Q1-0",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 1476.6,
+        "result_ms": 9632.8,
+        "error": null
+      },
+      {
+        "tag": "Q1-3",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 2700.6,
+        "result_ms": 10866.7,
+        "error": null
+      },
+      {
+        "tag": "Q2-4",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 2703.5,
+        "result_ms": 13286.9,
+        "error": null
+      },
+      {
+        "tag": "Q5-5",
+        "key": "Q5",
+        "status": "operational",
+        "first_partial_ms": 2700.7,
+        "result_ms": 13287.4,
+        "error": null
+      },
+      {
+        "tag": "Q5-8",
+        "key": "Q5",
+        "status": "operational",
+        "first_partial_ms": 2687.8,
+        "result_ms": 13287.5,
+        "error": null
+      },
+      {
+        "tag": "Q2-7",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 2688.1,
+        "result_ms": 14529.4,
+        "error": null
+      },
+      {
+        "tag": "Q5-2",
+        "key": "Q5",
+        "status": "operational",
+        "first_partial_ms": 2701.7,
+        "result_ms": 15751.9,
+        "error": null
+      }
+    ]
+  },
+  "forty_mixed": {
+    "summary": {
+      "requests": 40,
+      "first_partial_ms": {
+        "n": 40,
+        "p50": 5616.2,
+        "p95": 5719.8,
+        "max": 5720.7
+      },
+      "result_ms": {
+        "n": 40,
+        "p50": 5734.7,
+        "p95": 14127.9,
+        "max": 15129.3
+      },
+      "statuses": {
+        "operational": 32,
+        "retrieval_only": 8
+      },
+      "errors": 0
+    },
+    "rows": [
+      {
+        "tag": "Q4-13",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5574.7,
+        "result_ms": 5588.2,
+        "error": null
+      },
+      {
+        "tag": "Q4-15",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5593.3,
+        "result_ms": 5595.2,
+        "error": null
+      },
+      {
+        "tag": "Q4-17",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5593.7,
+        "result_ms": 5595.4,
+        "error": null
+      },
+      {
+        "tag": "Q4-11",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5604.6,
+        "result_ms": 5606.3,
+        "error": null
+      },
+      {
+        "tag": "Q4-19",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5596.6,
+        "result_ms": 5598.3,
+        "error": null
+      },
+      {
+        "tag": "Q4-33",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5608.6,
+        "result_ms": 5610.8,
+        "error": null
+      },
+      {
+        "tag": "Q4-31",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5609.9,
+        "result_ms": 5611.8,
+        "error": null
+      },
+      {
+        "tag": "Q4-35",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5610.8,
+        "result_ms": 5612.3,
+        "error": null
+      },
+      {
+        "tag": "Q4-37",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5612.8,
+        "result_ms": 5614.2,
+        "error": null
+      },
+      {
+        "tag": "Q4-39",
+        "key": "Q4",
+        "status": "operational",
+        "first_partial_ms": 5614.0,
+        "result_ms": 5615.6,
+        "error": null
+      },
+      {
+        "tag": "Q3-14",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5699.1,
+        "result_ms": 5706.7,
+        "error": null
+      },
+      {
+        "tag": "Q3-10",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5709.6,
+        "result_ms": 5717.4,
+        "error": null
+      },
+      {
+        "tag": "Q3-16",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5701.2,
+        "result_ms": 5709.4,
+        "error": null
+      },
+      {
+        "tag": "Q3-18",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5705.0,
+        "result_ms": 5712.9,
+        "error": null
+      },
+      {
+        "tag": "Q3-12",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5718.2,
+        "result_ms": 5725.8,
+        "error": null
+      },
+      {
+        "tag": "Q3-30",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5715.2,
+        "result_ms": 5722.9,
+        "error": null
+      },
+      {
+        "tag": "Q3-32",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5716.6,
+        "result_ms": 5724.1,
+        "error": null
+      },
+      {
+        "tag": "Q3-34",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5719.9,
+        "result_ms": 5726.6,
+        "error": null
+      },
+      {
+        "tag": "Q3-36",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5719.8,
+        "result_ms": 5726.6,
+        "error": null
+      },
+      {
+        "tag": "Q3-38",
+        "key": "Q3",
+        "status": "operational",
+        "first_partial_ms": 5720.7,
+        "result_ms": 5727.4,
+        "error": null
+      },
+      {
+        "tag": "Q1-26",
+        "key": "Q1",
+        "status": "retrieval_only",
+        "first_partial_ms": 5615.4,
+        "result_ms": 5734.7,
+        "error": null
+      },
+      {
+        "tag": "Q2-27",
+        "key": "Q2",
+        "status": "retrieval_only",
+        "first_partial_ms": 5616.2,
+        "result_ms": 5734.7,
+        "error": null
+      },
+      {
+        "tag": "Q1-29",
+        "key": "Q1",
+        "status": "retrieval_only",
+        "first_partial_ms": 5616.7,
+        "result_ms": 5734.9,
+        "error": null
+      },
+      {
+        "tag": "Q5-5",
+        "key": "Q5",
+        "status": "retrieval_only",
+        "first_partial_ms": 5626.2,
+        "result_ms": 5748.5,
+        "error": null
+      },
+      {
+        "tag": "Q1-20",
+        "key": "Q1",
+        "status": "retrieval_only",
+        "first_partial_ms": 5620.2,
+        "result_ms": 5737.4,
+        "error": null
+      },
+      {
+        "tag": "Q5-22",
+        "key": "Q5",
+        "status": "retrieval_only",
+        "first_partial_ms": 5618.4,
+        "result_ms": 5738.5,
+        "error": null
+      },
+      {
+        "tag": "Q5-25",
+        "key": "Q5",
+        "status": "retrieval_only",
+        "first_partial_ms": 5619.5,
+        "result_ms": 5738.5,
+        "error": null
+      },
+      {
+        "tag": "Q5-28",
+        "key": "Q5",
+        "status": "retrieval_only",
+        "first_partial_ms": 5622.5,
+        "result_ms": 5738.9,
+        "error": null
+      },
+      {
+        "tag": "Q1-0",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 5615.8,
+        "result_ms": 6344.8,
+        "error": null
+      },
+      {
+        "tag": "Q1-9",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 5605.4,
+        "result_ms": 7020.4,
+        "error": null
+      },
+      {
+        "tag": "Q2-1",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 5614.0,
+        "result_ms": 7576.7,
+        "error": null
+      },
+      {
+        "tag": "Q1-3",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 5609.9,
+        "result_ms": 8234.5,
+        "error": null
+      },
+      {
+        "tag": "Q1-6",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 5618.8,
+        "result_ms": 9384.4,
+        "error": null
+      },
+      {
+        "tag": "Q1-23",
+        "key": "Q1",
+        "status": "operational",
+        "first_partial_ms": 5611.8,
+        "result_ms": 10604.3,
+        "error": null
+      },
+      {
+        "tag": "Q5-8",
+        "key": "Q5",
+        "status": "operational",
+        "first_partial_ms": 5612.5,
+        "result_ms": 12158.2,
+        "error": null
+      },
+      {
+        "tag": "Q5-2",
+        "key": "Q5",
+        "status": "operational",
+        "first_partial_ms": 5617.0,
+        "result_ms": 12162.5,
+        "error": null
+      },
+      {
+        "tag": "Q2-7",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 5606.7,
+        "result_ms": 12184.1,
+        "error": null
+      },
+      {
+        "tag": "Q2-21",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 5611.1,
+        "result_ms": 14127.9,
+        "error": null
+      },
+      {
+        "tag": "Q2-24",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 5612.5,
+        "result_ms": 14735.4,
+        "error": null
+      },
+      {
+        "tag": "Q2-4",
+        "key": "Q2",
+        "status": "operational",
+        "first_partial_ms": 5626.6,
+        "result_ms": 15129.3,
+        "error": null
+      }
+    ]
+  },
+  "notes": [
+    "Applied via scripts/x570_service_audit.sh apply-chat-ctx 24576.",
+    "Ollama disabled before test.",
+    "No context exceeded in 20/40 mixed.",
+    "Reboot verification still pending."
+  ]
+}

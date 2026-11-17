@@ -45,7 +45,8 @@
       "port": 11436,
       "model": "gemma3-4b-q4_k_m.gguf",
       "total_slots": 4,
-      "n_ctx": 8192
+      "n_ctx": 24576,
+      "slot_ctx": 24576
     },
     "embedding": {
       "port": 11437,
@@ -68,7 +69,7 @@
     "verified_enabled": true,
     "reason": "SSH port 22 reachable but publickey/password denied; Tailscale SSH host key not available.",
     "verified_active": true,
-    "active_since": "2026-11-17T12:50:13+08:00",
+    "active_since": "2026-11-17T20:29:43+08:00",
     "uptime_hours": 7,
     "chat_memory": "10.6G peak 11.2G",
     "embedding_memory": "1.6G",
@@ -76,14 +77,50 @@
     "gpu": {
       "name": "RTX 5070 Ti",
       "vram_total_mib": 16303,
-      "vram_used_mib": 5090,
-      "vram_free_mib": 10749,
-      "temperature_c": 43
+      "vram_used_mib": 5408,
+      "vram_free_mib": 10431,
+      "temperature_c": 44,
+      "utilization_pct": 48
     },
-    "ollama_service_active": true,
-    "chat_context_error_observed": true,
+    "ollama_service_active": false,
+    "chat_context_error_observed": false,
     "service_restart_observed": false,
-    "note": "All three units enabled+active for 7h; journal context-exceeded errors are request-level, no CUDA/OOM/restart. Free VRAM supports 24576; Ollama service should be stopped/disabled."
+    "note": "chat applied -c 24576; /props reports total_slots=4 slot_ctx=24576 (kv_unified). 4x5.7k all 200 with no context exceeded. Ollama inactive. Reboot verification still pending.",
+    "four_concurrent_q5": {
+      "http_200": 4,
+      "finish_reason_stop": 4,
+      "total_tokens": [
+        5901,
+        5916,
+        5910,
+        5888
+      ],
+      "elapsed_ms": [
+        3857.5,
+        4100.1,
+        4094.1,
+        3817.2
+      ]
+    },
+    "twenty_mixed": {
+      "operational": 20,
+      "retrieval_only": 0,
+      "first_partial_p95_ms": 2736.4,
+      "done_p95_ms": 14529.4,
+      "errors": 0
+    },
+    "forty_mixed": {
+      "operational": 32,
+      "retrieval_only": 8,
+      "llm_busy": 8,
+      "first_partial_p95_ms": 5719.8,
+      "done_p95_ms": 14127.9,
+      "errors": 0
+    },
+    "app_settings": {
+      "LLM_MAX_CONCURRENT": 4,
+      "LLM_NUM_CTX": 6144
+    }
   },
   "x570_serial_mode": {
     "app_setting": "LLM_MAX_CONCURRENT=1, LLM_NUM_CTX=8192",

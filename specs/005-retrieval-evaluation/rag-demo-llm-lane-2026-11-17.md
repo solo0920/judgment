@@ -6,9 +6,9 @@
 - 相關資料：`rag-demo-llm-lane-2026-11-17.json`／`.csv`
 - 監督腳本：`scripts/run_mbp_llm_24576.sh`
 
-## 決策（修正）
+## 決策（2026-11-17 20:29 更新）
 
-**x570 維持 primary；MBP 24576 暫時不作為 demo primary。**
+**x570 primary，chat 已套用 `-c 24576 -np 4`；app 使用 `LLM_MAX_CONCURRENT=4`、`LLM_NUM_CTX=6144`。MBP 只保留 fallback，24576 不作為 demo primary。**
 
 原因不是 4×5.7k 放不下，而是 MBP llama-server 在重複負載後仍會無聲退出：
 
@@ -18,7 +18,18 @@
 - 因此「先啟動 supervisor 再啟動 web」只能繞過一次啟動順序，不能證明長時間穩定。
 - demo 若使用 MBP 主 LLM，必須先完成 supervised service 與 30 分鐘 70% 負載測試；目前尚未通過。
 
-x570 目前的限制仍是 `n_ctx=8192`；Q5 在併發下 context exceeded。實體登入 x570、套用 `-c 24576 -np 4` 仍是長期修正。在完成前，demo 的摘要是 best-effort，檢索與引用才是主展示。
+x570 已完成 `-c 24576`；`/props` 顯示 total_slots=4、slot_ctx=24576（kv_unified），4×5,749-token 全部 200。Ollama 已 inactive。重開機驗證尚未做。
+
+## x570 24576 結果（2026-11-17 20:29）
+
+```text
+20 mixed：20/20 operational，first_partial p95 2,736 ms，done p95 14,529 ms
+40 mixed：32 operational／8 retrieval_only（8 llm_busy），
+          first_partial p95 5,720 ms，done p95 14,128 ms
+error 0；沒有 context exceeded
+```
+
+摘要比例：20 mixed 20/20、40 mixed 12/20。這是目前最新的 demo 數字；MBP 24576 只保留為備援。
 
 ## 已實作的 LLM 佇列
 

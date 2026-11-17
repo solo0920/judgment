@@ -44,7 +44,7 @@ x570：三個 llama-server systemd 服務目前都在跑；部署腳本會 enabl
 - chat 11436 啟動 log：`n_slots=4, n_ctx_slot=8192, kv_unified=true`。
 - plist 沒有指定 `--parallel`，llama-server 預設就是 4 slots。
 - 所以 11436 不是「單一 8192」；並行時 Q5 會 context exceeded。
-- 24576 / 4 slots = 6144 是唯一已驗證能放 5,749-token 的設定，但沒有留在 MBP。
+- MBP 的 24576 測試只用於驗證 4×5,749-token；x570 實際 `/props` 是 total_slots=4、slot_ctx=24576（kv_unified）。
 
 ## x570
 
@@ -55,7 +55,7 @@ x570：三個 llama-server systemd 服務目前都在跑；部署腳本會 enabl
 | Port | Model | total_slots | default n_ctx |
 |---|---:|---:|---:|
 | 11435 | bge-reranker-v2-m3-q8_0 | 4 | 8192 |
-| 11436 | gemma3-4b-q4_k_m | 4 | 8192 |
+| 11436 | gemma3-4b-q4_k_m | 4 | 24576（slot_ctx 24576，kv_unified） |
 | 11437 | bge-m3-f16 | 4 | 8192 |
 
 三個服務都在回應 `/v1/models`。
@@ -83,10 +83,11 @@ RestartSec=3
 ### 3. 2026-11-17 本機輸出（已確認）
 
 - 三個 unit 都是 `enabled` + `active`，自 12:50:13 起已運行 7 小時。
-- chat service 使用 `/usr/local/lib/ollama/llama-server`，`--ctx-size 8192`，沒有 `--parallel`；`/props` 顯示 total_slots=4、slot_ctx=8192。
-- journal 有 `Context size has been exceeded`，時間在 19:51 的 4 並行 5k 請求；**沒有 CUDA error、OOM 或 service restart**。
-- `nvidia-smi`：RTX 5070 Ti，16303 MiB total、5090 MiB used、10749 MiB free、43°C。
-- `ollama` systemd service 仍是 active，11434 在聽；雖然目前 GPU 上只有三個 llama-server，但應停止／停用 Ollama，避免之後載入模型占用 VRAM。
+- chat 已套用 `--ctx-size 24576`；`/props` 回報 total_slots=4、slot_ctx=24576（log 也顯示 `n_slots=4, n_ctx_slot=24576, kv_unified=true`）。
+- 4 個並行、每個 5,749-token 的請求：4/4 HTTP 200、finish stop，total tokens 5,888–5,916；沒有 context exceeded。
+- `nvidia-smi`：RTX 5070 Ti，16303 MiB total、5408 MiB used、10431 MiB free、44°C、48% util。
+- `ollama` systemd service 已 inactive；GPU 上只有三個 llama-server。
+- 20 mixed：20/20 operational、0 error；40 mixed：32 operational／8 retrieval_only（8 llm_busy）、0 error。
 - UFW active；規則細節不寫進 repo，請在 x570 本機確認只允許必要來源與 port。
 - 請在 x570 上跑（或提供 SSH 後我來跑）：
 
@@ -101,31 +102,41 @@ journalctl -u judgment-llm-chat -n 200 --no-pager
 
 - systemd `Restart=on-failure` 會讓崩潰後自動重啟；如果服務中斷後又恢復，`journalctl` 應有 restart 記錄。
 - `/props` 無法提供 uptime；需要 journal 才能分辨 OOM、CUDA error、model load 失敗或手動 restart。
-- 目前沒有觀察到 x570 service 中斷；7 小時內 active，context exceeded 是單次請求層級的錯誤，不是服務重啟。
+- 目前沒有觀察到 x570 service 中斷；7 小時內 active。套用 24576 後重啟一次是管理操作，不是崩潰。
+- **尚未做重開機驗證**：需 `sudo reboot` 後確認三個 unit 自動 active、`/props` 與 VRAM 正常。
 
-## 立即修正：x570 序列化 LLM
+## x570 24576 後（2026-11-17 20:29）
 
-x570 仍是 8192、4 slots。先把 `.env` 設為：
+`.env` 已改為：
 
 ```text
-LLM_MAX_CONCURRENT=1
-LLM_NUM_CTX=8192
+LLM_MAX_CONCURRENT=4
+LLM_NUM_CTX=6144
 ```
 
-這樣一次只有一個 LLM 使用 8192 池，Q5 5,749 tokens 可放進；20 mixed 實測：
+20 mixed：
 
 ```text
-operational 16／retrieval_only 4
-first_partial p95 2,802 ms
-done p95 9,939 ms
+operational 20／retrieval_only 0
+first_partial p95 2,736 ms
+done p95 14,529 ms
 error 0
 ```
 
-比 4 並行全部 context exceeded 好。等 x570 套用 `-c 24576 -np 4` 後再改回 4。
+40 mixed：
+
+```text
+operational 32／retrieval_only 8（8 llm_busy）
+first_partial p95 5,720 ms
+done p95 14,128 ms
+error 0
+```
+
+沒有 context exceeded；摘要比例 20/20（20 mixed）與 12/20（40 mixed）。
 
 ## 建議
 
-1. x570 實體登入或提供 SSH key／密碼，確認三個 systemd unit 是 enabled + active，並抓 `journalctl`。
-2. x570 套用 `-c 24576 -np 4`，4×Q5 驗證、`nvidia-smi` 記錄。
-3. MBP 若要再開 24576，必須用 LaunchAgent／launchd（不要用 tmux），並保留 exit code 與 30 分鐘負載紀錄。
-4. 保持 `.env` `LLM_MAX_CONCURRENT=1` 直到 x570 context 修好。
+1. x570 重開機，確認三個 unit 自動 active、`/props` slot_ctx 24576、VRAM 正常。
+2. 加 SSH 公鑰，讓後續 `systemctl`／journal 檢查不必實體登入。
+3. MBP 若要再開 24576，必須用 LaunchAgent／launchd（不要用 tmux），並保留 exit code 與 10 分鐘負載紀錄。
+4. 觀察 40 mixed 的 8 個 llm_busy 是否可接受；若要提高摘要比例，再考慮佇列期限或 provider 速度。

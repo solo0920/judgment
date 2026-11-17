@@ -1,0 +1,9 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+20 mixed x570 24576,first_partial_ms,20,2689.9,2736.4,2739.8,no context exceeded
+20 mixed x570 24576,result_ms,20,7065.4,14529.4,15751.9,no context exceeded
+20 mixed x570 24576,statuses,20,,,,"{""operational"": 20}"
+20 mixed x570 24576,errors,20,,,,0
+40 mixed x570 24576,first_partial_ms,40,5616.2,5719.8,5720.7,no context exceeded
+40 mixed x570 24576,result_ms,40,5734.7,14127.9,15129.3,no context exceeded
+40 mixed x570 24576,statuses,40,,,,"{""operational"": 32, ""retrieval_only"": 8}"
+40 mixed x570 24576,errors,40,,,,0
