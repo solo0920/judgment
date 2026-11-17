@@ -80,10 +80,14 @@ RestartSec=3
 
 所以設計上是開機載入三個 model，失敗會自動重啟。
 
-### 3. 無法確認的部分
+### 3. 2026-11-17 本機輸出（已確認）
 
-- SSH port 22 可連，但 `solo@x570` publickey／password 被拒；`ssh-add -l` 沒有已載入金鑰；Tailscale SSH host key 也不可用。
-- 因此**無法直接確認** `systemctl is-enabled`／`is-active` 與 journal。 `/props` 只證明目前三個服務在跑，不證明開機 enable 狀態。
+- 三個 unit 都是 `enabled` + `active`，自 12:50:13 起已運行 7 小時。
+- chat service 使用 `/usr/local/lib/ollama/llama-server`，`--ctx-size 8192`，沒有 `--parallel`；`/props` 顯示 total_slots=4、slot_ctx=8192。
+- journal 有 `Context size has been exceeded`，時間在 19:51 的 4 並行 5k 請求；**沒有 CUDA error、OOM 或 service restart**。
+- `nvidia-smi`：RTX 5070 Ti，16303 MiB total、5090 MiB used、10749 MiB free、43°C。
+- `ollama` systemd service 仍是 active，11434 在聽；雖然目前 GPU 上只有三個 llama-server，但應停止／停用 Ollama，避免之後載入模型占用 VRAM。
+- UFW active；規則細節不寫進 repo，請在 x570 本機確認只允許必要來源與 port。
 - 請在 x570 上跑（或提供 SSH 後我來跑）：
 
 ```bash
@@ -97,7 +101,7 @@ journalctl -u judgment-llm-chat -n 200 --no-pager
 
 - systemd `Restart=on-failure` 會讓崩潰後自動重啟；如果服務中斷後又恢復，`journalctl` 應有 restart 記錄。
 - `/props` 無法提供 uptime；需要 journal 才能分辨 OOM、CUDA error、model load 失敗或手動 restart。
-- 目前沒有 x570 SSH，不能把「服務中斷」歸因於程式或硬體。
+- 目前沒有觀察到 x570 service 中斷；7 小時內 active，context exceeded 是單次請求層級的錯誤，不是服務重啟。
 
 ## 立即修正：x570 序列化 LLM
 

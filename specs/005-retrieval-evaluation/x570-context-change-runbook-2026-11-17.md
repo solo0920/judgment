@@ -26,6 +26,15 @@ bash scripts/x570_service_audit.sh before
 
 ## 2. 判斷 chat context
 
+2026-11-17 的 before 輸出：RTX 5070 Ti，16303 MiB total、5090 MiB used、10749 MiB free。三個 model 已載入，24576 應該放得下；仍以每次輸出的 `nvidia-smi` 為準。
+
+先停用 Ollama，避免之後載入模型占用 VRAM：
+
+```bash
+sudo systemctl disable --now ollama
+systemctl is-active ollama   # 應為 inactive
+```
+
 看 `nvidia-smi`：
 
 - 若 free VRAM 足夠（保守看 >4 GB 餘裕），套用 `--ctx-size 24576`。
@@ -65,7 +74,14 @@ sudo bash scripts/x570_service_audit.sh rollback
 
 ## 4. 4×Q5 驗證
 
-在 MBP 或 x570 上跑 4 個並行、每個約 5,700 tokens 的請求。最簡單是重用 `/tmp/probe_mbp_24576_5k.py`，把 URL 改成 `http://x570:11436`。預期：
+在 MBP 或 x570 上跑 4 個並行、每個約 5,700 tokens 的請求。最簡單是重用 `/tmp/probe_mbp_24576_5k.py`，把 URL 改成 `http://x570:11436`：
+
+```bash
+sed 's#http://127.0.0.1:11440#http://x570:11436#' /tmp/probe_mbp_24576_5k.py > /tmp/probe_x570_5k.py
+uv run python /tmp/probe_x570_5k.py
+```
+
+預期：
 
 ```text
 4/4 HTTP 200

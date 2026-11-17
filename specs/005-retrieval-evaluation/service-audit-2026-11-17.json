@@ -2,25 +2,98 @@
   "generated_at": "2026-11-17",
   "mbp": {
     "model_services": [
-      {"label": "com.judgment.rerank", "port": 11435, "model": "bge-reranker-v2-m3-q8_0.gguf", "run_at_load": true, "keep_alive": true, "runs": 1, "pid": 846},
-      {"label": "com.judgment.llm-chat", "port": 11436, "model": "gemma3-4b.gguf", "run_at_load": true, "keep_alive": true, "runs": 2, "last_status": -15},
-      {"label": "com.judgment.llm-embedding", "port": 11437, "model": "bge-m3-f16.gguf", "run_at_load": true, "keep_alive": true, "runs": 2, "last_status": -15}
+      {
+        "label": "com.judgment.rerank",
+        "port": 11435,
+        "model": "bge-reranker-v2-m3-q8_0.gguf",
+        "run_at_load": true,
+        "keep_alive": true,
+        "runs": 1,
+        "pid": 846
+      },
+      {
+        "label": "com.judgment.llm-chat",
+        "port": 11436,
+        "model": "gemma3-4b.gguf",
+        "run_at_load": true,
+        "keep_alive": true,
+        "runs": 2,
+        "last_status": -15
+      },
+      {
+        "label": "com.judgment.llm-embedding",
+        "port": 11437,
+        "model": "bge-m3-f16.gguf",
+        "run_at_load": true,
+        "keep_alive": true,
+        "runs": 2,
+        "last_status": -15
+      }
     ],
-    "mbp_24576_launchd_probe": {"requests": 77, "http_200": 77, "duration_s": 120, "runs": 1, "last_exit": "never exited", "note": "temporary LaunchAgent, removed after test"},
+    "mbp_24576_launchd_probe": {
+      "requests": 77,
+      "http_200": 77,
+      "duration_s": 120,
+      "runs": 1,
+      "last_exit": "never exited",
+      "note": "temporary LaunchAgent, removed after test"
+    },
     "diagnosis": "The extra 24576 server was a tmux foreground process, not a managed service. Its disappearance matched tmux/process-group cleanup, not a llama-server crash. Under a temporary launchd job it survived 77/77 5.7k-token requests with no exit."
   },
   "x570": {
-    "chat": {"port": 11436, "model": "gemma3-4b-q4_k_m.gguf", "total_slots": 4, "n_ctx": 8192},
-    "embedding": {"port": 11437, "model": "bge-m3-f16.gguf", "total_slots": 4, "n_ctx": 8192},
-    "rerank": {"port": 11435, "model": "bge-reranker-v2-m3-q8_0.gguf", "total_slots": 4, "n_ctx": 8192},
-    "systemd_units": ["judgment-llm-chat", "judgment-llm-embedding", "judgment-reranker"],
+    "chat": {
+      "port": 11436,
+      "model": "gemma3-4b-q4_k_m.gguf",
+      "total_slots": 4,
+      "n_ctx": 8192
+    },
+    "embedding": {
+      "port": 11437,
+      "model": "bge-m3-f16.gguf",
+      "total_slots": 4,
+      "n_ctx": 8192
+    },
+    "rerank": {
+      "port": 11435,
+      "model": "bge-reranker-v2-m3-q8_0.gguf",
+      "total_slots": 4,
+      "n_ctx": 8192
+    },
+    "systemd_units": [
+      "judgment-llm-chat",
+      "judgment-llm-embedding",
+      "judgment-reranker"
+    ],
     "deploy_script": "scripts/deploy_llama_services_systemd.sh: systemctl enable + Restart=on-failure + RestartSec=3",
-    "verified_enabled": false,
-    "reason": "SSH port 22 reachable but publickey/password denied; Tailscale SSH host key not available."
+    "verified_enabled": true,
+    "reason": "SSH port 22 reachable but publickey/password denied; Tailscale SSH host key not available.",
+    "verified_active": true,
+    "active_since": "2026-11-17T12:50:13+08:00",
+    "uptime_hours": 7,
+    "chat_memory": "10.6G peak 11.2G",
+    "embedding_memory": "1.6G",
+    "rerank_memory": "2G",
+    "gpu": {
+      "name": "RTX 5070 Ti",
+      "vram_total_mib": 16303,
+      "vram_used_mib": 5090,
+      "vram_free_mib": 10749,
+      "temperature_c": 43
+    },
+    "ollama_service_active": true,
+    "chat_context_error_observed": true,
+    "service_restart_observed": false,
+    "note": "All three units enabled+active for 7h; journal context-exceeded errors are request-level, no CUDA/OOM/restart. Free VRAM supports 24576; Ollama service should be stopped/disabled."
   },
   "x570_serial_mode": {
     "app_setting": "LLM_MAX_CONCURRENT=1, LLM_NUM_CTX=8192",
-    "twenty_mixed": {"operational": 16, "retrieval_only": 4, "first_partial_p95_ms": 2801.8, "done_p95_ms": 9939.3, "errors": 0},
+    "twenty_mixed": {
+      "operational": 16,
+      "retrieval_only": 4,
+      "first_partial_p95_ms": 2801.8,
+      "done_p95_ms": 9939.3,
+      "errors": 0
+    },
     "note": "Serializing one LLM at a time lets a single Q5-sized prompt fit the 8192 context; restore 4 after -c 24576."
   }
 }
