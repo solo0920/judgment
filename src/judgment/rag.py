@@ -13,7 +13,7 @@ from sqlalchemy import func, or_, select
 from .config import Settings
 from .embeddings import EmbeddingError, OllamaEmbedder
 from .judgment_citations import law_citations_for_record
-from .judgment_index import index_coverage
+from .judgment_index import cached_index_coverage
 from .index_versions import active_version
 from .law_rag import (
     LAW_ALIASES,
@@ -2365,15 +2365,26 @@ def answer_question(
         with trace_segment(
             "rag.coverage",
             module=__name__,
-            function="index_coverage",
-            params={"collection": collection, "model": settings.embedding_model},
-        ):
-            coverage = index_coverage(
+            function="cached_index_coverage",
+            params={
+                "collection": collection,
+                "model": settings.embedding_model,
+                "cache_ttl_seconds": settings.rag_coverage_cache_ttl_seconds,
+            },
+        ) as coverage_segment:
+            coverage_cache: Dict[str, Any] = {}
+            coverage = cached_index_coverage(
                 session_factory,
                 collection=collection,
                 model=settings.embedding_model,
                 version_id=active_index["version_id"] if active_index else None,
+                ttl_seconds=settings.rag_coverage_cache_ttl_seconds,
+                cache_stats=coverage_cache,
             )
+            if coverage_segment is not None:
+                coverage_segment.setdefault("metadata", {}).update(
+                    coverage_cache
+                )
     except Exception:
         coverage = {
             "total_judgments": 0,

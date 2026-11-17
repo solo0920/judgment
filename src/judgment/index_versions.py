@@ -32,6 +32,17 @@ VERSION_STATUSES = {
 ACTIVE_STATUSES = {"active"}
 
 
+def _invalidate_coverage_cache() -> None:
+    """Clear request-path coverage cache after the serving pointer changes."""
+
+    try:
+        from .judgment_index import invalidate_index_coverage
+
+        invalidate_index_coverage()
+    except Exception:
+        logger.debug("coverage cache invalidation failed", exc_info=True)
+
+
 def recipe_version(settings: Settings, max_chars: Optional[int] = None) -> str:
     return (
         f"{settings.judgment_index_recipe_version}-"
@@ -524,6 +535,7 @@ def activate_version(
         target.activated_at = _now()
         session.commit()
         session.refresh(target)
+        _invalidate_coverage_cache()
         return _version_dict(target) or {}
 
 
@@ -573,6 +585,7 @@ def rollback_version(
         previous.activated_at = _now()
         session.commit()
         session.refresh(previous)
+        _invalidate_coverage_cache()
         return _version_dict(previous) or {}
 
 
@@ -614,6 +627,7 @@ def reconcile_alias(
                 target.alias_name = alias
                 target.activated_at = target.activated_at or _now()
                 session.commit()
+                _invalidate_coverage_cache()
                 result["repaired"] = True
                 result["postgres_target"] = target.physical_collection
     return result

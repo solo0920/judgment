@@ -94,6 +94,7 @@ class Settings:
     rag_top_k: int = 4
     rag_score_threshold: float = 0.35
     rag_max_context_chars: int = 4000
+    rag_coverage_cache_ttl_seconds: float = 300.0
     rag_lexical_rrf_enabled: bool = False
     rag_lexical_rrf_weight: float = 2.0
     rag_legal_expansion_enabled: bool = False
@@ -302,6 +303,9 @@ class Settings:
             rag_top_k=_env_int("RAG_TOP_K", 4),
             rag_score_threshold=_env_float("RAG_SCORE_THRESHOLD", 0.35),
             rag_max_context_chars=_env_int("RAG_MAX_CONTEXT_CHARS", 4000),
+            rag_coverage_cache_ttl_seconds=_env_float(
+                "RAG_COVERAGE_CACHE_TTL_SECONDS", 300.0
+            ),
             rag_lexical_rrf_enabled=_env_bool(
                 "RAG_LEXICAL_RRF_ENABLED", False
             ),

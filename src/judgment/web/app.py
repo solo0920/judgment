@@ -531,6 +531,7 @@ def _rag_response_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
 
 _RAG_PIPELINE_SEGMENTS = {
     "rag.parse_question",
+    "rag.coverage",
     "rag.embed_query",
     "rag.qdrant_search",
     "rag.rerank",

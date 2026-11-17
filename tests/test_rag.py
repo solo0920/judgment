@@ -478,6 +478,68 @@ def test_index_judgments_dry_run_does_not_call_services() -> None:
     )["indexed_judgments"] == 0
 
 
+def test_cached_index_coverage_reuses_and_invalidates(monkeypatch) -> None:
+    from judgment import judgment_index as module
+
+    session_factory = _session_factory()
+    calls = {"n": 0}
+
+    def fake_index_coverage(
+        session_factory,
+        *,
+        collection: str,
+        model: str,
+        version_id: int | None = None,
+    ) -> dict:
+        calls["n"] += 1
+        return {
+            "total_judgments": 10,
+            "indexed_judgments": calls["n"],
+            "remaining_judgments": 10 - calls["n"],
+            "collection": collection,
+            "model": model,
+            "version_id": version_id,
+            "latest_indexed_at": None,
+        }
+
+    monkeypatch.setattr(module, "index_coverage", fake_index_coverage)
+    module.invalidate_index_coverage()
+    try:
+        first = module.cached_index_coverage(
+            session_factory,
+            collection="coverage-test",
+            model="bge-m3",
+            version_id=1,
+        )
+        second_stats: dict = {}
+        second = module.cached_index_coverage(
+            session_factory,
+            collection="coverage-test",
+            model="bge-m3",
+            version_id=1,
+            cache_stats=second_stats,
+        )
+        assert calls["n"] == 1
+        assert second["indexed_judgments"] == first["indexed_judgments"] == 1
+        assert second_stats["cache_hit"] is True
+
+        module.invalidate_index_coverage(
+            collection="coverage-test",
+            model="bge-m3",
+            version_id=1,
+        )
+        third = module.cached_index_coverage(
+            session_factory,
+            collection="coverage-test",
+            model="bge-m3",
+            version_id=1,
+        )
+        assert calls["n"] == 2
+        assert third["indexed_judgments"] == 2
+    finally:
+        module.invalidate_index_coverage()
+
+
 def test_answer_question_returns_retrieval_only_without_llm(monkeypatch) -> None:
     session_factory = _session_factory()
     _seed_judgments(session_factory)

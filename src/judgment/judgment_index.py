@@ -7,9 +7,10 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
@@ -280,6 +281,179 @@ def index_coverage(
         "version_id": version_id,
         "latest_indexed_at": latest.isoformat() if latest else None,
     }
+
+
+_COVERAGE_CACHE_TTL_SECONDS = 300.0
+_COVERAGE_CACHE_FAILURE_TTL_SECONDS = 30.0
+_coverage_cache: Dict[
+    Tuple[int, str, str, Optional[int]],
+    Tuple[Dict[str, Any], float, Any],
+] = {}
+_coverage_cache_locks: Dict[
+    Tuple[int, str, str, Optional[int]], threading.Lock
+] = {}
+_coverage_cache_guard = threading.Lock()
+
+
+def _coverage_cache_key(
+    session_factory: Any,
+    *,
+    collection: str,
+    model: str,
+    version_id: Optional[int],
+) -> Tuple[int, str, str, Optional[int]]:
+    return (
+        id(session_factory),
+        str(collection or ""),
+        str(model or ""),
+        int(version_id) if version_id is not None else None,
+    )
+
+
+def invalidate_index_coverage(
+    *,
+    collection: Optional[str] = None,
+    model: Optional[str] = None,
+    version_id: Optional[int] = None,
+) -> int:
+    """Drop cached coverage values matching the supplied filters."""
+
+    target_collection = str(collection) if collection is not None else None
+    target_model = str(model) if model is not None else None
+    target_version = int(version_id) if version_id is not None else None
+    removed = 0
+    with _coverage_cache_guard:
+        for key in list(_coverage_cache):
+            _, key_collection, key_model, key_version = key
+            if target_collection is not None and key_collection != target_collection:
+                continue
+            if target_model is not None and key_model != target_model:
+                continue
+            if target_version is not None and key_version != target_version:
+                continue
+            _coverage_cache.pop(key, None)
+            removed += 1
+    return removed
+
+
+def cached_index_coverage(
+    session_factory: Any,
+    *,
+    collection: str,
+    model: str,
+    version_id: Optional[int] = None,
+    ttl_seconds: float = _COVERAGE_CACHE_TTL_SECONDS,
+    cache_stats: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return coverage with a process-wide TTL cache and single-flight refresh.
+
+    The cache is keyed by the session factory identity, collection, model and
+    version.  Coverage is an exact count over millions of rows, so callers on
+    the request path should use this wrapper instead of ``index_coverage``.
+    Admin and indexing callers can keep using ``index_coverage`` when they need
+    an authoritative value.
+    """
+
+    started = time.perf_counter()
+
+    def record(**values: Any) -> None:
+        if cache_stats is None:
+            return
+        cache_stats.update(values)
+        cache_stats.setdefault(
+            "cache_lookup_ms",
+            round((time.perf_counter() - started) * 1000, 2),
+        )
+
+    ttl = max(0.0, float(ttl_seconds))
+    if ttl <= 0:
+        value = index_coverage(
+            session_factory,
+            collection=collection,
+            model=model,
+            version_id=version_id,
+        )
+        record(cache_hit=False, cache_disabled=True)
+        return value
+    key = _coverage_cache_key(
+        session_factory,
+        collection=collection,
+        model=model,
+        version_id=version_id,
+    )
+    now = time.monotonic()
+    with _coverage_cache_guard:
+        entry = _coverage_cache.get(key)
+        if (
+            entry is not None
+            and entry[2] is session_factory
+            and entry[1] > now
+        ):
+            record(cache_hit=True, cache_wait_ms=0.0)
+            return dict(entry[0])
+        key_lock = _coverage_cache_locks.setdefault(key, threading.Lock())
+
+    # Only one request per key refreshes the count; the rest wait and then
+    # read the value written by the winner.
+    with key_lock:
+        wait_ms = round((time.perf_counter() - started) * 1000, 2)
+        now = time.monotonic()
+        with _coverage_cache_guard:
+            entry = _coverage_cache.get(key)
+            if (
+                entry is not None
+                and entry[2] is session_factory
+                and entry[1] > now
+            ):
+                record(cache_hit=True, cache_wait_ms=wait_ms)
+                return dict(entry[0])
+            stale = (
+                dict(entry[0])
+                if entry is not None and entry[2] is session_factory
+                else None
+            )
+        refresh_started = time.perf_counter()
+        try:
+            value = index_coverage(
+                session_factory,
+                collection=collection,
+                model=model,
+                version_id=version_id,
+            )
+        except Exception:
+            if stale is None:
+                raise
+            logger.warning(
+                "index coverage refresh failed; serving stale cache",
+                exc_info=True,
+            )
+            with _coverage_cache_guard:
+                _coverage_cache[key] = (
+                    stale,
+                    time.monotonic()
+                    + min(ttl, _COVERAGE_CACHE_FAILURE_TTL_SECONDS),
+                    session_factory,
+                )
+            record(
+                cache_hit=True,
+                cache_stale=True,
+                cache_wait_ms=wait_ms,
+                cache_refresh_ms=round(
+                    (time.perf_counter() - refresh_started) * 1000, 2
+                ),
+            )
+            return dict(stale)
+        expires_at = time.monotonic() + ttl
+        with _coverage_cache_guard:
+            _coverage_cache[key] = (dict(value), expires_at, session_factory)
+        record(
+            cache_hit=False,
+            cache_wait_ms=wait_ms,
+            cache_refresh_ms=round(
+                (time.perf_counter() - refresh_started) * 1000, 2
+            ),
+        )
+        return dict(value)
 
 
 def index_staleness(
@@ -1129,6 +1303,7 @@ def index_judgments(
             collection_points = store.collection_count(collection)
         except Exception:
             collection_points = None
+    invalidate_index_coverage(collection=collection, model=model)
     coverage = index_coverage(session_factory, collection=collection, model=model)
     stats = build_stats(duration_ms)
     summary = {
