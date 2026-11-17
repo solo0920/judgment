@@ -1,6 +1,6 @@
 # Judgment RAG
 
-判決檢索與法規引用問答系統。目前已包含「法規／命令資料下載」、「判決下載」、「判決金融法規篩選匯入」、「資料品質」、「題庫與 RAG Benchmark」、「版本化判決 Qdrant 索引」與「法規／命令條文向量索引」模組，以及以 FastAPI + Vanilla JS 建置的 Web 主控台：從全國法規資料庫與司法院開放資料下載最新資料、判斷是否有新版、將原始資料寫入 Parquet、把版本與中繼資料寫入 PostgreSQL；判決資料會先將壓縮檔內原始 JSON 寫入不可變的原始 Parquet 備份，再依金融法規清單篩選後寫入 PostgreSQL，最後建立 Qdrant 向量索引，透過本機 Ollama 提供有引用依據的 RAG 回答。
+判決檢索與法規引用問答系統。目前已包含「法規／命令資料下載」、「判決下載」、「判決金融法規篩選匯入」、「資料品質」、「題庫與 RAG Benchmark」、「版本化判決 Qdrant 索引」與「法規／命令條文向量索引」模組，以及以 FastAPI + Vanilla JS 建置的 Web 主控台：從全國法規資料庫與司法院開放資料下載最新資料、判斷是否有新版、將原始資料寫入 Parquet、把版本與中繼資料寫入 PostgreSQL；判決資料會先將壓縮檔內原始 JSON 寫入不可變的原始 Parquet 備份，再依金融法規清單篩選後寫入 PostgreSQL，最後建立 Qdrant 向量索引，透過 x570／MBP llama-server 提供有引用依據的 RAG 回答。
 
 ## 法規下載模組
 
@@ -113,7 +113,7 @@ uv run judgment-backfill-law-articles --data-dir ./data/laws
 uv run judgment-web --host 127.0.0.1 --port 9200 --data-dir ./data/laws
 ```
 
-`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、視設定啟動本機 llama.cpp reranker，接著探測 x570 的 llama-server（chat `11436`、embedding `11437`）；可用時以 llama-server 為主要 API 且不設定本機 Ollama fallback；x570 llama-server 未就緒時才退回 x570 Ollama，最後才使用本機 Ollama。之後在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端或 reranker。後端優先以 detached tmux session `judgment-web` 啟動，避免啟動它的終端或 shell process group 結束時一起被終止；tmux 不可用時才回退 `nohup`。`down.sh` 會先停止 `judgment-web` session，再清理 9200 listener 與電源控制器。可用 `tmux attach -t judgment-web` 查看後端輸出；`tmux kill-session -t judgment-web` 只停止該 session。若使用自訂 session 名稱，設定環境變數 `JUDGMENT_WEB_TMUX_SESSION`。查詢 embedding 前會先做 2 秒健康檢查，非本機 llama-server／Ollama 未回應即直接改用 fallback；實際 embedding 若超過 `EMBEDDING_QUERY_TIMEOUT_SECONDS`（預設 2 秒）未回應，也會改用 fallback。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端、控制器與本機 reranker（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器，`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過啟動時的線上更新檢查。
+`up.sh` 會依序啟動 Docker Compose 的 PostgreSQL 與 Qdrant、等待健康檢查、視設定啟動本機 llama.cpp reranker，接著探測 x570 的 llama-server（chat `11436`、embedding `11437`）；可用時以 x570 llama-server 為主要 API、MBP llama-server 為 fallback；x570 llama-server 未就緒時改用 MBP llama-server。Ollama 不再作為 runtime fallback。之後在 `127.0.0.1:9200` 啟動後端，並確認 `127.0.0.1:9201` 電源控制器可用；重複執行不會啟動第二個後端或 reranker。後端優先以 detached tmux session `judgment-web` 啟動，避免啟動它的終端或 shell process group 結束時一起被終止；tmux 不可用時才回退 `nohup`。`down.sh` 會先停止 `judgment-web` session，再清理 9200 listener 與電源控制器。可用 `tmux attach -t judgment-web` 查看後端輸出；`tmux kill-session -t judgment-web` 只停止該 session。若使用自訂 session 名稱，設定環境變數 `JUDGMENT_WEB_TMUX_SESSION`。查詢 embedding 前會先做 2 秒健康檢查，非本機 llama-server／Ollama 未回應即直接改用 fallback；實際 embedding 若超過 `EMBEDDING_QUERY_TIMEOUT_SECONDS`（預設 2 秒）未回應，也會改用 fallback。若 `frontend/` 尚未建立或來源檔較新，會先重新產生 standalone 前端。日誌位於 `.run/web.log`，啟動完成後會印出系統測試網址。`down.sh` 會先停止後端、控制器與本機 reranker（必要時強制結束），再執行 `docker compose stop`，不會刪除 `judgment_pgdata` 或 `judgment_qdrant` volume。可用 `JUDGMENT_PORT` 與 `JUDGMENT_POWER_PORT` 覆寫連接埠；設定 `JUDGMENT_SKIP_QDRANT=1` 可略過 Qdrant，`JUDGMENT_SKIP_DOCKER=1` 可略過 Docker 啟動／停止，`JUDGMENT_POWER_AGENT=0` 可停用電源控制器，`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過啟動時的線上更新檢查。
 
 開啟 <http://127.0.0.1:9200/>，預設進入 RAG 提問頁。主控台是純靜態的 Vanilla JS SPA，由 FastAPI 直接服務，原始碼模式不需要 Node.js 建置步驟。若要以 `file://` 直接開啟，或部署到 Cloudflare Pages，請先產生 `frontend/`，見〈靜態前端與部署〉。
 
@@ -201,30 +201,30 @@ cd /Volumes/USB/judgment-backup-20261108
 | `JUDGMENT_EMBEDDING_VERSION` | `bge-m3@v1` | 向量重用指紋的一部分；模型或前處理改變時必須更新 |
 | `JUDGMENT_INDEX_RECIPE_VERSION` | `doc-head-tail-v1` | index text 規則版本；會自動附加 max_chars |
 | `EMBEDDING_URL` | 空 | 主要 embedding API；x570 llama-server 使用 `http://x570:11437`（OpenAI 相容） |
-| `EMBEDDING_API` | `ollama` | Embedding API 種類；x570 llama-server 設 `openai`，本機 Ollama 設 `ollama` |
-| `EMBEDDING_FALLBACK_URL` | 空 | 主要 embedding API 無法連線時的第一台 fallback；x570 llama-server 可用時 `up.sh` 會清空，不再使用本機 Ollama |
-| `EMBEDDING_FALLBACK_API` | `ollama` | Embedding fallback 的 API 種類；x570 llama-server 用 `openai`，Ollama 用 `ollama` |
+| `EMBEDDING_API` | `ollama` | Embedding API 種類；x570／MBP llama-server 設 `openai`，Ollama 設 `ollama` |
+| `EMBEDDING_FALLBACK_URL` | 空 | 主要 embedding API 無法連線時的 fallback；x570 可用時指向 MBP llama-server `http://127.0.0.1:11437`，x570 不可用時改為 primary |
+| `EMBEDDING_FALLBACK_API` | `ollama` | Embedding fallback 的 API 種類；x570／MBP llama-server 用 `openai` |
 | `EMBEDDING_FAILOVER_URLS` | 空 | 額外的 embedding fallback 清單（逗號分隔）；DB 有設定 Ollama 主機時由優先順序自動附加 |
 | `EMBEDDING_FAILOVER_APIS` | 空 | 與 `EMBEDDING_FAILOVER_URLS` 對齊的 API 種類清單（`openai`／`ollama`） |
 | `JUDGMENT_X570_LLM_URL` | `http://x570:11436` | `up.sh` 啟動時探測的 x570 llama-server chat |
 | `JUDGMENT_X570_EMBEDDING_URL` | `http://x570:11437` | `up.sh` 啟動時探測的 x570 llama-server embedding |
-| `JUDGMENT_X570_OLLAMA_URL` | `http://x570:11434` | x570 llama-server 不可用時的第二順位 Ollama |
-| `JUDGMENT_LOCAL_EMBEDDING_URL` | `http://127.0.0.1:11434` | 最後順位的 MBP Ollama |
-| `JUDGMENT_EMBEDDING_PROBE_TIMEOUT` | `2` | `up.sh` 探測 llama-server／Ollama 的逾時秒數 |
+| `JUDGMENT_MBP_LLM_URL` | `http://127.0.0.1:11436` | `up.sh` 探測的 MBP llama-server chat fallback |
+| `JUDGMENT_MBP_EMBEDDING_URL` | `http://127.0.0.1:11437` | `up.sh` 探測的 MBP llama-server embedding fallback |
+| `JUDGMENT_EMBEDDING_PROBE_TIMEOUT` | `2` | `up.sh` 探測 x570／MBP llama-server 的逾時秒數 |
 | `EMBEDDING_MODEL` | `bge-m3` | 判決、法規條文與查詢共用的 embedding 模型（1024 維） |
 | `EMBEDDING_TIMEOUT_SECONDS` | `120` | Embedding 請求逾時 |
 | `EMBEDDING_QUERY_TIMEOUT_SECONDS` | `2` | 非本機 embedding 查詢的逾時；超過即改用 fallback（若設定）；本機 primary 使用 `EMBEDDING_TIMEOUT_SECONDS` |
 | `EMBEDDING_HEALTH_TIMEOUT_SECONDS` | `2` | 使用非本機 embedding 前的健康檢查逾時；未回應即直接改用 fallback |
 | `LLM_URL` | 空 | LLM API 位址；x570 llama-server 使用 `http://x570:11436`（OpenAI 相容） |
-| `LLM_API` | `ollama` | LLM API 種類；x570 llama-server 設 `openai`，本機 Ollama 設 `ollama` |
-| `LLM_FALLBACK_URL` | 空 | 主要 LLM 無法使用時的 fallback；x570 llama-server 可用時 `up.sh` 會清空，不再使用本機 Ollama |
+| `LLM_API` | `ollama` | LLM API 種類；x570／MBP llama-server 設 `openai`，Ollama 設 `ollama` |
+| `LLM_FALLBACK_URL` | 空 | 主要 LLM 無法使用時的 fallback；x570 可用時指向 MBP llama-server `http://127.0.0.1:11436`，x570 不可用時改為 primary |
 | `LLM_FALLBACK_MODEL` | 空 | fallback LLM 模型；空值沿用 `LLM_MODEL` |
-| `LLM_FALLBACK_API` | `ollama` | fallback LLM 的 API 種類；x570 llama-server 用 `openai`，Ollama 用 `ollama` |
+| `LLM_FALLBACK_API` | `ollama` | fallback LLM 的 API 種類；x570／MBP llama-server 用 `openai`，Ollama 用 `ollama` |
 | `LLM_MODEL` | 空 | RAG 回答模型；x570 llama-server 別名為 `gemma3:4b` |
 | `LLM_TIMEOUT_SECONDS` | `180` | LLM 請求逾時 |
 | `LLM_NUM_CTX` | `8192` | Ollama context window；OpenAI 路徑的實際上限仍由 llama-server `--ctx-size` 決定 |
 | `LLM_NUM_PREDICT` | `384` | 最多生成 tokens；OpenAI 路徑送 `max_tokens` |
-| `LLM_KEEP_ALIVE` | `30m` | Ollama fallback 模型保持載入時間；`.env` 目前設為 `-1`，永久保留 |
+| `LLM_KEEP_ALIVE` | `30m` | 舊 Ollama 路徑的模型保持載入時間；llama-server 不使用此設定 |
 | `RAG_TOP_K` | `4` | 最終提供給 LLM 的判決數；啟用 reranker 時建議 `8` |
 | `RAG_SCORE_THRESHOLD` | `0.35` | 向量相似度下限；低於門檻不提供給 LLM |
 | `RAG_MAX_CONTEXT_CHARS` | `4000` | 提供給 LLM 的判決片段總字數上限 |
@@ -1180,7 +1180,7 @@ curl "http://127.0.0.1:9200/api/index-alias/reconcile"
 - 已刪除或不再符合資格的判決會從新 collection 刪除。
 - 驗證失敗不得切換；第一階段保留 active＋前一個成功版本，不自動刪除舊 collection。
 - `JUDGMENT_VECTOR_ALIAS` 預設 `judgments_current`，`JUDGMENT_VECTOR_COLLECTION_PREFIX` 預設 `judgments`。
-- x570 以 llama-server 的 `http://x570:11437`（`EMBEDDING_API=openai`）作為主要 embedding；x570 llama-server 可用時不設定本機 fallback，關機或查詢 embedding 超過 2 秒未回應時才由 `up.sh` 探測 x570 Ollama／本機 Ollama。兩端若都使用 `bge-m3`，必須是同一個 digest。
+- x570 以 llama-server 的 `http://x570:11437`（`EMBEDDING_API=openai`）作為主要 embedding，MBP llama-server `http://127.0.0.1:11437` 為 fallback；x570 不可用時由 `up.sh` 改用 MBP llama-server。兩端使用同一個 `bge-m3` GGUF／pooling，輸出需維持相容。
 - 在「系統狀態 → Model Provider」新增多台 Ollama 後，可到「資料處理」的「執行資訊」卡片點選「主機:模型」按鈕；選取的主機會設為第一優先，embedding 會依序嘗試後續主機，直到成功或全部失敗。此設定會套用到法規／命令索引、判決向量索引與完整資料更新；CLI 若明確指定 `--embedding-url`／`--embedding-model`，以 CLI 參數為優先。
 
 #### 全量索引腳本
@@ -1860,17 +1860,17 @@ MBP 的 `.env` 對應設定：
 LLM_URL=http://x570:11436
 LLM_API=openai
 LLM_MODEL=gemma3:4b
-LLM_FALLBACK_URL=http://x570:11436
+LLM_FALLBACK_URL=http://127.0.0.1:11436
 LLM_FALLBACK_MODEL=gemma3:4b
 LLM_FALLBACK_API=openai
 EMBEDDING_URL=http://x570:11437
 EMBEDDING_API=openai
 EMBEDDING_MODEL=bge-m3
-EMBEDDING_FALLBACK_URL=http://x570:11437
+EMBEDDING_FALLBACK_URL=http://127.0.0.1:11437
 EMBEDDING_FALLBACK_API=openai
 ```
 
-`up.sh` 會自動探測 x570 llama-server：`11436`／`11437` 可用時設為主要 API，且不設定本機 Ollama fallback；llama-server 未就緒時退回 x570 Ollama（`11434`），最後才使用本機 Ollama。
+`up.sh` 會自動探測 x570 llama-server：`11436`／`11437` 可用時設為主要 API、MBP llama-server 為 fallback；x570 llama-server 未就緒時改用 MBP llama-server。Ollama 不再作為 runtime fallback。
 
 舊的 Ollama 預載腳本仍保留，但不再是 x570 的主要路徑；只有在暫時不想使用 llama-server 時才需要重新啟用：
 
@@ -1878,54 +1878,51 @@ EMBEDDING_FALLBACK_API=openai
 ssh -t x570 'sudo systemctl enable --now judgment-ollama-preload.service'
 ```
 
-注意：應用端若送出較短的 `LLM_KEEP_ALIVE`，會在該次 Ollama fallback 請求後覆寫預載的 `-1`；目前 `.env` 已設為 `-1`。llama-server 路徑不使用 `keep_alive`，模型是否常駐由 service 決定。
+注意：這是 x570 的舊 Ollama 路徑，只在手動啟用時使用；MBP 現在以 llama-server 作為 fallback，不再依賴 Ollama。llama-server 不使用 `keep_alive`，模型是否常駐由 service 決定。
 
-#### MBP 開機預載 gemma3:4b、bge-m3（macOS launchd）
+#### MBP 開機啟動 gemma3:4b、bge-m3（llama-server launchd）
 
-macOS 的 Ollama.app 在使用者登入後執行，因此 MBP 的「開機預載」是在登入後自動完成。`scripts/deploy_ollama_preload_macos.sh` 會安裝 per-user LaunchAgent，登入時與每 120 秒確認下列模型已載入，並以 `keep_alive=-1` 保持常駐：
+MBP 的 chat 與 embedding fallback 由 llama-server 提供，不再由 Ollama.app 預載：
 
-- `gemma3:4b`（chat）
-- `bge-m3:latest`（embedding）
+- `com.judgment.llm-chat`：`gemma3:4b`，`127.0.0.1:11436`
+- `com.judgment.llm-embedding`：`bge-m3`，`127.0.0.1:11437`
+- `com.judgment.rerank`：`bge-reranker-v2-m3`，`127.0.0.1:11435`（由 `scripts/deploy_rerank_macos.sh` 安裝）
 
-reranker 不再由 Ollama 預載；MBP 改由 `scripts/deploy_rerank_macos.sh` 以 llama-server 提供（見上一節）。
-
-安裝：
+安裝 chat 與 embedding：
 
 ```bash
-bash scripts/deploy_ollama_preload_macos.sh
+bash scripts/deploy_llama_services_macos.sh
 ```
 
 腳本會：
 
-- 確認 Ollama API 可用；必要時以 `open -ga Ollama` 啟動 Ollama.app
-- 確認兩個模型已下載
-- 建立 `~/Library/Application Support/Judgment/ollama-preload.sh`
-- 建立 `~/Library/LaunchAgents/com.judgment.ollama-preload.plist`
-- 以 `launchctl bootstrap`／`kickstart` 立即執行，之後登入自動執行
-- 等待兩個模型出現於 `/api/ps`，且 `expires_at` 年份至少 2100
+- 從 Ollama 的 GGUF blob 複製（APFS clone，不重複佔用磁碟）到 `~/Library/Application Support/Judgment/models/`
+- 建立 `com.judgment.llm-chat.plist` 與 `com.judgment.llm-embedding.plist`
+- 以 `launchctl bootstrap`／`kickstart` 立即啟動，之後登入自動執行
+- 等待 `/health` 就緒，並確認 `/v1/models` 有 `gemma3:4b`／`bge-m3`
+- 兩個服務都只監聽 `127.0.0.1`，不會暴露到區網
 
 驗證：
 
 ```bash
-bash scripts/deploy_ollama_preload_macos.sh --status
-launchctl print gui/$(id -u)/com.judgment.ollama-preload
-tail -f ~/Library/Logs/judgment-ollama-preload.log
-curl -s http://127.0.0.1:11434/api/ps | python3 -m json.tool
+bash scripts/deploy_llama_services_macos.sh --status
+curl -s http://127.0.0.1:11436/health
+curl -s http://127.0.0.1:11436/v1/models | python3 -m json.tool
+curl -s http://127.0.0.1:11437/v1/models | python3 -m json.tool
 ```
 
-`expires_at` 顯示約 2319 年表示 `keep_alive=-1`。管理與移除：
+管理與移除：
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.judgment.ollama-preload
-bash scripts/deploy_ollama_preload_macos.sh --uninstall
+launchctl kickstart -k gui/$(id -u)/com.judgment.llm-chat
+launchctl kickstart -k gui/$(id -u)/com.judgment.llm-embedding
+bash scripts/deploy_llama_services_macos.sh --uninstall
 ```
 
 注意：
 
-- 這是使用者登入後執行的 LaunchAgent，不是登入畫面前的系統層 LaunchDaemon；Ollama.app 本身也需要使用者 session。
-- 若 Ollama 沒有執行，LaunchAgent 會嘗試以 `open -ga Ollama` 啟動它；若不想讓它自動重開，請先執行 `--uninstall` 或 `launchctl bootout`。
-- 兩個模型常駐約使用 3.9 GB 記憶體（gemma3:4b 約 3.2 GB、bge-m3 約 0.69 GB）。
-- `.env` 的 `LLM_KEEP_ALIVE` 已設為 `-1`，避免 RAG 請求把 gemma3:4b 的到期時間改成 30 分鐘；若改成 `30m`，LaunchAgent 仍會在下一輪（最多 120 秒）重新載入。
+- 兩個模型常駐約使用 3.4 GB 記憶體（gemma3:4b 約 2.3 GB、bge-m3 約 1.1 GB）。
+- `scripts/deploy_ollama_preload_macos.sh` 是舊的 Ollama 預載路徑，會啟動 Ollama.app；已不再使用，請勿再執行。
 - `qllama/bge-reranker-v2-m3` 只保留在 Ollama 模型庫作為 GGUF 來源，不再載入 Ollama runtime；rerank 由 MBP 的 llama-server LaunchAgent 提供。
 
 ### 本階段驗證

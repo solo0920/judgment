@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED: MBP now uses llama-server LaunchAgents installed by
+# scripts/deploy_llama_services_macos.sh.  This script starts Ollama.app and
+# should not be used unless you intentionally want the legacy Ollama path.
+#
 # Preload Ollama models at login on the MBP (macOS/launchd).
 #
 # Ollama unloads idle models and starts with an empty memory state.  This

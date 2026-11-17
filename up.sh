@@ -156,10 +156,10 @@ if [[ ! -f .env ]]; then
   export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://judgment:judgment@localhost:5432/judgment}"
   export QDRANT_URL="${QDRANT_URL:-http://127.0.0.1:6333}"
   export JUDGMENT_VECTOR_COLLECTION="${JUDGMENT_VECTOR_COLLECTION:-judgment_documents}"
-  export EMBEDDING_URL="${EMBEDDING_URL:-http://127.0.0.1:11434}"
+  export EMBEDDING_URL="${EMBEDDING_URL:-http://127.0.0.1:11437}"
   export EMBEDDING_MODEL="${EMBEDDING_MODEL:-bge-m3}"
-  export LLM_URL="${LLM_URL:-http://127.0.0.1:11434}"
-  export LLM_MODEL="${LLM_MODEL:-gemma3:27b}"
+  export LLM_URL="${LLM_URL:-http://127.0.0.1:11436}"
+  export LLM_MODEL="${LLM_MODEL:-gemma3:4b}"
 fi
 
 need_frontend_build() {
@@ -339,16 +339,6 @@ else
   echo "略過本機 reranker 啟動（RAG_RERANK_ENABLED=${RAG_RERANK_ENABLED:-false}，RERANK_START_LOCAL=${RERANK_START_LOCAL}）。"
 fi
 
-probe_ollama_model() {
-  local url="$1"
-  local model="$2"
-  local timeout="${JUDGMENT_EMBEDDING_PROBE_TIMEOUT:-2}"
-  local tags
-  tags="$(curl -fsS --max-time "${timeout}" "${url}/api/tags" 2>/dev/null || true)"
-  [[ -n "${tags}" ]] || return 1
-  printf '%s' "${tags}" | grep -q "${model}" 2>/dev/null
-}
-
 probe_openai_model() {
   local url="$1"
   local model="$2"
@@ -364,81 +354,81 @@ probe_openai_model() {
 
 X570_LLM_URL="${JUDGMENT_X570_LLM_URL:-http://x570:11436}"
 X570_EMBEDDING_URL="${JUDGMENT_X570_EMBEDDING_URL:-http://x570:11437}"
-X570_OLLAMA_URL="${JUDGMENT_X570_OLLAMA_URL:-http://x570:11434}"
-LOCAL_OLLAMA_URL="${JUDGMENT_LOCAL_EMBEDDING_URL:-http://127.0.0.1:11434}"
+MBP_LLM_URL="${JUDGMENT_MBP_LLM_URL:-http://127.0.0.1:11436}"
+MBP_EMBEDDING_URL="${JUDGMENT_MBP_EMBEDDING_URL:-http://127.0.0.1:11437}"
 LLM_MODEL="${LLM_MODEL:-$(read_env_value LLM_MODEL)}"
 LLM_MODEL="${LLM_MODEL:-gemma3:4b}"
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-$(read_env_value EMBEDDING_MODEL)}"
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-bge-m3}"
 
-local_llm_ok=0
-local_embedding_ok=0
-if probe_ollama_model "${LOCAL_OLLAMA_URL}" "${LLM_MODEL}"; then
-  local_llm_ok=1
+x570_llm_ok=0
+x570_embedding_ok=0
+mbp_llm_ok=0
+mbp_embedding_ok=0
+if probe_openai_model "${X570_LLM_URL}" "${LLM_MODEL}"; then
+  x570_llm_ok=1
 fi
-if probe_ollama_model "${LOCAL_OLLAMA_URL}" "${EMBEDDING_MODEL}"; then
-  local_embedding_ok=1
+if probe_openai_model "${X570_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+  x570_embedding_ok=1
+fi
+if probe_openai_model "${MBP_LLM_URL}" "${LLM_MODEL}"; then
+  mbp_llm_ok=1
+fi
+if probe_openai_model "${MBP_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+  mbp_embedding_ok=1
 fi
 
-if probe_openai_model "${X570_LLM_URL}" "${LLM_MODEL}"; then
+if [[ "${x570_llm_ok}" == "1" ]]; then
+  export LLM_URL="${X570_LLM_URL}"
+  export LLM_API="openai"
+  export LLM_MODEL
+  if [[ "${mbp_llm_ok}" == "1" ]]; then
+    export LLM_FALLBACK_URL="${MBP_LLM_URL}"
+    export LLM_FALLBACK_MODEL="${LLM_MODEL}"
+    export LLM_FALLBACK_API="openai"
+    echo "LLM：x570 llama-server（${X570_LLM_URL}）· fallback：MBP llama-server（${MBP_LLM_URL}）"
+  else
+    export LLM_FALLBACK_URL=""
+    echo "LLM：x570 llama-server（${X570_LLM_URL}）· MBP llama-server 未就緒"
+  fi
+elif [[ "${mbp_llm_ok}" == "1" ]]; then
+  export LLM_URL="${MBP_LLM_URL}"
+  export LLM_API="openai"
+  export LLM_MODEL
+  export LLM_FALLBACK_URL=""
+  echo "x570 llama-server 不可用，LLM 改用 MBP llama-server（${MBP_LLM_URL}）"
+else
   export LLM_URL="${X570_LLM_URL}"
   export LLM_API="openai"
   export LLM_MODEL
   export LLM_FALLBACK_URL=""
-  echo "LLM：x570 llama-server（${X570_LLM_URL}）· fallback：停用"
-elif probe_ollama_model "${X570_OLLAMA_URL}" "${LLM_MODEL}"; then
-  export LLM_URL="${X570_OLLAMA_URL}"
-  export LLM_API="ollama"
-  export LLM_MODEL
-  if [[ "${local_llm_ok}" == "1" ]]; then
-    export LLM_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
-    export LLM_FALLBACK_MODEL="${LLM_MODEL}"
-    export LLM_FALLBACK_API="ollama"
-    echo "x570 llama-server 不可用，LLM 改用 x570 Ollama（${X570_OLLAMA_URL}）"
-  else
-    export LLM_FALLBACK_URL=""
-    echo "x570 llama-server 不可用，LLM 改用 x570 Ollama（${X570_OLLAMA_URL}）"
-  fi
-else
-  export LLM_URL="${LOCAL_OLLAMA_URL}"
-  export LLM_API="ollama"
-  export LLM_MODEL
-  export LLM_FALLBACK_URL=""
-  if [[ "${local_llm_ok}" == "1" ]]; then
-    echo "x570 LLM 不可用，改用本機 Ollama（${LOCAL_OLLAMA_URL}）"
-  else
-    echo "警告：x570 與本機 LLM 都無法使用，RAG 會降級為檢索結果。"
-  fi
+  echo "警告：x570 與 MBP llama-server 都無法使用，RAG 會降級為檢索結果。"
 fi
 
-if probe_openai_model "${X570_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
+if [[ "${x570_embedding_ok}" == "1" ]]; then
+  export EMBEDDING_URL="${X570_EMBEDDING_URL}"
+  export EMBEDDING_API="openai"
+  export EMBEDDING_MODEL
+  if [[ "${mbp_embedding_ok}" == "1" ]]; then
+    export EMBEDDING_FALLBACK_URL="${MBP_EMBEDDING_URL}"
+    export EMBEDDING_FALLBACK_API="openai"
+    echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· fallback：MBP llama-server（${MBP_EMBEDDING_URL}）"
+  else
+    export EMBEDDING_FALLBACK_URL=""
+    echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· MBP llama-server 未就緒"
+  fi
+elif [[ "${mbp_embedding_ok}" == "1" ]]; then
+  export EMBEDDING_URL="${MBP_EMBEDDING_URL}"
+  export EMBEDDING_API="openai"
+  export EMBEDDING_MODEL
+  export EMBEDDING_FALLBACK_URL=""
+  echo "x570 llama-server embedding 不可用，改用 MBP llama-server（${MBP_EMBEDDING_URL}）"
+else
   export EMBEDDING_URL="${X570_EMBEDDING_URL}"
   export EMBEDDING_API="openai"
   export EMBEDDING_MODEL
   export EMBEDDING_FALLBACK_URL=""
-  echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· fallback：停用"
-elif probe_ollama_model "${X570_OLLAMA_URL}" "${EMBEDDING_MODEL}"; then
-  export EMBEDDING_URL="${X570_OLLAMA_URL}"
-  export EMBEDDING_API="ollama"
-  export EMBEDDING_MODEL
-  if [[ "${local_embedding_ok}" == "1" ]]; then
-    export EMBEDDING_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
-    export EMBEDDING_FALLBACK_API="ollama"
-    echo "x570 llama-server embedding 不可用，改用 x570 Ollama（${X570_OLLAMA_URL}）"
-  else
-    export EMBEDDING_FALLBACK_URL=""
-    echo "x570 llama-server embedding 不可用，改用 x570 Ollama（${X570_OLLAMA_URL}）"
-  fi
-else
-  export EMBEDDING_URL="${LOCAL_OLLAMA_URL}"
-  export EMBEDDING_API="ollama"
-  export EMBEDDING_MODEL
-  export EMBEDDING_FALLBACK_URL=""
-  if [[ "${local_embedding_ok}" == "1" ]]; then
-    echo "x570 embedding 不可用，改用本機 Ollama（${LOCAL_OLLAMA_URL}）"
-  else
-    echo "警告：x570 與本機 Ollama 都無法使用，Embedding 會降級。"
-  fi
+  echo "警告：x570 與 MBP llama-server 都無法使用，Embedding 會降級。"
 fi
 
 # up.sh owns the embedding failover chain; clear stale comma-separated values
