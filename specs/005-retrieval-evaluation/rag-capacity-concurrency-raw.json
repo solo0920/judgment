@@ -1,0 +1,788 @@
+{
+  "single": [
+    {
+      "key": "Q1",
+      "tag": "Q1-0",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 5453,
+      "wall_ms": 5814.3,
+      "llm": {
+        "calls": 2,
+        "providers": [
+          "primary",
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false,
+          true
+        ],
+        "input_tokens": [
+          3070,
+          3104
+        ],
+        "output_tokens": [
+          238,
+          204
+        ]
+      },
+      "rerank": 285.2,
+      "embed": 156.1,
+      "qdrant": 118.8,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-0",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 5318,
+      "wall_ms": 5379.4,
+      "llm": {
+        "calls": 2,
+        "providers": [
+          "primary",
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false,
+          true
+        ],
+        "input_tokens": [
+          3070,
+          3104
+        ],
+        "output_tokens": [
+          225,
+          195
+        ]
+      },
+      "rerank": 326.9,
+      "embed": 82.7,
+      "qdrant": 71.5,
+      "judgments": 1,
+      "laws": 2
+    }
+  ],
+  "two_long": [
+    {
+      "key": "Q5",
+      "tag": "Q5-0",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23530,
+      "wall_ms": 23580.1,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 1177.8,
+      "embed": 137.5,
+      "qdrant": 125.0,
+      "judgments": 1,
+      "laws": 3
+    },
+    {
+      "key": "Q5",
+      "tag": "Q5-1",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23535,
+      "wall_ms": 23593.9,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 1165.4,
+      "embed": 140.3,
+      "qdrant": 85.0,
+      "judgments": 1,
+      "laws": 3
+    },
+    {
+      "key": "Q5",
+      "tag": "Q5-0",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 22126,
+      "wall_ms": 22177.3,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 953.8,
+      "embed": 163.9,
+      "qdrant": 71.9,
+      "judgments": 1,
+      "laws": 3
+    },
+    {
+      "key": "Q5",
+      "tag": "Q5-1",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 22130,
+      "wall_ms": 22195.9,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 1066.8,
+      "embed": 166.6,
+      "qdrant": 21.6,
+      "judgments": 1,
+      "laws": 3
+    }
+  ],
+  "four_mixed": [
+    {
+      "key": "Q4",
+      "tag": "Q4-3",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 1695,
+      "wall_ms": 1731.5,
+      "llm": {},
+      "rerank": 0,
+      "embed": 0,
+      "qdrant": 0,
+      "judgments": 0,
+      "laws": 1
+    },
+    {
+      "key": "Q3",
+      "tag": "Q3-2",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 2636,
+      "wall_ms": 2669.9,
+      "llm": {},
+      "rerank": 0,
+      "embed": 137.6,
+      "qdrant": 0,
+      "judgments": 20,
+      "laws": 0
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-0",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 8982,
+      "wall_ms": 9068.5,
+      "llm": {
+        "calls": 2,
+        "providers": [
+          "primary",
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false,
+          true
+        ],
+        "input_tokens": [
+          3070,
+          3104
+        ],
+        "output_tokens": [
+          213,
+          181
+        ]
+      },
+      "rerank": 1599.5,
+      "embed": 131.0,
+      "qdrant": 184.7,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q2",
+      "tag": "Q2-1",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 10007,
+      "wall_ms": 10089.6,
+      "llm": {
+        "calls": 2,
+        "providers": [
+          "primary",
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false,
+          true
+        ],
+        "input_tokens": [
+          2972,
+          3006
+        ],
+        "output_tokens": [
+          290,
+          260
+        ]
+      },
+      "rerank": 1468.4,
+      "embed": 135.1,
+      "qdrant": 256.6,
+      "judgments": 1,
+      "laws": 1
+    },
+    {
+      "key": "Q4",
+      "tag": "Q4-3",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 1566,
+      "wall_ms": 1593.8,
+      "llm": {},
+      "rerank": 0,
+      "embed": 0,
+      "qdrant": 0,
+      "judgments": 0,
+      "laws": 1
+    },
+    {
+      "key": "Q3",
+      "tag": "Q3-2",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 2300,
+      "wall_ms": 2328.8,
+      "llm": {},
+      "rerank": 0,
+      "embed": 142.3,
+      "qdrant": 0,
+      "judgments": 20,
+      "laws": 0
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-0",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 5220,
+      "wall_ms": 5292.8,
+      "llm": {
+        "calls": 1,
+        "providers": [
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false
+        ],
+        "input_tokens": [
+          3070
+        ],
+        "output_tokens": [
+          158
+        ]
+      },
+      "rerank": 760.1,
+      "embed": 145.2,
+      "qdrant": 63.2,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q2",
+      "tag": "Q2-1",
+      "ok": true,
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 8677,
+      "wall_ms": 8722.4,
+      "llm": {
+        "calls": 2,
+        "providers": [
+          "primary",
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false,
+          true
+        ],
+        "input_tokens": [
+          2972,
+          3006
+        ],
+        "output_tokens": [
+          290,
+          301
+        ]
+      },
+      "rerank": 830.3,
+      "embed": 148.2,
+      "qdrant": 37.2,
+      "judgments": 1,
+      "laws": 1
+    }
+  ],
+  "four_llm": [
+    {
+      "key": "Q5",
+      "tag": "Q5-2",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 8719,
+      "wall_ms": 8867.4,
+      "llm": {
+        "calls": 2,
+        "providers": [
+          "primary",
+          "primary"
+        ],
+        "fallback": false,
+        "strict": [
+          false,
+          true
+        ],
+        "input_tokens": [
+          5006,
+          5040
+        ],
+        "output_tokens": [
+          187,
+          200
+        ]
+      },
+      "rerank": 659.0,
+      "embed": 117.5,
+      "qdrant": 89.6,
+      "judgments": 1,
+      "laws": 3
+    },
+    {
+      "key": "Q2",
+      "tag": "Q2-1",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23532,
+      "wall_ms": 23606.7,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 2071.3,
+      "embed": 175.3,
+      "qdrant": 16.2,
+      "judgments": 1,
+      "laws": 1
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-3",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23535,
+      "wall_ms": 23646.9,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 957.1,
+      "embed": 176.5,
+      "qdrant": 37.5,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-0",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23538,
+      "wall_ms": 23647.7,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 680.5,
+      "embed": 172.9,
+      "qdrant": 30.2,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-0",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23406,
+      "wall_ms": 23689.5,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 1014.8,
+      "embed": 137.7,
+      "qdrant": 125.5,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q1",
+      "tag": "Q1-3",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23411,
+      "wall_ms": 23700.7,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 718.8,
+      "embed": 139.1,
+      "qdrant": 153.3,
+      "judgments": 1,
+      "laws": 2
+    },
+    {
+      "key": "Q2",
+      "tag": "Q2-1",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23411,
+      "wall_ms": 23717.6,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 1898.5,
+      "embed": 144.4,
+      "qdrant": 104.9,
+      "judgments": 1,
+      "laws": 1
+    },
+    {
+      "key": "Q5",
+      "tag": "Q5-2",
+      "ok": true,
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 23408,
+      "wall_ms": 23717.7,
+      "llm": {
+        "calls": 4,
+        "providers": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "fallback": false,
+        "strict": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "input_tokens": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "output_tokens": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "rerank": 1752.3,
+      "embed": 146.8,
+      "qdrant": 84.0,
+      "judgments": 1,
+      "laws": 3
+    }
+  ]
+}

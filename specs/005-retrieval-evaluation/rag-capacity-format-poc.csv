@@ -1,0 +1,8 @@
+question,format,wall_ms,predicted_n,predicted_ms,cites,valid
+Q1,json_grammar,1445.9,169,1006.1,1;2;1;2,true
+Q2,bracket,2194.5,260,1496.1,33;35;2,false
+Q2,double,1375.3,169,956.5,12;12;35,false
+Q2,json_grammar,920.2,76,504.6,1,true
+Q5,bracket,2867.6,346,2092.4,19;19;15;23,false
+Q5,double,3071.8,419,2531.0,1;1;1;2;2;3;3;3,true
+Q5,json_grammar,1434.4,128,833.2,1;2;3,true

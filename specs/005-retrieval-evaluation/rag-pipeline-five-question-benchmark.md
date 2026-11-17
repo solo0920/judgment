@@ -130,3 +130,7 @@ x570 目前 `total_slots=4`，但這不代表可以直接乘 4：
 - 沒有並行負載，也沒有 x570 的 `nvidia-smi`／VRAM／溫度資料（目前沒有 x570 SSH 權限）。
 - warm-up 的 6 秒 rerank timeout 是獨立觀察，未列入五題中位數。
 - Q5 是品質失敗（citation validation），不只是速度問題；架構調整不能只看時間表。
+
+## 後續
+
+並行、context 上限與格式 PoC 見 `rag-capacity-colleague-review-2026-11-17.md`。

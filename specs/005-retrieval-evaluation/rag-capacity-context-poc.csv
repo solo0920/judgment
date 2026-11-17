@@ -1,0 +1,7 @@
+service,concurrent,tokens_each,ok_count,total,result,detail
+x570-8192,2,2833,2,2,ok,wall 0.94-0.96s; prompt_ms 492-706
+x570-8192,3,2033,3,3,ok,wall 0.98-1.01s; prompt_ms 360-806
+x570-8192,3,2833,0,3,http500,Context size has been exceeded
+x570-8192,4,2833,0,4,http500,Context size has been exceeded
+mbp-8192,4,2833,0,4,http500,Context size has been exceeded
+mbp-24576-np4,4,2833,4,4,ok,props n_ctx=6144; slots 4x6144; wall 13.2-13.4s
