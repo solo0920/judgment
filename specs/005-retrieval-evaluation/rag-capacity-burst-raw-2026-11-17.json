@@ -1,0 +1,500 @@
+{
+  "_meta": {
+    "date": "2026-11-17",
+    "environment": "x570 chat endpoint with -c 8192 (shared pool); MBP FastAPI app; MBP fallback configured but not used",
+    "question_set": {
+      "Q1": "侵權行為損害賠償的舉證責任",
+      "Q2": "銀行法對於吸收存款與授信有哪些限制？",
+      "Q3": "在板橋地方法院相關詐騙的判決有那些",
+      "Q4": "銀行法有多少條文？",
+      "Q5": "保險法對於業務員不當招攬的責任規定？"
+    },
+    "burst20_mixed": "10 LLM questions (Q1,Q2,Q5 x3 + Q1) + 10 non-LLM questions (Q3,Q4 x5)",
+    "burst40_nonllm": "20 Q3 + 20 Q4",
+    "note": "Single run per burst; internal duration_ms and client wall_ms are both retained. No HTTP errors were observed."
+  },
+  "burst20_mixed": [
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 4057,
+      "wall_ms": 8110.2
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 7919,
+      "wall_ms": 8169.1
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 7977,
+      "wall_ms": 8214.0
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 8106,
+      "wall_ms": 8407.3
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 3614,
+      "wall_ms": 9253.8
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 8986,
+      "wall_ms": 9425.7
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 3916,
+      "wall_ms": 9526.3
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 4648,
+      "wall_ms": 9628.5
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 3942,
+      "wall_ms": 9943.1
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 10490,
+      "wall_ms": 10693.0
+    },
+    {
+      "key": "Q1",
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 12274,
+      "wall_ms": 15899.0
+    },
+    {
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 35545,
+      "wall_ms": 35794.2
+    },
+    {
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 35534,
+      "wall_ms": 35795.2
+    },
+    {
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 35679,
+      "wall_ms": 35810.9
+    },
+    {
+      "key": "Q5",
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 37057,
+      "wall_ms": 37300.4
+    },
+    {
+      "key": "Q5",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 44329,
+      "wall_ms": 44515.8
+    },
+    {
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 44444,
+      "wall_ms": 44534.1
+    },
+    {
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 44319,
+      "wall_ms": 44536.5
+    },
+    {
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "source": "retrieval",
+      "duration_ms": 44311,
+      "wall_ms": 44556.1
+    },
+    {
+      "key": "Q5",
+      "http": 200,
+      "status": "operational",
+      "source": "llm",
+      "duration_ms": 54057,
+      "wall_ms": 54534.1
+    }
+  ],
+  "burst40_nonllm": [
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 12375,
+      "wall_ms": 14321.7
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 13919,
+      "wall_ms": 16097.0
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 14069,
+      "wall_ms": 16097.0
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 8990,
+      "wall_ms": 16276.5
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 5679,
+      "wall_ms": 17983.5
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 11588,
+      "wall_ms": 17984.0
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 15726,
+      "wall_ms": 17986.8
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 9787,
+      "wall_ms": 17985.3
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 8125,
+      "wall_ms": 17983.3
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 9509,
+      "wall_ms": 17985.5
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 9920,
+      "wall_ms": 17985.5
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 14772,
+      "wall_ms": 17986.8
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 6370,
+      "wall_ms": 17983.9
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 9197,
+      "wall_ms": 17983.9
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 15239,
+      "wall_ms": 17987.6
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 15636,
+      "wall_ms": 17987.0
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 11443,
+      "wall_ms": 18119.4
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 4447,
+      "wall_ms": 18409.8
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 17683,
+      "wall_ms": 18411.4
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 18125,
+      "wall_ms": 18764.2
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 13642,
+      "wall_ms": 19314.2
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 18733,
+      "wall_ms": 19574.5
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 19003,
+      "wall_ms": 19573.8
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 12841,
+      "wall_ms": 19571.4
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 12800,
+      "wall_ms": 19585.0
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 18711,
+      "wall_ms": 19644.5
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 15355,
+      "wall_ms": 19643.4
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 18878,
+      "wall_ms": 19645.9
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 12982,
+      "wall_ms": 19645.1
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 19047,
+      "wall_ms": 19645.7
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 15801,
+      "wall_ms": 19645.4
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 13117,
+      "wall_ms": 19778.2
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 13321,
+      "wall_ms": 19779.3
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 6370,
+      "wall_ms": 19777.6
+    },
+    {
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "source": "structured",
+      "duration_ms": 6503,
+      "wall_ms": 19779.6
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 19166,
+      "wall_ms": 19780.7
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 9636,
+      "wall_ms": 19781.3
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 9564,
+      "wall_ms": 20199.6
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 11321,
+      "wall_ms": 20210.5
+    },
+    {
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "source": "retrieval_list",
+      "duration_ms": 6101,
+      "wall_ms": 20217.1
+    }
+  ]
+}

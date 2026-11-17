@@ -1,5 +1,8 @@
 # RAG 容量與同事架構建議評估
 
+> 後續評估（第二輪）：`specs/005-retrieval-evaluation/rag-capacity-second-review-2026-11-17.md`。
+> 該文以 exact tokenization 與 20/40 突發測試修正本文兩點：目前的 estimator 不可直接用於 token gate；分道尚未在執行資源上隔離。
+
 - 日期：2026-11-17
 - 目的：逐項評估同事提出的容量、降級與兩階段設計，並用實測數據回答「可不可行」
 - 測試環境：

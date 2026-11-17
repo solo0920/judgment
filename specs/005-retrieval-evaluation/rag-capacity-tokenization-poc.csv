@@ -1,0 +1,6 @@
+question,ctx_tokens,estimated_tokens,actual_input_tokens,ratio,contexts_before,contexts_after,contexts_dropped,note
+Q1,8192,3771,3070,1.2283,3,3,0,"estimated overcounts 22.8%; no drop at 8192"
+Q2,8192,3965,2972,1.3341,2,2,0,"estimated overcounts 33.4%; no drop at 8192"
+Q2,6144,3965,2972,1.3341,2,2,0,"no drop at 6144"
+Q5,8192,6017,5006,1.2020,3,3,0,"estimated overcounts 20.2%; no drop at 8192"
+Q5,6144,6017,5006,1.2020,3,2,1,"naive 6144 drops one context; actual 5006+384 fits in 6144"
