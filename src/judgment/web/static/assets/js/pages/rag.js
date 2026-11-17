@@ -1121,7 +1121,7 @@ function renderAnswerBody(payload) {
       </div>
       ${
         rerankDegraded
-          ? `<div class="answer-notice" data-rerank-degraded="true">排序精簡模式：本次 rerank 逾時或降級，來源目前以向量順序顯示。</div>`
+          ? `<div class="answer-notice" data-rerank-degraded="true">排序精簡模式：本次部分 rerank 逾時或降級，來源可能以向量順序顯示。</div>`
           : ""
       }
       ${

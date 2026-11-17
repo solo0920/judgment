@@ -147,7 +147,7 @@ rerank 完成後，原本的 `answer_source=streaming` partial 會取代它；LL
 - `answer_question` 回傳 top-level `rerank_degraded`。
 - law rerank 或 judgment rerank 任一 `status=degraded` 時為 true。
 - partial 與 final payload 都帶這個欄位。
-- 前端在回答下方顯示：「排序精簡模式：本次 rerank 逾時或降級，來源目前以向量順序顯示。」
+- 前端在回答下方顯示：「排序精簡模式：本次部分 rerank 逾時或降級，來源可能以向量順序顯示。」
 
 端到端驗證：另開 9202，把 `RERANK_URL` 指到 closed port、關閉 fallback 與 LLM，串流事件為：
 
