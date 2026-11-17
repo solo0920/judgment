@@ -317,6 +317,12 @@ else
   fi
 fi
 
+# Do not start the web console with a known non-loopback Judgment listener.
+if ! bash scripts/security_listener_check.sh; then
+  echo "SECURITY: listener check failed; refusing to start web." >&2
+  exit 1
+fi
+
 if should_start_reranker; then
   if ! start_reranker; then
     echo "警告：RAG 會改用遠端 reranker 或降級為原向量排序。"
@@ -513,6 +519,12 @@ else
   else
     echo "警告：電源控制器未就緒，本機電源 API 可能無法使用。"
   fi
+fi
+
+# Check again after web/reranker startup; this is a loud warning rather than
+# tearing down an already-running service.
+if ! bash scripts/security_listener_check.sh; then
+  echo "SECURITY WARNING: a Judgment-related listener is not loopback-only." >&2
 fi
 
 echo "完成。"
