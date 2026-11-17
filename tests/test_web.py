@@ -2355,6 +2355,71 @@ def test_file_origin_cannot_modify_data(web_client) -> None:
     assert response.status_code == 403
 
 
+def test_local_write_requires_trusted_origin_or_no_browser_headers(
+    web_client,
+) -> None:
+    allowed = web_client.post(
+        "/api/auth/sse-ticket",
+        headers={
+            "Origin": "http://127.0.0.1:9200",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+    assert allowed.status_code == 200
+
+    no_browser_headers = web_client.post("/api/auth/sse-ticket")
+    assert no_browser_headers.status_code == 200
+
+    evil_origin = web_client.post(
+        "/api/auth/sse-ticket",
+        headers={"Origin": "https://evil.example"},
+    )
+    assert evil_origin.status_code == 403
+
+    cross_site = web_client.post(
+        "/api/auth/sse-ticket",
+        headers={"Sec-Fetch-Site": "cross-site"},
+    )
+    assert cross_site.status_code == 403
+
+    same_origin_without_origin = web_client.post(
+        "/api/auth/sse-ticket",
+        headers={"Sec-Fetch-Site": "same-origin"},
+    )
+    assert same_origin_without_origin.status_code == 200
+
+
+def test_trusted_host_accepts_allowed_hosts_with_ports(web_client) -> None:
+    for host in ("127.0.0.1:9200", "localhost:9200", "testserver"):
+        response = web_client.get(
+            "/api/health", headers={"Host": host}
+        )
+        assert response.status_code == 200, host
+
+    settings = replace(
+        web_client.app.state.settings,
+        trusted_hosts=("api.example.test", "testserver"),
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as client:
+        assert (
+            client.get(
+                "/api/health", headers={"Host": "api.example.test"}
+            ).status_code
+            == 200
+        )
+        assert (
+            client.get(
+                "/api/health", headers={"Host": "api.example.test:443"}
+            ).status_code
+            == 200
+        )
+
+
 def test_cors_honors_explicit_origin_configuration(web_client) -> None:
     settings = replace(
         web_client.app.state.settings,

@@ -902,7 +902,28 @@ def create_app(
             )
         if path in PUBLIC_API_PATHS:
             return await call_next(request)
+
         if _is_local_request(request):
+            if request.method not in {"GET", "HEAD", "OPTIONS"}:
+                origin = request.headers.get("Origin")
+                sec_fetch_site = request.headers.get("Sec-Fetch-Site")
+                if origin is not None and origin not in cors_origins:
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "detail": "不允許的 Origin 對本機管理 API 寫入。"
+                        },
+                    )
+                if (
+                    sec_fetch_site is not None
+                    and sec_fetch_site not in {"same-origin", "none"}
+                ):
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "detail": "跨站請求不可寫入本機管理 API。"
+                        },
+                    )
             return await call_next(request)
 
         expected = str(app.state.settings.admin_token or "")

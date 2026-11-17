@@ -153,9 +153,17 @@ def test_probe_counts_only_normalized_exact_phrase_in_scope() -> None:
     assert too_many.status == "too_many_hits"
     assert too_many.skipped is True
 
-    wildcard = probe_scope_terms(
+    for raw_term in ("借款%", "借款_", "借款\\", "%%", "__"):
+        wildcard = probe_scope_terms(
+            session_factory=session_factory,
+            parsed_query=court_only,
+            terms=[ScopeTerm(term=raw_term, scope="external")],
+        )
+        assert wildcard.terms[0].document_count == 0, raw_term
+
+    empty = probe_scope_terms(
         session_factory=session_factory,
         parsed_query=court_only,
-        terms=[ScopeTerm(term="借款%", scope="external")],
+        terms=[ScopeTerm(term="", scope="external")],
     )
-    assert wildcard.terms[0].document_count == 0
+    assert empty.terms == ()

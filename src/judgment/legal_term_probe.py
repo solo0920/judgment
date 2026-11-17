@@ -439,6 +439,9 @@ def probe_scope_terms(
 ) -> ScopeProbeResult:
     """Count exact phrases in a court/year scope with cost guards."""
 
+    terms = tuple(
+        term for term in terms if str(term.term).strip()
+    )
     if not terms:
         return ScopeProbeResult(terms=())
     filters = _scope_filters(parsed_query)
