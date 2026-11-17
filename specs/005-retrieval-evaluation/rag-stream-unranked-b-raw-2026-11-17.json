@@ -1,0 +1,554 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "app": "MBP FastAPI loopback, single uvicorn worker",
+    "rerank_config": "RAG_RERANK_CANDIDATES=20, RERANK_MAX_CHARS=500",
+    "rerank_total_timeout_seconds": 4.0,
+    "rerank_heartbeat_seconds": 60.0,
+    "coverage_cache_ttl_seconds": 300.0,
+    "llm_primary": "x570 llama-server :11436",
+    "llm_fallback": "MBP llama-server 127.0.0.1:11436 (OpenAI API, not Ollama)",
+    "readiness": "/api/health returns 503 until coverage warmup completes"
+  },
+  "changes": [
+    "provisional 20x500 rerank config after 27-case A/B",
+    "unranked vector partial emitted before judgment rerank",
+    "rerank_degraded flag in partial and final payloads",
+    "frontend shows 排序精簡模式 when rerank_degraded is true"
+  ],
+  "stream20": [
+    {
+      "tag": "Q4-15",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 389.5,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-17",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 389.1,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-13",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 417.0,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-19",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 1868.5,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-16",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2012.1,
+      "first_token_ms": null,
+      "result_ms": 2014.9,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-12",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2156.8,
+      "first_token_ms": null,
+      "result_ms": 2159.1,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-18",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2160.5,
+      "first_token_ms": null,
+      "result_ms": 2161.4,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-14",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 2165.5,
+      "first_token_ms": null,
+      "result_ms": 2213.8,
+      "coverage_ms": 0.05,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q4-11",
+      "key": "Q4",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "structured",
+      "first_partial_ms": null,
+      "first_token_ms": null,
+      "result_ms": 2284.0,
+      "coverage_ms": 0.03,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q3-10",
+      "key": "Q3",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "retrieval_list",
+      "first_partial_ms": 3039.3,
+      "first_token_ms": null,
+      "result_ms": 3048.4,
+      "coverage_ms": 0.04,
+      "providers": [],
+      "error": null
+    },
+    {
+      "tag": "Q5-2",
+      "key": "Q5",
+      "http": 200,
+      "status": "operational",
+      "answer_source": "llm",
+      "first_partial_ms": 2335.6,
+      "first_token_ms": 5029.5,
+      "result_ms": 6845.4,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1139.16,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "ok",
+          "duration_ms": 1624.86,
+          "error": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q2-1",
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1300.7,
+      "first_token_ms": 12588.4,
+      "result_ms": 14141.8,
+      "coverage_ms": 0.02,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1739.19,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 8813.67,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1376.87,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q2-4",
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1541.4,
+      "first_token_ms": 13991.8,
+      "result_ms": 14149.2,
+      "coverage_ms": 0.05,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1315.48,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 8377.61,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1375.64,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q2-7",
+      "key": "Q2",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1210.2,
+      "first_token_ms": 3185.4,
+      "result_ms": 21531.4,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1687.42,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 517.16,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 17131.0,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-9",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1884.6,
+      "first_token_ms": null,
+      "result_ms": 30232.1,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1160.0,
+          "error": "RuntimeError: LLM HTTP 500: {\"error\":{\"code\":500,\"message\":\"Context size has been exceeded.\",\"type\":\"server_error\"}}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 8817.05,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1399.73,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16068.54,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-6",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1720.9,
+      "first_token_ms": 9252.0,
+      "result_ms": 30234.3,
+      "coverage_ms": 0.04,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1345.65,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 8813.21,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1427.33,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16054.46,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-3",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 1729.8,
+      "first_token_ms": null,
+      "result_ms": 30235.5,
+      "coverage_ms": 0.05,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1359.36,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 17145.73,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 541.55,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 8153.85,
+          "error": "RuntimeError: LLM HTTP 500: {\"error\":{\"code\":500,\"message\":\"Context size has been exceeded.\",\"type\":\"server_error\"}}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q5-5",
+      "key": "Q5",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 2334.6,
+      "first_token_ms": 30837.3,
+      "result_ms": 32122.2,
+      "coverage_ms": 0.05,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1375.84,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 24997.56,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "ok",
+          "duration_ms": 1878.34,
+          "error": null
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q5-8",
+      "key": "Q5",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 2323.3,
+      "first_token_ms": 37684.6,
+      "result_ms": 39029.7,
+      "coverage_ms": 0.03,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 692.75,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 17139.18,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 529.32,
+          "error": "RuntimeError: LLM HTTP 500: {\"error\":{\"code\":500,\"message\":\"Context size has been exceeded.\",\"type\":\"server_error\"}}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16924.5,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "tag": "Q1-0",
+      "key": "Q1",
+      "http": 200,
+      "status": "retrieval_only",
+      "answer_source": "retrieval",
+      "first_partial_ms": 3038.3,
+      "first_token_ms": 18019.9,
+      "result_ms": 39030.8,
+      "coverage_ms": 0.03,
+      "providers": [
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 1277.36,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16275.92,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "primary",
+          "base_url": "http://x570:11436",
+          "status": "error",
+          "duration_ms": 549.58,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        },
+        {
+          "provider": "fallback",
+          "base_url": "http://127.0.0.1:11436",
+          "status": "error",
+          "duration_ms": 16944.28,
+          "error": "RuntimeError: LLM 串流失敗：{'code': 500, 'message': 'Context size has been exceeded.', 'type': 'server_error'}"
+        }
+      ],
+      "error": null
+    }
+  ],
+  "summary": {
+    "first_partial_ms": {
+      "n": 15,
+      "p50": 2156.8,
+      "p95": 3038.3,
+      "max": 3039.3
+    },
+    "first_token_ms": {
+      "n": 8,
+      "p50": 13991.8,
+      "p95": 37684.6,
+      "max": 37684.6
+    },
+    "result_ms": {
+      "n": 20,
+      "p50": 6845.4,
+      "p95": 39029.7,
+      "max": 39030.8
+    },
+    "statuses": {
+      "operational": 11,
+      "retrieval_only": 9
+    },
+    "errors": 0
+  }
+}

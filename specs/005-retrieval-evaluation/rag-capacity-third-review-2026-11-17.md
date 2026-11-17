@@ -1,5 +1,7 @@
 # RAG 容量第三輪評估：coverage 快取、串流 first_partial 與下一個瓶頸
 
+> 後續評估（第四輪）：`specs/005-retrieval-evaluation/rag-capacity-fourth-review-2026-11-17.md`。
+
 - 日期：2026-11-17
 - 目的：回應同事第三輪審查，先用 trace／程式碼確認「每查詢約 1.1 秒固定成本」，再實作 coverage 快取，最後用串流端點重測 20 mixed 與 40 non-LLM
 - 範圍：只改 RAG 請求路徑的 coverage 快取與觀測；不改 registry、不啟用 expansion、不改 Qdrant／embedding／reranker 模型、不進行法律審查、不 push

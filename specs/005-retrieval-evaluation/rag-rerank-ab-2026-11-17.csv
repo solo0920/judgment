@@ -1,0 +1,4 @@
+config,candidates,max_chars,workload_ratio,judgment_rerank_p50_ms,judgment_rerank_p95_ms,judgment_rerank_degraded,elapsed_p50_ms,elapsed_p95_ms,semantic_avg_top8_overlap_vs_baseline,semantic_top1_same
+current_30_1200,30,1200,1.0,572,907,0,613.4,1714.4,6.0,baseline
+A_30_800,30,800,0.667,478,1260,0,531.3,1298.8,4.71,4/7
+B_20_500,20,500,0.278,157,379,0,529.8,786.5,3.71,2/7

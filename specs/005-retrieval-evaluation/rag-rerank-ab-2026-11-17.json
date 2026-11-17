@@ -1,0 +1,3809 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "reranker": "x570 :11435 primary only (fallback disabled for isolation)",
+    "llm": "disabled for retrieval-only A/B",
+    "questions": "tests/benchmarks/rag_query_suite.json (27 cases)",
+    "note": "Actual current config is 30 candidates x 1200 chars, not 50 x 1200."
+  },
+  "config_table": {
+    "current_30_1200": {
+      "candidates": 30,
+      "max_chars": 1200,
+      "workload_ratio": 1.0,
+      "semantic_avg_top8_overlap": 6.0,
+      "semantic_top1_same": "baseline"
+    },
+    "A_30_800": {
+      "candidates": 30,
+      "max_chars": 800,
+      "workload_ratio": 0.667,
+      "semantic_avg_top8_overlap": 4.71,
+      "semantic_top1_same": "4/7"
+    },
+    "B_20_500": {
+      "candidates": 20,
+      "max_chars": 500,
+      "workload_ratio": 0.278,
+      "semantic_avg_top8_overlap": 3.71,
+      "semantic_top1_same": "2/7"
+    }
+  },
+  "notes": [
+    "Actual current setting was 30 candidates x 1200 chars, not 50 x 1200.",
+    "LLM disabled; reranker fallback disabled to isolate x570.",
+    "Only 11/27 cases invoke judgment rerank and 6/27 invoke law rerank; structured list cases skip rerank.",
+    "Overlap with baseline is a stability proxy, not a relevance or quality metric.",
+    "ground_truth_cases remains 0; no Recall/nDCG claim.",
+    "10-question human review is pending."
+  ],
+  "results": {
+    "current_30_1200": {
+      "dated_banqiao_fraud_2000_2010": {
+        "question": "2000年至2010年在板橋地方法院相關詐騙的判決有那些",
+        "elapsed_ms": 603.2,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "dated_banqiao_fraud_2002_2009": {
+        "question": "2002年到2009年板橋地院詐欺判決有哪些",
+        "elapsed_ms": 517.2,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,91,簡,42,20020225,1",
+          "PCDM,91,簡,69,20020313,1",
+          "PCEM,91,板簡,479,20020328,1",
+          "PCDM,91,自更緝,1,20020520,2",
+          "PCDM,91,自,78,20020625,1",
+          "PCDM,91,附民,293,20020807,1",
+          "PCDM,91,訴,1362,20020913,1",
+          "PCDM,91,重附民,11,20021009,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2005_newtaipei_fraud": {
+        "question": "2005年新北地院詐欺判決有哪些",
+        "elapsed_ms": 494.8,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,94,簡,467,20050221,1",
+          "PCDM,95,簡,734,20050324,1",
+          "PCDM,93,附民,245,20050406,1",
+          "PCDM,93,簡,2610,20050422,1",
+          "PCDM,93,易,1077,20050506,1",
+          "PCDM,92,訴,309,20050518,12",
+          "PCDM,94,簡,458,20050525,1",
+          "PCDM,93,簡上,633,20050526,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2006_newtaipei_fraud": {
+        "question": "2006年新北地院詐欺判決有哪些",
+        "elapsed_ms": 487.7,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,95,簡,381,20060120,1",
+          "PCDM,95,重附民,4,20060125,1",
+          "PCDM,95,簡,70,20060127,1",
+          "PCDM,95,訴,140,20060127,1",
+          "PCDM,94,訴,2566,20060223,1",
+          "PCDM,94,簡,6030,20060227,1",
+          "PCDM,95,簡,933,20060227,1",
+          "PCDM,94,簡,3721,20060314,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2007_newtaipei_fraud": {
+        "question": "2007年新北地院詐欺判決有哪些",
+        "elapsed_ms": 403.2,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,96,易,20,20070131,1",
+          "PCDM,94,易,1630,20070307,1",
+          "PCDM,96,簡,233,20070425,1",
+          "PCDM,95,訴緝,201,20070504,3",
+          "PCDM,96,簡上,187,20070511,1",
+          "PCDM,96,簡,219,20070525,1",
+          "PCDM,94,附民,146,20070726,1",
+          "PCDM,95,重訴,32,20070919,6"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2008_newtaipei_fraud": {
+        "question": "2008年新北地院詐欺判決有哪些",
+        "elapsed_ms": 400.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,96,易,1200,20080104,1",
+          "PCDM,96,易緝,47,20080104,1",
+          "PCDM,95,易緝,96,20080104,1",
+          "PCDM,97,易緝,3,20080117,1",
+          "PCDM,97,簡上,185,20080227,1",
+          "PCDM,96,簡,7441,20080229,1",
+          "PCDM,96,易,3061,20080331,1",
+          "PCDM,96,附民,637,20080408,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "dated_banqiao_money_2000_2010": {
+        "question": "2000年至2010年板橋地院洗錢判決有哪些",
+        "elapsed_ms": 503.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,92,簡,3584,20020528,1",
+          "PCDM,91,訴,473,20020620,1",
+          "PCDM,91,簡,355,20021126,1",
+          "PCDM,91,訴,1230,20021128,2",
+          "PCDM,92,訴,434,20030403,1",
+          "PCDM,92,重簡,110,20030429,1",
+          "PCDM,92,訴,407,20030509,1",
+          "PCDM,91,訴,2590,20030604,2"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "no_match_early_years": {
+        "question": "1990年至1991年新北地院詐欺判決有哪些",
+        "elapsed_ms": 202.2,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [],
+        "judgment_scores": [],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "no_match_lianjiang_money": {
+        "question": "2000年至2010年連江地院洗錢判決有哪些",
+        "elapsed_ms": 295.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [],
+        "judgment_scores": [],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_newtaipei_fraud": {
+        "question": "2026年新北地院詐欺判決有哪些",
+        "elapsed_ms": 634.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,114,審金訴,3336,20260102,1",
+          "PCDM,113,金簡,246,20260102,1",
+          "PCDM,114,審金訴,3397,20260102,1",
+          "PCDM,114,金訴,2970,20260102,1",
+          "PCDM,114,金訴,2106,20260102,1",
+          "PCDM,114,金訴,2124,20260102,1",
+          "PCDM,114,審金訴,3853,20260102,1",
+          "PCDM,114,金訴,3050,20260102,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_taipei_fraud": {
+        "question": "2026年台北地院詐欺判決有哪些",
+        "elapsed_ms": 569.9,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "TPDM,114,審簡,2728,20260102,1",
+          "TPDM,114,審簡,2711,20260102,1",
+          "TPDM,114,審簡,2743,20260102,1",
+          "TPDM,114,簡上,276,20260106,1",
+          "TPDM,114,審訴,2018,20260106,1",
+          "TPDM,114,審訴,3130,20260106,1",
+          "TPDM,114,審訴,2996,20260106,1",
+          "TPDM,114,審訴,3161,20260106,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_taichung_fraud": {
+        "question": "2026年台中地院詐欺判決有哪些",
+        "elapsed_ms": 613.4,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "TCDM,114,金訴,2626,20260102,1",
+          "TCDM,114,金訴,3879,20260102,2",
+          "TCDM,114,金訴,3415,20260102,1",
+          "TCDM,114,金訴,2648,20260102,1",
+          "TCDM,114,金訴,4057,20260102,1",
+          "TCDM,114,審原金訴,119,20260102,1",
+          "TCDM,114,金訴,3430,20260102,1",
+          "TCDM,114,金訴,3775,20260102,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_bank_staff": {
+        "question": "銀行法對從業人員有哪些規定",
+        "elapsed_ms": 1343.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "KSDM,100,訴緝,40,20110729,3"
+        ],
+        "judgment_scores": [
+          0.6302
+        ],
+        "law_sources": [
+          {
+            "law_name": "銀行法",
+            "articles": [
+              "第 35 條",
+              "第 125-2 條",
+              "第 131 條",
+              "第 35-2 條",
+              "第 127-4 條",
+              "第 62-2 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 464,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 144,
+          "candidate_count": 8,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_securities_insider": {
+        "question": "證券交易法對內線交易有哪些規定",
+        "elapsed_ms": 1660.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPDM,112,金訴,29,20231120,2"
+        ],
+        "judgment_scores": [
+          0.6548
+        ],
+        "law_sources": [
+          {
+            "law_name": "證券交易法",
+            "articles": [
+              "第 62 條",
+              "第 157-1 條",
+              "第 171 條",
+              "第 14-1 條",
+              "第 155 條",
+              "第 138 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 574,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 162,
+          "candidate_count": 7,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_money_19": {
+        "question": "洗錢防制法第19條的規定是什麼",
+        "elapsed_ms": 1221.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPDM,114,審簡,1283,20251117,1"
+        ],
+        "judgment_scores": [
+          0.6238
+        ],
+        "law_sources": [
+          {
+            "law_name": "洗錢防制法",
+            "articles": [
+              "第 19 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 509,
+          "candidate_count": 28,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 98,
+          "candidate_count": 1,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_insurance_107": {
+        "question": "保險法第107條的規定是什麼",
+        "elapsed_ms": 1242.3,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPSV,102,台上,137,20130123"
+        ],
+        "judgment_scores": [
+          0.5817
+        ],
+        "law_sources": [
+          {
+            "law_name": "保險法",
+            "articles": [
+              "第 107 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 506,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 87,
+          "candidate_count": 1,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_third_party_fraud_burden": {
+        "question": "第三人詐欺的舉證責任有哪些實務見解",
+        "elapsed_ms": 2138.5,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPSM,114,台上,6887,20260225,1",
+          "TPSM,110,台上,5506,20211006,1",
+          "TPSM,115,台上,2738,20260805,1",
+          "TPSM,114,台上,659,20250324,1",
+          "TPSM,112,台上,2333,20230614,1",
+          "TPSM,111,台上,2672,20220728,1",
+          "TPSM,112,台上,3748,20230913,1",
+          "TPSM,111,台上,2486,20220601,1"
+        ],
+        "judgment_scores": [
+          0.6547,
+          0.6561,
+          0.6519,
+          0.6539,
+          0.6638,
+          0.6516,
+          0.6606,
+          0.6535
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 596,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_cash_mule_forfeiture": {
+        "question": "詐欺車手面交的犯罪所得沒收範圍",
+        "elapsed_ms": 1215.2,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,114,審金訴,2918,20251112,1"
+        ],
+        "judgment_scores": [
+          0.6516
+        ],
+        "law_sources": [
+          {
+            "law_name": "詐欺犯罪危害防制條例",
+            "articles": [
+              "第 48 條",
+              "第 44 條",
+              "第 50 條",
+              "第 46 條",
+              "第 56 條",
+              "第 9 條"
+            ]
+          },
+          {
+            "law_name": "信託業法",
+            "articles": [
+              "第 58-1 條",
+              "第 48-3 條",
+              "第 23 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 572,
+          "candidate_count": 28,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 90,
+          "candidate_count": 11,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_help_fraud_intent": {
+        "question": "幫助詐欺與不確定故意的認定",
+        "elapsed_ms": 1253.3,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "KSHM,111,上易,10,20220407,1",
+          "PCDM,107,簡,5322,20180919,1",
+          "PCDM,107,簡,6478,20181001,1",
+          "MKEM,115,馬軍簡,6,20260824,1",
+          "PCDM,107,簡,5865,20180926,1",
+          "PCDM,107,簡,6115,20180918,1",
+          "TPSM,113,台上,1327,20240411,1",
+          "MKEM,115,馬軍簡,11,20260828,1"
+        ],
+        "judgment_scores": [
+          0.6763,
+          0.7233,
+          0.6956,
+          0.6717,
+          0.686,
+          0.6874,
+          0.6766,
+          0.6856
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 581,
+          "candidate_count": 28,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "structured_semantic_2007_issue": {
+        "question": "2007年新北地院詐欺判決的爭點",
+        "elapsed_ms": 745.5,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,96,簡,233,20070425,1",
+          "PCDM,94,附民,146,20070726,1",
+          "PCDM,95,訴緝,201,20070504,3",
+          "PCDM,96,重附民,38,20071024,1",
+          "PCDM,96,簡上,187,20070511,1",
+          "PCDM,96,簡,8561,20071231,1",
+          "PCDM,96,易,20,20070131,1",
+          "PCDM,95,重訴,32,20070919,6"
+        ],
+        "judgment_scores": [
+          0.5815,
+          0.5662,
+          0.5702,
+          0.5902,
+          0.5847,
+          0.5903,
+          0.606,
+          0.5796
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 265,
+          "candidate_count": 11,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_fraud_elements_law": {
+        "question": "詐欺罪有哪些構成要件？",
+        "elapsed_ms": 1177.3,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "KLDM,112,金訴,516,20231130,1"
+        ],
+        "judgment_scores": [
+          0.6375
+        ],
+        "law_sources": [
+          {
+            "law_name": "詐欺犯罪危害防制條例",
+            "articles": [
+              "第 56 條",
+              "第 4 條",
+              "第 3 條",
+              "第 48 條",
+              "第 49 條",
+              "第 46 條"
+            ]
+          },
+          {
+            "law_name": "中華民國刑法",
+            "articles": [
+              "第 339-4 條",
+              "第 13 條",
+              "第 14 條",
+              "第 61 條",
+              "第 5 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 589,
+          "candidate_count": 29,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 103,
+          "candidate_count": 13,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_money_patterns_semantic": {
+        "question": "洗錢有哪些常見態樣？",
+        "elapsed_ms": 1282.4,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "HLDM,107,原金簡上,1,20181219,1",
+          "SCDM,114,訴,1095,20251212,1",
+          "SLDM,114,簡,362,20260120,1",
+          "SLDM,114,簡,152,20250908,1",
+          "KLDM,114,基金簡,14,20250930,1",
+          "SCDM,114,竹簡,984,20251022,1",
+          "SCDM,114,金簡,83,20250701,1",
+          "TCHM,111,金上訴,3037,20230221,1"
+        ],
+        "judgment_scores": [
+          0.6234,
+          0.6233,
+          0.6257,
+          0.6266,
+          0.6295,
+          0.6235,
+          0.6395,
+          0.6313
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 548,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_sentencing_semantic_with_filter": {
+        "question": "新北地院的詐欺判決通常怎麼量刑？",
+        "elapsed_ms": 1714.4,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,108,簡上,954,20200218,1",
+          "PCDM,113,金簡,157,20240507,1",
+          "PCDM,114,審金訴,2195,20250905,1",
+          "PCDM,115,審金訴,927,20260617,1",
+          "PCDM,114,審金訴,3236,20251126,1",
+          "PCDM,113,審金訴,405,20240416,1",
+          "PCDM,112,審簡,1265,20231228,1",
+          "PCDM,114,金訴,2289,20251219,1"
+        ],
+        "judgment_scores": [
+          0.6961,
+          0.7037,
+          0.7153,
+          0.6992,
+          0.6963,
+          0.7035,
+          0.6975,
+          0.6972
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 907,
+          "candidate_count": 50,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_fraud_2000_2010_2": {
+        "question": "板橋地院在 2000 至 2010 年間有哪些詐騙案件？",
+        "elapsed_ms": 441.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_fraud_2000_2010_4": {
+        "question": "涉及詐欺的板橋地院判決，時間限定在 2000–2010 年",
+        "elapsed_ms": 543.7,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_before_rename": {
+        "question": "新北地院改制前，板橋地院的詐欺案件有哪些？",
+        "elapsed_ms": 603.8,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "exact_keyword_violation_settlement": {
+        "question": "士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+        "elapsed_ms": 950.3,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "keyword_list",
+        "judgments": [
+          "SLDV,89,訴,367,20000728"
+        ],
+        "judgment_scores": [
+          2.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      }
+    },
+    "A_30_800": {
+      "dated_banqiao_fraud_2000_2010": {
+        "question": "2000年至2010年在板橋地方法院相關詐騙的判決有那些",
+        "elapsed_ms": 531.3,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "dated_banqiao_fraud_2002_2009": {
+        "question": "2002年到2009年板橋地院詐欺判決有哪些",
+        "elapsed_ms": 524.9,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,91,簡,42,20020225,1",
+          "PCDM,91,簡,69,20020313,1",
+          "PCEM,91,板簡,479,20020328,1",
+          "PCDM,91,自更緝,1,20020520,2",
+          "PCDM,91,自,78,20020625,1",
+          "PCDM,91,附民,293,20020807,1",
+          "PCDM,91,訴,1362,20020913,1",
+          "PCDM,91,重附民,11,20021009,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2005_newtaipei_fraud": {
+        "question": "2005年新北地院詐欺判決有哪些",
+        "elapsed_ms": 353.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,94,簡,467,20050221,1",
+          "PCDM,95,簡,734,20050324,1",
+          "PCDM,93,附民,245,20050406,1",
+          "PCDM,93,簡,2610,20050422,1",
+          "PCDM,93,易,1077,20050506,1",
+          "PCDM,92,訴,309,20050518,12",
+          "PCDM,94,簡,458,20050525,1",
+          "PCDM,93,簡上,633,20050526,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2006_newtaipei_fraud": {
+        "question": "2006年新北地院詐欺判決有哪些",
+        "elapsed_ms": 444.7,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,95,簡,381,20060120,1",
+          "PCDM,95,重附民,4,20060125,1",
+          "PCDM,95,簡,70,20060127,1",
+          "PCDM,95,訴,140,20060127,1",
+          "PCDM,94,訴,2566,20060223,1",
+          "PCDM,94,簡,6030,20060227,1",
+          "PCDM,95,簡,933,20060227,1",
+          "PCDM,94,簡,3721,20060314,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2007_newtaipei_fraud": {
+        "question": "2007年新北地院詐欺判決有哪些",
+        "elapsed_ms": 451.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,96,易,20,20070131,1",
+          "PCDM,94,易,1630,20070307,1",
+          "PCDM,96,簡,233,20070425,1",
+          "PCDM,95,訴緝,201,20070504,3",
+          "PCDM,96,簡上,187,20070511,1",
+          "PCDM,96,簡,219,20070525,1",
+          "PCDM,94,附民,146,20070726,1",
+          "PCDM,95,重訴,32,20070919,6"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2008_newtaipei_fraud": {
+        "question": "2008年新北地院詐欺判決有哪些",
+        "elapsed_ms": 398.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,96,易,1200,20080104,1",
+          "PCDM,96,易緝,47,20080104,1",
+          "PCDM,95,易緝,96,20080104,1",
+          "PCDM,97,易緝,3,20080117,1",
+          "PCDM,97,簡上,185,20080227,1",
+          "PCDM,96,簡,7441,20080229,1",
+          "PCDM,96,易,3061,20080331,1",
+          "PCDM,96,附民,637,20080408,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "dated_banqiao_money_2000_2010": {
+        "question": "2000年至2010年板橋地院洗錢判決有哪些",
+        "elapsed_ms": 463.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,92,簡,3584,20020528,1",
+          "PCDM,91,訴,473,20020620,1",
+          "PCDM,91,簡,355,20021126,1",
+          "PCDM,91,訴,1230,20021128,2",
+          "PCDM,92,訴,434,20030403,1",
+          "PCDM,92,重簡,110,20030429,1",
+          "PCDM,92,訴,407,20030509,1",
+          "PCDM,91,訴,2590,20030604,2"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "no_match_early_years": {
+        "question": "1990年至1991年新北地院詐欺判決有哪些",
+        "elapsed_ms": 279.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [],
+        "judgment_scores": [],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "no_match_lianjiang_money": {
+        "question": "2000年至2010年連江地院洗錢判決有哪些",
+        "elapsed_ms": 335.6,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [],
+        "judgment_scores": [],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_newtaipei_fraud": {
+        "question": "2026年新北地院詐欺判決有哪些",
+        "elapsed_ms": 589.4,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,114,審金訴,3336,20260102,1",
+          "PCDM,113,金簡,246,20260102,1",
+          "PCDM,114,審金訴,3397,20260102,1",
+          "PCDM,114,金訴,2970,20260102,1",
+          "PCDM,114,金訴,2106,20260102,1",
+          "PCDM,114,金訴,2124,20260102,1",
+          "PCDM,114,審金訴,3853,20260102,1",
+          "PCDM,114,金訴,3050,20260102,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_taipei_fraud": {
+        "question": "2026年台北地院詐欺判決有哪些",
+        "elapsed_ms": 489.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "TPDM,114,審簡,2728,20260102,1",
+          "TPDM,114,審簡,2711,20260102,1",
+          "TPDM,114,審簡,2743,20260102,1",
+          "TPDM,114,簡上,276,20260106,1",
+          "TPDM,114,審訴,2018,20260106,1",
+          "TPDM,114,審訴,3130,20260106,1",
+          "TPDM,114,審訴,2996,20260106,1",
+          "TPDM,114,審訴,3161,20260106,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_taichung_fraud": {
+        "question": "2026年台中地院詐欺判決有哪些",
+        "elapsed_ms": 485.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "TCDM,114,金訴,2626,20260102,1",
+          "TCDM,114,金訴,3879,20260102,2",
+          "TCDM,114,金訴,3415,20260102,1",
+          "TCDM,114,金訴,2648,20260102,1",
+          "TCDM,114,金訴,4057,20260102,1",
+          "TCDM,114,審原金訴,119,20260102,1",
+          "TCDM,114,金訴,3430,20260102,1",
+          "TCDM,114,金訴,3775,20260102,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_bank_staff": {
+        "question": "銀行法對從業人員有哪些規定",
+        "elapsed_ms": 1763.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPSM,103,台上,2996,20140827"
+        ],
+        "judgment_scores": [
+          0.6379
+        ],
+        "law_sources": [
+          {
+            "law_name": "銀行法",
+            "articles": [
+              "第 35 條",
+              "第 125-2 條",
+              "第 131 條",
+              "第 35-2 條",
+              "第 127-4 條",
+              "第 62-2 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 1260,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 132,
+          "candidate_count": 8,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_securities_insider": {
+        "question": "證券交易法對內線交易有哪些規定",
+        "elapsed_ms": 1086.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPDM,112,金訴,29,20231120,2"
+        ],
+        "judgment_scores": [
+          0.6548
+        ],
+        "law_sources": [
+          {
+            "law_name": "證券交易法",
+            "articles": [
+              "第 62 條",
+              "第 157-1 條",
+              "第 171 條",
+              "第 14-1 條",
+              "第 155 條",
+              "第 138 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 514,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 101,
+          "candidate_count": 7,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_money_19": {
+        "question": "洗錢防制法第19條的規定是什麼",
+        "elapsed_ms": 808.4,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "CHDM,113,金簡,203,20240919,1"
+        ],
+        "judgment_scores": [
+          0.6254
+        ],
+        "law_sources": [
+          {
+            "law_name": "洗錢防制法",
+            "articles": [
+              "第 19 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 498,
+          "candidate_count": 28,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 41,
+          "candidate_count": 1,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_insurance_107": {
+        "question": "保險法第107條的規定是什麼",
+        "elapsed_ms": 827.1,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "KSHV,107,保險上,2,20190417,1"
+        ],
+        "judgment_scores": [
+          0.5823
+        ],
+        "law_sources": [
+          {
+            "law_name": "保險法",
+            "articles": [
+              "第 107 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 474,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 55,
+          "candidate_count": 1,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_third_party_fraud_burden": {
+        "question": "第三人詐欺的舉證責任有哪些實務見解",
+        "elapsed_ms": 924.5,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPSM,114,台上,6887,20260225,1",
+          "TPSM,111,台上,2486,20220601,1",
+          "TPSM,114,台上,659,20250324,1",
+          "TPSM,111,台上,2672,20220728,1",
+          "TPSM,115,台上,1591,20260603,1",
+          "TPSM,112,台上,3748,20230913,1",
+          "TPSM,115,台上,2738,20260805,1",
+          "TPSM,114,台上,6875,20260225,1"
+        ],
+        "judgment_scores": [
+          0.6547,
+          0.6535,
+          0.6539,
+          0.6516,
+          0.6521,
+          0.6606,
+          0.6519,
+          0.6528
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 478,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_cash_mule_forfeiture": {
+        "question": "詐欺車手面交的犯罪所得沒收範圍",
+        "elapsed_ms": 911.4,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,114,審金訴,2918,20251112,1"
+        ],
+        "judgment_scores": [
+          0.6516
+        ],
+        "law_sources": [
+          {
+            "law_name": "詐欺犯罪危害防制條例",
+            "articles": [
+              "第 48 條",
+              "第 44 條",
+              "第 50 條",
+              "第 46 條",
+              "第 56 條",
+              "第 9 條"
+            ]
+          },
+          {
+            "law_name": "信託業法",
+            "articles": [
+              "第 58-1 條",
+              "第 48-3 條",
+              "第 23 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 460,
+          "candidate_count": 28,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 112,
+          "candidate_count": 11,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_help_fraud_intent": {
+        "question": "幫助詐欺與不確定故意的認定",
+        "elapsed_ms": 898.8,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,107,簡,5322,20180919,1",
+          "PCDM,107,簡,6478,20181001,1",
+          "MKEM,115,馬軍簡,6,20260824,1",
+          "MKEM,115,馬簡,62,20260522,1",
+          "PCDM,107,簡,5865,20180926,1",
+          "KSHM,111,上易,10,20220407,1",
+          "PCDM,107,簡,6115,20180918,1",
+          "MKEM,115,馬簡,48,20260507,1"
+        ],
+        "judgment_scores": [
+          0.7233,
+          0.6956,
+          0.6717,
+          0.6707,
+          0.686,
+          0.6763,
+          0.6874,
+          0.6692
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 373,
+          "candidate_count": 28,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "structured_semantic_2007_issue": {
+        "question": "2007年新北地院詐欺判決的爭點",
+        "elapsed_ms": 661.4,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,95,訴緝,201,20070504,3",
+          "PCDM,94,附民,146,20070726,1",
+          "PCDM,96,重附民,38,20071024,1",
+          "PCDM,96,簡,233,20070425,1",
+          "PCDM,96,簡上,187,20070511,1",
+          "PCDM,96,簡,8561,20071231,1",
+          "PCDM,95,重訴,32,20070919,6",
+          "PCDM,96,易,20,20070131,1"
+        ],
+        "judgment_scores": [
+          0.5702,
+          0.5662,
+          0.5902,
+          0.5815,
+          0.5847,
+          0.5903,
+          0.5796,
+          0.606
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 225,
+          "candidate_count": 11,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_fraud_elements_law": {
+        "question": "詐欺罪有哪些構成要件？",
+        "elapsed_ms": 898.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "KLDM,112,金訴,516,20231130,1"
+        ],
+        "judgment_scores": [
+          0.6375
+        ],
+        "law_sources": [
+          {
+            "law_name": "詐欺犯罪危害防制條例",
+            "articles": [
+              "第 56 條",
+              "第 4 條",
+              "第 3 條",
+              "第 48 條",
+              "第 49 條",
+              "第 46 條"
+            ]
+          },
+          {
+            "law_name": "中華民國刑法",
+            "articles": [
+              "第 339-4 條",
+              "第 13 條",
+              "第 14 條",
+              "第 61 條",
+              "第 5 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 444,
+          "candidate_count": 29,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 138,
+          "candidate_count": 13,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_money_patterns_semantic": {
+        "question": "洗錢有哪些常見態樣？",
+        "elapsed_ms": 1202.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "HLDM,107,原金簡上,1,20181219,1",
+          "SLDM,114,簡,152,20250908,1",
+          "SLDM,114,簡,362,20260120,1",
+          "SCDM,114,金簡,14,20250312,1",
+          "KLDM,114,基金簡,14,20250930,1",
+          "SLDM,114,審簡,76,20250203,1",
+          "SCDM,114,金簡,83,20250701,1",
+          "SCDM,114,竹簡,984,20251022,1"
+        ],
+        "judgment_scores": [
+          0.6234,
+          0.6266,
+          0.6257,
+          0.6287,
+          0.6295,
+          0.6263,
+          0.6395,
+          0.6235
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 530,
+          "candidate_count": 30,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_sentencing_semantic_with_filter": {
+        "question": "新北地院的詐欺判決通常怎麼量刑？",
+        "elapsed_ms": 1298.8,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,113,金簡,157,20240507,1",
+          "PCDM,114,審金訴,2195,20250905,1",
+          "PCDM,108,簡上,954,20200218,1",
+          "PCDM,114,審金訴,3236,20251126,1",
+          "PCDM,112,審簡,1265,20231228,1",
+          "PCDM,115,原訴,105,20260831,1",
+          "PCDM,113,審訴,88,20240418,1",
+          "PCDM,115,審金訴,883,20260512,1"
+        ],
+        "judgment_scores": [
+          0.7037,
+          0.7153,
+          0.6961,
+          0.6963,
+          0.6975,
+          0.6972,
+          0.7029,
+          0.6966
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 667,
+          "candidate_count": 50,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_fraud_2000_2010_2": {
+        "question": "板橋地院在 2000 至 2010 年間有哪些詐騙案件？",
+        "elapsed_ms": 422.8,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_fraud_2000_2010_4": {
+        "question": "涉及詐欺的板橋地院判決，時間限定在 2000–2010 年",
+        "elapsed_ms": 465.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_before_rename": {
+        "question": "新北地院改制前，板橋地院的詐欺案件有哪些？",
+        "elapsed_ms": 431.0,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "exact_keyword_violation_settlement": {
+        "question": "士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+        "elapsed_ms": 657.2,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "keyword_list",
+        "judgments": [
+          "SLDV,89,訴,367,20000728"
+        ],
+        "judgment_scores": [
+          2.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      }
+    },
+    "B_20_500": {
+      "dated_banqiao_fraud_2000_2010": {
+        "question": "2000年至2010年在板橋地方法院相關詐騙的判決有那些",
+        "elapsed_ms": 598.8,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "dated_banqiao_fraud_2002_2009": {
+        "question": "2002年到2009年板橋地院詐欺判決有哪些",
+        "elapsed_ms": 429.8,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,91,簡,42,20020225,1",
+          "PCDM,91,簡,69,20020313,1",
+          "PCEM,91,板簡,479,20020328,1",
+          "PCDM,91,自更緝,1,20020520,2",
+          "PCDM,91,自,78,20020625,1",
+          "PCDM,91,附民,293,20020807,1",
+          "PCDM,91,訴,1362,20020913,1",
+          "PCDM,91,重附民,11,20021009,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2005_newtaipei_fraud": {
+        "question": "2005年新北地院詐欺判決有哪些",
+        "elapsed_ms": 447.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,94,簡,467,20050221,1",
+          "PCDM,95,簡,734,20050324,1",
+          "PCDM,93,附民,245,20050406,1",
+          "PCDM,93,簡,2610,20050422,1",
+          "PCDM,93,易,1077,20050506,1",
+          "PCDM,92,訴,309,20050518,12",
+          "PCDM,94,簡,458,20050525,1",
+          "PCDM,93,簡上,633,20050526,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2006_newtaipei_fraud": {
+        "question": "2006年新北地院詐欺判決有哪些",
+        "elapsed_ms": 413.2,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,95,簡,381,20060120,1",
+          "PCDM,95,重附民,4,20060125,1",
+          "PCDM,95,簡,70,20060127,1",
+          "PCDM,95,訴,140,20060127,1",
+          "PCDM,94,訴,2566,20060223,1",
+          "PCDM,94,簡,6030,20060227,1",
+          "PCDM,95,簡,933,20060227,1",
+          "PCDM,94,簡,3721,20060314,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2007_newtaipei_fraud": {
+        "question": "2007年新北地院詐欺判決有哪些",
+        "elapsed_ms": 426.0,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,96,易,20,20070131,1",
+          "PCDM,94,易,1630,20070307,1",
+          "PCDM,96,簡,233,20070425,1",
+          "PCDM,95,訴緝,201,20070504,3",
+          "PCDM,96,簡上,187,20070511,1",
+          "PCDM,96,簡,219,20070525,1",
+          "PCDM,94,附民,146,20070726,1",
+          "PCDM,95,重訴,32,20070919,6"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2008_newtaipei_fraud": {
+        "question": "2008年新北地院詐欺判決有哪些",
+        "elapsed_ms": 397.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,96,易,1200,20080104,1",
+          "PCDM,96,易緝,47,20080104,1",
+          "PCDM,95,易緝,96,20080104,1",
+          "PCDM,97,易緝,3,20080117,1",
+          "PCDM,97,簡上,185,20080227,1",
+          "PCDM,96,簡,7441,20080229,1",
+          "PCDM,96,易,3061,20080331,1",
+          "PCDM,96,附民,637,20080408,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "dated_banqiao_money_2000_2010": {
+        "question": "2000年至2010年板橋地院洗錢判決有哪些",
+        "elapsed_ms": 461.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,92,簡,3584,20020528,1",
+          "PCDM,91,訴,473,20020620,1",
+          "PCDM,91,簡,355,20021126,1",
+          "PCDM,91,訴,1230,20021128,2",
+          "PCDM,92,訴,434,20030403,1",
+          "PCDM,92,重簡,110,20030429,1",
+          "PCDM,92,訴,407,20030509,1",
+          "PCDM,91,訴,2590,20030604,2"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "no_match_early_years": {
+        "question": "1990年至1991年新北地院詐欺判決有哪些",
+        "elapsed_ms": 323.9,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [],
+        "judgment_scores": [],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "no_match_lianjiang_money": {
+        "question": "2000年至2010年連江地院洗錢判決有哪些",
+        "elapsed_ms": 207.3,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [],
+        "judgment_scores": [],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_newtaipei_fraud": {
+        "question": "2026年新北地院詐欺判決有哪些",
+        "elapsed_ms": 584.7,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,114,審金訴,3336,20260102,1",
+          "PCDM,113,金簡,246,20260102,1",
+          "PCDM,114,審金訴,3397,20260102,1",
+          "PCDM,114,金訴,2970,20260102,1",
+          "PCDM,114,金訴,2106,20260102,1",
+          "PCDM,114,金訴,2124,20260102,1",
+          "PCDM,114,審金訴,3853,20260102,1",
+          "PCDM,114,金訴,3050,20260102,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_taipei_fraud": {
+        "question": "2026年台北地院詐欺判決有哪些",
+        "elapsed_ms": 633.9,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "TPDM,114,審簡,2728,20260102,1",
+          "TPDM,114,審簡,2711,20260102,1",
+          "TPDM,114,審簡,2743,20260102,1",
+          "TPDM,114,簡上,276,20260106,1",
+          "TPDM,114,審訴,2018,20260106,1",
+          "TPDM,114,審訴,3130,20260106,1",
+          "TPDM,114,審訴,2996,20260106,1",
+          "TPDM,114,審訴,3161,20260106,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "year_2026_taichung_fraud": {
+        "question": "2026年台中地院詐欺判決有哪些",
+        "elapsed_ms": 569.7,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "TCDM,114,金訴,2626,20260102,1",
+          "TCDM,114,金訴,3879,20260102,2",
+          "TCDM,114,金訴,3415,20260102,1",
+          "TCDM,114,金訴,2648,20260102,1",
+          "TCDM,114,金訴,4057,20260102,1",
+          "TCDM,114,審原金訴,119,20260102,1",
+          "TCDM,114,金訴,3430,20260102,1",
+          "TCDM,114,金訴,3775,20260102,1"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_bank_staff": {
+        "question": "銀行法對從業人員有哪些規定",
+        "elapsed_ms": 697.5,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "KSDM,100,訴緝,40,20110729,3"
+        ],
+        "judgment_scores": [
+          0.6302
+        ],
+        "law_sources": [
+          {
+            "law_name": "銀行法",
+            "articles": [
+              "第 35 條",
+              "第 125-2 條",
+              "第 131 條",
+              "第 35-2 條",
+              "第 127-4 條",
+              "第 62-2 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 216,
+          "candidate_count": 20,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 86,
+          "candidate_count": 8,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_securities_insider": {
+        "question": "證券交易法對內線交易有哪些規定",
+        "elapsed_ms": 650.1,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPDM,107,金訴,43,20190430,1"
+        ],
+        "judgment_scores": [
+          0.6618
+        ],
+        "law_sources": [
+          {
+            "law_name": "證券交易法",
+            "articles": [
+              "第 62 條",
+              "第 157-1 條",
+              "第 171 條",
+              "第 14-1 條",
+              "第 155 條",
+              "第 138 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 183,
+          "candidate_count": 20,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 109,
+          "candidate_count": 7,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_money_19": {
+        "question": "洗錢防制法第19條的規定是什麼",
+        "elapsed_ms": 479.6,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "CHDM,113,金簡,203,20240919,1"
+        ],
+        "judgment_scores": [
+          0.6254
+        ],
+        "law_sources": [
+          {
+            "law_name": "洗錢防制法",
+            "articles": [
+              "第 19 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 157,
+          "candidate_count": 18,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 74,
+          "candidate_count": 1,
+          "errors": []
+        },
+        "error": null
+      },
+      "law_insurance_107": {
+        "question": "保險法第107條的規定是什麼",
+        "elapsed_ms": 529.8,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPSV,102,台上,137,20130123"
+        ],
+        "judgment_scores": [
+          0.5817
+        ],
+        "law_sources": [
+          {
+            "law_name": "保險法",
+            "articles": [
+              "第 107 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 157,
+          "candidate_count": 20,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 119,
+          "candidate_count": 1,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_third_party_fraud_burden": {
+        "question": "第三人詐欺的舉證責任有哪些實務見解",
+        "elapsed_ms": 553.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPSM,114,台上,6887,20260225,1",
+          "TPSM,111,台上,2486,20220601,1",
+          "TPSM,112,台上,2333,20230614,1",
+          "TPSM,112,台上,176,20230215,1",
+          "TPSM,112,台上,3748,20230913,1",
+          "TPSM,112,台上,3232,20230809,1",
+          "TPSM,114,台上,6875,20260225,1",
+          "TPSM,114,台上,659,20250324,1"
+        ],
+        "judgment_scores": [
+          0.6547,
+          0.6535,
+          0.6638,
+          0.6631,
+          0.6606,
+          0.6529,
+          0.6528,
+          0.6539
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 157,
+          "candidate_count": 20,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_cash_mule_forfeiture": {
+        "question": "詐欺車手面交的犯罪所得沒收範圍",
+        "elapsed_ms": 598.7,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "TPHM,115,上訴,3010,20260630,1"
+        ],
+        "judgment_scores": [
+          0.6906
+        ],
+        "law_sources": [
+          {
+            "law_name": "詐欺犯罪危害防制條例",
+            "articles": [
+              "第 48 條",
+              "第 44 條",
+              "第 50 條",
+              "第 46 條",
+              "第 56 條",
+              "第 9 條"
+            ]
+          },
+          {
+            "law_name": "信託業法",
+            "articles": [
+              "第 58-1 條",
+              "第 48-3 條",
+              "第 23 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 155,
+          "candidate_count": 18,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 159,
+          "candidate_count": 11,
+          "errors": []
+        },
+        "error": null
+      },
+      "semantic_help_fraud_intent": {
+        "question": "幫助詐欺與不確定故意的認定",
+        "elapsed_ms": 515.8,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,107,簡,5322,20180919,1",
+          "KSHM,111,上易,10,20220407,1",
+          "PCDM,107,簡,3651,20180601,1",
+          "PCDM,107,簡,6478,20181001,1",
+          "PCDM,107,簡,5865,20180926,1",
+          "TYDM,111,桃簡,1910,20221205,1",
+          "PCDM,107,簡,6115,20180918,1",
+          "MKEM,114,馬金簡,128,20251119,1"
+        ],
+        "judgment_scores": [
+          0.7233,
+          0.6763,
+          0.6774,
+          0.6956,
+          0.686,
+          0.6745,
+          0.6874,
+          0.6738
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 150,
+          "candidate_count": 18,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "structured_semantic_2007_issue": {
+        "question": "2007年新北地院詐欺判決的爭點",
+        "elapsed_ms": 531.3,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,96,簡,233,20070425,1",
+          "PCDM,96,易,20,20070131,1",
+          "PCDM,95,訴緝,201,20070504,3",
+          "PCDM,96,簡,8561,20071231,1",
+          "PCDM,94,附民,146,20070726,1",
+          "PCDM,96,重附民,38,20071024,1",
+          "PCDM,96,簡上,187,20070511,1",
+          "PCDM,96,簡,8108,20071211,1"
+        ],
+        "judgment_scores": [
+          0.5815,
+          0.606,
+          0.5702,
+          0.5903,
+          0.5662,
+          0.5902,
+          0.5847,
+          0.5851
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 102,
+          "candidate_count": 11,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_fraud_elements_law": {
+        "question": "詐欺罪有哪些構成要件？",
+        "elapsed_ms": 496.9,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "CHDM,114,訴,1679,20251230,2"
+        ],
+        "judgment_scores": [
+          0.637
+        ],
+        "law_sources": [
+          {
+            "law_name": "詐欺犯罪危害防制條例",
+            "articles": [
+              "第 56 條",
+              "第 4 條",
+              "第 3 條",
+              "第 48 條",
+              "第 49 條",
+              "第 46 條"
+            ]
+          },
+          {
+            "law_name": "中華民國刑法",
+            "articles": [
+              "第 339-4 條",
+              "第 13 條",
+              "第 14 條",
+              "第 61 條",
+              "第 5 條"
+            ]
+          }
+        ],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 158,
+          "candidate_count": 20,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "ok",
+          "latency_ms": 85,
+          "candidate_count": 13,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_money_patterns_semantic": {
+        "question": "洗錢有哪些常見態樣？",
+        "elapsed_ms": 649.8,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "SCDM,114,金簡,14,20250312,1",
+          "SLDM,114,簡,152,20250908,1",
+          "TCDM,112,金簡,583,20231130,1",
+          "SLDM,114,簡,362,20260120,1",
+          "KLDM,113,基金簡,59,20250728,1",
+          "KLDM,114,基金簡,14,20250930,1",
+          "SCDM,114,金簡,183,20251202,1",
+          "SCDM,114,竹簡,1163,20251031,1"
+        ],
+        "judgment_scores": [
+          0.6287,
+          0.6266,
+          0.6243,
+          0.6257,
+          0.6238,
+          0.6295,
+          0.6266,
+          0.6373
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 167,
+          "candidate_count": 20,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "route_sentencing_semantic_with_filter": {
+        "question": "新北地院的詐欺判決通常怎麼量刑？",
+        "elapsed_ms": 1091.0,
+        "status": "retrieval_only",
+        "answer_source": "retrieval",
+        "retrieval_mode": "vector",
+        "judgments": [
+          "PCDM,113,金簡,157,20240507,1",
+          "PCDM,113,審金訴,405,20240416,1",
+          "PCDM,114,審金訴,2195,20250905,1",
+          "PCDM,112,審簡,1265,20231228,1",
+          "PCDM,113,審金訴,3834,20250429,1",
+          "PCDM,108,簡上,954,20200218,1",
+          "PCDM,114,審金訴,3236,20251126,1",
+          "PCDM,114,金訴,1233,20250606,1"
+        ],
+        "judgment_scores": [
+          0.7037,
+          0.7035,
+          0.7153,
+          0.6975,
+          0.7039,
+          0.6961,
+          0.6963,
+          0.7075
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "ok",
+          "latency_ms": 379,
+          "candidate_count": 50,
+          "selected_count": 8,
+          "errors": [],
+          "fallback_used": false
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_fraud_2000_2010_2": {
+        "question": "板橋地院在 2000 至 2010 年間有哪些詐騙案件？",
+        "elapsed_ms": 422.4,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_fraud_2000_2010_4": {
+        "question": "涉及詐欺的板橋地院判決，時間限定在 2000–2010 年",
+        "elapsed_ms": 560.6,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "variant_banqiao_before_rename": {
+        "question": "新北地院改制前，板橋地院的詐欺案件有哪些？",
+        "elapsed_ms": 465.1,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "structured_list",
+        "judgments": [
+          "PCDM,88,易,2824,20000317",
+          "PCDM,89,易緝,87,20000320",
+          "PCDM,89,附民,119,20000531",
+          "PCDM,89,附民,78,20000531",
+          "PCDM,89,易,159,20000602",
+          "PCDM,89,重附民,54,20000619",
+          "PCDM,87,附民,411,20000627,1",
+          "PCDM,89,易,1178,20000711"
+        ],
+        "judgment_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": "skipped",
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      },
+      "exact_keyword_violation_settlement": {
+        "question": "士林地方法院在1995到2000年間有什麼和違約交割相關的案子?",
+        "elapsed_ms": 786.5,
+        "status": "operational",
+        "answer_source": "retrieval_list",
+        "retrieval_mode": "keyword_list",
+        "judgments": [
+          "SLDV,89,訴,367,20000728"
+        ],
+        "judgment_scores": [
+          2.0
+        ],
+        "law_sources": [],
+        "rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "selected_count": null,
+          "errors": [],
+          "fallback_used": null
+        },
+        "law_rerank": {
+          "status": null,
+          "latency_ms": null,
+          "candidate_count": null,
+          "errors": []
+        },
+        "error": null
+      }
+    }
+  },
+  "summary": {
+    "current_30_1200": {
+      "n_cases": 27,
+      "errors": 0,
+      "elapsed_ms": {
+        "p50": 613.4,
+        "p95": 1714.4,
+        "max": 2138.5
+      },
+      "judgment_rerank": {
+        "n": 11,
+        "p50": 572,
+        "p95": 907,
+        "max": 907,
+        "degraded": 0
+      },
+      "law_rerank": {
+        "n": 6,
+        "p50": 98,
+        "p95": 162,
+        "max": 162,
+        "degraded": 0
+      },
+      "judgment_overlap_vs_baseline": [
+        {
+          "id": "law_bank_staff",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_securities_insider",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_money_19",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_insurance_107",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_third_party_fraud_burden",
+          "top1_same": true,
+          "top3_overlap": 3,
+          "top8_overlap": 8,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_cash_mule_forfeiture",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_help_fraud_intent",
+          "top1_same": true,
+          "top3_overlap": 3,
+          "top8_overlap": 8,
+          "same_order_top8": true
+        },
+        {
+          "id": "structured_semantic_2007_issue",
+          "top1_same": true,
+          "top3_overlap": 3,
+          "top8_overlap": 8,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_fraud_elements_law",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_money_patterns_semantic",
+          "top1_same": true,
+          "top3_overlap": 3,
+          "top8_overlap": 8,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_sentencing_semantic_with_filter",
+          "top1_same": true,
+          "top3_overlap": 3,
+          "top8_overlap": 8,
+          "same_order_top8": true
+        }
+      ],
+      "law_overlap_vs_baseline": [
+        {
+          "id": "law_bank_staff",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_securities_insider",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_money_19",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_insurance_107",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_cash_mule_forfeiture",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 2,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_fraud_elements_law",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 2,
+          "same_order_top8": true
+        }
+      ]
+    },
+    "A_30_800": {
+      "n_cases": 27,
+      "errors": 0,
+      "elapsed_ms": {
+        "p50": 531.3,
+        "p95": 1298.8,
+        "max": 1763.0
+      },
+      "judgment_rerank": {
+        "n": 11,
+        "p50": 478,
+        "p95": 1260,
+        "max": 1260,
+        "degraded": 0
+      },
+      "law_rerank": {
+        "n": 6,
+        "p50": 101,
+        "p95": 138,
+        "max": 138,
+        "degraded": 0
+      },
+      "judgment_overlap_vs_baseline": [
+        {
+          "id": "law_bank_staff",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "law_securities_insider",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_money_19",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "law_insurance_107",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "semantic_third_party_fraud_burden",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 6,
+          "same_order_top8": false
+        },
+        {
+          "id": "semantic_cash_mule_forfeiture",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_help_fraud_intent",
+          "top1_same": false,
+          "top3_overlap": 2,
+          "top8_overlap": 6,
+          "same_order_top8": false
+        },
+        {
+          "id": "structured_semantic_2007_issue",
+          "top1_same": false,
+          "top3_overlap": 2,
+          "top8_overlap": 8,
+          "same_order_top8": false
+        },
+        {
+          "id": "route_fraud_elements_law",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_money_patterns_semantic",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 6,
+          "same_order_top8": false
+        },
+        {
+          "id": "route_sentencing_semantic_with_filter",
+          "top1_same": false,
+          "top3_overlap": 3,
+          "top8_overlap": 5,
+          "same_order_top8": false
+        }
+      ],
+      "law_overlap_vs_baseline": [
+        {
+          "id": "law_bank_staff",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_securities_insider",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_money_19",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_insurance_107",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_cash_mule_forfeiture",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 2,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_fraud_elements_law",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 2,
+          "same_order_top8": true
+        }
+      ]
+    },
+    "B_20_500": {
+      "n_cases": 27,
+      "errors": 0,
+      "elapsed_ms": {
+        "p50": 529.8,
+        "p95": 786.5,
+        "max": 1091.0
+      },
+      "judgment_rerank": {
+        "n": 11,
+        "p50": 157,
+        "p95": 379,
+        "max": 379,
+        "degraded": 0
+      },
+      "law_rerank": {
+        "n": 6,
+        "p50": 86,
+        "p95": 159,
+        "max": 159,
+        "degraded": 0
+      },
+      "judgment_overlap_vs_baseline": [
+        {
+          "id": "law_bank_staff",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_securities_insider",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "law_money_19",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "law_insurance_107",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_third_party_fraud_burden",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 5,
+          "same_order_top8": false
+        },
+        {
+          "id": "semantic_cash_mule_forfeiture",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "semantic_help_fraud_intent",
+          "top1_same": false,
+          "top3_overlap": 2,
+          "top8_overlap": 5,
+          "same_order_top8": false
+        },
+        {
+          "id": "structured_semantic_2007_issue",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 7,
+          "same_order_top8": false
+        },
+        {
+          "id": "route_fraud_elements_law",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 0,
+          "same_order_top8": false
+        },
+        {
+          "id": "route_money_patterns_semantic",
+          "top1_same": false,
+          "top3_overlap": 0,
+          "top8_overlap": 3,
+          "same_order_top8": false
+        },
+        {
+          "id": "route_sentencing_semantic_with_filter",
+          "top1_same": false,
+          "top3_overlap": 2,
+          "top8_overlap": 6,
+          "same_order_top8": false
+        }
+      ],
+      "law_overlap_vs_baseline": [
+        {
+          "id": "law_bank_staff",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_securities_insider",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_money_19",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "law_insurance_107",
+          "top1_same": true,
+          "top3_overlap": 1,
+          "top8_overlap": 1,
+          "same_order_top8": true
+        },
+        {
+          "id": "semantic_cash_mule_forfeiture",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 2,
+          "same_order_top8": true
+        },
+        {
+          "id": "route_fraud_elements_law",
+          "top1_same": true,
+          "top3_overlap": 2,
+          "top8_overlap": 2,
+          "same_order_top8": true
+        }
+      ]
+    }
+  }
+}

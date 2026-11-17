@@ -1,0 +1,6 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+20 mixed stream B+unranked,first_partial_ms,15,2156.8,3038.3,3039.3,20x500 rerank; unranked partial before rerank
+20 mixed stream B+unranked,first_token_ms,8,13991.8,37684.6,37684.6,20x500 rerank; unranked partial before rerank
+20 mixed stream B+unranked,result_ms,20,6845.4,39029.7,39030.8,20x500 rerank; unranked partial before rerank
+20 mixed stream B+unranked,statuses,20,,,,"{""operational"": 11, ""retrieval_only"": 9}"
+20 mixed stream B+unranked,errors,20,,,,0
