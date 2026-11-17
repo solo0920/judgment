@@ -105,6 +105,7 @@ journalctl -u judgment-llm-chat -n 200 --no-pager
 - `/props` 無法提供 uptime；需要 journal 才能分辨 OOM、CUDA error、model load 失敗或手動 restart。
 - 目前沒有觀察到 x570 service 中斷；7 小時內 active。套用 24576 後重啟一次是管理操作，不是崩潰。
 - **重開機驗證已通過**（20:36:41）：三個 unit 都在開機時自動 active，沒有第一次啟動失敗；chat `/props` slot_ctx 24576，GPU 5311 MiB used／10529 MiB free。
+- **UFW 套用後第二次重開已通過**（21:32:55）：boot_id 改變；三個 unit 14 秒後自動 active、NRestarts=0；`ufw`／`tailscaled` enabled+active。重開後 LAN 11434–11437 仍 timeout，kernel 仍有 `[UFW BLOCK]`；Tailscale 11435–11437 `/health` 200。
 
 ## x570 24576 後（2026-11-17 20:29）
 
