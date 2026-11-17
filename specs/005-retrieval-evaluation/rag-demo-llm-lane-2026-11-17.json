@@ -66,7 +66,8 @@
       "max_concurrency": 4,
       "max_queue": 8,
       "wait_deadline_seconds": 20.0,
-      "initial_service_seconds": 8.0
+      "initial_service_seconds": 8.0,
+      "note": "Observed runs used initial service 8s; MBP recommendation is 15s, x570 default is 4s."
     },
     "twenty_mixed": {
       "first_partial_p95_ms": 2758.3,
@@ -111,5 +112,10 @@
       "max": 1640.9
     },
     "note": "ASGI accept->handler p95 <200ms; residual gap is client/TCP plus handler->flow scheduling."
+  },
+  "decision": {
+    "primary": "x570 http://x570:11436",
+    "mbp_24576": "not stable; not demo primary until supervised 30-minute test",
+    "note": "x570 physical login and -c 24576 remain the long-term fix"
   }
 }

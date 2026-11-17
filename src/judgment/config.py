@@ -94,7 +94,7 @@ class Settings:
     llm_num_ctx: int = 8192
     llm_max_concurrent: int = 4
     llm_admission_max_queue: int = 8
-    llm_admission_initial_service_seconds: float = 8.0
+    llm_admission_initial_service_seconds: float = 4.0
     rag_summary_wait_deadline_seconds: float = 20.0
     llm_num_predict: int = 384
     llm_keep_alive: str = "30m"
@@ -324,7 +324,7 @@ class Settings:
                 "LLM_ADMISSION_MAX_QUEUE", 8
             ),
             llm_admission_initial_service_seconds=_env_float(
-                "LLM_ADMISSION_INITIAL_SERVICE_SECONDS", 8.0
+                "LLM_ADMISSION_INITIAL_SERVICE_SECONDS", 4.0
             ),
             rag_summary_wait_deadline_seconds=_env_float(
                 "RAG_SUMMARY_WAIT_DEADLINE_SECONDS", 20.0
