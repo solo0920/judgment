@@ -14,7 +14,8 @@
 |---|---|---|---|---|---|
 | NET-01 | x570 Ollama 11434／AI 服務 | 未授權區網與公網無法存取 | 防火牆規則 + 第二台設備 + 手機行動網路失敗紀錄 | `not_started` | Infra／x570 sudo |
 | NET-02 | x570 llama-server 11435／11436／11437 | 只允許應用主機／管理設備 | 同上；若加 `--api-key`，應用端與 health check 均帶 Bearer | `not_started` | Infra／工程 |
-| CF-01 | Cloudflare Access 公開入口 | 無 Access 身分不可到 origin | 公開請求 403 證據 | `verified` | Cloudflare admin |
+| NET-03 | MBP 本機 Ollama 11434 | 只綁 127.0.0.1／::1，不得 listen `*` | `lsof` 顯示 127.0.0.1:11434；LAN IP `nc` 失敗；loopback API 200 | `verified` | 工程／本機管理 |
+| CF-01 | Cloudflare Access 公開入口 | 無 Access 身分不可到 origin；policy／其他 hostname／bypass 規則已檢視 | 公開請求 403 證據 + Zero Trust 政策清單 | `verified`（僅 edge 阻擋；policy 尚未檢視） | Cloudflare admin |
 | CF-02 | Access 通過後仍要求 Admin Token | GET 與寫入 API 都不可無 token 取得／修改 | Access service token + 無 admin token 的 GET／POST 實測 | `not_started` | Cloudflare admin／工程 |
 | CF-03 | cloudflared origin | tunnel 實際執行位置與 origin 正確 | `cloudflared` process／config、`/props`、origin request 紀錄 | `not_started` | Infra |
 | WEB-01 | 跨站 loopback 寫入 | 跨站 POST／PUT／PATCH／DELETE 被拒絕 | Origin／Sec-Fetch-Site 測試與 curl 證據 | `verified` | 工程 |
@@ -30,7 +31,7 @@
 | AUTH-02 | 題庫狀態機 | 不可直接建立／更新為 accepted | 狀態轉換 API 測試、角色矩陣 | `not_started` | 工程／法律審閱 |
 | DATA-01 | RAG 問題與答案保留 | 有保留天數與遮罩 | retention job／DB policy／備份清單 | `not_started` | PM／工程 |
 | SUP-01 | 供應鏈 | 依賴與 image 可重現、無高風險 CVE | pip-audit、SBOM、digest pinning、npx 固定版 | `not_started` | 工程 |
-| HIST-01 | Git history | 不含憑證；hostname／port 已評估 | `git log -p` 掃描；目前未發現 live secrets，但歷史仍有 host/ports | `implemented` | 工程 |
+| HIST-01 | Git history | push 前 history 搜不到公開網域與內部連接埠；不含憑證 | `git log -S`／`git log -p` 掃描；目前只有工作樹 redact，歷史仍有 host/ports | `partial` | 工程 |
 
 ## 2. 目前已驗證的證據
 
@@ -44,6 +45,7 @@
 本機 Origin evil + POST                 → 403
 本機 Sec-Fetch-Site: cross-site + POST  → 403
 本機 curl 無 Origin／Sec-Fetch           → 200（CLI 信任）
+MBP Ollama                                → 127.0.0.1:11434；LAN IP nc 失敗；loopback API 200
 ```
 
 測試：
