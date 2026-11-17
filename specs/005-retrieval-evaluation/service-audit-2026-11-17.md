@@ -88,6 +88,7 @@ RestartSec=3
 - `nvidia-smi`：RTX 5070 Ti，16303 MiB total、5408 MiB used、10431 MiB free、44°C、48% util。
 - `ollama` systemd service 已 inactive；GPU 上只有三個 llama-server。
 - 20 mixed：20/20 operational、0 error；40 mixed：32 operational／8 retrieval_only（8 llm_busy）、0 error。
+- 重開機後 4×Q5 仍 4/4 HTTP 200、finish stop；20 mixed 仍 20/20 operational（first_partial p95 3,572 ms）。
 - UFW active；規則細節不寫進 repo，請在 x570 本機確認只允許必要來源與 port。
 - 請在 x570 上跑（或提供 SSH 後我來跑）：
 
@@ -103,7 +104,7 @@ journalctl -u judgment-llm-chat -n 200 --no-pager
 - systemd `Restart=on-failure` 會讓崩潰後自動重啟；如果服務中斷後又恢復，`journalctl` 應有 restart 記錄。
 - `/props` 無法提供 uptime；需要 journal 才能分辨 OOM、CUDA error、model load 失敗或手動 restart。
 - 目前沒有觀察到 x570 service 中斷；7 小時內 active。套用 24576 後重啟一次是管理操作，不是崩潰。
-- **尚未做重開機驗證**：需 `sudo reboot` 後確認三個 unit 自動 active、`/props` 與 VRAM 正常。
+- **重開機驗證已通過**（20:36:41）：三個 unit 都在開機時自動 active，沒有第一次啟動失敗；chat `/props` slot_ctx 24576，GPU 5311 MiB used／10529 MiB free。
 
 ## x570 24576 後（2026-11-17 20:29）
 

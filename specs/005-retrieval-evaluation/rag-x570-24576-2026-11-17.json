@@ -558,5 +558,29 @@
     "Ollama disabled before test.",
     "No context exceeded in 20/40 mixed.",
     "Reboot verification still pending."
-  ]
+  ],
+  "reboot_verified": true,
+  "postboot_four_concurrent_q5": {
+    "http_200": 4,
+    "finish_reason_stop": 4,
+    "total_tokens": [
+      5896,
+      5899,
+      5889,
+      5896
+    ],
+    "elapsed_ms": [
+      3633.8,
+      3820.2,
+      3649.5,
+      3753.9
+    ]
+  },
+  "postboot_twenty_mixed": {
+    "operational": 20,
+    "retrieval_only": 0,
+    "first_partial_p95_ms": 3571.9,
+    "done_p95_ms": 17048.1,
+    "errors": 0
+  }
 }

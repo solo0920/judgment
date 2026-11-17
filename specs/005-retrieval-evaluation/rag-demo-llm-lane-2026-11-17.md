@@ -18,12 +18,12 @@
 - 因此「先啟動 supervisor 再啟動 web」只能繞過一次啟動順序，不能證明長時間穩定。
 - demo 若使用 MBP 主 LLM，必須先完成 supervised service 與 30 分鐘 70% 負載測試；目前尚未通過。
 
-x570 已完成 `-c 24576`；`/props` 顯示 total_slots=4、slot_ctx=24576（kv_unified），4×5,749-token 全部 200。Ollama 已 inactive。重開機驗證尚未做。
+x570 已完成 `-c 24576`；`/props` 顯示 total_slots=4、slot_ctx=24576（kv_unified），4×5,749-token 全部 200。Ollama 已 inactive。重開機驗證已通過：三個 unit 在 20:36:41 自動 active，重開後 4×Q5 仍 4/4 成功，20 mixed 20/20 operational。
 
 ## x570 24576 結果（2026-11-17 20:29）
 
 ```text
-20 mixed：20/20 operational，first_partial p95 2,736 ms，done p95 14,529 ms
+20 mixed：20/20 operational，first_partial p95 2,736 ms（重開後 3,572 ms），done p95 14,529 ms（重開後 17,048 ms）
 40 mixed：32 operational／8 retrieval_only（8 llm_busy），
           first_partial p95 5,720 ms，done p95 14,128 ms
 error 0；沒有 context exceeded

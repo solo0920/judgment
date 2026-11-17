@@ -69,7 +69,7 @@
     "verified_enabled": true,
     "reason": "SSH port 22 reachable but publickey/password denied; Tailscale SSH host key not available.",
     "verified_active": true,
-    "active_since": "2026-11-17T20:29:43+08:00",
+    "active_since": "2026-11-17T20:36:41+08:00",
     "uptime_hours": 7,
     "chat_memory": "10.6G peak 11.2G",
     "embedding_memory": "1.6G",
@@ -77,15 +77,15 @@
     "gpu": {
       "name": "RTX 5070 Ti",
       "vram_total_mib": 16303,
-      "vram_used_mib": 5408,
-      "vram_free_mib": 10431,
-      "temperature_c": 44,
-      "utilization_pct": 48
+      "vram_used_mib": 5311,
+      "vram_free_mib": 10529,
+      "temperature_c": 42,
+      "utilization_pct": 0
     },
     "ollama_service_active": false,
     "chat_context_error_observed": false,
     "service_restart_observed": false,
-    "note": "chat applied -c 24576; /props reports total_slots=4 slot_ctx=24576 (kv_unified). 4x5.7k all 200 with no context exceeded. Ollama inactive. Reboot verification still pending.",
+    "note": "Reboot verified: all three units active at boot, no failure journal. 4xQ5 all 200. 20 mixed 20/20 operational. Ollama inactive.",
     "four_concurrent_q5": {
       "http_200": 4,
       "finish_reason_stop": 4,
@@ -120,6 +120,30 @@
     "app_settings": {
       "LLM_MAX_CONCURRENT": 4,
       "LLM_NUM_CTX": 6144
+    },
+    "reboot_verified": true,
+    "postboot_four_concurrent_q5": {
+      "http_200": 4,
+      "finish_reason_stop": 4,
+      "total_tokens": [
+        5896,
+        5899,
+        5889,
+        5896
+      ],
+      "elapsed_ms": [
+        3633.8,
+        3820.2,
+        3649.5,
+        3753.9
+      ]
+    },
+    "postboot_twenty_mixed": {
+      "operational": 20,
+      "retrieval_only": 0,
+      "first_partial_p95_ms": 3571.9,
+      "done_p95_ms": 17048.1,
+      "errors": 0
     }
   },
   "x570_serial_mode": {
