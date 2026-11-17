@@ -384,15 +384,8 @@ if probe_openai_model "${X570_LLM_URL}" "${LLM_MODEL}"; then
   export LLM_URL="${X570_LLM_URL}"
   export LLM_API="openai"
   export LLM_MODEL
-  if [[ "${local_llm_ok}" == "1" ]]; then
-    export LLM_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
-    export LLM_FALLBACK_MODEL="${LLM_MODEL}"
-    export LLM_FALLBACK_API="ollama"
-    echo "LLM：x570 llama-server（${X570_LLM_URL}）· fallback：本機 Ollama"
-  else
-    export LLM_FALLBACK_URL=""
-    echo "LLM：x570 llama-server（${X570_LLM_URL}）· 本機 Ollama 未就緒"
-  fi
+  export LLM_FALLBACK_URL=""
+  echo "LLM：x570 llama-server（${X570_LLM_URL}）· fallback：停用"
 elif probe_ollama_model "${X570_OLLAMA_URL}" "${LLM_MODEL}"; then
   export LLM_URL="${X570_OLLAMA_URL}"
   export LLM_API="ollama"
@@ -422,14 +415,8 @@ if probe_openai_model "${X570_EMBEDDING_URL}" "${EMBEDDING_MODEL}"; then
   export EMBEDDING_URL="${X570_EMBEDDING_URL}"
   export EMBEDDING_API="openai"
   export EMBEDDING_MODEL
-  if [[ "${local_embedding_ok}" == "1" ]]; then
-    export EMBEDDING_FALLBACK_URL="${LOCAL_OLLAMA_URL}"
-    export EMBEDDING_FALLBACK_API="ollama"
-    echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· fallback：本機 Ollama"
-  else
-    export EMBEDDING_FALLBACK_URL=""
-    echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· 本機 Ollama 未就緒"
-  fi
+  export EMBEDDING_FALLBACK_URL=""
+  echo "Embedding：x570 llama-server（${X570_EMBEDDING_URL}）· fallback：停用"
 elif probe_ollama_model "${X570_OLLAMA_URL}" "${EMBEDDING_MODEL}"; then
   export EMBEDDING_URL="${X570_OLLAMA_URL}"
   export EMBEDDING_API="ollama"
