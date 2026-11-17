@@ -1,0 +1,64 @@
+{
+  "generated_at": "2026-11-17",
+  "environment": {
+    "demo_llm_primary": "MBP llama-server http://127.0.0.1:11440 --ctx-size 24576 --parallel 4 (slot 6144)",
+    "demo_llm_fallback": "x570 http://x570:11436 only on ConnectError/ConnectTimeout/ConnectionError/OSError",
+    "supervisor": "scripts/run_mbp_llm_24576.sh",
+    "app": "MBP FastAPI loopback, single uvicorn worker"
+  },
+  "mbp_24576_four_concurrent": {
+    "prompt_tokens": 5749,
+    "total_tokens": [
+      5895,
+      5895,
+      5898,
+      5918
+    ],
+    "all_http_200": true,
+    "finish_reason": "stop"
+  },
+  "twenty_mixed_mbp_primary": {
+    "retrieval_results": "20/20",
+    "first_partial_p50_ms": 2632.7,
+    "first_partial_p95_ms": 2680.1,
+    "statuses": {
+      "operational": 14,
+      "retrieval_only": 6
+    },
+    "summary_admitted": 4,
+    "summary_busy": 6,
+    "errors": 0
+  },
+  "forty_mixed_mbp_primary": {
+    "retrieval_results": "40/40",
+    "first_partial_p50_ms": 5635.1,
+    "first_partial_p95_ms": 6275.9,
+    "statuses": {
+      "operational": 24,
+      "retrieval_only": 16
+    },
+    "summary_admitted": 4,
+    "summary_busy": 16,
+    "errors": 0
+  },
+  "multi_process_40": {
+    "first_partial_ms": {
+      "n": 40,
+      "p50": 4776.8,
+      "p95": 5573.9,
+      "max": 6286.1
+    },
+    "client_request_ms": {
+      "n": 40,
+      "p50": 1118.23,
+      "p95": 3944.19,
+      "max": 3966.74
+    },
+    "statuses": {
+      "operational": 24,
+      "retrieval_only": 16
+    },
+    "errors": 0,
+    "note": "4 processes x 10 threads; gap persists (first_partial p95 5.57s, client_request p95 3.94s)."
+  }
+}

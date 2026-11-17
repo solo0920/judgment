@@ -1,0 +1,17 @@
+scenario,metric,value,notes
+20 mixed MBP primary,retrieval_results,20/20,supervised MBP 24576
+20 mixed MBP primary,first_partial_p50_ms,2632.7,supervised MBP 24576
+20 mixed MBP primary,first_partial_p95_ms,2680.1,supervised MBP 24576
+20 mixed MBP primary,statuses,"{""operational"": 14, ""retrieval_only"": 6}",supervised MBP 24576
+20 mixed MBP primary,summary_admitted,4,supervised MBP 24576
+20 mixed MBP primary,summary_busy,6,supervised MBP 24576
+20 mixed MBP primary,errors,0,supervised MBP 24576
+40 mixed MBP primary,retrieval_results,40/40,supervised MBP 24576
+40 mixed MBP primary,first_partial_p50_ms,5635.1,supervised MBP 24576
+40 mixed MBP primary,first_partial_p95_ms,6275.9,supervised MBP 24576
+40 mixed MBP primary,statuses,"{""operational"": 24, ""retrieval_only"": 16}",supervised MBP 24576
+40 mixed MBP primary,summary_admitted,4,supervised MBP 24576
+40 mixed MBP primary,summary_busy,16,supervised MBP 24576
+40 mixed MBP primary,errors,0,supervised MBP 24576
+40 mixed multi-process,first_partial,"{""n"": 40, ""p50"": 4776.8, ""p95"": 5573.9, ""max"": 6286.1}",4 processes x10 threads
+40 mixed multi-process,client_request,"{""n"": 40, ""p50"": 1118.23, ""p95"": 3944.19, ""max"": 3966.74}",gap persists

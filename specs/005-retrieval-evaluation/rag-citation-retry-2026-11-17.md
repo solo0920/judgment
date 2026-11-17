@@ -137,6 +137,8 @@ LLM 嘗試 4、retry 0、error 0
 
 40 個人都先看到檢索結果；20 個非 LLM 查詢 operational，20 個 LLM 查詢全部降級（4 個 context exceeded、16 個 llm_busy）。這是 x570 context 容量問題，不是 citation retry；在 `-c 24576 -np 4` 之前，摘要比例沒有代表性。
 
+後續 demo lane 改用 MBP 24576 後，40 mixed 是 24 operational／16 retrieval_only，4 個摘要成功、16 個 llm_busy；詳見 `rag-demo-llm-lane-2026-11-17.md`。
+
 ## 三、判定
 
 - Q5 的 `[19]`／`[17]`／`[15]` 是法條號，不是被裁掉的 context index；字母標籤是正確修正。
@@ -144,7 +146,35 @@ LLM 嘗試 4、retry 0、error 0
 - 串流畫面不再因 citation retry 刪除第一版回答；token 直接顯示 numeric marker。
 - context exceeded 仍會讓摘要降級，但這是容量問題，不應再觸發第二次 LLM。
 
-## 四、限制
+## 四、Sentence-level trace 欄位
+
+已在 final payload 與 pipeline flow metadata 加入：
+
+```text
+citation_retry             是否發生 strict retry
+citation_audit.invalid_marker_count
+citation_audit.uncited_sentence_count
+citation_audit.unsupported_citation_count
+citation_audit.unsupported_sentences
+```
+
+`_citation_audit()` 的規則：
+
+- 先去掉「法律意見／請注意／以上回答／資料來源」這類固定語句。
+- 沒有 marker 的實質句子計入 `uncited_sentence_count`。
+- 有 marker 的句子，取句中的 3–8 字中文詞；若沒有任何詞出現在被引用來源文字中，計入 `unsupported_citation_count`。
+- 這是 heuristic，不是法律忠實度分數；只用來找明顯問題。
+
+Q5 實際 sample：
+
+```text
+citation_retry=false
+invalid_marker_count=0
+uncited_sentence_count=0
+unsupported_citation_count=0
+```
+
+## 五、限制
 
 - 27 題 benchmark 沒有 ground truth relevance label；`ground_truth_cases` 仍是 0，不能宣稱 Recall／nDCG。
 - 尚未做 sentence-level citation 檢查；`_valid_citation_markers` 仍只要求至少一個合法 marker。`invalid_marker_count`、`uncited_sentence_count` 尚未進 trace。
@@ -154,7 +184,7 @@ LLM 嘗試 4、retry 0、error 0
 - Registry 未觸碰：429 terms／10 active／419 candidates；candidate 未啟用；RAG 文字維持 14px。
 - 沒有 push；所有 commit 只在本機。
 
-## 五、下一步
+## 六、下一步
 
 1. 在 trace 加 `citation_retry`、`invalid_marker_count`、`uncited_sentence_count`，重跑 27 題。
 2. 實作 sentence-level citation 檢查與串流時丟棄非法 marker；未附來源的句子加淡色標記。
@@ -168,5 +198,5 @@ LLM 嘗試 4、retry 0、error 0
 - `rag-citation-retry-2026-11-17.json`／`.csv`：27 題 sync benchmark、20／40 mixed stream retry 統計。
 - `rag-citation-review-2026-11-17.csv`：11 題 LLM 回答、完整引用來源與人工複核欄位；`q1_source_supports_claim`、`q2_uncited_fact_sentence` 尚待填寫。
 - `src/judgment/rag.py`：`_source_label_map`、`_map_letter_markers`、`_CitationMarkerMapper`、`CitationValidationError`、`_should_try_fallback`。
-- `tests/test_rag.py`：字母 prompt、marker 映射、token mapper、非 citation 錯誤不 retry、context overflow 不 fallback。
+- `tests/test_rag.py`：字母 prompt、marker 映射、token mapper、citation audit、非 citation 錯誤不 retry、context overflow 不 fallback。
 - `src/judgment/web/app.py`：串流 strict 迴圈的分類與 `citation_invalid` 降級原因。
