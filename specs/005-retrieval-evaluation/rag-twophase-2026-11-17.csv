@@ -1,0 +1,13 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+20 mixed two-phase,first_partial_ms,20,1919.2,3454.7,3531.4,retrieval_result_ratio=1.0
+20 mixed two-phase,degraded_notify_ms,0,,,,retrieval_result_ratio=1.0
+20 mixed two-phase,result_ms,20,3160.7,14762.7,14764.4,retrieval_result_ratio=1.0
+20 mixed two-phase,statuses,20,,,,"{""operational"": 11, ""retrieval_only"": 9}"
+20 mixed two-phase,degraded_reasons,20,,,,{}
+20 mixed two-phase,errors,20,,,,0
+40 mixed two-phase,first_partial_ms,40,5588.2,5752.5,5755.0,retrieval_result_ratio=1.0
+40 mixed two-phase,degraded_notify_ms,16,5763.6,5770.1,6144.6,retrieval_result_ratio=1.0
+40 mixed two-phase,result_ms,40,5759.5,7817.0,14658.0,retrieval_result_ratio=1.0
+40 mixed two-phase,statuses,40,,,,"{""operational"": 24, ""retrieval_only"": 16}"
+40 mixed two-phase,degraded_reasons,40,,,,"{""llm_busy"": 16}"
+40 mixed two-phase,errors,40,,,,0

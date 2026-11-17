@@ -1,5 +1,7 @@
 # RAG 容量第五輪評估：資源分解、入口 admission 與 MBP 24576 驗證
 
+> 後續評估（第六輪）：`specs/005-retrieval-evaluation/rag-capacity-sixth-review-2026-11-17.md`。
+
 - 日期：2026-11-17
 - 目的：回應第五輪審查，先做 40 並行的資源占用分解，再實作入口 admission、獨立 RAG executor 與 LLM 併發閘門，最後在 MBP 驗證 `-c 24576 -np 4`
 - 範圍：只改 RAG 請求入口、executor、LLM 併發與 Ollama fallback 行為；不改 registry、不啟用 expansion、不改 Qdrant／embedding／reranker 模型、不進行法律審查、不 push
