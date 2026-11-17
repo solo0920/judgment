@@ -90,6 +90,77 @@ def _llm_gate_for(limit: int):
             _llm_gate_limit = target
         return _llm_gate
 
+
+_llm_breaker_lock = threading.Lock()
+_llm_breaker: Dict[str, Dict[str, float]] = {}
+_LLM_BREAKER_THRESHOLD = 2
+_LLM_BREAKER_SECONDS = 30.0
+
+
+def _llm_breaker_key(base_url: str, api: str) -> str:
+    return f"{str(api or '').strip()}|{str(base_url or '').rstrip('/')}"
+
+
+def _llm_breaker_allow(base_url: str, api: str) -> bool:
+    key = _llm_breaker_key(base_url, api)
+    now = time.monotonic()
+    with _llm_breaker_lock:
+        state = _llm_breaker.get(key)
+        if state is None:
+            return True
+        if state.get("open_until", 0.0) > now:
+            return False
+        if state.get("open_until", 0.0) > 0.0:
+            _llm_breaker.pop(key, None)
+        return True
+
+
+def _llm_breaker_record(
+    base_url: str,
+    api: str,
+    exc: Optional[Exception] = None,
+) -> None:
+    key = _llm_breaker_key(base_url, api)
+    with _llm_breaker_lock:
+        if exc is None:
+            _llm_breaker.pop(key, None)
+            return
+        if not isinstance(
+            exc,
+            (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                ConnectionError,
+                OSError,
+            ),
+        ):
+            return
+        state = _llm_breaker.setdefault(
+            key, {"failures": 0.0, "open_until": 0.0}
+        )
+        state["failures"] = float(state.get("failures", 0) + 1)
+        if state["failures"] >= _LLM_BREAKER_THRESHOLD:
+            state["open_until"] = time.monotonic() + _LLM_BREAKER_SECONDS
+
+
+def _llm_breaker_reset() -> None:
+    with _llm_breaker_lock:
+        _llm_breaker.clear()
+
+
+def llm_circuit_snapshot() -> Dict[str, Dict[str, float]]:
+    now = time.monotonic()
+    with _llm_breaker_lock:
+        return {
+            key: {
+                "failures": state.get("failures", 0.0),
+                "open_for_s": round(
+                    max(0.0, state.get("open_until", 0.0) - now), 1
+                ),
+            }
+            for key, state in _llm_breaker.items()
+        }
+
 SYSTEM_PROMPT = (
     "你是法律資料檢索助理。只能根據下方提供的判決片段、法規與命令內容回答，"
     "不得使用資料以外的知識，也不得創造案號、法院、日期或法條。"
@@ -2068,6 +2139,11 @@ def generate_answer_with_model(
             api=provider.api,
         )
         url = chat_url(provider.base_url, provider.api)
+        if not _llm_breaker_allow(provider.base_url, provider.api):
+            errors.append(
+                f"{provider.role} ({provider.base_url}): circuit open"
+            )
+            continue
         request_started = time.perf_counter()
         tokens_emitted = False
         try:
@@ -2171,6 +2247,7 @@ def generate_answer_with_model(
                                 ),
                             }
                         )
+                    _llm_breaker_record(provider.base_url, provider.api, None)
                     return answer
 
                 chunks: List[str] = []
@@ -2258,9 +2335,11 @@ def generate_answer_with_model(
                             ),
                         }
                     )
+                _llm_breaker_record(provider.base_url, provider.api, None)
                 return answer
         except Exception as exc:  # noqa: BLE001 - fallback is intentional
             last_error = exc
+            _llm_breaker_record(provider.base_url, provider.api, exc)
             if tokens_emitted:
                 raise
             errors.append(
@@ -2274,6 +2353,184 @@ def generate_answer_with_model(
                 )
 
     raise RuntimeError("; ".join(errors) or "LLM 沒有可用的 provider") from last_error
+
+
+async def generate_answer_with_model_async(
+    *,
+    settings: Settings,
+    model: str,
+    question: str,
+    contexts: Sequence[Dict[str, Any]],
+    timeout: Optional[float],
+    strict: bool = False,
+    on_token: Optional[Callable[[str], None]] = None,
+) -> str:
+    """Async streaming generation for the two-phase stream path.
+
+    The retrieval phase runs in a worker and releases it before this function
+    starts. This function uses httpx.AsyncClient so a generating request does
+    not occupy a thread from the RAG retrieval executor.
+    """
+
+    providers = chat_providers(settings, model)
+    if not providers:
+        raise RuntimeError("LLM_URL 或 LLM_MODEL 未設定")
+    errors: List[str] = []
+    last_error: Optional[Exception] = None
+
+    for provider in providers:
+        fitted_contexts, budget_meta = _fit_contexts_to_prompt_budget(
+            settings=settings,
+            question=question,
+            contexts=contexts,
+        )
+        request_payload, prompt_chars = _llm_request_payload(
+            settings=settings,
+            model=provider.model,
+            question=question,
+            contexts=fitted_contexts,
+            strict=strict,
+            stream=True,
+            api=provider.api,
+        )
+        url = chat_url(provider.base_url, provider.api)
+        if not _llm_breaker_allow(provider.base_url, provider.api):
+            errors.append(
+                f"{provider.role} ({provider.base_url}): circuit open"
+            )
+            continue
+        started = time.perf_counter()
+        first_token_at: Optional[float] = None
+        tokens_emitted = False
+        try:
+            with trace_segment(
+                "rag.llm_request",
+                module=__name__,
+                function="httpx.AsyncClient.stream",
+                params={
+                    "url": url,
+                    "model": provider.model,
+                    "api": provider.api,
+                    "provider": provider.role,
+                    "stream": True,
+                    "strict": strict,
+                    "timeout": timeout,
+                    "prompt_chars": prompt_chars,
+                    "prompt_tokens_estimated": budget_meta[
+                        "prompt_tokens_estimated"
+                    ],
+                    "contexts_dropped": budget_meta["contexts_dropped"],
+                },
+            ) as llm_segment:
+                if llm_segment is not None:
+                    llm_segment["metadata"].update(
+                        {
+                            "model": provider.model,
+                            "base_url": provider.base_url,
+                            "api": provider.api,
+                            "provider": provider.role,
+                            "fallback": provider.role == "fallback",
+                            "stream": True,
+                            "strict": strict,
+                        }
+                    )
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream(
+                        "POST", url, json=request_payload
+                    ) as response:
+                        if response.status_code >= 400:
+                            body = (
+                                await response.aread()
+                            ).decode("utf-8", "replace")
+                            raise RuntimeError(
+                                f"LLM HTTP {response.status_code}: "
+                                f"{body[:300]}"
+                            )
+                        chunks: List[str] = []
+                        final_event: Dict[str, Any] = {}
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            if is_openai_api(provider.api):
+                                if not line.startswith("data:"):
+                                    continue
+                                data = line[5:].strip()
+                                if data == "[DONE]":
+                                    break
+                                event = json.loads(data)
+                            else:
+                                event = json.loads(line)
+                            error = event.get("error")
+                            if error:
+                                raise RuntimeError(
+                                    f"LLM 串流失敗：{error}"
+                                )
+                            content, done = stream_delta(
+                                provider.api, event
+                            )
+                            if done or event.get("usage"):
+                                final_event = event
+                            if not content:
+                                continue
+                            if first_token_at is None:
+                                first_token_at = time.perf_counter()
+                            tokens_emitted = True
+                            chunks.append(content)
+                            if on_token is not None:
+                                try:
+                                    on_token(content)
+                                except Exception:
+                                    logger.debug(
+                                        "async LLM token callback failed",
+                                        exc_info=True,
+                                    )
+                        answer = "".join(chunks).strip()
+                        if not answer:
+                            raise RuntimeError("LLM 回傳空回答")
+                        usage = chat_usage(provider.api, final_event)
+                        _guard_prompt_tokens(
+                            usage=usage,
+                            budget_meta=budget_meta,
+                            provider=provider,
+                        )
+                        if llm_segment is not None:
+                            llm_segment["metadata"].update(
+                                {
+                                    "input_tokens": usage["input_tokens"],
+                                    "output_tokens": usage["output_tokens"],
+                                    "ttft_ms": (
+                                        round(
+                                            (
+                                                first_token_at
+                                                - started
+                                            )
+                                            * 1000,
+                                            2,
+                                        )
+                                        if first_token_at is not None
+                                        else None
+                                    ),
+                                }
+                            )
+                        _llm_breaker_record(provider.base_url, provider.api, None)
+                        return answer
+        except Exception as exc:  # noqa: BLE001 - fallback is intentional
+            last_error = exc
+            _llm_breaker_record(provider.base_url, provider.api, exc)
+            if tokens_emitted:
+                raise
+            errors.append(
+                f"{provider.role} ({provider.base_url}): "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+            if provider.role != "fallback":
+                logger.warning(
+                    "async LLM primary failed; trying fallback if configured: %s",
+                    exc,
+                )
+    raise RuntimeError(
+        "; ".join(errors) or "LLM 沒有可用的 provider"
+    ) from last_error
 
 
 @traced(
@@ -2417,6 +2674,7 @@ def answer_question(
     on_token: Optional[Callable[[str], None]] = None,
     on_token_reset: Optional[Callable[[], None]] = None,
     enable_law_retrieval: bool = True,
+    return_retrieval_state: bool = False,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     raw_question = str(question or "")
@@ -3842,4 +4100,21 @@ def answer_question(
         "duration_ms": _elapsed_ms(started),
         "rerank_degraded": rerank_degraded,
         "degraded_reason": degraded_reason,
+        **(
+            {
+                "_retrieval_state": {
+                    "contexts": contexts,
+                    "citations": citations,
+                    "law_sources": law_sources,
+                    "terms": terms,
+                    "law_answer": law_answer,
+                    "law_framework": law_framework,
+                    "citation_total": citation_total,
+                    "coverage": coverage,
+                    "retrieval": retrieval,
+                }
+            }
+            if return_retrieval_state
+            else {}
+        ),
     }

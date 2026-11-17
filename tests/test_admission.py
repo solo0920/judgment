@@ -20,7 +20,10 @@ def test_admission_rejects_when_eta_exceeds_limit() -> None:
             await gate.acquire()
         assert exc.value.position == 1
         assert exc.value.eta_s == 2.0
+        assert gate.snapshot["admitted_total"] == 1
+        assert gate.snapshot["rejected_busy_total"] == 1
         await gate.release(elapsed_s=0.1)
+        assert gate.snapshot["completed_total"] == 1
 
     asyncio.run(scenario())
 
@@ -57,5 +60,8 @@ def test_admission_queues_and_promotes_in_order() -> None:
         assert all(item[2] for item in order)
         assert gate.snapshot["active"] == 0
         assert gate.snapshot["waiters"] == 0
+        assert gate.snapshot["admitted_total"] == 3
+        assert gate.snapshot["queued_total"] == 2
+        assert gate.snapshot["completed_total"] == 3
 
     asyncio.run(scenario())

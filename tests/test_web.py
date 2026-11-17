@@ -1525,6 +1525,13 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
     import importlib
 
     app_module = importlib.import_module("judgment.web.app")
+    live_settings = replace(
+        web_client.app.state.settings,
+        llm_url="http://llm.test",
+        llm_api="openai",
+        llm_model="test-model",
+        llm_fallback_url="",
+    )
 
     def fake_answer_question(
         *,
@@ -1534,6 +1541,7 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
         on_partial=None,
         on_token=None,
         on_token_reset=None,
+        return_retrieval_state=False,
     ):
         with trace_segment(
             "rag.fake_step",
@@ -1542,6 +1550,16 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
             params={"question_length": len(question)},
         ):
             pass
+        citations = [
+            {
+                "index": 1,
+                "jid": "TEST,114,訴,1,20260101,1",
+                "court": "測試法院",
+                "jdate": "20260101",
+                "title": "測試案由",
+                "snippet": "測試內容",
+            }
+        ]
         if on_partial:
             on_partial(
                 {
@@ -1551,23 +1569,46 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
                     "answer": "法規結果先顯示",
                 }
             )
-        if on_token_reset:
-            on_token_reset()
+        state = {
+            "contexts": [{"index": 1, "text": "測試內容"}],
+            "citations": citations,
+            "law_sources": [],
+            "terms": [],
+            "law_answer": "",
+            "law_framework": None,
+            "citation_total": 1,
+            "coverage": {},
+            "retrieval": {},
+        }
+        return {
+            "status": "retrieval_only",
+            "answer": "檢索結果",
+            "notice": "test",
+            "citations": [],
+            "judgments": citations,
+            "law_sources": [],
+            "matched_terms": [],
+            "answer_source": "retrieval",
+            "duration_ms": 1,
+            "_retrieval_state": state,
+        }
+
+    async def fake_async_generate(**kwargs):
+        on_token = kwargs.get("on_token")
         if on_token:
             on_token("測試")
             on_token("回答")
-        return {
-            "status": "operational",
-            "answer": "測試回答 [1]",
-            "notice": "test",
-            "citations": [],
-            "judgments": [],
-            "law_sources": [],
-            "matched_terms": [],
-            "duration_ms": 1,
-        }
+        return "測試回答 [1]"
 
     monkeypatch.setattr(app_module, "answer_question", fake_answer_question)
+    monkeypatch.setattr(
+        app_module,
+        "generate_answer_with_model_async",
+        fake_async_generate,
+    )
+    monkeypatch.setattr(
+        app_module, "runtime_settings", lambda settings, sf: live_settings
+    )
     with web_client.stream(
         "POST",
         "/api/rag/query/stream",
@@ -1580,10 +1621,9 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
     assert "http.request" in body
     assert "rag.fake_step" in body
     assert "event: partial" in body
-    assert "event: token_reset" in body
     assert "event: token" in body
     assert "法規結果先顯示" in body
-    assert "測試回答" in body
+    assert "測試回答 [1]" in body
     assert "event: result" in body
     assert '"pipeline_flow"' in body
     assert body.index("event: partial") < body.index("event: result")

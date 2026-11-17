@@ -49,6 +49,9 @@ class Settings:
     user_agent: str = "judgment-law-downloader/0.1"
     log_level: str = "INFO"
     auto_create_schema: bool = True
+    database_pool_size: int = 20
+    database_max_overflow: int = 20
+    database_pool_timeout_seconds: float = 10.0
     max_uncompressed_bytes: int = 512 * 1024 * 1024
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:9200",
@@ -97,11 +100,11 @@ class Settings:
     rag_max_context_chars: int = 4000
     rag_coverage_cache_ttl_seconds: float = 300.0
     rag_coverage_warmup_enabled: bool = True
-    rag_admission_max_concurrency: int = 12
-    rag_admission_max_queue: int = 8
-    rag_admission_eta_limit_seconds: float = 5.0
+    rag_admission_max_concurrency: int = 40
+    rag_admission_max_queue: int = 40
+    rag_admission_eta_limit_seconds: float = 30.0
     rag_admission_initial_service_seconds: float = 2.0
-    rag_stream_executor_workers: int = 12
+    rag_stream_executor_workers: int = 40
     rag_lexical_rrf_enabled: bool = False
     rag_lexical_rrf_weight: float = 2.0
     rag_legal_expansion_enabled: bool = False
@@ -185,6 +188,11 @@ class Settings:
             user_agent=os.getenv("USER_AGENT", "judgment-law-downloader/0.1"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             auto_create_schema=_env_bool("AUTO_CREATE_SCHEMA", True),
+            database_pool_size=_env_int("DATABASE_POOL_SIZE", 20),
+            database_max_overflow=_env_int("DATABASE_MAX_OVERFLOW", 20),
+            database_pool_timeout_seconds=_env_float(
+                "DATABASE_POOL_TIMEOUT_SECONDS", 10.0
+            ),
             max_uncompressed_bytes=_env_int("MAX_UNCOMPRESSED_BYTES", 512 * 1024 * 1024),
             cors_allow_origins=_env_csv(
                 "CORS_ALLOW_ORIGINS",
@@ -321,19 +329,19 @@ class Settings:
                 "RAG_COVERAGE_WARMUP_ENABLED", True
             ),
             rag_admission_max_concurrency=_env_int(
-                "RAG_ADMISSION_MAX_CONCURRENCY", 12
+                "RAG_ADMISSION_MAX_CONCURRENCY", 40
             ),
             rag_admission_max_queue=_env_int(
-                "RAG_ADMISSION_MAX_QUEUE", 8
+                "RAG_ADMISSION_MAX_QUEUE", 40
             ),
             rag_admission_eta_limit_seconds=_env_float(
-                "RAG_ADMISSION_ETA_LIMIT_SECONDS", 5.0
+                "RAG_ADMISSION_ETA_LIMIT_SECONDS", 30.0
             ),
             rag_admission_initial_service_seconds=_env_float(
                 "RAG_ADMISSION_INITIAL_SERVICE_SECONDS", 2.0
             ),
             rag_stream_executor_workers=_env_int(
-                "RAG_STREAM_EXECUTOR_WORKERS", 12
+                "RAG_STREAM_EXECUTOR_WORKERS", 40
             ),
             rag_lexical_rrf_enabled=_env_bool(
                 "RAG_LEXICAL_RRF_ENABLED", False

@@ -59,6 +59,10 @@ class RagAdmission:
         self._active = 0
         self._waiters: Deque[asyncio.Future] = deque()
         self._lock = asyncio.Lock()
+        self._admitted_total = 0
+        self._queued_total = 0
+        self._rejected_busy_total = 0
+        self._completed_total = 0
 
     @property
     def snapshot(self) -> Dict[str, float]:
@@ -68,6 +72,10 @@ class RagAdmission:
             "max_concurrency": self.max_concurrency,
             "max_queue": self.max_queue,
             "service_ema_s": round(self._service_ema, 3),
+            "admitted_total": self._admitted_total,
+            "queued_total": self._queued_total,
+            "rejected_busy_total": self._rejected_busy_total,
+            "completed_total": self._completed_total,
         }
 
     def _eta(self, position: int) -> float:
@@ -81,6 +89,7 @@ class RagAdmission:
                 and not self._waiters
             ):
                 self._active += 1
+                self._admitted_total += 1
                 return AdmissionTicket(
                     position=0,
                     eta_s=0.0,
@@ -93,9 +102,11 @@ class RagAdmission:
                 len(self._waiters) >= self.max_queue
                 or eta_s > self.eta_limit_seconds
             ):
+                self._rejected_busy_total += 1
                 raise RagBusy(position=position, eta_s=eta_s)
             future = asyncio.get_running_loop().create_future()
             self._waiters.append(future)
+            self._queued_total += 1
         try:
             await future
         except BaseException:
@@ -124,6 +135,7 @@ class RagAdmission:
         elapsed = max(0.0, float(elapsed_s))
         async with self._lock:
             self._active = max(0, self._active - 1)
+            self._completed_total += 1
             # Exponential moving average of admitted service time. This keeps
             # the ETA tied to the current workload instead of a fixed guess.
             self._service_ema = (
@@ -140,4 +152,5 @@ class RagAdmission:
             if future.done():
                 continue
             self._active += 1
+            self._admitted_total += 1
             future.set_result(True)

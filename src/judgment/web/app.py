@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextvars
 import hashlib
 import hmac
 import ipaddress
@@ -115,7 +116,14 @@ from ..ollama_hosts import (
     update_host,
 )
 from ..llm_backends import fetch_context_window
-from ..rag import answer_question, warm_index_coverage
+from ..rag import (
+    _fit_contexts_to_prompt_budget,
+    _valid_citation_markers,
+    answer_question,
+    generate_answer_with_model_async,
+    llm_circuit_snapshot,
+    warm_index_coverage,
+)
 from ..rerank import rerank_heartbeat, rerank_service_test
 from ..vector_store import QdrantStore
 from ..index_versions import (
@@ -613,6 +621,160 @@ def _llm_models_payload(
     return state
 
 
+def _database_pool_snapshot(engine) -> Optional[Dict[str, Any]]:
+    pool = getattr(engine, "pool", None)
+    if pool is None:
+        return None
+    try:
+        return {
+            "size": pool.size(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+        }
+    except Exception:
+        return None
+
+
+def _busy_rag_result(exc, started_perf: float) -> Dict[str, Any]:
+    return {
+        "status": "degraded",
+        "answer": f"目前系統忙碌，預估約 {exc.eta_s:.1f} 秒後可再試。",
+        "notice": "請求未進入檢索，沒有產生引用；請稍後再送出。",
+        "citations": [],
+        "judgments": [],
+        "law_sources": [],
+        "matched_terms": [],
+        "answer_source": "admission",
+        "degraded_reason": "busy",
+        "queue_position": exc.position,
+        "eta_s": round(exc.eta_s, 2),
+        "retrieval": {"status": "busy"},
+        "duration_ms": round((time.perf_counter() - started_perf) * 1000, 1),
+    }
+
+
+def _retrieval_partial(
+    retrieval_result: Dict[str, Any],
+    state: Dict[str, Any],
+    started_perf: float,
+) -> Dict[str, Any]:
+    return {
+        "status": retrieval_result.get("status") or "retrieval_only",
+        "answer": retrieval_result.get("answer") or "",
+        "notice": retrieval_result.get("notice") or "",
+        "citations": [],
+        "judgments": state.get("citations")
+        or retrieval_result.get("judgments")
+        or [],
+        "law_sources": state.get("law_sources")
+        or retrieval_result.get("law_sources")
+        or [],
+        "law_answer": state.get("law_answer") or "",
+        "law_framework": state.get("law_framework"),
+        "matched_terms": state.get("terms") or [],
+        "answer_source": retrieval_result.get("answer_source") or "retrieval",
+        "llm_model": None,
+        "embedding_model": retrieval_result.get("embedding_model"),
+        "retrieval": state.get("retrieval")
+        or retrieval_result.get("retrieval")
+        or {},
+        "coverage": state.get("coverage")
+        or retrieval_result.get("coverage"),
+        "duration_ms": round((time.perf_counter() - started_perf) * 1000, 1),
+        "partial": True,
+        "streaming": False,
+        "show_sources": True,
+        "rerank_degraded": bool(retrieval_result.get("rerank_degraded")),
+        "degraded_reason": retrieval_result.get("degraded_reason"),
+    }
+
+
+def _retrieval_final_result(
+    retrieval_result: Dict[str, Any],
+    state: Dict[str, Any],
+    settings: Settings,
+    started_perf: float,
+    *,
+    degraded_reason: Optional[str] = None,
+    notice: Optional[str] = None,
+) -> Dict[str, Any]:
+    result = dict(retrieval_result)
+    source = str(retrieval_result.get("answer_source") or "retrieval")
+    if source in {"structured", "retrieval_list"}:
+        result_status = "operational"
+        result_source = source
+    else:
+        result_status = "retrieval_only"
+        result_source = "retrieval"
+    result.update(
+        {
+            "status": result_status,
+            "answer": retrieval_result.get("answer")
+            or "目前沒有可顯示的回答。",
+            "notice": notice
+            if notice is not None
+            else retrieval_result.get("notice") or "",
+            "citations": [],
+            "judgments": state.get("citations") or [],
+            "law_sources": state.get("law_sources") or [],
+            "answer_source": result_source,
+            "llm_model": None,
+            "embedding_model": settings.embedding_model or None,
+            "retrieval": state.get("retrieval") or {},
+            "duration_ms": round(
+                (time.perf_counter() - started_perf) * 1000, 1
+            ),
+            "degraded_reason": degraded_reason,
+        }
+    )
+    return result
+
+
+def _llm_final_result(
+    retrieval_result: Dict[str, Any],
+    state: Dict[str, Any],
+    settings: Settings,
+    answer: str,
+    prompt_meta: Dict[str, Any],
+    allowed_indexes,
+    started_perf: float,
+) -> Dict[str, Any]:
+    result = dict(retrieval_result)
+    retrieval = dict(state.get("retrieval") or {})
+    retrieval["prompt_context"] = {
+        **prompt_meta,
+        "used_indexes": sorted(allowed_indexes),
+    }
+    result.update(
+        {
+            "status": "operational",
+            "answer": answer,
+            "notice": (
+                "回答只根據檢索到的法規／命令與判決片段生成，"
+                "引用編號可對應下方來源。這不是法律意見。"
+            ),
+            "citations": [],
+            "judgments": state.get("citations") or [],
+            "law_sources": state.get("law_sources") or [],
+            "matched_terms": state.get("terms") or [],
+            "answer_source": "llm",
+            "llm_model": settings.llm_model,
+            "embedding_model": settings.embedding_model or None,
+            "retrieval": retrieval,
+            "coverage": state.get("coverage")
+            or retrieval_result.get("coverage"),
+            "duration_ms": round(
+                (time.perf_counter() - started_perf) * 1000, 1
+            ),
+            "degraded_reason": None,
+            "rerank_degraded": bool(
+                retrieval_result.get("rerank_degraded")
+            ),
+        }
+    )
+    return result
+
+
 def _rag_pipeline_snapshot(flow, session_factory=None) -> Dict[str, Any]:
     """Return the compact flow snapshot embedded in RAG responses.
 
@@ -673,7 +835,12 @@ def create_app(
     async def lifespan(app: FastAPI):
         engine = None
         if app.state.session_factory is None:
-            engine = build_engine(settings.database_url)
+            engine = build_engine(
+                settings.database_url,
+                pool_size=settings.database_pool_size,
+                max_overflow=settings.database_max_overflow,
+                pool_timeout=settings.database_pool_timeout_seconds,
+            )
             if settings.auto_create_schema:
                 init_db(engine)
             app.state.engine = engine
@@ -904,6 +1071,12 @@ def create_app(
         max_queue=settings.rag_admission_max_queue,
         eta_limit_seconds=settings.rag_admission_eta_limit_seconds,
         initial_service_seconds=settings.rag_admission_initial_service_seconds,
+    )
+    app.state.llm_admission = RagAdmission(
+        max_concurrency=settings.llm_max_concurrent,
+        max_queue=0,
+        eta_limit_seconds=0.0,
+        initial_service_seconds=1.0,
     )
     app.state.rag_executor = None
     app.state.processing_manager = ProcessingManager(
@@ -1188,6 +1361,9 @@ def create_app(
             "version": __version__,
             "readiness": readiness,
             "admission": app.state.rag_admission.snapshot,
+            "llm_admission": app.state.llm_admission.snapshot,
+            "database_pool": _database_pool_snapshot(app.state.engine),
+            "llm_circuit": llm_circuit_snapshot(),
         }
         if not readiness.get("ready"):
             return JSONResponse(status_code=503, content=payload)
@@ -2708,6 +2884,351 @@ def create_app(
                         ),
                     )
 
+        async def run_query_two_phase() -> None:
+            """Retrieval in an executor, then async LLM without a worker.
+
+            The entry admission ticket is released as soon as retrieval
+            finishes. Summary generation is protected by a separate LLM
+            admission gate and does not occupy a retrieval worker.
+            """
+
+            flow = start_flow(
+                request_id=request_id,
+                entrypoint="/api/rag/query/stream",
+                method="POST",
+                path="/api/rag/query/stream",
+                params={"question_length": len(request.question)},
+                client_started_at_ms=client_started_at_ms,
+                listener=listener,
+            )
+            started_at = flow.started_at
+            started_perf = time.perf_counter()
+            status = "success"
+            error_message = None
+            result: Optional[Dict[str, Any]] = None
+            retrieval_ticket = None
+            llm_ticket = None
+            llm_started: Optional[float] = None
+            try:
+                live_settings = runtime_settings(
+                    app.state.settings, app.state.session_factory
+                )
+                try:
+                    retrieval_ticket = await app.state.rag_admission.acquire()
+                except RagBusy as exc:
+                    result = _busy_rag_result(exc, started_perf)
+                    queue.put_nowait(
+                        (
+                            "degraded",
+                            {
+                                "type": "degraded",
+                                "reason": "busy",
+                                "position": exc.position,
+                                "eta_s": round(exc.eta_s, 2),
+                                "message": result["answer"],
+                            },
+                        )
+                    )
+                    return
+                if retrieval_ticket.waited:
+                    queue.put_nowait(
+                        (
+                            "queued",
+                            {
+                                "type": "queued",
+                                "position": retrieval_ticket.position,
+                                "eta_s": round(retrieval_ticket.eta_s, 2),
+                                "queue_wait_ms": 0.0,
+                            },
+                        )
+                    )
+                retrieval_settings = replace(
+                    live_settings,
+                    llm_url="",
+                    llm_model="",
+                    llm_fallback_url="",
+                    llm_fallback_model="",
+                )
+                context = contextvars.copy_context()
+                retrieval_result = await loop.run_in_executor(
+                    app.state.rag_executor,
+                    lambda: context.run(
+                        answer_question,
+                        session_factory=app.state.session_factory,
+                        question=request.question,
+                        settings=retrieval_settings,
+                        on_partial=emit_partial,
+                        return_retrieval_state=True,
+                    ),
+                )
+                await app.state.rag_admission.release(
+                    elapsed_s=time.perf_counter() - started_perf
+                )
+                retrieval_ticket = None
+                state = retrieval_result.pop("_retrieval_state", None) or {}
+                queue.put_nowait(
+                    (
+                        "partial",
+                        _retrieval_partial(
+                            retrieval_result, state, started_perf
+                        ),
+                    )
+                )
+
+                llm_needed = bool(
+                    state.get("contexts")
+                    and retrieval_result.get("answer_source")
+                    not in {"structured", "retrieval_list"}
+                    and live_settings.llm_url
+                    and live_settings.llm_model
+                )
+                if not llm_needed:
+                    if state:
+                        result = _retrieval_final_result(
+                            retrieval_result,
+                            state,
+                            live_settings,
+                            started_perf,
+                            degraded_reason=(
+                                None
+                                if retrieval_result.get("answer_source")
+                                in {"structured", "retrieval_list"}
+                                else retrieval_result.get(
+                                    "degraded_reason"
+                                )
+                            ),
+                        )
+                    else:
+                        result = dict(retrieval_result)
+                        result["duration_ms"] = round(
+                            (time.perf_counter() - started_perf) * 1000,
+                            1,
+                        )
+                        if result.get("answer_source") in {
+                            "structured",
+                            "retrieval_list",
+                        }:
+                            result["degraded_reason"] = None
+                    return
+
+                try:
+                    llm_ticket = await app.state.llm_admission.acquire()
+                except RagBusy:
+                    result = _retrieval_final_result(
+                        retrieval_result,
+                        state,
+                        live_settings,
+                        started_perf,
+                        degraded_reason="llm_busy",
+                        notice=(
+                            "摘要服務忙碌，先顯示檢索結果；"
+                            "請稍後再送出以取得 LLM 摘要。"
+                        ),
+                    )
+                    queue.put_nowait(
+                        (
+                            "degraded",
+                            {
+                                "type": "degraded",
+                                "reason": "llm_busy",
+                                "message": result["notice"],
+                            },
+                        )
+                    )
+                    return
+
+                llm_started = time.perf_counter()
+                prompt_contexts, prompt_meta = (
+                    _fit_contexts_to_prompt_budget(
+                        settings=live_settings,
+                        question=request.question,
+                        contexts=state.get("contexts") or [],
+                    )
+                )
+                allowed_indexes = {
+                    int(context.get("index"))
+                    for context in prompt_contexts
+                    if context.get("index") is not None
+                }
+                for citation in state.get("citations") or []:
+                    citation["used_for_generation"] = (
+                        int(citation.get("index") or 0)
+                        in allowed_indexes
+                    )
+                for source in state.get("law_sources") or []:
+                    source["used_for_generation"] = (
+                        int(source.get("index") or 0)
+                        in allowed_indexes
+                    )
+                queue.put_nowait(
+                    (
+                        "partial",
+                        {
+                            "status": "streaming",
+                            "answer": "",
+                            "notice": (
+                                "判決與法規來源已先顯示；"
+                                "LLM 回答生成中，完成後會驗證引用編號。"
+                            ),
+                            "citations": [],
+                            "judgments": state.get("citations") or [],
+                            "law_sources": state.get("law_sources") or [],
+                            "law_answer": state.get("law_answer") or "",
+                            "law_framework": state.get("law_framework"),
+                            "matched_terms": state.get("terms") or [],
+                            "answer_source": "streaming",
+                            "llm_model": live_settings.llm_model,
+                            "embedding_model": (
+                                live_settings.embedding_model or None
+                            ),
+                            "retrieval": {
+                                **(state.get("retrieval") or {}),
+                                "prompt_context": prompt_meta,
+                            },
+                            "coverage": state.get("coverage"),
+                            "duration_ms": round(
+                                (
+                                    time.perf_counter() - started_perf
+                                )
+                                * 1000,
+                                1,
+                            ),
+                            "partial": True,
+                            "streaming": True,
+                            "show_sources": True,
+                            "rerank_degraded": bool(
+                                retrieval_result.get("rerank_degraded")
+                            ),
+                        },
+                    )
+                )
+                answer: Optional[str] = None
+                last_error: Optional[Exception] = None
+                for strict in (False, True):
+                    if strict:
+                        queue.put_nowait(("token_reset", {}))
+                    try:
+                        candidate = (
+                            await generate_answer_with_model_async(
+                                settings=live_settings,
+                                model=live_settings.llm_model,
+                                question=request.question,
+                                contexts=state.get("contexts") or [],
+                                timeout=live_settings.llm_timeout_seconds,
+                                strict=strict,
+                                on_token=lambda text: queue.put_nowait(
+                                    ("token", {"text": str(text or "")})
+                                ),
+                            )
+                        )
+                        if not _valid_citation_markers(
+                            candidate,
+                            int(state.get("citation_total") or 0),
+                            allowed_indexes=allowed_indexes,
+                        ):
+                            raise RuntimeError(
+                                "LLM 回答缺少有效引用標記"
+                            )
+                        answer = candidate
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = exc
+                if answer is not None:
+                    result = _llm_final_result(
+                        retrieval_result,
+                        state,
+                        live_settings,
+                        answer,
+                        prompt_meta,
+                        allowed_indexes,
+                        started_perf,
+                    )
+                else:
+                    result = _retrieval_final_result(
+                        retrieval_result,
+                        state,
+                        live_settings,
+                        started_perf,
+                        degraded_reason="llm_error",
+                        notice=(
+                            "LLM 無法產生可驗證的回答"
+                            f"（{last_error.__class__.__name__ if last_error else 'Error'}: "
+                            f"{last_error or '未知錯誤'}），"
+                            "已改為只顯示檢索結果，不生成推測內容。"
+                        ),
+                    )
+            except Exception as exc:
+                status = "failed"
+                error_message = f"{exc.__class__.__name__}: {exc}"
+            finally:
+                if llm_ticket is not None:
+                    await app.state.llm_admission.release(
+                        elapsed_s=(
+                            time.perf_counter()
+                            - (llm_started or time.perf_counter())
+                        )
+                    )
+                if retrieval_ticket is not None:
+                    await app.state.rag_admission.release(
+                        elapsed_s=time.perf_counter() - started_perf
+                    )
+                flow.set_metadata("question", request.question)
+                flow.set_metadata("answer", (result or {}).get("answer") or "")
+                flow.set_metadata(
+                    "rag_status", (result or {}).get("status") or ""
+                )
+                if result is not None:
+                    flow.set_metadata(
+                        "rag_response", _rag_response_metadata(result)
+                    )
+                if isinstance((result or {}).get("test_run"), dict):
+                    flow.set_metadata(
+                        "test_run_id",
+                        result["test_run"].get("run_id"),
+                    )
+                flow.finish(status=status, error_message=error_message)
+                duration_ms = int(
+                    max(
+                        0.0,
+                        (
+                            flow.finished_at or datetime.now(timezone.utc)
+                        ).timestamp()
+                        - started_at.timestamp(),
+                    )
+                    * 1000
+                )
+                record_performance(
+                    app.state.session_factory,
+                    process="RAG 問答",
+                    module="judgment.rag.answer_question",
+                    status=status,
+                    started_at=started_at,
+                    finished_at=flow.finished_at,
+                    duration_ms=duration_ms,
+                    method="POST",
+                    path="/api/rag/query/stream",
+                    request_id=request_id,
+                    params={"question_length": len(request.question)},
+                    flow=flow.to_dict(),
+                    error_message=error_message,
+                )
+                if result is not None:
+                    result["pipeline_flow"] = _rag_pipeline_snapshot(
+                        flow, app.state.session_factory
+                    )
+                    queue.put_nowait(("result", result))
+                else:
+                    queue.put_nowait(
+                        (
+                            "error",
+                            {
+                                "message": error_message
+                                or "RAG 流程失敗。",
+                                "status": "failed",
+                            },
+                        )
+                    )
+
         def sse(event: str, payload: Dict[str, Any]) -> str:
             return (
                 f"event: {event}\n"
@@ -2715,105 +3236,39 @@ def create_app(
             )
 
         async def event_stream():
-            admission = app.state.rag_admission
-            request_started = time.perf_counter()
-            ticket = None
-            task: Optional[asyncio.Task] = None
-            processing_started = request_started
-            try:
-                try:
-                    ticket = await admission.acquire()
-                except RagBusy as exc:
-                    busy_payload = {
-                        "status": "degraded",
-                        "answer": (
-                            "目前系統忙碌，預估約 "
-                            f"{exc.eta_s:.1f} 秒後可再試。"
-                        ),
-                        "notice": (
-                            "請求未進入檢索，沒有產生引用；"
-                            "請稍後再送出。"
-                        ),
-                        "citations": [],
-                        "judgments": [],
-                        "law_sources": [],
-                        "matched_terms": [],
-                        "answer_source": "admission",
-                        "degraded_reason": "busy",
-                        "queue_position": exc.position,
-                        "eta_s": round(exc.eta_s, 2),
-                        "retrieval": {"status": "busy"},
-                        "duration_ms": round(
-                            (time.perf_counter() - request_started) * 1000,
-                            1,
-                        ),
-                    }
-                    yield sse(
-                        "degraded",
-                        {
-                            "type": "degraded",
-                            "reason": "busy",
-                            "position": exc.position,
-                            "eta_s": round(exc.eta_s, 2),
-                            "message": busy_payload["answer"],
-                        },
-                    )
-                    yield sse("result", busy_payload)
-                    return
-                processing_started = time.perf_counter()
-                if ticket.waited:
-                    yield sse(
-                        "queued",
-                        {
-                            "type": "queued",
-                            "position": ticket.position,
-                            "eta_s": round(ticket.eta_s, 2),
-                            "queue_wait_ms": round(
-                                (processing_started - request_started)
-                                * 1000,
-                                1,
-                            ),
-                        },
-                    )
-                yield sse(
-                    "step",
-                    {
-                        "type": "segment_start",
-                        "segment": {
-                            "seq": 0,
-                            "parent_seq": None,
-                            "depth": 0,
-                            "name": "http.request",
-                            "module": "judgment.web.app",
-                            "function": "rag_query_stream",
-                            "params": {"question_length": len(request.question)},
-                            "started_at": datetime.now(
-                                timezone.utc
-                            ).isoformat(),
-                            "offset_ms": 0,
-                            "duration_ms": 0,
-                            "status": "running",
-                            "error": None,
-                        },
+            yield sse(
+                "step",
+                {
+                    "type": "segment_start",
+                    "segment": {
+                        "seq": 0,
+                        "parent_seq": None,
+                        "depth": 0,
+                        "name": "http.request",
+                        "module": "judgment.web.app",
+                        "function": "rag_query_stream",
+                        "params": {"question_length": len(request.question)},
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "offset_ms": 0,
+                        "duration_ms": 0,
+                        "status": "running",
+                        "error": None,
                     },
-                )
-                executor = app.state.rag_executor
-                if executor is not None:
-                    task = loop.run_in_executor(executor, run_query)
-                else:
-                    task = asyncio.create_task(
-                        asyncio.to_thread(run_query)
-                    )
+                },
+            )
+            task = asyncio.create_task(run_query_two_phase())
+            try:
                 while True:
                     kind, payload = await queue.get()
-                    if kind == "step":
-                        yield sse("step", payload)
-                    elif kind == "partial":
-                        yield sse("partial", payload)
-                    elif kind == "token":
-                        yield sse("token", payload)
-                    elif kind == "token_reset":
-                        yield sse("token_reset", payload)
+                    if kind in {
+                        "step",
+                        "partial",
+                        "token",
+                        "token_reset",
+                        "queued",
+                        "degraded",
+                    }:
+                        yield sse(kind, payload)
                     elif kind == "result":
                         yield sse("result", payload)
                         break
@@ -2821,15 +3276,10 @@ def create_app(
                         yield sse("error", payload)
                         break
             finally:
-                if task is not None:
-                    try:
-                        await task
-                    except Exception:
-                        logger.exception("RAG stream worker failed")
-                if ticket is not None:
-                    await admission.release(
-                        elapsed_s=time.perf_counter() - processing_started
-                    )
+                try:
+                    await task
+                except Exception:
+                    logger.exception("RAG stream worker failed")
 
         return StreamingResponse(
             event_stream(),

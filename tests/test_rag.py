@@ -1961,6 +1961,26 @@ def test_answer_question_marks_llm_error(monkeypatch, tmp_path: Path) -> None:
     assert "context size has been exceeded" in payload["notice"]
 
 
+def test_llm_circuit_breaker_opens_after_two_connect_errors() -> None:
+    from judgment import rag as rag_module
+
+    rag_module._llm_breaker_reset()
+    try:
+        base_url = "http://breaker.test:11436"
+        assert rag_module._llm_breaker_allow(base_url, "openai")
+        error = httpx.ConnectError("connection refused")
+        rag_module._llm_breaker_record(base_url, "openai", error)
+        assert rag_module._llm_breaker_allow(base_url, "openai")
+        rag_module._llm_breaker_record(base_url, "openai", error)
+        assert not rag_module._llm_breaker_allow(base_url, "openai")
+        snapshot = rag_module.llm_circuit_snapshot()
+        assert snapshot["openai|http://breaker.test:11436"]["failures"] == 2
+        rag_module._llm_breaker_record(base_url, "openai", None)
+        assert rag_module._llm_breaker_allow(base_url, "openai")
+    finally:
+        rag_module._llm_breaker_reset()
+
+
 def test_answer_question_resets_tokens_before_strict_retry(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
@@ -10,8 +11,21 @@ from .models import Base
 from .version_codes import version_code_for_datetime
 
 
-def build_engine(database_url: str) -> Engine:
-    return create_engine(database_url, pool_pre_ping=True, future=True)
+def build_engine(
+    database_url: str,
+    *,
+    pool_size: Optional[int] = None,
+    max_overflow: Optional[int] = None,
+    pool_timeout: float = 30.0,
+) -> Engine:
+    kwargs = {"pool_pre_ping": True, "future": True}
+    if not str(database_url).startswith("sqlite"):
+        if pool_size is not None:
+            kwargs["pool_size"] = max(1, int(pool_size))
+        if max_overflow is not None:
+            kwargs["max_overflow"] = max(0, int(max_overflow))
+        kwargs["pool_timeout"] = max(0.1, float(pool_timeout))
+    return create_engine(database_url, **kwargs)
 
 
 def build_session_factory(engine: Engine) -> sessionmaker[Session]:
