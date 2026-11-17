@@ -1,0 +1,6 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+40 mixed stream B+unranked,first_partial_ms,30,3818.0,29322.6,29856.5,20x500; no admission gate
+40 mixed stream B+unranked,first_token_ms,17,20594.1,45867.0,53657.2,20x500; no admission gate
+40 mixed stream B+unranked,result_ms,40,28687.7,48313.5,57770.5,20x500; no admission gate
+40 mixed stream B+unranked,statuses,40,,,,"{""operational"": 24, ""retrieval_only"": 16}"
+40 mixed stream B+unranked,errors,40,,,,0

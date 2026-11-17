@@ -31,6 +31,7 @@ B = 20 candidates x 500 chars：
   judgment rerank p95 907 → 379 ms
   20 mixed first_partial p95 6.02 → 2.92–3.04 秒（兩輪）
   0 error、11 operational／9 retrieval_only
+  40 mixed first_partial p95 29.3 秒（未通過）
 ```
 
 但這是**暫定通過**，不是正式驗收：
@@ -177,7 +178,26 @@ run 1：p50 2,220／p95 2,959／max 3,178 ms
 run 2：p50 2,157／p95 3,038／max 3,039 ms
 ```
 
-所以在 20 mixed、coverage 已暖、B 設定的條件下，first_partial p95 暫定 ≤4 秒。這是兩輪樣本，不是 SLA；40 mixed 尚未測。
+所以在 20 mixed、coverage 已暖、B 設定的條件下，first_partial p95 暫定 ≤4 秒。這是兩輪樣本，不是 SLA。
+
+### 4. 40 mixed 未通過
+
+同樣的 B＋unranked 設定，40 同時到達（20 LLM＋20 非 LLM）：
+
+| 指標 | 40 mixed |
+|---|---:|
+| first_partial n | 30 |
+| first_partial p50 | 3,818 ms |
+| first_partial p95 | **29,323 ms** |
+| first_partial max | 29,857 ms |
+| done p50／p95 | 28,688／48,314 ms |
+| operational／retrieval_only | 24／16 |
+| error | 0 |
+
+- Q3 判決列表 first_partial 19.4–29.3 秒；Q4 structured 27.9–29.4 秒；Q5 4.6–19.9 秒。
+- 這不是 rerank 問題：coverage 都在 0.02–0.15 秒，Q3/Q4 根本沒有 rerank。
+- 原因是 40 個請求同時穿過同一個 process：sync LLM 占住 default executor、DB／Qdrant／embedding／rerank 共用資源，且沒有 admission gate。
+- 所以目前只能說「20 mixed 暫定通過」；**40 mixed 沒有通過 4 秒目標**，不能對外宣稱容量驗收完成。
 
 ## 四、Readiness
 
@@ -205,7 +225,7 @@ run 2：p50 2,157／p95 3,038／max 3,039 ms
 
 ### 1. Semaphore 暫不實作
 
-同意「先縮小工作量，再加 semaphore」。B 已把 judgment rerank 的工作量降到 0.278×，20 mixed 不再出現 4 秒耗盡；此時先加 semaphore 只會把排隊延遲變成另一種尾。保留為 40 mixed 的保險：
+同意「先縮小工作量，再加 semaphore」。B 已把 judgment rerank 的工作量降到 0.278×，20 mixed 不再出現 4 秒耗盡；此時先加 semaphore 只會把排隊延遲變成另一種尾。保留為 rerank 專用的保險，但 40 mixed 的主因是 process-wide admission／executor，不是 reranker：
 
 ```text
 若 40 mixed 仍出現 rerank deadline exhausted 集中在少數請求，
@@ -227,8 +247,8 @@ run 2：p50 2,157／p95 3,038／max 3,039 ms
 - A/B 只跑一輪、27 題；structured list 佔多數，真正 rerank 樣本只有 11 題 judgment＋6 題 law。
 - Top-8 重疊不是 relevance；沒有人工 label，`ground_truth_cases` 仍是 0。
 - B 只暫用於 local demo；`.env.example` 預設未改。
-- 20 mixed 只跑兩輪 B；40 mixed 未測，不能說容量已驗收。
-- done p95 39.0 秒、9/20 retrieval_only；等 `-c 24576`＋token gate。
+- 20 mixed 只跑兩輪 B；40 mixed 跑一輪，p95 29.3 秒，**未通過**。
+- done p95 39.0 秒（20 mixed）／48.3 秒（40 mixed）、9–16 retrieval_only；等 `-c 24576`＋token gate。
 - x570 `nvidia-smi`、reranker 服務日誌仍不可得；無法判斷 3 秒 timeout 是 GPU 滿載、模型載入、批次設定或 CPU 後處理。
 - semaphore 尚未實作。
 - MBP fallback 仍是 llama-server，不是 Ollama；demo 應關閉或獨立 gate。
@@ -237,11 +257,12 @@ run 2：p50 2,157／p95 3,038／max 3,039 ms
 ## 七、下一步
 
 1. 人工複核 `rag-rerank-ab-review-2026-11-17.csv` 10 題；若 B 排序退步，回 30×1200。
-2. x570 權限、`nvidia-smi`、reranker log、`-c 24576 -np 4`、4×Q5 驗證。
-3. 精確 tokenization＋token gate＋citation-only retry＋absolute deadline＋async LLM。
-4. 40 mixed stream 重測；必要時再加 reranker semaphore（上限 2）。
-5. demo 關閉或獨立 gate MBP fallback；完成後再解讀 done p95 與 retrieval_only 比例。
-6. 字母標籤、答案快取／範例題預熱、session／Turnstile／安全驗證。
+2. 先做 admission／executor 分道：40 mixed 的 p95 29.3 秒不是 rerank，而是 40 個 sync 請求同時穿過同一 process；沒有 gate 與 bounded executor，40 不可能達標。
+3. x570 權限、`nvidia-smi`、reranker log、`-c 24576 -np 4`、4×Q5 驗證。
+4. 精確 tokenization＋token gate＋citation-only retry＋absolute deadline＋async LLM。
+5. 40 mixed stream 重測；必要時再加 reranker semaphore（上限 2）。
+6. demo 關閉或獨立 gate MBP fallback；完成後再解讀 done p95 與 retrieval_only 比例。
+7. 字母標籤、答案快取／範例題預熱、session／Turnstile／安全驗證。
 
 ## 附錄：檔案
 
@@ -250,5 +271,7 @@ run 2：p50 2,157／p95 3,038／max 3,039 ms
 - `rag-rerank-ab-review-2026-11-17.csv`：10 題人工複核佇列。
 - `rag-stream-unranked-b-raw-2026-11-17.json`：20 mixed stream（B＋unranked）。
 - `rag-stream-unranked-b-2026-11-17.csv`：上述摘要。
+- `rag-stream-40-b-raw-2026-11-17.json`：40 mixed stream（B＋unranked，未通過）。
+- `rag-stream-40-b-2026-11-17.csv`：上述摘要。
 - `tests/test_rag.py`：unranked partial、`rerank_degraded`、coverage 快取／暖機、失敗 span provider。
 - `tests/test_rerank.py`：總 deadline、request-level deadline、heartbeat。
