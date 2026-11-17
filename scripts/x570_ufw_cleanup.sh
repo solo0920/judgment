@@ -45,9 +45,13 @@ delete_matching() {
   mapfile -t numbers < <(
     ufw status numbered \
       | awk -v pat="$pattern" '
-          /^\[/ {
-            n=$1; gsub(/[^0-9]/, "", n);
-            if ($0 ~ pat) print n;
+          {
+            line=$0;
+            if (match(line, /\[[[:space:]]*[0-9]+[[:space:]]*\]/)) {
+              n=substr(line, RSTART, RLENGTH);
+              gsub(/[^0-9]/, "", n);
+              if (line ~ pat) print n;
+            }
           }' \
       | sort -rn
   )
@@ -57,6 +61,7 @@ delete_matching() {
   fi
   local n
   for n in "${numbers[@]}"; do
+    [[ -z "$n" ]] && continue
     echo "delete rule [$n] matching $pattern"
     ufw --force delete "$n"
   done
@@ -75,7 +80,7 @@ apply() {
   echo "backup=$backup"
 
   # Keep SSH reachable before touching anything else.
-  if ! ufw status | grep -qE '^22/tcp[[:space:]]+ALLOW'; then
+  if ! ufw status | grep -qE '22/tcp[[:space:]]+ALLOW'; then
     echo "SSH rule missing; adding 22/tcp"
     ufw allow 22/tcp
   fi
@@ -91,7 +96,7 @@ apply() {
 
   # Model ports are for the MBP over Tailscale, not the public internet.
   for port in 11435 11436 11437; do
-    if ! ufw status | grep -qE "${port}/tcp on tailscale0"; then
+    if ! ufw status | grep -qE "${port}/tcp.*on tailscale0"; then
       ufw allow in on tailscale0 to any port "$port" proto tcp
     fi
   done
