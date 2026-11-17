@@ -1064,6 +1064,14 @@ JUDGMENT_ADMIN_TOKEN=<以 python -c "import secrets; print(secrets.token_urlsafe
 
 安全驗收狀態與證據見 `specs/security/security-acceptance-matrix.md`；未完成的部署項不會因程式測試通過而標成 verified。
 
+每次開機或部署後可跑 listener 回歸檢查：
+
+```bash
+bash scripts/security_listener_check.sh
+```
+
+預期 `OK: Judgment-related listeners are loopback-only`；有非 loopback 的 Judgment／AI／DB port 會 FAIL。
+
 需要 Cloudflare Pages 或其他靜態主機時，把實際網址加入 `CORS_ALLOW_ORIGINS`，例如：
 
 ```bash

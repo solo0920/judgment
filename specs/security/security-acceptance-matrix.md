@@ -15,6 +15,7 @@
 | NET-01 | x570 Ollama 11434／AI 服務 | 未授權區網與公網無法存取 | 防火牆規則 + 第二台設備 + 手機行動網路失敗紀錄 | `not_started` | Infra／x570 sudo |
 | NET-02 | x570 llama-server 11435／11436／11437 | 只允許應用主機／管理設備 | 同上；若加 `--api-key`，應用端與 health check 均帶 Bearer | `not_started` | Infra／工程 |
 | NET-03 | MBP 本機 Ollama 11434 | 只綁 127.0.0.1／::1，不得 listen `*` | `lsof` 顯示 127.0.0.1:11434；LAN IP `nc` 失敗；loopback API 200 | `verified` | 工程／本機管理 |
+| NET-04 | 本機 listener 回歸 | Judgment 相關 ports 不得非 loopback | `bash scripts/security_listener_check.sh` 無 FAIL | `verified`（每次開機／部署重跑） | 工程 |
 | CF-01 | Cloudflare Access 公開入口 | 無 Access 身分不可到 origin；policy／其他 hostname／bypass 規則已檢視 | 公開請求 403 證據 + Zero Trust 政策清單 | `verified`（僅 edge 阻擋；policy 尚未檢視） | Cloudflare admin |
 | CF-02 | Access 通過後仍要求 Admin Token | GET 與寫入 API 都不可無 token 取得／修改 | Access service token + 無 admin token 的 GET／POST 實測 | `not_started` | Cloudflare admin／工程 |
 | CF-03 | cloudflared origin | tunnel 實際執行位置與 origin 正確 | `cloudflared` process／config、`/props`、origin request 紀錄 | `not_started` | Infra |
