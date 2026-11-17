@@ -175,6 +175,7 @@ promotion_allowed = false
 
 ## 6. 已知限制
 
+- 這份 snapshot 產生於 2026-11-16；其中 active 術語的 `expansion_enabled` 是當時狀態。2026-11-17 已把 5 個 expansion 術語改為 `false`／`disabled`，以 registry JSON 為現況。
 - 200k 是 4.35% systematic sample；282 個術語在樣本內零命中，不代表全庫零命中。
 - 全文命中不是 relevance；`短線交易` 可能出現在夫妻剩餘財產分配判決。
 - 反例是 confuser，不是法律上的 negative。

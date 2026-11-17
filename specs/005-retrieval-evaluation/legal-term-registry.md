@@ -51,12 +51,13 @@ terms_proxy_supported 72（sample df >= 20）
 
 ### Registry-external scope probe（2026-11-17）
 
-只有 10 個 active 術語是 must-term：零命中維持拒答。其餘 419 個 candidate 與 registry 外名詞，在**法院＋年份＋list intent**且 parser 沒有已知 topic facet 時，會用同一套正規化全文 probe：
+只有 10 個 active 術語是 must-term：零命中維持拒答。其餘 419 個 candidate 與 registry 外名詞，在**有法院或年份條件**且 parser 沒有已知 topic facet 時，會用同一套正規化全文 probe；list intent 只影響顯示成清單或摘要，不再決定是否查證：
 
 - 命中：回傳 `keyword_list` 精確清單，`retrieval.scope_probe` 記錄 hit terms；非 active 詞會加註「尚未完成法律審閱」。
 - 零命中：不拒答；改用 semantic 檢索，並在 notice 揭露「判決內文未出現『該詞』字樣，以下為語意相近結果」。
 - Registry 內 candidate 零命中時額外標示「仍是 candidate，尚未啟用精確拒答」。
-- 沒有法院＋年份時不做這個 probe，仍走原本 semantic／structured path。
+- 有法院或年份單獨條件即可 probe；若候選集超過 `RAG_SCOPE_PROBE_MAX_DOCUMENTS`（預設 50,000）、逾時 `RAG_SCOPE_PROBE_TIMEOUT_MS`（10,000ms）或單詞命中超過 `RAG_SCOPE_PROBE_MAX_HITS`（5,000），會跳過精確清單並揭露。
+- 零命中／跳過模式不呼叫 LLM，只顯示語意檢索清單與揭露文字；命中很多時顯示總數加前 20 筆。
 - 目前 parser 已解析出 topic（例如 `詐欺`、`洗錢`）時不重複 probe，保留原有 structured list。
 - 測試：`tests/test_legal_term_probe.py`、`tests/test_rag.py` 的 external scope 零命中／命中案例。
 
@@ -66,15 +67,15 @@ terms_proxy_supported 72（sample df >= 20）
 
 | 術語 | 精確變體 | 語意擴展 | 適用範圍 | 正規化 | 審核狀態 | 資料證據 | 正例 | 反例 |
 |---|---|---|---|---|---|---|---|---|
-| 違約交割 | 違約交割／交割違約／未履行交割／違約不履行交割 | **enabled**（top20 16→16、top50 20→35） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 全庫 1,589 筆；head 1,600 字只有 603 筆 | `SLDV,89,訴,367,20000728` | `SLDV,88,訴,458,20000706`（給付違約金） |
+| 違約交割 | 違約交割／交割違約／未履行交割／違約不履行交割 | disabled（runtime 2026-11-17；top20 16→16、top50 20→35） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 全庫 1,589 筆；head 1,600 字只有 603 筆 | `SLDV,89,訴,367,20000728` | `SLDV,88,訴,458,20000706`（給付違約金） |
 | 內線交易 | 內線交易／內部人交易 | disabled（20→18、50→44；直接詞已強） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 全庫 2,645 筆；案由以證券交易法為主 | 待補 | 待補 |
 | 操縱股價 | 操縱股價／炒作股票／操縱市場 | disabled（15→10、31→24） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 全庫 1,284 筆；共現含相對成交、公司股價 | 待補 | 待補 |
-| 人頭帳戶 | 人頭帳戶 | **enabled**（16→20、38→44） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 詐欺／洗錢案件常見事實 | 待補 | 待補 |
+| 人頭帳戶 | 人頭帳戶 | disabled（runtime 2026-11-17；16→20、38→44） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 詐欺／洗錢案件常見事實 | 待補 | 待補 |
 | 掏空公司 | 掏空公司／掏空 | disabled（1→1、4→3） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 公司治理與證券犯罪常見概念 | 待補 | 待補 |
-| 財報不實 | 財報不實／財務報告不實／虛偽記載 | **enabled**（1→2、1→5） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 證券交易法第20條相關 | 待補 | 待補 |
-| 非法吸金 | 非法吸金／吸金 | **enabled**（14→18、25→35） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 銀行法第29條相關 | 待補 | 待補 |
+| 財報不實 | 財報不實／財務報告不實／虛偽記載 | disabled（runtime 2026-11-17；1→2、1→5） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 證券交易法第20條相關 | 待補 | 待補 |
+| 非法吸金 | 非法吸金／吸金 | disabled（runtime 2026-11-17；14→18、25→35） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 銀行法第29條相關 | 待補 | 待補 |
 | 證券詐欺 | 證券詐欺 | disabled（未測） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 證券交易法第20條相關 | 待補 | 待補 |
-| 短線交易 | 短線交易 | **enabled**（0→1、0→1） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 證券交易法第157條相關 | 待補 | 待補 |
+| 短線交易 | 短線交易 | disabled（runtime 2026-11-17；0→1、0→1） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 證券交易法第157條相關 | 待補 | 待補 |
 | 非常規交易 | 非常規交易 | disabled（未測） | 法院＋年份的 list query | `remove-unicode-space-v2` | engineering_approved | 掏空與背信案件常見 | 待補 | 待補 |
 
 > 語意擴展的「top20／top50」是 proxy：在無法院條件的語意查詢中，top20／top50 結果有多少筆的全文真的含該術語。這不是 Recall，也不是 precision ground truth；只用來決定是否啟用該術語的 expansion。2026-11-16 測量。
@@ -88,9 +89,9 @@ terms_proxy_supported 72（sample df >= 20）
 - `disabled`：proxy 或 benchmark 顯示 precision／nDCG 變差。
 - `legal_reviewed`：法律語義已確認，與 benchmark 狀態獨立。
 
-目前 enabled 的術語為 `proxy_approved`；disabled 的術語為 `disabled`。完整評估契約見 `legal-term-expansion-evaluation.md`。
+目前 5 個原本 proxy-approved 的 expansion 術語也已改為 `disabled`／`expansion_enabled=false`，與 runtime 預設一致；歷史 proxy 數據保留在 `expansion_evaluation`。完整評估契約見 `legal-term-expansion-evaluation.md`。
 
-> **Runtime default（2026-11-17）**：`RAG_LEGAL_EXPANSION_ENABLED=false`。5 個術語仍保留 `expansion_enabled=true` 的 registry 設定，但在 proxy A/B 顯示可量測效益前，正式執行預設不套用 expansion。需要實驗時才以環境變數明確開啟。
+> **Runtime default（2026-11-17）**：`RAG_LEGAL_EXPANSION_ENABLED=false`，且 5 個術語的 registry 已是 `expansion_enabled=false`／`expansion_decision=disabled`。需要做離線實驗時，使用 `expand_semantic_query(..., include_disabled=True)`；正式 semantic 查詢不套用。
 
 ## 加入新術語的流程
 

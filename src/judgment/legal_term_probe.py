@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence, Tuple
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from .legal_terms import REGISTRY_TERMS
 from .models import JudgmentDocument
@@ -23,6 +24,9 @@ GENERIC_PHRASES = tuple(
             "什麼樣",
             "列出",
             "列舉",
+            "找出",
+            "尋找",
+            "搜尋",
             "清單",
             "所有",
             "全部",
@@ -80,6 +84,10 @@ GENERIC_PHRASES = tuple(
             "還是",
             "年間",
             "之間",
+            "左右",
+            "前後",
+            "附近",
+            "期間",
             "可以",
             "能不能",
             "有沒有",
@@ -211,6 +219,15 @@ class ScopeTermCount:
 @dataclass(frozen=True)
 class ScopeProbeResult:
     terms: Tuple[ScopeTermCount, ...]
+    status: str = "ok"
+    skipped_reason: str = ""
+    scope_document_count: int = 0
+    max_hit_documents: int = 0
+    elapsed_ms: float = 0.0
+
+    @property
+    def skipped(self) -> bool:
+        return self.status != "ok"
 
     @property
     def hit_terms(self) -> Tuple[ScopeTermCount, ...]:
@@ -227,6 +244,11 @@ class ScopeProbeResult:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "enabled": bool(self.terms),
+            "status": self.status,
+            "skipped_reason": self.skipped_reason,
+            "scope_document_count": self.scope_document_count,
+            "max_hit_documents": self.max_hit_documents,
+            "elapsed_ms": self.elapsed_ms,
             "terms": [term.to_dict() for term in self.terms],
             "hit_terms": [term.to_dict() for term in self.hit_terms],
             "zero_terms": [term.to_dict() for term in self.zero_terms],
@@ -384,44 +406,118 @@ def extract_scope_terms(
     return registry_terms + extracted
 
 
+def _scope_filters(parsed_query: ParsedJudgmentQuery) -> List[Any]:
+    filters: List[Any] = [JudgmentDocument.is_current.is_(True)]
+    if parsed_query.courts:
+        filters.append(
+            JudgmentDocument.court_normalized.in_(
+                list(parsed_query.courts)
+            )
+        )
+    if parsed_query.year_from is not None:
+        filters.append(
+            JudgmentDocument.jdate.between(
+                f"{parsed_query.year_from}0101",
+                f"{parsed_query.year_to or parsed_query.year_from}1231",
+            )
+        )
+    return filters
+
+
 def probe_scope_terms(
     *,
     session_factory,
     parsed_query: ParsedJudgmentQuery,
     terms: Sequence[ScopeTerm],
+    max_scope_documents: int = 50_000,
+    max_hit_documents: int = 5_000,
+    timeout_ms: int = 10_000,
 ) -> ScopeProbeResult:
-    """Count exact phrases in the court+year scope using normalized text."""
+    """Count exact phrases in a court/year scope with cost guards."""
 
-    if (
-        not terms
-        or not parsed_query.courts
-        or parsed_query.year_from is None
-        or parsed_query.year_to is None
-    ):
+    if not terms:
         return ScopeProbeResult(terms=())
+    filters = _scope_filters(parsed_query)
+    if len(filters) <= 1:
+        return ScopeProbeResult(
+            terms=(),
+            status="no_scope",
+            skipped_reason="法院與年份條件皆缺少",
+        )
 
-    phrases = [term.term for term in terms]
+    started = time.perf_counter()
     with session_factory() as session:
-        records = list(
-            session.scalars(
-                select(JudgmentDocument).where(
-                    JudgmentDocument.is_current.is_(True),
-                    JudgmentDocument.court_normalized.in_(
-                        list(parsed_query.courts)
+        try:
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                session.connection().exec_driver_sql(
+                    f"SET LOCAL statement_timeout = {max(1, int(timeout_ms))}"
+                )
+            scope_count = int(
+                session.scalar(
+                    select(func.count(JudgmentDocument.id)).where(*filters)
+                )
+                or 0
+            )
+            if scope_count > max_scope_documents:
+                return ScopeProbeResult(
+                    terms=tuple(
+                        ScopeTermCount(
+                            term=term.term,
+                            scope=term.scope,
+                            term_id=term.term_id,
+                            document_count=0,
+                            occurrence_count=0,
+                            matched_jids=(),
+                        )
+                        for term in terms
                     ),
-                    JudgmentDocument.jdate.between(
-                        f"{parsed_query.year_from}0101",
-                        f"{parsed_query.year_to}1231",
+                    status="scope_too_large",
+                    skipped_reason=(
+                        f"scope_count={scope_count} > "
+                        f"max_scope_documents={max_scope_documents}"
                     ),
-                    or_(
-                        *[
-                            JudgmentDocument.full_text.contains(phrase)
-                            for phrase in phrases
-                        ]
+                    scope_document_count=scope_count,
+                    max_hit_documents=max_hit_documents,
+                    elapsed_ms=round(
+                        (time.perf_counter() - started) * 1000.0, 2
                     ),
                 )
-            ).all()
-        )
+            phrases = [term.term for term in terms]
+            records = list(
+                session.scalars(
+                    select(JudgmentDocument).where(
+                        *filters,
+                        or_(
+                            *[
+                                JudgmentDocument.full_text.contains(phrase)
+                                for phrase in phrases
+                            ]
+                        ),
+                    )
+                ).all()
+            )
+        except Exception as exc:  # noqa: BLE001 - timeout/degraded fallback
+            session.rollback()
+            return ScopeProbeResult(
+                terms=tuple(
+                    ScopeTermCount(
+                        term=term.term,
+                        scope=term.scope,
+                        term_id=term.term_id,
+                        document_count=0,
+                        occurrence_count=0,
+                        matched_jids=(),
+                    )
+                    for term in terms
+                ),
+                status="timeout",
+                skipped_reason=f"{exc.__class__.__name__}: {exc}",
+                scope_document_count=0,
+                max_hit_documents=max_hit_documents,
+                elapsed_ms=round(
+                    (time.perf_counter() - started) * 1000.0, 2
+                ),
+            )
 
     counts: Dict[str, List[Any]] = {
         term.term: [0, 0, []] for term in terms
@@ -453,4 +549,19 @@ def probe_scope_terms(
                 ),
             )
         )
-    return ScopeProbeResult(terms=tuple(result))
+    too_many = [
+        term for term in result if term.document_count > max_hit_documents
+    ]
+    return ScopeProbeResult(
+        terms=tuple(result),
+        status="too_many_hits" if too_many else "ok",
+        skipped_reason=(
+            "terms_over_max_hit_documents="
+            + ",".join(term.term for term in too_many)
+            if too_many
+            else ""
+        ),
+        scope_document_count=scope_count,
+        max_hit_documents=max_hit_documents,
+        elapsed_ms=round((time.perf_counter() - started) * 1000.0, 2),
+    )

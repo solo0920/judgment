@@ -68,6 +68,31 @@ Tag 只是分流，不是法律相關性判斷；每一題仍要人工看 answer
 - 用失敗型態與使用者需求排序術語，不要用 429 術語的 document frequency 直接排序。
 - 在有 20–30 題之前，不新增或升級 candidate。
 
+## 4.1 第一批 trace 問題（2026-11-17）
+
+從 `performance_records` 的 `RAG 問答` flow metadata 取最近 30 個 distinct questions，存到 `.run/real_questions.jsonl`，跑 `real_question_audit.py`。
+
+Tag counts：
+
+```text
+exact_keyword       1
+structured_list    15
+semantic           14
+law_first           7
+no_results          2
+abstained           3
+scope_probe_zero    1
+scope_probe_hit     2
+```
+
+觀察：
+
+- 多數問題仍是 structured list（法院／年份／案由）與 semantic；真正走 active `keyword_list` 的只有 1 題。
+- 兩題 no-results 是 Lianjiang／1990–91 等資料覆蓋問題，不是 retrieval 邏輯錯誤。
+- 無法院條件的違約交割問題仍走 semantic；這支持 postings 的價值，但還不足以證明要立即接入。
+- 少數 scope probe 問題延遲 13–19 秒（含 LLM）；需要看 prompt／probe 的細部 trace，不能只看總時間。
+- 這些問題沒有 human relevance label；`ground_truth_cases` 仍是 0。
+
 ## 5. 下一步
 
 1. 收集第一批 20–30 題（PM／使用者提供）。

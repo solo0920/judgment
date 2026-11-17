@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import tempfile
 import time
@@ -35,7 +36,12 @@ from judgment.legal_term_matching import (
     build_variant_index,
     match_term_counts,
 )
-from judgment.legal_terms import LEGAL_TERMS, REGISTRY_TERMS, REGISTRY_VERSION
+from judgment.legal_terms import (
+    LEGAL_TERMS,
+    REGISTRY_PATH,
+    REGISTRY_TERMS,
+    REGISTRY_VERSION,
+)
 from judgment.text_normalization import (
     NORMALIZATION_VERSION,
     normalize_for_match,
@@ -45,6 +51,8 @@ POSTINGS_SCHEMA = "legal_term_evidence"
 POSTINGS_TABLE = "legal_term_postings"
 POSTINGS_FQN = f"{POSTINGS_SCHEMA}.{POSTINGS_TABLE}"
 POSTINGS_TERM_INDEX = "legal_term_postings_term_date_idx"
+POSTINGS_MANIFEST = "legal_term_postings_manifest"
+POSTINGS_MANIFEST_FQN = f"{POSTINGS_SCHEMA}.{POSTINGS_MANIFEST}"
 
 
 def _pg_dsn(database_url: str) -> str:
@@ -75,6 +83,25 @@ def _create_table(conn: psycopg.Connection, *, rebuild: bool) -> None:
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {POSTINGS_SCHEMA}")
         if rebuild:
             cur.execute(f"DROP TABLE IF EXISTS {POSTINGS_FQN} CASCADE")
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {POSTINGS_MANIFEST_FQN} (
+                build_id text PRIMARY KEY,
+                generated_at timestamp with time zone NOT NULL,
+                registry_version text NOT NULL,
+                registry_sha256 text NOT NULL,
+                normalization_version text NOT NULL,
+                matching_rule text NOT NULL,
+                is_full_scan boolean NOT NULL,
+                scanned_rows bigint NOT NULL,
+                total_current_rows bigint NOT NULL,
+                max_last_seen_snapshot_id bigint,
+                complete boolean NOT NULL
+            )
+            """
+        )
+        if rebuild:
+            cur.execute(f"DELETE FROM {POSTINGS_MANIFEST_FQN}")
         cur.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {POSTINGS_FQN} (
@@ -269,6 +296,63 @@ def _scan_postings(
     }
 
 
+def _write_manifest(
+    conn: psycopg.Connection,
+    *,
+    build_id: str,
+    generated_at: str,
+    scan: Dict[str, Any],
+    is_full_scan: bool,
+) -> Dict[str, Any]:
+    registry_sha256 = hashlib.sha256(
+        REGISTRY_PATH.read_bytes()
+    ).hexdigest()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT max(last_seen_snapshot_id) FROM judgment_documents "
+            "WHERE is_current = true"
+        )
+        max_snapshot_id = cur.fetchone()[0]
+        complete = bool(
+            is_full_scan
+            and int(scan["scanned_rows"]) == int(scan["total_current_rows"])
+        )
+        cur.execute(
+            f"DELETE FROM {POSTINGS_MANIFEST_FQN}"
+        )
+        cur.execute(
+            f"""
+            INSERT INTO {POSTINGS_MANIFEST_FQN}
+                (build_id, generated_at, registry_version, registry_sha256,
+                 normalization_version, matching_rule, is_full_scan,
+                 scanned_rows, total_current_rows,
+                 max_last_seen_snapshot_id, complete)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [
+                build_id,
+                generated_at,
+                REGISTRY_VERSION,
+                registry_sha256,
+                NORMALIZATION_VERSION,
+                "longest_exact_variant_with_containment_v1",
+                bool(is_full_scan),
+                int(scan["scanned_rows"]),
+                int(scan["total_current_rows"]),
+                int(max_snapshot_id) if max_snapshot_id is not None else None,
+                complete,
+            ],
+        )
+        cur.execute(f"SELECT * FROM {POSTINGS_MANIFEST_FQN}")
+        row = cur.fetchone()
+        columns = [desc.name for desc in cur.description]
+    manifest = dict(zip(columns, row))
+    return {
+        key: (value.isoformat() if hasattr(value, "isoformat") else value)
+        for key, value in manifest.items()
+    }
+
+
 def _validate_postings(
     conn: psycopg.Connection,
     *,
@@ -417,6 +501,13 @@ def main() -> int:
             limit=args.limit,
         )
         index = _create_index(conn)
+        manifest = _write_manifest(
+            conn,
+            build_id=snapshot_id,
+            generated_at=generated_at,
+            scan=scan,
+            is_full_scan=bool(args.full),
+        )
         table_size, table_pretty = _relation_size(conn, POSTINGS_FQN)
         validation = _validate_postings(
             conn,
@@ -452,6 +543,8 @@ def main() -> int:
         "normalization_version": NORMALIZATION_VERSION,
         "matching_rule": "longest_exact_variant_with_containment_v1",
         "table": POSTINGS_FQN,
+        "manifest_table": POSTINGS_MANIFEST_FQN,
+        "manifest": manifest,
         "index": index,
         "sample": {
             "method": scan["sample_method"],

@@ -1327,18 +1327,25 @@ def _keyword_list_payload(
 ) -> Dict[str, Any]:
     """Answer a filtered list query with exact full-text term matching."""
     phrases = phrases_for_terms(list(terms))
+    filters = [JudgmentDocument.is_current.is_(True)]
+    if parsed_query.courts:
+        filters.append(
+            JudgmentDocument.court_normalized.in_(
+                list(parsed_query.courts)
+            )
+        )
+    if parsed_query.year_from is not None:
+        filters.append(
+            JudgmentDocument.jdate.between(
+                f"{parsed_query.year_from}0101",
+                f"{parsed_query.year_to or parsed_query.year_from}1231",
+            )
+        )
     with session_factory() as session:
         records = list(
             session.scalars(
                 select(JudgmentDocument).where(
-                    JudgmentDocument.is_current.is_(True),
-                    JudgmentDocument.court_normalized.in_(
-                        list(parsed_query.courts)
-                    ),
-                    JudgmentDocument.jdate.between(
-                        f"{parsed_query.year_from}0101",
-                        f"{parsed_query.year_to}1231",
-                    ),
+                    *filters,
                     or_(
                         *[
                             JudgmentDocument.full_text.contains(phrase)
@@ -1353,12 +1360,7 @@ def _keyword_list_payload(
                 func.min(JudgmentDocument.jdate),
                 func.max(JudgmentDocument.jdate),
                 func.count(JudgmentDocument.id),
-            ).where(
-                JudgmentDocument.is_current.is_(True),
-                JudgmentDocument.court_normalized.in_(
-                    list(parsed_query.courts)
-                ),
-            )
+            ).where(*filters)
         ).one()
 
     matched = []
@@ -1413,14 +1415,22 @@ def _keyword_list_payload(
     coverage_note = ""
     min_year = int(str(min_date)[:4]) if min_date else None
     max_year = int(str(max_date)[:4]) if max_date else None
-    if min_year is not None and parsed_query.year_from < min_year:
+    if (
+        parsed_query.year_from is not None
+        and min_year is not None
+        and parsed_query.year_from < min_year
+    ):
         coverage_note += (
-            f"資料庫在該法院最早收錄 {min_year} 年判決；"
+            f"資料庫最早收錄 {min_year} 年判決；"
             f"{parsed_query.year_from}–{min_year - 1} 年沒有資料。"
         )
-    if max_year is not None and parsed_query.year_to > max_year:
+    if (
+        parsed_query.year_to is not None
+        and max_year is not None
+        and parsed_query.year_to > max_year
+    ):
         coverage_note += (
-            f"資料庫在該法院目前收錄至 {max_year} 年；"
+            f"資料庫目前收錄至 {max_year} 年；"
             f"{max_year + 1}–{parsed_query.year_to} 年沒有資料。"
         )
 
@@ -1431,6 +1441,14 @@ def _keyword_list_payload(
         "term_keys": [term.key for term in terms],
     }
     term_label = "／".join(term.key for term in terms)
+    scope_parts = []
+    if parsed_query.courts:
+        scope_parts.append("法院 " + "／".join(parsed_query.courts))
+    if parsed_query.year_from is not None:
+        scope_parts.append(
+            f"裁判年份 {parsed_query.year_from}–{parsed_query.year_to}"
+        )
+    scope_text = "、".join(scope_parts) or "指定範圍"
     if total_matches:
         answer = _judgment_list_answer(
             question,
@@ -1445,8 +1463,7 @@ def _keyword_list_payload(
         )
     else:
         answer = (
-            f"在法院 {'／'.join(parsed_query.courts)}、"
-            f"裁判年份 {parsed_query.year_from}–{parsed_query.year_to} 的判決中，"
+            f"在{scope_text}的判決中，"
             f"查無正規化全文含「{term_label}」的判決。"
         )
         if coverage_note:
@@ -1566,6 +1583,34 @@ def _scope_probe_notice(
     return notice
 
 
+def _scope_probe_skip_notice(result: ScopeProbeResult) -> str:
+    if not result.skipped:
+        return ""
+    if result.status == "scope_too_large":
+        return (
+            f"指定法院／年份的候選判決共 {result.scope_document_count:,} 筆，"
+            "超過精確探測上限；以下改以語意檢索顯示相近結果，"
+            "未進行精確詞命中判定。"
+        )
+    if result.status == "too_many_hits":
+        too_many = [
+            f"「{term.term}」（{term.document_count:,} 筆）"
+            for term in result.terms
+            if term.document_count > result.max_hit_documents
+        ]
+        return (
+            "精確詞 "
+            + "、".join(too_many)
+            + " 命中筆數過多，未直接列出；以下改以語意檢索顯示相近結果。"
+        )
+    if result.status == "timeout":
+        return (
+            "精確全文探測逾時；以下改以語意檢索顯示相近結果，"
+            "未完成精確詞命中判定。"
+        )
+    return ""
+
+
 def _scope_probe_hit_notice(result: ScopeProbeResult) -> str:
     non_must = [
         term
@@ -1655,6 +1700,154 @@ def _empty_judgment_list_payload(
         "coverage": coverage,
         "duration_ms": _elapsed_ms(started),
     }
+
+
+LLM_PROMPT_OVERHEAD_TOKENS = 512
+LLM_CONTEXT_SAFETY_RATIO = 0.90
+
+
+def estimate_prompt_tokens(text: str) -> int:
+    """Conservative token estimate for mixed Chinese/English prompts.
+
+    Chinese characters are roughly one token each; counting them as one and
+    adding fixed overhead avoids the old ``chars // 3`` underestimation.  The
+    estimate intentionally over-counts short English words.
+    """
+
+    value = str(text or "")
+    if not value:
+        return 1
+    cjk = sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
+    ascii_words = len(re.findall(r"[A-Za-z0-9_]+", value))
+    other = sum(
+        1
+        for char in value
+        if not char.isspace()
+        and not ("\u4e00" <= char <= "\u9fff")
+        and not re.match(r"[A-Za-z0-9_]", char)
+    )
+    ascii_chars = sum(1 for char in value if re.match(r"[A-Za-z0-9_]", char))
+    # A Chinese char is ~1 token; an ASCII word is usually 1-2 tokens; other
+    # punctuation/whitespace is budgeted conservatively.
+    estimated = cjk + ascii_words * 2 + other + max(0, ascii_chars // 8)
+    return max(1, int(math.ceil(estimated * 1.05)))
+
+
+def _fit_contexts_to_prompt_budget(
+    *,
+    settings: Settings,
+    question: str,
+    contexts: Sequence[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Trim context text to a conservative prompt-token budget.
+
+    The LLM context budget also contains the output reservation.  We keep a
+    90% safety margin, reserve ``num_predict`` tokens, and drop/truncate the
+    least important contexts rather than waiting for a provider HTTP 400.
+    """
+
+    ctx_tokens = max(1024, int(settings.llm_num_ctx or 0))
+    prompt_budget = max(
+        512,
+        int(ctx_tokens * LLM_CONTEXT_SAFETY_RATIO)
+        - max(0, int(settings.llm_num_predict or 0)),
+    )
+    overhead = (
+        estimate_prompt_tokens(SYSTEM_PROMPT)
+        + estimate_prompt_tokens(question)
+        + LLM_PROMPT_OVERHEAD_TOKENS
+    )
+    fitted = [dict(context) for context in contexts]
+    before = overhead + sum(
+        estimate_prompt_tokens(str(context.get("text") or "")) + 24
+        for context in fitted
+    )
+    dropped = 0
+    truncated = False
+    while len(fitted) > 1:
+        total = overhead + sum(
+            estimate_prompt_tokens(str(context.get("text") or "")) + 24
+            for context in fitted
+        )
+        if total <= prompt_budget:
+            break
+        # Drop the last context first; retrieval order is relevance/date order.
+        fitted.pop()
+        dropped += 1
+    if fitted:
+        total = overhead + sum(
+            estimate_prompt_tokens(str(context.get("text") or "")) + 24
+            for context in fitted
+        )
+        if total > prompt_budget:
+            first = fitted[0]
+            text = str(first.get("text") or "")
+            available = max(
+                200,
+                prompt_budget
+                - overhead
+                - 24
+                - sum(
+                    estimate_prompt_tokens(
+                        str(context.get("text") or "")
+                    )
+                    + 24
+                    for context in fitted[1:]
+                ),
+            )
+            if len(text) > available:
+                first["text"] = text[:available]
+                truncated = True
+                while len(str(first.get("text") or "")) > 200:
+                    current = overhead + sum(
+                        estimate_prompt_tokens(
+                            str(context.get("text") or "")
+                        )
+                        + 24
+                        for context in fitted
+                    )
+                    if current <= prompt_budget:
+                        break
+                    available = int(available * 0.9)
+                    first["text"] = text[: max(200, available)]
+    after = overhead + sum(
+        estimate_prompt_tokens(str(context.get("text") or "")) + 24
+        for context in fitted
+    )
+    return fitted, {
+        "ctx_tokens": ctx_tokens,
+        "context_budget_tokens": prompt_budget,
+        "prompt_tokens_estimated_initial": before,
+        "prompt_tokens_estimated": after,
+        "contexts_before": len(contexts),
+        "contexts_after": len(fitted),
+        "contexts_dropped": dropped,
+        "text_truncated": truncated,
+        "safety_ratio": LLM_CONTEXT_SAFETY_RATIO,
+        "output_reserved_tokens": max(0, int(settings.llm_num_predict or 0)),
+    }
+
+
+def _guard_prompt_tokens(
+    *,
+    usage: Dict[str, Any],
+    budget_meta: Dict[str, Any],
+    provider: Any,
+) -> None:
+    actual = usage.get("input_tokens")
+    if actual is None:
+        return
+    try:
+        actual_tokens = int(actual)
+    except (TypeError, ValueError):
+        return
+    ctx_tokens = int(budget_meta.get("ctx_tokens") or 0)
+    if ctx_tokens and actual_tokens > ctx_tokens:
+        raise RuntimeError(
+            "LLM prompt exceeded context window: "
+            f"{actual_tokens} > {ctx_tokens} "
+            f"(provider={provider.role}, api={provider.api})"
+        )
 
 
 def _build_llm_prompt(
@@ -1786,11 +1979,16 @@ def generate_answer_with_model(
     last_error: Optional[Exception] = None
 
     for provider in providers:
+        fitted_contexts, budget_meta = _fit_contexts_to_prompt_budget(
+            settings=settings,
+            question=question,
+            contexts=contexts,
+        )
         request_payload, prompt_chars = _llm_request_payload(
             settings=settings,
             model=provider.model,
             question=question,
-            contexts=contexts,
+            contexts=fitted_contexts,
             strict=strict,
             stream=streaming,
             api=provider.api,
@@ -1815,6 +2013,16 @@ def generate_answer_with_model(
                     "keep_alive": settings.llm_keep_alive,
                     "timeout": timeout,
                     "prompt_chars": prompt_chars,
+                    "prompt_tokens_estimated": budget_meta[
+                        "prompt_tokens_estimated"
+                    ],
+                    "context_budget_tokens": budget_meta[
+                        "context_budget_tokens"
+                    ],
+                    "contexts_dropped": budget_meta["contexts_dropped"],
+                    "context_text_truncated": budget_meta[
+                        "text_truncated"
+                    ],
                     "strict": strict,
                 },
             ) as llm_segment:
@@ -1827,8 +2035,13 @@ def generate_answer_with_model(
                     answer = chat_content(provider.api, payload).strip()
                     if not answer:
                         raise RuntimeError("LLM 回傳空回答")
+                    usage = chat_usage(provider.api, payload)
+                    _guard_prompt_tokens(
+                        usage=usage,
+                        budget_meta=budget_meta,
+                        provider=provider,
+                    )
                     if llm_segment is not None:
-                        usage = chat_usage(provider.api, payload)
                         llm_segment["metadata"].update(
                             {
                                 "model": provider.model,
@@ -1839,6 +2052,12 @@ def generate_answer_with_model(
                                 "stream": False,
                                 "strict": strict,
                                 "input_tokens": usage["input_tokens"],
+                                "prompt_tokens_estimated": budget_meta[
+                                    "prompt_tokens_estimated"
+                                ],
+                                "contexts_dropped": budget_meta[
+                                    "contexts_dropped"
+                                ],
                                 "output_tokens": usage["output_tokens"],
                                 "ttft_ms": None,
                                 "total_duration_ms": _ns_to_ms(
@@ -1896,8 +2115,13 @@ def generate_answer_with_model(
                 answer = "".join(chunks).strip()
                 if not answer:
                     raise RuntimeError("LLM 回傳空回答")
+                usage = chat_usage(provider.api, final_event)
+                _guard_prompt_tokens(
+                    usage=usage,
+                    budget_meta=budget_meta,
+                    provider=provider,
+                )
                 if llm_segment is not None:
-                    usage = chat_usage(provider.api, final_event)
                     llm_segment["metadata"].update(
                         {
                             "model": provider.model,
@@ -1908,6 +2132,12 @@ def generate_answer_with_model(
                             "stream": True,
                             "strict": strict,
                             "input_tokens": usage["input_tokens"],
+                            "prompt_tokens_estimated": budget_meta[
+                                "prompt_tokens_estimated"
+                            ],
+                            "contexts_dropped": budget_meta[
+                                "contexts_dropped"
+                            ],
                             "output_tokens": usage["output_tokens"],
                             "ttft_ms": (
                                 round(
@@ -2154,13 +2384,16 @@ def answer_question(
     )
     scope_probe_result: Optional[ScopeProbeResult] = None
     scope_probe_zero = False
+    scope_probe_skipped = False
     scope_probe_notice = ""
+    scope_probe_skip_notice = ""
     scope_probe_payload: Optional[Dict[str, Any]] = None
     if (
         not law_first_hint
-        and (judgment_list_hint or parsed_query.list_intent)
-        and parsed_query.courts
-        and parsed_query.year_from is not None
+        and (
+            parsed_query.courts
+            or parsed_query.year_from is not None
+        )
         and not parsed_query.topics
     ):
         scope_terms = extract_scope_terms(question, parsed_query)
@@ -2172,10 +2405,18 @@ def answer_question(
                 session_factory=session_factory,
                 parsed_query=parsed_query,
                 terms=probe_terms,
+                max_scope_documents=settings.rag_scope_probe_max_documents,
+                max_hit_documents=settings.rag_scope_probe_max_hits,
+                timeout_ms=settings.rag_scope_probe_timeout_ms,
             )
             if scope_probe_result.terms:
                 scope_probe_payload = scope_probe_result.to_dict()
-                if scope_probe_result.has_hits and not exact_terms:
+                scope_probe_skip_notice = _scope_probe_skip_notice(
+                    scope_probe_result
+                )
+                if scope_probe_result.skipped:
+                    scope_probe_skipped = True
+                elif scope_probe_result.has_hits and not exact_terms:
                     probe_legal_terms = _scope_probe_legal_terms(
                         scope_probe_result
                     )
@@ -2222,6 +2463,16 @@ def answer_question(
                         scope_probe_result,
                         exact_hits=False,
                     )
+                if (
+                    scope_probe_result.zero_terms
+                    and not scope_probe_zero
+                ):
+                    scope_probe_zero = True
+                    scope_probe_notice = _scope_probe_notice(
+                        scope_probe_result,
+                        exact_hits=exact_channel_available,
+                    )
+    scope_probe_semantic = scope_probe_zero or scope_probe_skipped
     semantic_question = question
     legal_expansion: Dict[str, Any] = {
         "enabled": False,
@@ -2488,10 +2739,20 @@ def answer_question(
                 payload["retrieval"]["scope_probe"] = (
                     scope_probe_payload
                 )
-                extra_notice = _scope_probe_notice(
-                    scope_probe_result, exact_hits=True
+                extra_notice = " ".join(
+                    part
+                    for part in (
+                        _scope_probe_notice(
+                            scope_probe_result, exact_hits=True
+                        ),
+                        scope_probe_skip_notice,
+                    )
+                    if part
                 )
-                if scope_probe_result.has_hits:
+                if (
+                    scope_probe_result.has_hits
+                    and not scope_probe_result.skipped
+                ):
                     labels = "、".join(
                         f"「{term.term}」"
                         for term in scope_probe_result.hit_terms
@@ -2763,7 +3024,7 @@ def answer_question(
                 and query_filter
                 and structured_store_ok
                 and not filter_meta.get("facet_error")
-                and not scope_probe_zero
+                and not scope_probe_semantic
             )
             if structured_list_ready:
                 total_matches = store.count(
@@ -3018,7 +3279,12 @@ def answer_question(
                             "chunks": len(judgment_contexts),
                             "citation_count": len(citations),
                             "context_chars": context_chars,
-                            "token_estimate": max(1, context_chars // 3),
+                            "token_estimate": estimate_prompt_tokens(
+                                "".join(
+                                    str(context.get("text") or "")
+                                    for context in judgment_contexts
+                                )
+                            ),
                         }
                     )
         elif rerank_active:
@@ -3075,6 +3341,7 @@ def answer_question(
                     ),
                     _list_query_notice(question, retrieval, 0),
                     scope_probe_notice,
+                    scope_probe_skip_notice,
                 )
                 if part
             ),
@@ -3117,7 +3384,12 @@ def answer_question(
                 "law_chunks": len(law_contexts),
                 "citation_count": citation_total,
                 "context_chars": context_chars,
-                "token_estimate": max(1, context_chars // 3),
+                "token_estimate": estimate_prompt_tokens(
+                    "".join(
+                        str(context.get("text") or "")
+                        for context in contexts
+                    )
+                ),
             }
         )
     terms = [source["law_name"] for source in law_sources]
@@ -3125,7 +3397,7 @@ def answer_question(
         terms.append(law_stats["entity"])
     llm_configured = bool(settings.llm_url and settings.llm_model)
     structured_judgment_list = bool(
-        (structured_list_path or judgment_list_hint)
+        (structured_list_path or judgment_list_hint or scope_probe_semantic)
         and citations
         and not law_first
     )
@@ -3242,7 +3514,14 @@ def answer_question(
             if notice
             else scope_probe_notice
         )
+    if scope_probe_skip_notice:
+        notice = (
+            f"{notice} {scope_probe_skip_notice}".strip()
+            if notice
+            else scope_probe_skip_notice
+        )
     retrieval["scope_probe_notice"] = scope_probe_notice or None
+    retrieval["scope_probe_skip_notice"] = scope_probe_skip_notice or None
     return {
         "status": status,
         "answer": answer,

@@ -19,6 +19,24 @@ index   (term_id, jdate)
 
 這不是 `judgment_documents` 的 index，也不改變全文表。Table 是 derived data，可從判決全文重建。
 
+Completeness manifest：
+
+```text
+legal_term_evidence.legal_term_postings_manifest
+  build_id
+  generated_at
+  registry_version
+  registry_sha256
+  normalization_version
+  matching_rule
+  is_full_scan
+  scanned_rows / total_current_rows
+  max_last_seen_snapshot_id
+  complete
+```
+
+`complete=true` 只在 full scan 且 scanned rows 等於 total current rows 時成立。未來接入 RAG 前必須核對 `registry_sha256`、`normalization_version`、`max_last_seen_snapshot_id`；任一不符就不得使用 postings table。
+
 ## 2. Build
 
 ```bash
@@ -44,7 +62,7 @@ documents with postings   90,699
 terms with postings          147
 table total size            35 MB（heap 19 MB）
 secondary index size       3.6 MB
-build + copy + validate   205.08s
+build + copy + validate   180.23s
 estimated full rows     2.93M
 estimated full size     ≈805 MB（線性外推）
 ```
@@ -68,6 +86,9 @@ checked postings    1,174
 row mismatches          0
 term-level mismatches   0
 status                  ok
+manifest.complete       false（sample build）
+registry_sha256         7f7ac32d…
+normalization_version   remove-unicode-space-v2
 ```
 
 這支持「postings 與即時全文比對一致」的 sample 驗證；full build 仍要重跑同一驗證。

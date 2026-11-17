@@ -233,7 +233,7 @@ HTTP 層：
 
 - 端點：`POST {LLM_URL}/api/chat`。
 - 模型：由 `LLM_MODEL` 設定；本機 `.env` 目前為 `gemma3:4b`，可改成 27B 品質模式。
-- 參數：`temperature=0.1`、`num_ctx=4096`、`num_predict=384`、`keep_alive=30m`；一般模式 `stream=true` 並以 SSE 逐 token 回傳，測試模式使用非串流生成。
+- 參數：`temperature=0.1`、`num_ctx=8192`、`num_predict=384`、`keep_alive=30m`；一般模式 `stream=true` 並以 SSE 逐 token 回傳，測試模式使用非串流生成。Prompt 預算使用保守 token 估算（中文約一字一 token）；超過 90% context 會先截斷 context。
 - 系統提示要求：
   - 只能根據提供的判決片段、法規與命令內容回答。
   - 不得創造案號、法院、日期或法條。
@@ -384,7 +384,7 @@ uv run judgment-index-vectors --rollback
 | `LLM_URL` | 預設空；本機 `.env` `http://127.0.0.1:11434` | Ollama API |
 | `LLM_MODEL` | 預設空；本機 `.env` `gemma3:4b` | 回答模型；品質優先可改 27B |
 | `LLM_TIMEOUT_SECONDS` | `180` | LLM 請求逾時 |
-| `LLM_NUM_CTX` | `4096` | Ollama context window |
+| `LLM_NUM_CTX` | `8192` | Ollama context window；OpenAI 路徑另受 llama-server `--ctx-size` 限制 |
 | `LLM_NUM_PREDICT` | `384` | 最多生成 tokens |
 | `LLM_KEEP_ALIVE` | `30m` | 模型保持載入時間 |
 | `RAG_TOP_K` | `4` | 檢索候選數 |
@@ -467,7 +467,7 @@ sequenceDiagram
 2. **文件級向量而非片段級**：每筆判決只取 head/tail 1,600 字作為 embedding，判決中段的細節可能不會被檢索到。
 3. **Reranker 只覆蓋候選排序**：判決候選與法規／命令候選由 `bge-reranker-v2-m3` 重新排序，法規與命令再依 `source_type` 分組；關閉、逾時或服務失敗時保留檢索原順序。檢索本身仍是 BM25／dense（RRF）與 Qdrant cosine，不是端到端學習式檢索。
 4. **引用驗證是結構驗證**：只檢查 `[n]` 是否落在範圍內、拒答是否含案號；不驗證每個句子是否真的由對應片段支持。
-5. **LLM 生成速度與品質權衡**：快速 profile（`gemma3:4b`、top_k=4、4,000 字上下文、num_ctx=4096）實測整體 RAG 約 2–5 秒；切回 `gemma3:27b` 約 30–50 秒。一般模式前端等待上限為 300 秒，測試模式則對 embedding 與 LLM 使用無 timeout。4B 的複雜推理品質可能低於 27B，可透過 `LLM_MODEL` 切換。
+5. **LLM 生成速度與品質權衡**：快速 profile（`gemma3:4b`、top_k=4、4,000 字上下文、num_ctx=8192）實測整體 RAG 約 2–5 秒；切回 `gemma3:27b` 約 30–50 秒。一般模式前端等待上限為 300 秒，測試模式則對 embedding 與 LLM 使用無 timeout。4B 的複雜推理品質可能低於 27B，可透過 `LLM_MODEL` 切換。
 6. **串流回應**：API 使用 SSE `partial`／`token`／`result`，前端先顯示法規結果，再逐字顯示 LLM 回答。
 7. **Qdrant 與 PostgreSQL 可能短暫不同步**：索引器先寫 Qdrant 再寫 `judgment_vector_index`；RAG 以 PostgreSQL 全文為最終依據，找不到的判決會被跳過。
 8. **沒有使用者認證**：RAG 查詢端點本身唯讀，但整個 Web API 含大量寫入端點（題庫、benchmark、Ollama 主機、processing、index versions、test mode 等），且目前沒有認證；若透過 tunnel 對外開放，任何知道網址的人都能操作。正式部署應加上存取控制與速率限制。

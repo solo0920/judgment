@@ -221,7 +221,7 @@ cd /Volumes/USB/judgment-backup-20261108
 | `LLM_FALLBACK_API` | `ollama` | fallback LLM 的 API 種類 |
 | `LLM_MODEL` | 空 | RAG 回答模型；x570 llama-server 別名為 `gemma3:4b` |
 | `LLM_TIMEOUT_SECONDS` | `180` | LLM 請求逾時 |
-| `LLM_NUM_CTX` | `4096` | Ollama context window（OpenAI 路徑由 llama-server `--ctx-size` 決定） |
+| `LLM_NUM_CTX` | `8192` | Ollama context window；OpenAI 路徑的實際上限仍由 llama-server `--ctx-size` 決定 |
 | `LLM_NUM_PREDICT` | `384` | 最多生成 tokens；OpenAI 路徑送 `max_tokens` |
 | `LLM_KEEP_ALIVE` | `30m` | Ollama fallback 模型保持載入時間；`.env` 目前設為 `-1`，永久保留 |
 | `RAG_TOP_K` | `4` | 最終提供給 LLM 的判決數；啟用 reranker 時建議 `8` |
@@ -229,6 +229,9 @@ cd /Volumes/USB/judgment-backup-20261108
 | `RAG_MAX_CONTEXT_CHARS` | `4000` | 提供給 LLM 的判決片段總字數上限 |
 | `RAG_LEGAL_EXPANSION_ENABLED` | `false` | 將高信心法律術語的相關詞附加到 embedding query；只用於語意路徑，不影響 `keyword_list`。Proxy A/B 完成前預設關閉 |
 | `RAG_LEGAL_EXPANSION_TERMS` | `4` | 每次最多附加幾個 expansion terms；越少越保守 |
+| `RAG_SCOPE_PROBE_MAX_DOCUMENTS` | `50000` | 法院／年份精確探測的候選集上限；超過就跳過並揭露 |
+| `RAG_SCOPE_PROBE_MAX_HITS` | `5000` | 單一詞精確命中上限；超過改走語意摘要 |
+| `RAG_SCOPE_PROBE_TIMEOUT_MS` | `10000` | 精確探測的 PostgreSQL statement timeout |
 | `RAG_LAW_FIRST_JUDGMENT_LIMIT` | `1` | 法規優先題最多保留幾筆判決作為輔助 context |
 | `LEGAL_ARTICLE_VECTOR_ALIAS` | `legal_articles_current` | 法規／命令條文索引 alias；與判決 alias 完全分開 |
 | `LEGAL_ARTICLE_VECTOR_COLLECTION` | `legal_articles` | alias 不存在時的後備 collection 名稱 |
@@ -1347,7 +1350,7 @@ uv run python scripts/legal_term_expansion_probe.py \
   --repetitions 2 --output .run/legal_term_expansion_probe.json
 ```
 
-5 個 expansion 術語的 exact-match proxy：只有 `違約交割` 的 Recall@8 增加 0.083（1/12），其餘 A/B 都是 0；mean ΔRecall@8 +0.0167。runtime `RAG_LEGAL_EXPANSION_ENABLED` 因此維持預設 `false`。
+5 個 expansion 術語的 exact-match proxy：只有 `違約交割` 的 Recall@8 增加 0.083（1/12），其餘 A/B 都是 0；mean ΔRecall@8 +0.0167。runtime `RAG_LEGAL_EXPANSION_ENABLED` 因此維持預設 `false`，registry 內這 5 個術語也已改成 `expansion_enabled=false`／`expansion_decision=disabled`。
 
 真實問題 intake（先收集 20–30 題，再排序術語；不是用語料 frequency 排序）：
 
@@ -1722,7 +1725,7 @@ ollama pull gemma3:4b
 
 ```dotenv
 LLM_MODEL=gemma3:4b
-LLM_NUM_CTX=4096
+LLM_NUM_CTX=8192
 LLM_NUM_PREDICT=384
 LLM_KEEP_ALIVE=-1
 RAG_TOP_K=4
@@ -1796,7 +1799,8 @@ ssh -t x570 'sudo bash /tmp/judgment-llama-services.sh'
 - 尋找 x570 上的 `llama-server`（也接受 `LLAMA_SERVER_BIN`），偵測 Ollama 的 CUDA backend（`libggml-cuda.so`）並設定 `GGML_BACKEND_PATH`
 - 從 Ollama 取出 `gemma3:4b`、`bge-m3:latest`、`qllama/bge-reranker-v2-m3:latest` 的 GGUF，複製到穩定路徑
 - 建立三個 systemd unit：chat 使用 `--alias gemma3:4b --ctx-size 8192`；embedding 使用 `--embedding --pooling cls`；reranker 使用 `--reranking --pooling rank`；三者皆 `--gpu-layers all`
-- 2026-11-17 修正 chat context：先前 `--ctx-size 4096` 會讓 4,292–4,652 token 的 RAG prompt 回 `HTTP 400 exceed_context_size_error`；預設改為 8192。若日後 prompt 仍過長，調高 `CHAT_CTX_SIZE` 或降低 `RAG_MAX_CONTEXT_CHARS`。
+- 2026-11-17 修正 chat context：先前 `--ctx-size 4096` 會讓 4,292–4,652 token 的 RAG prompt 回 `HTTP 400 exceed_context_size_error`；預設改為 8192。
+- Token 估算已改為保守值（中文接近一字一 token，不再用 `chars // 3`）；超過 `num_ctx * 0.9 - num_predict` 時會先丟棄／截斷 context。trace 會記錄 `prompt_tokens_estimated` 與 provider 回傳的 `input_tokens`；實際超過 context 會標記失敗並走 fallback，不再靜默接受。
 - `systemctl enable` 三個 unit，之後 x570 開機自動載入
 - 停用 `judgment-ollama-preload.service`，避免 Ollama 與 llama-server 重複占用 VRAM（`ollama.service` 仍保留）
 - 等 `/health` 就緒後，實際呼叫 chat、embedding（檢查 1024 維）與 rerank 端點

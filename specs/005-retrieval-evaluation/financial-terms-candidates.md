@@ -4,6 +4,7 @@
 - 資料來源：`src/judgment/data/legal_terms_registry.json`
 - 非 active 術語均 `active=false`、`expansion_enabled=false`、`review_status=engineering_pending`
 - 清單為檢索概念候選，不代表正式法定用語或法律同義詞
+- 200k evidence snapshot 後，runtime expansion 已預設關閉；active 術語的 expansion 欄位目前也是 `false`
 - `Sample df`／`Est. full df` 來自 200k deterministic evidence snapshot；`Est.` 是估計值，不是全庫普查
 - `Priority tier` 是人工審閱順序，不是啟用狀態；`P3_hold_no_data` 只表示 sample 內零命中
 
@@ -68,7 +69,7 @@
 | 012 | 金融機構退場 | `banking_deposit_credit` | 存款保險條例、銀行法 | no | no | 1 | 23 | P2_collect_data | 65.27 | engineering_pending |
 | 013 | 存款保險理賠 | `banking_deposit_credit` | 存款保險條例 | no | no | 0 | 0 | P3_hold_no_data | 41.0 | engineering_pending |
 | 014 | 金融債券發行 | `banking_deposit_credit` | 銀行法、銀行發行金融債券辦法 | no | no | 1 | 23 | P2_collect_data | 61.27 | engineering_pending |
-| 065 | 非法吸金 | `banking_deposit_credit` | 銀行法 | yes | yes | 451 | 10373 | active_monitor | 93.13 | engineering_approved |
+| 065 | 非法吸金 | `banking_deposit_credit` | 銀行法 | yes | no | 451 | 10373 | active_monitor | 93.13 | engineering_approved |
 | 143 | 違法吸收存款 | `banking_deposit_credit` | 待補 | no | no | 7 | 161 | P2_collect_data | 68.07 | engineering_pending |
 | 144 | 關係企業授信 | `banking_deposit_credit` | 待補 | no | no | 1 | 23 | P2_collect_data | 61.27 | engineering_pending |
 | 145 | 同一人授信限額 | `banking_deposit_credit` | 待補 | no | no | 1 | 23 | P2_collect_data | 65.27 | engineering_pending |
@@ -91,14 +92,14 @@
 | 162 | 金融機構資產負債失衡 | `banking_deposit_credit` | 待補 | no | no | 0 | 0 | P3_hold_no_data | 41.0 | engineering_pending |
 | 016 | 內線交易 | `securities_capital_markets` | 證券交易法 | yes | no | 118 | 2714 | active_monitor | 88.2 | engineering_approved |
 | 017 | 操縱股價 | `securities_capital_markets` | 證券交易法 | yes | no | 109 | 2507 | active_monitor | 88.37 | engineering_approved |
-| 018 | 違約交割 | `securities_capital_markets` | 證券交易法 | yes | yes | 89 | 2047 | active_monitor | 87.05 | engineering_approved |
+| 018 | 違約交割 | `securities_capital_markets` | 證券交易法 | yes | no | 89 | 2047 | active_monitor | 87.05 | engineering_approved |
 | 019 | 相對委託 | `securities_capital_markets` | 證券交易法 | no | no | 18 | 414 | P2_collect_data | 70.31 | engineering_pending |
 | 020 | 沖洗買賣 | `securities_capital_markets` | 證券交易法 | no | no | 25 | 575 | P0_review_now | 77.91 | engineering_pending |
 | 021 | 連續交易操縱 | `securities_capital_markets` | 證券交易法 | no | no | 1 | 23 | P2_collect_data | 66.27 | engineering_pending |
 | 022 | 散布不實消息 | `securities_capital_markets` | 證券交易法 | no | no | 6 | 138 | P2_collect_data | 69.76 | engineering_pending |
-| 023 | 財報不實 | `securities_capital_markets` | 證券交易法、商業會計法 | yes | yes | 228 | 5244 | active_monitor | 90.88 | engineering_approved |
+| 023 | 財報不實 | `securities_capital_markets` | 證券交易法、商業會計法 | yes | no | 228 | 5244 | active_monitor | 90.88 | engineering_approved |
 | 024 | 公開說明書不實 | `securities_capital_markets` | 證券交易法 | no | no | 3 | 69 | P2_collect_data | 69.85 | engineering_pending |
-| 025 | 短線交易 | `securities_capital_markets` | 證券交易法 | yes | yes | 8 | 184 | active_monitor | 63.9 | engineering_approved |
+| 025 | 短線交易 | `securities_capital_markets` | 證券交易法 | yes | no | 8 | 184 | active_monitor | 63.9 | engineering_approved |
 | 026 | 大股東持股申報不實 | `securities_capital_markets` | 證券交易法 | no | no | 0 | 0 | P3_hold_no_data | 45.0 | engineering_pending |
 | 029 | 證券詐欺 | `securities_capital_markets` | 證券交易法 | yes | no | 31 | 713 | active_monitor | 82.94 | engineering_approved |
 | 030 | 有價證券私募違規 | `securities_capital_markets` | 證券交易法 | no | no | 0 | 0 | P3_hold_no_data | 42.0 | engineering_pending |
@@ -215,7 +216,7 @@
 | 250 | 債權移轉瑕疵 | `trust_securitization` | 待補 | no | no | 0 | 0 | P3_hold_no_data | 35.0 | engineering_pending |
 | 251 | 不動產投資信託違規 | `trust_securitization` | 待補 | no | no | 0 | 0 | P3_hold_no_data | 39.0 | engineering_pending |
 | 056 | 洗錢 | `aml_cft_virtual_assets` | 洗錢防制法 | no | no | 13073 | 300680 | P0_review_now | 88.87 | engineering_pending |
-| 057 | 人頭帳戶 | `aml_cft_virtual_assets` | 洗錢防制法、刑法 | yes | yes | 5270 | 121210 | active_monitor | 90.8 | engineering_approved |
+| 057 | 人頭帳戶 | `aml_cft_virtual_assets` | 洗錢防制法、刑法 | yes | no | 5270 | 121210 | active_monitor | 90.8 | engineering_approved |
 | 058 | 可疑交易申報 | `aml_cft_virtual_assets` | 洗錢防制法 | no | no | 2 | 46 | P2_collect_data | 66.45 | engineering_pending |
 | 059 | 大額通貨交易申報 | `aml_cft_virtual_assets` | 洗錢防制法 | no | no | 8 | 184 | P2_collect_data | 75.54 | engineering_pending |
 | 060 | 實質受益人 | `aml_cft_virtual_assets` | 洗錢防制法 | no | no | 17 | 391 | P2_collect_data | 73.51 | engineering_pending |

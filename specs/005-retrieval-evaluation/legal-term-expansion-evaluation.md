@@ -51,7 +51,7 @@ Expansion 只改變 embedding query；原問題仍用於 reranker、citation 與
 - 70 個術語達到 `proxy_ready`（>=20 positives、>=5 negatives），但**沒有一個是 `human_reviewed` 或 `benchmark_approved`**。
 - 檔案與流程見 `legal-term-evidence-pipeline.md`。
 
-2026-11-17 起 `RAG_LEGAL_EXPANSION_ENABLED` 預設為 `false`。5 個術語的 registry 設定保留，但在 proxy A/B 完成前不套用到正式 semantic 查詢。
+2026-11-17 起 `RAG_LEGAL_EXPANSION_ENABLED` 預設為 `false`；5 個術語的 registry 也已改為 `expansion_enabled=false`、`expansion_decision=disabled`。歷史 proxy 數據保留在 `expansion_evaluation`，但正式 semantic 查詢不套用。
 
 2026-11-17 另跑了一次 **免人工標註的 exact-match proxy probe**（`scripts/legal_term_expansion_probe.py`）：
 

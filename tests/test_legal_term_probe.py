@@ -116,3 +116,39 @@ def test_probe_counts_only_normalized_exact_phrase_in_scope() -> None:
         "TPDV,114,訴,9,20260101,1",
     )
     assert result.zero_terms == ()
+
+    court_only = parse_judgment_query("臺灣臺北地方法院借款糾紛案件")
+    court_result = probe_scope_terms(
+        session_factory=session_factory,
+        parsed_query=court_only,
+        terms=[ScopeTerm(term="借款糾紛", scope="external")],
+    )
+    assert court_result.status == "ok"
+    assert court_result.terms[0].document_count == 1
+
+    year_only = parse_judgment_query("2026年借款糾紛案件")
+    year_result = probe_scope_terms(
+        session_factory=session_factory,
+        parsed_query=year_only,
+        terms=[ScopeTerm(term="借款糾紛", scope="external")],
+    )
+    assert year_result.status == "ok"
+    assert year_result.terms[0].document_count == 1
+
+    too_large = probe_scope_terms(
+        session_factory=session_factory,
+        parsed_query=court_only,
+        terms=[ScopeTerm(term="借款糾紛", scope="external")],
+        max_scope_documents=1,
+    )
+    assert too_large.status == "scope_too_large"
+    assert too_large.skipped is True
+
+    too_many = probe_scope_terms(
+        session_factory=session_factory,
+        parsed_query=court_only,
+        terms=[ScopeTerm(term="借款糾紛", scope="external")],
+        max_hit_documents=0,
+    )
+    assert too_many.status == "too_many_hits"
+    assert too_many.skipped is True

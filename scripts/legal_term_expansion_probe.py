@@ -247,7 +247,9 @@ def main() -> int:
         relevant = set(scope["relevant_jids"])
         term_query = f"{term_key}的判決"
         expanded, expansion_meta = expand_semantic_query(
-            term_query, limit=settings.rag_legal_expansion_terms
+            term_query,
+            limit=settings.rag_legal_expansion_terms,
+            include_disabled=True,
         )
         indexed_relevant = store.count(
             collection,

@@ -21,12 +21,15 @@ from judgment.models import (
 from judgment.observability import clear_flow, start_flow
 from judgment.rag import (
     _best_judgment_snippet,
+    _fit_contexts_to_prompt_budget,
+    _guard_prompt_tokens,
     _raise_for_llm_status,
     _judgment_list_answer,
     _llm_request_payload,
     _search_legal_articles,
     _valid_citation_markers,
     answer_question,
+    estimate_prompt_tokens,
     extract_excerpt,
     generate_answer_with_model,
     is_judgment_list_question,
@@ -69,6 +72,39 @@ def _session_factory():
     return sessionmaker(
         bind=engine, autoflush=False, expire_on_commit=False, future=True
     )
+
+
+def test_prompt_token_estimate_is_conservative_for_chinese() -> None:
+    text = "違約交割" * 100
+    assert estimate_prompt_tokens(text) >= 400
+    assert estimate_prompt_tokens(text) > len(text) // 3
+
+
+def test_fit_contexts_truncates_to_prompt_budget() -> None:
+    settings = _settings(llm_num_ctx=4096, llm_num_predict=384)
+    contexts = [
+        {"index": 1, "text": "違約交割" * 4000},
+        {"index": 2, "text": "人頭帳戶" * 4000},
+    ]
+    fitted, meta = _fit_contexts_to_prompt_budget(
+        settings=settings,
+        question="違約交割的判決",
+        contexts=contexts,
+    )
+    assert meta["prompt_tokens_estimated"] <= meta["context_budget_tokens"]
+    assert meta["contexts_after"] < meta["contexts_before"]
+    assert meta["text_truncated"] is True or meta["contexts_dropped"] > 0
+
+
+def test_prompt_token_guard_rejects_actual_overflow() -> None:
+    with pytest.raises(RuntimeError, match="exceeded context window"):
+        _guard_prompt_tokens(
+            usage={"input_tokens": 4300},
+            budget_meta={"ctx_tokens": 4096},
+            provider=type(
+                "Provider", (), {"role": "primary", "api": "openai"}
+            )(),
+        )
 
 
 def test_llm_request_payload_sends_numeric_keep_alive_as_number() -> None:
@@ -477,7 +513,7 @@ def test_judgment_list_answer_has_fraud_caveat_and_complete_list_hint() -> None:
     assert "資料庫查詢" in answer
 
 
-def test_semantic_query_uses_legal_term_expansion() -> None:
+def test_semantic_query_stays_unexpanded_when_registry_disabled() -> None:
     session_factory = _session_factory()
     _seed_judgments(session_factory, count=1)
     embedder = FakeEmbedder()
@@ -495,8 +531,8 @@ def test_semantic_query_uses_legal_term_expansion() -> None:
     )
     embedded_queries = [call[0] for call in embedder.calls if call]
     assert embedded_queries
-    assert any("幫助詐欺" in query for query in embedded_queries)
-    assert payload["retrieval"]["query_expansion"]["enabled"] is True
+    assert all("幫助詐欺" not in query for query in embedded_queries)
+    assert payload["retrieval"]["query_expansion"]["enabled"] is False
 
 
 def test_semantic_query_legal_expansion_is_off_by_default() -> None:
@@ -694,6 +730,118 @@ def test_external_scope_term_zero_hit_skips_structured_list() -> None:
     assert payload["retrieval"]["scope_probe"]["zero_terms"][0][
         "term"
     ] == "借款糾紛"
+    assert "語意" in payload["notice"]
+
+
+def test_scope_probe_year_only_uses_semantic_disclosure() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="2026年關於借款糾紛的見解",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+        ),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] != "keyword_list"
+    assert payload["retrieval"]["scope_probe"]["zero_terms"][0][
+        "term"
+    ] == "借款糾紛"
+    assert "語意" in payload["notice"]
+
+
+def test_scope_probe_year_only_hit_returns_keyword_list() -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        text = (
+            "臺灣臺北地方法院民事判決 114年度訴字第9號\n"
+            "原告主張兩造間有借款糾紛，被告屆期未清償。"
+        )
+        session.add(
+            JudgmentDocument(
+                jid="TPDV,114,訴,9,20260101,1",
+                jyear="114",
+                jcase="訴",
+                jno="9",
+                jdate="20260101",
+                court="臺灣臺北地方法院民事",
+                court_normalized="臺灣臺北地方法院",
+                title="返還借款",
+                full_text=text,
+                full_text_length=len(text),
+                content_hash="year-only-hit",
+                matched_laws=[],
+                matched_laws_text="",
+                citations=[],
+                citation_count=0,
+                source_archive="test.rar",
+            )
+        )
+        session.commit()
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="2026年借款糾紛案件有哪些",
+        settings=_settings(qdrant_url=""),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["retrieval_mode"] == "keyword_list"
+    assert payload["retrieval"]["total_matches"] == 1
+    assert payload["retrieval"]["query_filters"]["courts"] == []
+
+
+def test_scope_probe_zero_hit_does_not_call_llm(monkeypatch) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+
+    def fail_generate_answer(*args, **kwargs):
+        raise AssertionError("zero-hit scope probe must not call the LLM")
+
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer", fail_generate_answer
+    )
+    payload = answer_question(
+        session_factory=session_factory,
+        question="臺灣臺北地方法院2026年借款糾紛案件有哪些",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+            llm_url="http://llm.test",
+            llm_model="fake",
+        ),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["answer_source"] == "retrieval_list"
+    assert "語意" in payload["notice"]
+
+
+def test_scope_probe_too_large_discloses_and_uses_semantic() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="臺灣臺北地方法院2026年借款糾紛案件有哪些",
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+            rag_scope_probe_max_documents=1,
+        ),
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+    assert payload["retrieval"]["scope_probe"]["status"] == (
+        "scope_too_large"
+    )
+    assert "超過精確探測上限" in payload["notice"]
     assert "語意" in payload["notice"]
 
 
@@ -2268,6 +2416,61 @@ def test_generate_answer_streams_openai_sse(monkeypatch) -> None:
     assert calls[0][0] == "POST"
     assert calls[0][1] == "http://x570:11436/v1/chat/completions"
     assert calls[0][2]["stream"] is True
+
+
+def test_generate_answer_rejects_actual_context_overflow(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class OverflowResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "overflow [1]"}}],
+                "usage": {"prompt_tokens": 5000, "completion_tokens": 4},
+            }
+
+    class FallbackResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "message": {"content": "fallback [1]"},
+                "prompt_eval_count": 100,
+                "eval_count": 4,
+            }
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if "x570" in url:
+            return OverflowResponse()
+        return FallbackResponse()
+
+    monkeypatch.setattr("judgment.rag.httpx.post", fake_post)
+    answer = generate_answer_with_model(
+        settings=_settings(
+            llm_url="http://x570:11436",
+            llm_api="openai",
+            llm_model="gemma3:4b",
+            llm_num_ctx=4096,
+            llm_fallback_url="http://127.0.0.1:11434",
+            llm_fallback_model="gemma3:4b",
+            llm_fallback_api="ollama",
+        ),
+        model="gemma3:4b",
+        question="測試問題",
+        contexts=_rag_context(),
+        timeout=10,
+    )
+    assert answer == "fallback [1]"
+    assert calls == [
+        "http://x570:11436/v1/chat/completions",
+        "http://127.0.0.1:11434/api/chat",
+    ]
 
 
 def test_generate_answer_falls_back_to_ollama_before_any_token(

@@ -83,7 +83,7 @@ class Settings:
     llm_fallback_api: str = "ollama"
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
-    llm_num_ctx: int = 4096
+    llm_num_ctx: int = 8192
     llm_num_predict: int = 384
     llm_keep_alive: str = "30m"
     rag_top_k: int = 4
@@ -93,6 +93,9 @@ class Settings:
     rag_lexical_rrf_weight: float = 2.0
     rag_legal_expansion_enabled: bool = False
     rag_legal_expansion_terms: int = 4
+    rag_scope_probe_max_documents: int = 50_000
+    rag_scope_probe_max_hits: int = 5_000
+    rag_scope_probe_timeout_ms: int = 10_000
     rag_rerank_enabled: bool = False
     rag_rerank_candidates: int = 30
     rag_law_first_judgment_limit: int = 1
@@ -280,7 +283,7 @@ class Settings:
             ),
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             llm_timeout_seconds=_env_float("LLM_TIMEOUT_SECONDS", 180.0),
-            llm_num_ctx=_env_int("LLM_NUM_CTX", 4096),
+            llm_num_ctx=_env_int("LLM_NUM_CTX", 8192),
             llm_num_predict=_env_int("LLM_NUM_PREDICT", 384),
             llm_keep_alive=os.getenv("LLM_KEEP_ALIVE", "30m").strip() or "30m",
             rag_top_k=_env_int("RAG_TOP_K", 4),
@@ -297,6 +300,15 @@ class Settings:
             ),
             rag_legal_expansion_terms=_env_int(
                 "RAG_LEGAL_EXPANSION_TERMS", 4
+            ),
+            rag_scope_probe_max_documents=_env_int(
+                "RAG_SCOPE_PROBE_MAX_DOCUMENTS", 50_000
+            ),
+            rag_scope_probe_max_hits=_env_int(
+                "RAG_SCOPE_PROBE_MAX_HITS", 5_000
+            ),
+            rag_scope_probe_timeout_ms=_env_int(
+                "RAG_SCOPE_PROBE_TIMEOUT_MS", 10_000
             ),
             rag_rerank_enabled=_env_bool("RAG_RERANK_ENABLED", False),
             rag_rerank_candidates=_env_int("RAG_RERANK_CANDIDATES", 30),

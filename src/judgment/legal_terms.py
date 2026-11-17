@@ -150,20 +150,25 @@ def detect_exact_terms(question: str) -> List[LegalTerm]:
     ]
 
 
-def detect_expansion_terms(question: str) -> List[LegalTerm]:
+def detect_expansion_terms(
+    question: str, *, include_disabled: bool = False
+) -> List[LegalTerm]:
     return [
         term
         for term in detect_legal_terms(question)
         if (
             term.mode in {MODE_EXPANSION, MODE_BOTH}
             and term.expansion_terms
-            and term.expansion_enabled
+            and (term.expansion_enabled or include_disabled)
         )
     ]
 
 
 def expand_semantic_query(
-    question: str, *, limit: int = 4
+    question: str,
+    *,
+    limit: int = 4,
+    include_disabled: bool = False,
 ) -> Tuple[str, dict]:
     """Append the highest-priority expansion terms to a semantic query.
 
@@ -173,7 +178,9 @@ def expand_semantic_query(
     """
 
     terms = sorted(
-        detect_expansion_terms(question),
+        detect_expansion_terms(
+            question, include_disabled=include_disabled
+        ),
         key=lambda term: (-term.priority, term.key),
     )
     selected: List[str] = []

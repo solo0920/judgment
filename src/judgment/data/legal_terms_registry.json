@@ -2472,14 +2472,14 @@
       "normalization_version": "remove-unicode-space-v2",
       "mode": "both",
       "priority": 80,
-      "expansion_enabled": true,
+      "expansion_enabled": false,
       "expansion_terms": [
         "非法經營銀行業務",
         "保證獲利",
         "投資方案",
         "銀行法第29條"
       ],
-      "expansion_decision": "proxy_approved",
+      "expansion_decision": "disabled",
       "review_status": "engineering_approved",
       "evidence": "",
       "positive_jids": [],
@@ -2500,9 +2500,11 @@
         "precision_at_10_delta": null,
         "ndcg_at_10_delta": null,
         "latency_p95_delta_ms": null,
-        "reviewed_at": null
+        "reviewed_at": null,
+        "runtime_disabled_at": "2026-11-17",
+        "runtime_disabled_reason": "proxy probe did not justify expansion"
       },
-      "notes": "Active curated term."
+      "notes": "Active curated term. Runtime expansion disabled 2026-11-17 pending exact-match proxy A/B; proxy history retained in expansion_evaluation."
     },
     {
       "id": "financial_term_143",
@@ -3425,14 +3427,14 @@
       "normalization_version": "remove-unicode-space-v2",
       "mode": "both",
       "priority": 95,
-      "expansion_enabled": true,
+      "expansion_enabled": false,
       "expansion_terms": [
         "證券交易法",
         "交割款",
         "證券經紀商",
         "集保"
       ],
-      "expansion_decision": "proxy_approved",
+      "expansion_decision": "disabled",
       "review_status": "engineering_approved",
       "evidence": "",
       "positive_jids": [
@@ -3461,9 +3463,11 @@
         "precision_at_10_delta": null,
         "ndcg_at_10_delta": null,
         "latency_p95_delta_ms": null,
-        "reviewed_at": null
+        "reviewed_at": null,
+        "runtime_disabled_at": "2026-11-17",
+        "runtime_disabled_reason": "proxy probe did not justify expansion"
       },
-      "notes": "Active curated term."
+      "notes": "Active curated term. Runtime expansion disabled 2026-11-17 pending exact-match proxy A/B; proxy history retained in expansion_evaluation."
     },
     {
       "id": "financial_term_019",
@@ -3662,14 +3666,14 @@
       "normalization_version": "remove-unicode-space-v2",
       "mode": "both",
       "priority": 80,
-      "expansion_enabled": true,
+      "expansion_enabled": false,
       "expansion_terms": [
         "公開說明書",
         "會計師",
         "財務報告",
         "證券交易法第20條"
       ],
-      "expansion_decision": "proxy_approved",
+      "expansion_decision": "disabled",
       "review_status": "engineering_approved",
       "evidence": "",
       "positive_jids": [],
@@ -3690,9 +3694,11 @@
         "precision_at_10_delta": null,
         "ndcg_at_10_delta": null,
         "latency_p95_delta_ms": null,
-        "reviewed_at": null
+        "reviewed_at": null,
+        "runtime_disabled_at": "2026-11-17",
+        "runtime_disabled_reason": "proxy probe did not justify expansion"
       },
-      "notes": "Active curated term."
+      "notes": "Active curated term. Runtime expansion disabled 2026-11-17 pending exact-match proxy A/B; proxy history retained in expansion_evaluation."
     },
     {
       "id": "financial_term_024",
@@ -3755,14 +3761,14 @@
       "normalization_version": "remove-unicode-space-v2",
       "mode": "both",
       "priority": 70,
-      "expansion_enabled": true,
+      "expansion_enabled": false,
       "expansion_terms": [
         "歸入權",
         "六個月內",
         "買進賣出",
         "證券交易法第157條"
       ],
-      "expansion_decision": "proxy_approved",
+      "expansion_decision": "disabled",
       "review_status": "engineering_approved",
       "evidence": "",
       "positive_jids": [],
@@ -3783,9 +3789,11 @@
         "precision_at_10_delta": null,
         "ndcg_at_10_delta": null,
         "latency_p95_delta_ms": null,
-        "reviewed_at": null
+        "reviewed_at": null,
+        "runtime_disabled_at": "2026-11-17",
+        "runtime_disabled_reason": "proxy probe did not justify expansion"
       },
-      "notes": "Active curated term."
+      "notes": "Active curated term. Runtime expansion disabled 2026-11-17 pending exact-match proxy A/B; proxy history retained in expansion_evaluation."
     },
     {
       "id": "financial_term_026",
@@ -8573,14 +8581,14 @@
       "normalization_version": "remove-unicode-space-v2",
       "mode": "both",
       "priority": 85,
-      "expansion_enabled": true,
+      "expansion_enabled": false,
       "expansion_terms": [
         "幫助詐欺",
         "車手",
         "洗錢",
         "提款"
       ],
-      "expansion_decision": "proxy_approved",
+      "expansion_decision": "disabled",
       "review_status": "engineering_approved",
       "evidence": "",
       "positive_jids": [],
@@ -8601,9 +8609,11 @@
         "precision_at_10_delta": null,
         "ndcg_at_10_delta": null,
         "latency_p95_delta_ms": null,
-        "reviewed_at": null
+        "reviewed_at": null,
+        "runtime_disabled_at": "2026-11-17",
+        "runtime_disabled_reason": "proxy probe did not justify expansion"
       },
-      "notes": "Active curated term."
+      "notes": "Active curated term. Runtime expansion disabled 2026-11-17 pending exact-match proxy A/B; proxy history retained in expansion_evaluation."
     },
     {
       "id": "financial_term_058",
