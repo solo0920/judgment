@@ -257,6 +257,14 @@ start_reranker() {
   echo "Reranker：${health_url}"
 }
 
+security_listener_gate() {
+  if [[ "${SKIP_LISTENER_CHECK:-0}" == "1" ]]; then
+    echo "WARNING: SKIP_LISTENER_CHECK=1 — listener security gate bypassed." >&2
+    return 0
+  fi
+  bash scripts/security_listener_check.sh
+}
+
 if [[ "${JUDGMENT_SKIP_DOCKER:-0}" == "1" ]]; then
   echo "略過 Docker 啟動（JUDGMENT_SKIP_DOCKER=1）。"
 else
@@ -318,7 +326,7 @@ else
 fi
 
 # Do not start the web console with a known non-loopback Judgment listener.
-if ! bash scripts/security_listener_check.sh; then
+if ! security_listener_gate; then
   echo "SECURITY: listener check failed; refusing to start web." >&2
   exit 1
 fi
@@ -523,7 +531,7 @@ fi
 
 # Check again after web/reranker startup; this is a loud warning rather than
 # tearing down an already-running service.
-if ! bash scripts/security_listener_check.sh; then
+if ! security_listener_gate; then
   echo "SECURITY WARNING: a Judgment-related listener is not loopback-only." >&2
 fi
 

@@ -1072,6 +1072,14 @@ bash scripts/security_listener_check.sh
 
 預期 `OK: Judgment-related listeners are loopback-only`；有非 loopback 的 Judgment／AI／DB port（含 `*:`／`[::]:`）會 FAIL。
 
+緊急誤判時可刻意覆寫，但會在啟動日誌留下 warning：
+
+```bash
+SKIP_LISTENER_CHECK=1 bash up.sh
+```
+
+x570 網路隔離可從 MBP 以 `scripts/x570_apply_network_isolation.sh` 執行；它會要求管理 IP／MBP IP、二次確認與 sudo，並在套用後提示第二台設備與外網驗證。
+
 需要 Cloudflare Pages 或其他靜態主機時，把實際網址加入 `CORS_ALLOW_ORIGINS`，例如：
 
 ```bash
