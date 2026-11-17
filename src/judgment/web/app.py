@@ -11,6 +11,7 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .. import __version__
+from ..admission import RagAdmission, RagBusy
 from ..config import Settings
 from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
@@ -692,6 +694,13 @@ def create_app(
         warm_task: Optional[asyncio.Task] = None
         coverage_task: Optional[asyncio.Task] = None
         rerank_task: Optional[asyncio.Task] = None
+        rag_executor = ThreadPoolExecutor(
+            max_workers=max(
+                1, int(app.state.settings.rag_stream_executor_workers)
+            ),
+            thread_name_prefix="rag-stream",
+        )
+        app.state.rag_executor = rag_executor
         try:
             server_ctx = await asyncio.to_thread(
                 fetch_context_window,
@@ -860,6 +869,8 @@ def create_app(
                         await task
                     except asyncio.CancelledError:
                         pass
+            rag_executor.shutdown(wait=False, cancel_futures=True)
+            app.state.rag_executor = None
             await app.state.processing_event_server.stop()
             await app.state.event_broker.close()
             if engine is not None:
@@ -888,6 +899,13 @@ def create_app(
         "coverage_warmed": False,
         "detail": "starting",
     }
+    app.state.rag_admission = RagAdmission(
+        max_concurrency=settings.rag_admission_max_concurrency,
+        max_queue=settings.rag_admission_max_queue,
+        eta_limit_seconds=settings.rag_admission_eta_limit_seconds,
+        initial_service_seconds=settings.rag_admission_initial_service_seconds,
+    )
+    app.state.rag_executor = None
     app.state.processing_manager = ProcessingManager(
         settings=settings,
         session_factory=session_factory,
@@ -1169,6 +1187,7 @@ def create_app(
             "status": "ok" if readiness.get("ready") else "starting",
             "version": __version__,
             "readiness": readiness,
+            "admission": app.state.rag_admission.snapshot,
         }
         if not readiness.get("ready"):
             return JSONResponse(status_code=503, content=payload)
@@ -2696,28 +2715,95 @@ def create_app(
             )
 
         async def event_stream():
-            yield sse(
-                "step",
-                {
-                    "type": "segment_start",
-                    "segment": {
-                        "seq": 0,
-                        "parent_seq": None,
-                        "depth": 0,
-                        "name": "http.request",
-                        "module": "judgment.web.app",
-                        "function": "rag_query_stream",
-                        "params": {"question_length": len(request.question)},
-                        "started_at": datetime.now(timezone.utc).isoformat(),
-                        "offset_ms": 0,
-                        "duration_ms": 0,
-                        "status": "running",
-                        "error": None,
-                    },
-                },
-            )
-            task = asyncio.create_task(asyncio.to_thread(run_query))
+            admission = app.state.rag_admission
+            request_started = time.perf_counter()
+            ticket = None
+            task: Optional[asyncio.Task] = None
+            processing_started = request_started
             try:
+                try:
+                    ticket = await admission.acquire()
+                except RagBusy as exc:
+                    busy_payload = {
+                        "status": "degraded",
+                        "answer": (
+                            "目前系統忙碌，預估約 "
+                            f"{exc.eta_s:.1f} 秒後可再試。"
+                        ),
+                        "notice": (
+                            "請求未進入檢索，沒有產生引用；"
+                            "請稍後再送出。"
+                        ),
+                        "citations": [],
+                        "judgments": [],
+                        "law_sources": [],
+                        "matched_terms": [],
+                        "answer_source": "admission",
+                        "degraded_reason": "busy",
+                        "queue_position": exc.position,
+                        "eta_s": round(exc.eta_s, 2),
+                        "retrieval": {"status": "busy"},
+                        "duration_ms": round(
+                            (time.perf_counter() - request_started) * 1000,
+                            1,
+                        ),
+                    }
+                    yield sse(
+                        "degraded",
+                        {
+                            "type": "degraded",
+                            "reason": "busy",
+                            "position": exc.position,
+                            "eta_s": round(exc.eta_s, 2),
+                            "message": busy_payload["answer"],
+                        },
+                    )
+                    yield sse("result", busy_payload)
+                    return
+                processing_started = time.perf_counter()
+                if ticket.waited:
+                    yield sse(
+                        "queued",
+                        {
+                            "type": "queued",
+                            "position": ticket.position,
+                            "eta_s": round(ticket.eta_s, 2),
+                            "queue_wait_ms": round(
+                                (processing_started - request_started)
+                                * 1000,
+                                1,
+                            ),
+                        },
+                    )
+                yield sse(
+                    "step",
+                    {
+                        "type": "segment_start",
+                        "segment": {
+                            "seq": 0,
+                            "parent_seq": None,
+                            "depth": 0,
+                            "name": "http.request",
+                            "module": "judgment.web.app",
+                            "function": "rag_query_stream",
+                            "params": {"question_length": len(request.question)},
+                            "started_at": datetime.now(
+                                timezone.utc
+                            ).isoformat(),
+                            "offset_ms": 0,
+                            "duration_ms": 0,
+                            "status": "running",
+                            "error": None,
+                        },
+                    },
+                )
+                executor = app.state.rag_executor
+                if executor is not None:
+                    task = loop.run_in_executor(executor, run_query)
+                else:
+                    task = asyncio.create_task(
+                        asyncio.to_thread(run_query)
+                    )
                 while True:
                     kind, payload = await queue.get()
                     if kind == "step":
@@ -2735,10 +2821,15 @@ def create_app(
                         yield sse("error", payload)
                         break
             finally:
-                try:
-                    await task
-                except Exception:
-                    logger.exception("RAG stream worker failed")
+                if task is not None:
+                    try:
+                        await task
+                    except Exception:
+                        logger.exception("RAG stream worker failed")
+                if ticket is not None:
+                    await admission.release(
+                        elapsed_s=time.perf_counter() - processing_started
+                    )
 
         return StreamingResponse(
             event_stream(),

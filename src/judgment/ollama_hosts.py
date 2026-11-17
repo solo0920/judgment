@@ -683,10 +683,10 @@ def runtime_settings(settings: Settings, session_factory) -> Settings:
             changes["llm_model"] = host.chat_model
             changes["llm_api"] = OLLAMA_API
         elif host.chat_model and openai_llm_primary:
-            if not settings.llm_fallback_url:
-                changes["llm_fallback_url"] = host.base_url
-                changes["llm_fallback_model"] = host.chat_model
-                changes["llm_fallback_api"] = OLLAMA_API
+            # Do not auto-promote an Ollama host to the LLM fallback lane.
+            # Ollama must never be the runtime fallback; an explicit
+            # LLM_FALLBACK_* configuration is required instead.
+            pass
         if host.embedding_model and not openai_embedding_primary:
             changes["embedding_model"] = host.embedding_model
 
@@ -700,11 +700,7 @@ def runtime_settings(settings: Settings, session_factory) -> Settings:
             changes["llm_url"] = preferred_url
             changes["llm_model"] = preferred_model
             changes["llm_api"] = OLLAMA_API
-        elif preferred_url != settings.llm_url and not (
-            changes.get("llm_fallback_url") or settings.llm_fallback_url
-        ):
-            changes["llm_fallback_url"] = preferred_url
-            changes["llm_fallback_model"] = preferred_model
-            changes["llm_fallback_api"] = OLLAMA_API
+        # Do not auto-add an Ollama preference as the fallback for an
+        # OpenAI-compatible primary; explicit LLM_FALLBACK_* is required.
 
     return replace(settings, **changes) if changes else settings

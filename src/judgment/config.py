@@ -89,6 +89,7 @@ class Settings:
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
     llm_num_ctx: int = 8192
+    llm_max_concurrent: int = 4
     llm_num_predict: int = 384
     llm_keep_alive: str = "30m"
     rag_top_k: int = 4
@@ -96,6 +97,11 @@ class Settings:
     rag_max_context_chars: int = 4000
     rag_coverage_cache_ttl_seconds: float = 300.0
     rag_coverage_warmup_enabled: bool = True
+    rag_admission_max_concurrency: int = 12
+    rag_admission_max_queue: int = 8
+    rag_admission_eta_limit_seconds: float = 5.0
+    rag_admission_initial_service_seconds: float = 2.0
+    rag_stream_executor_workers: int = 12
     rag_lexical_rrf_enabled: bool = False
     rag_lexical_rrf_weight: float = 2.0
     rag_legal_expansion_enabled: bool = False
@@ -302,6 +308,7 @@ class Settings:
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             llm_timeout_seconds=_env_float("LLM_TIMEOUT_SECONDS", 180.0),
             llm_num_ctx=_env_int("LLM_NUM_CTX", 8192),
+            llm_max_concurrent=_env_int("LLM_MAX_CONCURRENT", 4),
             llm_num_predict=_env_int("LLM_NUM_PREDICT", 384),
             llm_keep_alive=os.getenv("LLM_KEEP_ALIVE", "30m").strip() or "30m",
             rag_top_k=_env_int("RAG_TOP_K", 4),
@@ -312,6 +319,21 @@ class Settings:
             ),
             rag_coverage_warmup_enabled=_env_bool(
                 "RAG_COVERAGE_WARMUP_ENABLED", True
+            ),
+            rag_admission_max_concurrency=_env_int(
+                "RAG_ADMISSION_MAX_CONCURRENCY", 12
+            ),
+            rag_admission_max_queue=_env_int(
+                "RAG_ADMISSION_MAX_QUEUE", 8
+            ),
+            rag_admission_eta_limit_seconds=_env_float(
+                "RAG_ADMISSION_ETA_LIMIT_SECONDS", 5.0
+            ),
+            rag_admission_initial_service_seconds=_env_float(
+                "RAG_ADMISSION_INITIAL_SERVICE_SECONDS", 2.0
+            ),
+            rag_stream_executor_workers=_env_int(
+                "RAG_STREAM_EXECUTOR_WORKERS", 12
             ),
             rag_lexical_rrf_enabled=_env_bool(
                 "RAG_LEXICAL_RRF_ENABLED", False

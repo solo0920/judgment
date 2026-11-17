@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -66,6 +67,28 @@ from .text_normalization import normalize_for_match, normalize_with_offsets
 from .vector_store import QdrantError, QdrantStore
 
 logger = logging.getLogger(__name__)
+
+_llm_gate_lock = threading.Lock()
+_llm_gate = None
+_llm_gate_limit: Optional[int] = None
+
+
+def _llm_gate_for(limit: int):
+    """Return the process-wide LLM generation semaphore.
+
+    Retrieval runs on its own worker; generation is capped so the shared
+    KV pool is not oversubscribed.  The gate is non-blocking at the call site
+    so a busy summary lane degrades to retrieval-only instead of holding a
+    worker thread.
+    """
+
+    global _llm_gate, _llm_gate_limit
+    target = max(1, int(limit))
+    with _llm_gate_lock:
+        if _llm_gate is None or _llm_gate_limit != target:
+            _llm_gate = threading.BoundedSemaphore(target)
+            _llm_gate_limit = target
+        return _llm_gate
 
 SYSTEM_PROMPT = (
     "你是法律資料檢索助理。只能根據下方提供的判決片段、法規與命令內容回答，"
@@ -3673,6 +3696,7 @@ def answer_question(
                 "rerank_degraded": rerank_degraded,
             }
         )
+    degraded_reason: Optional[str] = None
     if structured_judgment_list:
         answer = _judgment_list_answer(
             question,
@@ -3687,61 +3711,83 @@ def answer_question(
             "引用編號可對應下方判決。這不是法律意見。"
         )
     elif llm_configured:
-        answer: Optional[str] = None
-        last_error: Optional[Exception] = None
-        for strict in (False, True):
-            if strict and on_token is not None and on_token_reset is not None:
-                try:
-                    on_token_reset()
-                except Exception:
-                    logger.debug("LLM token reset callback failed", exc_info=True)
-            try:
-                candidate = _generate_answer(
-                    settings=settings,
-                    question=question,
-                    contexts=prompt_contexts,
-                    strict=strict,
-                    on_token=on_token,
-                )
-                if not _valid_citation_markers(
-                    candidate,
-                    citation_total,
-                    allowed_indexes=allowed_indexes,
-                ):
-                    raise RuntimeError("LLM 回答缺少有效引用標記")
-                answer = candidate
-                break
-            except Exception as exc:
-                last_error = exc
-        if answer is not None:
-            status = "operational"
-            if law_sources and citations:
-                notice = (
-                    "回答只根據檢索到的法規／命令與判決片段生成，"
-                    "引用編號可對應下方來源。這不是法律意見。"
-                )
-            elif law_sources:
-                notice = (
-                    "回答只根據法規資料庫中的法規／命令與條文生成，"
-                    "引用編號可對應下方來源。這不是法律意見。"
-                )
-            else:
-                notice = (
-                    "回答只根據檢索到的判決片段生成，引用編號可對應下方判決。"
-                    "這不是法律意見。"
-                )
-        else:
+        answer = None
+        last_error = None
+        gate = _llm_gate_for(settings.llm_max_concurrent)
+        if not gate.acquire(blocking=False):
             answer = _retrieval_answer(citations, law_sources)
             status = "retrieval_only"
+            degraded_reason = "llm_busy"
             notice = (
-                "LLM 無法產生可驗證的回答"
-                f"（{last_error.__class__.__name__ if last_error else 'Error'}: "
-                f"{last_error or '未知錯誤'}），"
-                "已改為只顯示檢索結果，不生成推測內容。"
+                "摘要服務忙碌，先顯示檢索結果；"
+                "請稍後再送出以取得 LLM 摘要。"
             )
+        else:
+            try:
+                for strict in (False, True):
+                    if (
+                        strict
+                        and on_token is not None
+                        and on_token_reset is not None
+                    ):
+                        try:
+                            on_token_reset()
+                        except Exception:
+                            logger.debug(
+                                "LLM token reset callback failed",
+                                exc_info=True,
+                            )
+                    try:
+                        candidate = _generate_answer(
+                            settings=settings,
+                            question=question,
+                            contexts=prompt_contexts,
+                            strict=strict,
+                            on_token=on_token,
+                        )
+                        if not _valid_citation_markers(
+                            candidate,
+                            citation_total,
+                            allowed_indexes=allowed_indexes,
+                        ):
+                            raise RuntimeError("LLM 回答缺少有效引用標記")
+                        answer = candidate
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                if answer is not None:
+                    status = "operational"
+                    if law_sources and citations:
+                        notice = (
+                            "回答只根據檢索到的法規／命令與判決片段生成，"
+                            "引用編號可對應下方來源。這不是法律意見。"
+                        )
+                    elif law_sources:
+                        notice = (
+                            "回答只根據法規資料庫中的法規／命令與條文生成，"
+                            "引用編號可對應下方來源。這不是法律意見。"
+                        )
+                    else:
+                        notice = (
+                            "回答只根據檢索到的判決片段生成，"
+                            "引用編號可對應下方判決。這不是法律意見。"
+                        )
+                else:
+                    answer = _retrieval_answer(citations, law_sources)
+                    status = "retrieval_only"
+                    degraded_reason = "llm_error"
+                    notice = (
+                        "LLM 無法產生可驗證的回答"
+                        f"（{last_error.__class__.__name__ if last_error else 'Error'}: "
+                        f"{last_error or '未知錯誤'}），"
+                        "已改為只顯示檢索結果，不生成推測內容。"
+                    )
+            finally:
+                gate.release()
     else:
         answer = _retrieval_answer(citations, law_sources)
         status = "retrieval_only"
+        degraded_reason = "llm_not_configured"
         notice = "LLM_URL／LLM_MODEL 未設定，只顯示檢索結果，不生成推測內容。"
 
     if scope_probe_payload:
@@ -3795,4 +3841,5 @@ def answer_question(
         "coverage": coverage,
         "duration_ms": _elapsed_ms(started),
         "rerank_degraded": rerank_degraded,
+        "degraded_reason": degraded_reason,
     }

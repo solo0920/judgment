@@ -1886,6 +1886,81 @@ def test_answer_question_marks_degraded_rerank(
     assert payload["retrieval"]["rerank"]["status"] == "degraded"
 
 
+def test_answer_question_degrades_when_llm_gate_is_busy(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+
+    class BusyGate:
+        def acquire(self, blocking: bool = False) -> bool:
+            return False
+
+        def release(self) -> None:
+            raise AssertionError("busy gate must not be released")
+
+    monkeypatch.setattr(
+        "judgment.rag._llm_gate_for", lambda limit: BusyGate()
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("LLM must not run while the gate is busy")
+        ),
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["status"] == "retrieval_only"
+    assert payload["degraded_reason"] == "llm_busy"
+    assert "摘要服務忙碌" in payload["notice"]
+
+
+def test_answer_question_marks_llm_error(monkeypatch, tmp_path: Path) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    monkeypatch.setattr(
+        "judgment.rag._generate_answer",
+        lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError("context size has been exceeded")
+        ),
+    )
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert payload["status"] == "retrieval_only"
+    assert payload["degraded_reason"] == "llm_error"
+    assert "context size has been exceeded" in payload["notice"]
+
+
 def test_answer_question_resets_tokens_before_strict_retry(
     monkeypatch, tmp_path: Path
 ) -> None:
