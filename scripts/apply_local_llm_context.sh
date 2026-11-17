@@ -58,10 +58,10 @@ tmux kill-session -t "${SESSION}" 2>/dev/null || true
   bash up.sh
 )
 
-echo "等待 http://127.0.0.1:${PORT}/api/status …"
+echo "等待 http://127.0.0.1:${PORT}/api/health …"
 ready=0
 for _ in $(seq 1 60); do
-  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/status" \
+  if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" \
     >/dev/null 2>&1; then
     ready=1
     break
