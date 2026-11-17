@@ -57,16 +57,18 @@ if ssh "${SSH_OPTS[@]}" "$HOST" "true" >/dev/null 2>&1; then
   for file in "${FILES[@]}"; do
     target="${HOST}:$(remote_target "$(basename "$file")")"
     echo "scp $file -> $target"
-    scp "${SSH_OPTS[@]}" "$file" "$target"
+    scp -p "${SSH_OPTS[@]}" "$file" "$target"
   done
+  ssh "${SSH_OPTS[@]}" "$HOST" "chmod +x '$(remote_target x570_service_audit.sh)'" >/dev/null 2>&1 || true
 
   echo
   echo "已複製到 ${HOST}:${REMOTE_DIR:-$HOME}/"
-  echo "在 x570 上執行："
+  echo "在 x570 上執行（用 bash，不要直接 sudo 路徑）："
   if [[ -n "$REMOTE_DIR" ]]; then
     echo "  cd ~/${REMOTE_DIR}"
   fi
   echo "  bash x570_service_audit.sh before"
+  echo "  # 需要 sudo 時：sudo bash x570_service_audit.sh verify"
   echo
   echo "若要從 MBP 直接跑 before（需要 sudo TTY）："
   echo "  bash scripts/scp_x570_audit.sh --run-before"

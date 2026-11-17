@@ -11,7 +11,7 @@
 在 x570 本機終端機：
 
 ```bash
-bash scripts/x570_service_audit.sh before
+bash ~/judgment-audit/x570_service_audit.sh before
 ```
 
 會輸出到 `~/judgment-x570-before-<timestamp>.txt`，內容包含：
@@ -53,7 +53,7 @@ slot_ctx 6144
 ## 3. 套用 chat context（可 rollback）
 
 ```bash
-sudo bash scripts/x570_service_audit.sh apply-chat-ctx 24576
+sudo bash ~/judgment-audit/x570_service_audit.sh apply-chat-ctx 24576
 ```
 
 腳本會：
@@ -67,7 +67,7 @@ sudo bash scripts/x570_service_audit.sh apply-chat-ctx 24576
 如果 chat 起不來，腳本會留下 backup 與 rollback 指令。手動 rollback：
 
 ```bash
-sudo bash scripts/x570_service_audit.sh rollback
+sudo bash ~/judgment-audit/x570_service_audit.sh rollback
 ```
 
 **不要在这个阶段改 embedding／reranker 的 `-np`。** 它們目前是預設 4 slots；先量測 chat 24576 的 VRAM 與 4×Q5，再決定是否值得降成 2。
@@ -100,7 +100,7 @@ sudo reboot
 重開後在 x570 本機：
 
 ```bash
-bash scripts/x570_service_audit.sh verify
+bash ~/judgment-audit/x570_service_audit.sh verify
 ```
 
 確認：
