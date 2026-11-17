@@ -88,7 +88,7 @@ RestartSec=3
 - `nvidia-smi`：RTX 5070 Ti，16303 MiB total、5408 MiB used、10431 MiB free、44°C、48% util。
 - `ollama` systemd service 已 inactive；GPU 上只有三個 llama-server。
 - 20 mixed：20/20 operational、0 error；40 mixed：32 operational／8 retrieval_only（8 llm_busy）、0 error。
-- 重開機後 4×Q5 仍 4/4 HTTP 200、finish stop；20 mixed 仍 20/20 operational（first_partial p95 3,572 ms）。
+- 重開機後 4×Q5 仍 4/4 HTTP 200、finish stop；20 mixed 20/20 operational（first_partial p95 3,572 ms）；40 mixed 32 operational／8 retrieval_only，first_partial p95 6,556 ms。
 - UFW active；規則細節不寫進 repo，請在 x570 本機確認只允許必要來源與 port。
 - 請在 x570 上跑（或提供 SSH 後我來跑）：
 

@@ -144,6 +144,14 @@
       "first_partial_p95_ms": 3571.9,
       "done_p95_ms": 17048.1,
       "errors": 0
+    },
+    "postboot_forty_mixed": {
+      "operational": 32,
+      "retrieval_only": 8,
+      "llm_busy": 8,
+      "first_partial_p95_ms": 6555.6,
+      "done_p95_ms": 19092.6,
+      "errors": 0
     }
   },
   "x570_serial_mode": {
