@@ -67,6 +67,56 @@ error 0
 
 40 mixed first_partial p95 6.28 秒，未達 4 秒。
 
+## LLM 有界佇列（後續）
+
+`llm_admission` 從「取不到就立刻拒絕」改成：
+
+```text
+4 並行、8 佇列、ETA 上限 20 秒、絕對等待期限 20 秒
+```
+
+- 取不到時送 `queued {lane: summary, position, eta_s}`；前端顯示「摘要排隊中：前面 N 位，預估約 X 秒」。
+- 等待超過 20 秒或佇列已滿才 `llm_busy`。
+- 對 20／40 mixed 重測：
+
+| 情境 | 檢索結果 | first_partial p95 | 摘要 | 忙碌 | done p95 |
+|---|---:|---:|---:|---:|---:|
+| 20 mixed | 20／20 | 2,758 ms | 7／10 | 3 | 31,487 ms |
+| 40 mixed | 40／40 | 5,925 ms | 8／20 | 12 | 14,667 ms |
+
+摘要比例由 4/10、4/20 提升到 7/10、8/20；沒有到 12/20，因為 MBP 每個摘要約 15–18 秒，20 秒期限只能容納約兩輪。若把期限放寬到 40–45 秒，摘要比例會上升，但 done 尾會更長；目前保留 20 秒作為 demo 的等待上限。
+
+## ASGI accept → handler 量測
+
+新增 middleware 記錄：
+
+```text
+asgi_to_handler_ms
+handler_to_flow_ms
+asgi_to_flow_ms
+```
+
+20 mixed：
+
+```text
+asgi_to_handler p50 51／p95 152 ms
+handler_to_flow p50 93／p95 1,212 ms
+asgi_to_flow p50 145／p95 1,367 ms
+```
+
+判讀：
+
+- ASGI accept → handler p95 152 ms，**伺服器 accept／路由不是 2.7 秒缺口的主因**。
+- 缺口主要在 client/TCP 連線，以及 handler → flow 的 event-loop 排程（p95 1.2 秒）。
+- 多行程 client 已把 client_request p95 從 5,218 降到 3,944 ms；正式架構經 Cloudflare 少量長連線時，這個數字可能再不同，需 tunnel 後從外網重測。
+
+## MBP 穩定性
+
+- 加 supervisor 後，依序啟動 MBP server → 確認 `/health` 200 → 啟動 judgment-web，20／40 mixed 都能完成，server 沒有退出。
+- `log show` 沒有 jetsam 輸出，memory_pressure 當時 free 78%；退出根因仍未確認。
+- supervisor 會記錄退出碼；斷路器會在連續 2 次 connection error 後開啟 30 秒。
+- 仍需 30 分鐘、70% 負載的長時間測試，才算完成穩定性驗證。
+
 ## 2.7 秒缺口：多行程重測
 
 用 4 個 process × 10 threads 重跑 40 mixed：
@@ -81,8 +131,9 @@ error 0
 判讀：
 
 - 多行程把 `client.request_ms` p95 從 5,218 降到 3,944 ms，客戶端 GIL／執行緒排程確實貢獻了一部分。
-- 但 first_partial p95 仍有 5,574 ms，缺口沒有消失；殘餘在伺服器端的 accept／event-loop／連線排隊，不能在應用層用 admission 解釋完。
-- 下一步要量 uvicorn accept backlog、`--limit-concurrency`、keep-alive／連線重用，或把 Cloudflare 放在前面；目前不能斷言 2.7 秒全是 client 或全是 server。
+- 但 first_partial p95 仍有 5,574 ms，缺口沒有消失。
+- 追加 ASGI 量測後，accept → handler p95 只有 152 ms，所以不是單純的 uvicorn accept backlog；殘餘主要是 client/TCP 連線與 handler → flow 的 event-loop 排程。
+- 下一步要用 Cloudflare tunnel 後的外部連線重測，並比較 keep-alive／連線重用；目前不能斷言全是 client 或全是 server。
 
 ## MBP 退出調查
 

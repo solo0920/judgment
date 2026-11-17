@@ -60,5 +60,56 @@
     },
     "errors": 0,
     "note": "4 processes x 10 threads; gap persists (first_partial p95 5.57s, client_request p95 3.94s)."
+  },
+  "llm_queue": {
+    "config": {
+      "max_concurrency": 4,
+      "max_queue": 8,
+      "wait_deadline_seconds": 20.0,
+      "initial_service_seconds": 8.0
+    },
+    "twenty_mixed": {
+      "first_partial_p95_ms": 2758.3,
+      "done_p95_ms": 31487.1,
+      "statuses": {
+        "operational": 17,
+        "retrieval_only": 3
+      },
+      "summaries": 7,
+      "summary_total": 10,
+      "errors": 0
+    },
+    "forty_mixed": {
+      "first_partial_p95_ms": 5925.0,
+      "done_p95_ms": 14667.2,
+      "statuses": {
+        "operational": 28,
+        "retrieval_only": 12
+      },
+      "summaries": 8,
+      "summary_total": 20,
+      "llm_busy": 12,
+      "errors": 0,
+      "queued": 4
+    },
+    "note": "MBP service ~15-18s; 20s deadline limits summaries to 7/10 and 8/20. Raising deadline would increase summaries but lengthen done."
+  },
+  "asgi_20": {
+    "asgi_to_handler_ms": {
+      "p50": 51.4,
+      "p95": 152.3,
+      "max": 155.0
+    },
+    "handler_to_flow_ms": {
+      "p50": 93.3,
+      "p95": 1211.6,
+      "max": 1488.6
+    },
+    "asgi_to_flow_ms": {
+      "p50": 144.5,
+      "p95": 1366.6,
+      "max": 1640.9
+    },
+    "note": "ASGI accept->handler p95 <200ms; residual gap is client/TCP plus handler->flow scheduling."
   }
 }
