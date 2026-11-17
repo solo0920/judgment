@@ -455,5 +455,24 @@
     },
     "errors": 0,
     "note": "x570 context exceeded now degrades immediately (llm_error); no citation retry."
+  },
+  "forty_mixed_stream_after_fix": {
+    "retrieval_results": 40,
+    "retrieval_ratio": 1.0,
+    "first_partial_p50_ms": 5477.8,
+    "first_partial_p95_ms": 5553.7,
+    "first_partial_max_ms": 6023.6,
+    "statuses": {
+      "operational": 20,
+      "retrieval_only": 20
+    },
+    "degraded_reasons": {
+      "llm_busy": 16,
+      "llm_error": 4
+    },
+    "llm_attempts": 4,
+    "retried_questions": 0,
+    "errors": 0,
+    "note": "x570 context exceeded; 4 LLM errors, 16 LLM busy; no citation retry."
   }
 }

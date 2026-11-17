@@ -125,6 +125,18 @@ operational 10／retrieval_only 10／error 0
 
 其中 retrieval_only 是 x570 context exceeded 後立即降級，不是 citation retry。先前同樣的 20 mixed 有 8/9 次 retry；現在是 0/8。
 
+### 3. 40 mixed stream（修正後）
+
+```text
+檢索結果 40/40（100%）
+first_partial p50 5,478／p95 5,554 ms
+statuses：operational 20／retrieval_only 20
+degraded_reason：llm_busy 16、llm_error 4
+LLM 嘗試 4、retry 0、error 0
+```
+
+40 個人都先看到檢索結果；20 個非 LLM 查詢 operational，20 個 LLM 查詢全部降級（4 個 context exceeded、16 個 llm_busy）。這是 x570 context 容量問題，不是 citation retry；在 `-c 24576 -np 4` 之前，摘要比例沒有代表性。
+
 ## 三、判定
 
 - Q5 的 `[19]`／`[17]`／`[15]` 是法條號，不是被裁掉的 context index；字母標籤是正確修正。
@@ -137,7 +149,7 @@ operational 10／retrieval_only 10／error 0
 - 27 題 benchmark 沒有 ground truth relevance label；`ground_truth_cases` 仍是 0，不能宣稱 Recall／nDCG。
 - 尚未做 sentence-level citation 檢查；`_valid_citation_markers` 仍只要求至少一個合法 marker。`invalid_marker_count`、`uncited_sentence_count` 尚未進 trace。
 - 同步與串流各有一份 strict 迴圈，尚未抽成同一個 helper。
-- 40 mixed 尚未在修正後重跑；x570 context exceeded 與 MBP test server 穩定性仍是容量問題。
+- 40 mixed 修正後已重跑：100% 檢索、first_partial p95 5.55 秒、摘要 0/20（4 llm_error、16 llm_busy）；未達 4 秒，且摘要容量仍 blocked。
 - x570 權限、`-c 24576 -np 4`、`nvidia-smi` 仍 blocked。
 - Registry 未觸碰：429 terms／10 active／419 candidates；candidate 未啟用；RAG 文字維持 14px。
 - 沒有 push；所有 commit 只在本機。
@@ -153,7 +165,8 @@ operational 10／retrieval_only 10／error 0
 
 ## 附錄
 
-- `rag-citation-retry-2026-11-17.json`／`.csv`：27 題 sync benchmark、20 mixed stream retry 統計。
+- `rag-citation-retry-2026-11-17.json`／`.csv`：27 題 sync benchmark、20／40 mixed stream retry 統計。
+- `rag-citation-review-2026-11-17.csv`：11 題 LLM 回答、完整引用來源與人工複核欄位；`q1_source_supports_claim`、`q2_uncited_fact_sentence` 尚待填寫。
 - `src/judgment/rag.py`：`_source_label_map`、`_map_letter_markers`、`_CitationMarkerMapper`、`CitationValidationError`、`_should_try_fallback`。
 - `tests/test_rag.py`：字母 prompt、marker 映射、token mapper、非 citation 錯誤不 retry、context overflow 不 fallback。
 - `src/judgment/web/app.py`：串流 strict 迴圈的分類與 `citation_invalid` 降級原因。

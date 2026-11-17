@@ -14,3 +14,12 @@ scenario,metric,value,notes
 20 mixed stream after fix,done_p50_ms,3221.4,two-phase; letter labels; no non-citation retry
 20 mixed stream after fix,done_p95_ms,4754.9,two-phase; letter labels; no non-citation retry
 20 mixed stream after fix,errors,0,two-phase; letter labels; no non-citation retry
+40 mixed stream after fix,retrieval_ratio,1.0,40/40
+40 mixed stream after fix,first_partial_p50_ms,5477.8,x570 context exceeded; no retry
+40 mixed stream after fix,first_partial_p95_ms,5553.7,x570 context exceeded; no retry
+40 mixed stream after fix,first_partial_max_ms,6023.6,x570 context exceeded; no retry
+40 mixed stream after fix,llm_attempts,4,x570 context exceeded; no retry
+40 mixed stream after fix,retried_questions,0,x570 context exceeded; no retry
+40 mixed stream after fix,errors,0,x570 context exceeded; no retry
+40 mixed stream after fix,statuses,"{""operational"": 20, ""retrieval_only"": 20}",
+40 mixed stream after fix,degraded_reasons,"{""llm_busy"": 16, ""llm_error"": 4}",
