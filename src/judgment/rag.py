@@ -166,7 +166,8 @@ SYSTEM_PROMPT = (
     "不得使用資料以外的知識，也不得創造案號、法院、日期或法條。"
     "引用條文時必須完整保留來源的條號，包括「之幾」與連字號，"
     "例如來源是第 157-1 條時不得寫成第 157 條。"
-    "每個結論後必須標註對應來源編號，例如 [1]；回答時要區分判決、法規與命令。"
+    "每個結論後必須標註對應來源標籤，例如 [A]；方括號內只能是來源標籤，"
+    "不得寫法條號；回答時要區分判決、法規與命令。"
     "若資料不足以回答，請直接說明「檢索到的資料不足以回答」，不要猜測。"
     "回答使用繁體中文，2 到 4 句，並提醒這不是法律意見。"
 )
@@ -1995,24 +1996,155 @@ def _guard_prompt_tokens(
         budget_meta["prompt_tokens_suspected_truncation"] = False
 
 
+class CitationValidationError(RuntimeError):
+    """Raised when a generated answer has no usable source markers."""
+
+
+def _should_try_fallback(exc: Exception) -> bool:
+    """Only connection failures may use the fallback provider.
+
+    HTTP 500, context overflow and timeouts are deterministic failures; trying
+    the fallback only doubles latency and GPU use.
+    """
+
+    return isinstance(
+        exc,
+        (httpx.ConnectError, httpx.ConnectTimeout, ConnectionError, OSError),
+    )
+
+
+def _source_label_map(
+    contexts: Sequence[Dict[str, Any]],
+) -> Dict[int, str]:
+    """Map numeric source indexes to letters for the LLM prompt."""
+
+    indexes: List[int] = []
+    for context in contexts:
+        try:
+            index = int(context.get("index") or 0)
+        except (TypeError, ValueError):
+            continue
+        if index and index not in indexes:
+            indexes.append(index)
+    return {
+        index: chr(ord("A") + position)
+        if position < 26
+        else str(index)
+        for position, index in enumerate(indexes)
+    }
+
+
+def _map_letter_markers(
+    answer: str, label_map: Dict[int, str]
+) -> str:
+    """Convert [A]/[A, B] source markers back to numeric [1]/[1, 2]."""
+
+    inverse = {
+        label.upper(): index
+        for index, label in label_map.items()
+        if label.isalpha()
+    }
+    if not inverse:
+        return answer
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        labels = [
+            part.strip().upper()
+            for part in re.split(r"[,，、]", raw)
+            if part.strip()
+        ]
+        if not labels or any(label not in inverse for label in labels):
+            return match.group(0)
+        return "[" + ",".join(str(inverse[label]) for label in labels) + "]"
+
+    return re.sub(
+        r"\[([A-Za-z](?:\s*[,，、]\s*[A-Za-z])*)\]",
+        replace,
+        str(answer or ""),
+    )
+
+
+class _CitationMarkerMapper:
+    """Map complete source markers in a token stream without losing text.
+
+    A marker can be split across SSE chunks (``[`` + ``A`` + ``]``), so an
+    incomplete bracket is buffered until it closes. Invalid or non-letter
+    brackets are emitted unchanged.
+    """
+
+    def __init__(self, label_map: Dict[int, str]) -> None:
+        self._inverse = {
+            label.upper(): index
+            for index, label in label_map.items()
+            if label.isalpha()
+        }
+        self._buffer = ""
+
+    def _map_inside(self, inside: str) -> Optional[str]:
+        labels = [
+            part.strip().upper()
+            for part in re.split(r"[,，、]", inside)
+            if part.strip()
+        ]
+        if not labels or any(label not in self._inverse for label in labels):
+            return None
+        return "[" + ",".join(
+            str(self._inverse[label]) for label in labels
+        ) + "]"
+
+    def feed(self, text: str) -> str:
+        self._buffer += str(text or "")
+        output: List[str] = []
+        while self._buffer:
+            start = self._buffer.find("[")
+            if start < 0:
+                output.append(self._buffer)
+                self._buffer = ""
+                break
+            output.append(self._buffer[:start])
+            rest = self._buffer[start:]
+            end = rest.find("]")
+            if end < 0:
+                self._buffer = rest
+                break
+            inside = rest[1:end]
+            mapped = self._map_inside(inside)
+            output.append(mapped if mapped is not None else f"[{inside}]")
+            self._buffer = rest[end + 1 :]
+        return "".join(output)
+
+    def flush(self) -> str:
+        text = self._buffer
+        self._buffer = ""
+        return text
+
+
 def _build_llm_prompt(
     *,
     question: str,
     contexts: Sequence[Dict[str, Any]],
     list_judgments: bool = False,
+    strict: bool = False,
 ) -> str:
+    labels = _source_label_map(contexts)
     blocks = []
     for context in contexts:
+        try:
+            index = int(context.get("index") or 0)
+        except (TypeError, ValueError):
+            index = 0
+        label = labels.get(index) or str(index)
         if context.get("kind") == "law":
             blocks.append(
-                f"[{context['index']}] 法規／命令來源"
-                f"（引用此法規時請標 [{context['index']}]）："
+                f"[{label}] 法規／命令來源"
+                f"（引用此法規時請標 [{label}]）："
                 f"{law_source_text(context)}"
             )
             continue
         laws = "、".join(context.get("matched_laws") or []) or "—"
         blocks.append(
-            f"[{context['index']}] 判決案號：{context['jid']}\n"
+            f"[{label}] 判決案號：{context['jid']}\n"
             f"法院：{context['court']}｜裁判日期：{context['jdate']}｜案由：{context['title']}\n"
             f"命中法規：{laws}\n片段：{context['text']}"
         )
@@ -2026,23 +2158,31 @@ def _build_llm_prompt(
             "使用者要求列出判決。請以判決來源為主，逐筆列出案號、法院、裁判日期與案由，"
             "並用一句話說明與問題的關聯；最多列出 8 筆。"
             "不得改答法規問題；若同時有法規來源，只能作為補充。"
-            "每個結論後標註對應的 [n]；不得虛構未提供的判決。"
+            "每個結論後標註對應的來源標籤，例如 [A]；不得虛構未提供的判決。"
             "使用繁體中文條列，最後提醒這不是法律意見。"
         )
     else:
         instruction = (
             "請直接回答問題，不要重複參考資料原文、案號清單或標題；"
-            "使用 2 到 3 句繁體中文，每個結論後標註對應的 [n]；"
-            "[n] 是參考資料來源編號，不是法律條號，條號請寫「第15條」。"
-            "引用法規或命令的內容時，必須使用該法規／命令區塊標示的來源編號，"
-            "不可改用判決編號或條號代替。"
+            "使用 2 到 3 句繁體中文，每個結論後標註對應的來源標籤，例如 [A]；"
+            "方括號內只能是來源標籤（A、B、C…），不是法律條號；"
+            "條號請寫「第15條」，不要寫成 [15]。"
+            "引用法規或命令的內容時，必須使用該法規／命令區塊標示的來源標籤，"
+            "不可改用判決標籤或條號代替。"
             "不要自行創造多個問題，並提醒這不是法律意見。"
         )
-    return (
+    prompt = (
         f"問題：{question}\n\n{heading}\n"
         + "\n\n".join(blocks)
         + f"\n\n{instruction}"
     )
+    if strict:
+        prompt += (
+            "\n\n重要：上一次回答缺少有效來源標籤。"
+            "這次每個結論後都必須加上對應的 [A]／[B]／[C] 標籤，"
+            "不得省略，也不得使用法條號或未提供的來源。"
+        )
+    return prompt
 
 
 def _llm_request_payload(
@@ -2060,6 +2200,7 @@ def _llm_request_payload(
         question=question,
         contexts=contexts,
         list_judgments=list_judgments,
+        strict=strict,
     )
     system_prompt = SYSTEM_PROMPT
     if list_judgments:
@@ -2072,11 +2213,6 @@ def _llm_request_payload(
             " 本次問題以法規／命令條文為主要依據；若參考資料包含法規或命令，"
             "必須優先整理並引用條文內容，判決僅作實務補充，不得以判決取代條文。"
             "若條文不足，請明確說明資料不足。"
-        )
-    if strict:
-        system_prompt += (
-            " 你上一次的回答缺少有效引用標記；這次每個結論後都必須加上 "
-            "對應的 [n]，不得省略，也不得使用未提供的來源。"
         )
     payload = chat_payload(
         api=api if api is not None else settings.llm_api,
@@ -2201,6 +2337,9 @@ def generate_answer_with_model(
                     _raise_for_llm_status(response)
                     payload = response.json()
                     answer = chat_content(provider.api, payload).strip()
+                    answer = _map_letter_markers(
+                        answer, _source_label_map(fitted_contexts)
+                    )
                     if not answer:
                         raise RuntimeError("LLM 回傳空回答")
                     usage = chat_usage(provider.api, payload)
@@ -2251,6 +2390,13 @@ def generate_answer_with_model(
                     return answer
 
                 chunks: List[str] = []
+                token_mapper = (
+                    _CitationMarkerMapper(
+                        _source_label_map(fitted_contexts)
+                    )
+                    if on_token is not None
+                    else None
+                )
                 first_token_at: Optional[float] = None
                 final_event: Dict[str, Any] = {}
                 with httpx.stream(
@@ -2284,12 +2430,30 @@ def generate_answer_with_model(
                         tokens_emitted = True
                         chunks.append(content)
                         try:
-                            on_token(content)
+                            mapped = (
+                                token_mapper.feed(content)
+                                if token_mapper is not None
+                                else content
+                            )
+                            if mapped:
+                                on_token(mapped)
                         except Exception:
                             logger.debug(
                                 "LLM token callback failed", exc_info=True
                             )
+                if token_mapper is not None:
+                    tail = token_mapper.flush()
+                    if tail:
+                        try:
+                            on_token(tail)
+                        except Exception:
+                            logger.debug(
+                                "LLM token flush failed", exc_info=True
+                            )
                 answer = "".join(chunks).strip()
+                answer = _map_letter_markers(
+                    answer, _source_label_map(fitted_contexts)
+                )
                 if not answer:
                     raise RuntimeError("LLM 回傳空回答")
                 usage = chat_usage(provider.api, final_event)
@@ -2340,7 +2504,7 @@ def generate_answer_with_model(
         except Exception as exc:  # noqa: BLE001 - fallback is intentional
             last_error = exc
             _llm_breaker_record(provider.base_url, provider.api, exc)
-            if tokens_emitted:
+            if tokens_emitted or not _should_try_fallback(exc):
                 raise
             errors.append(
                 f"{provider.role} ({provider.base_url}): "
@@ -2447,6 +2611,13 @@ async def generate_answer_with_model_async(
                                 f"{body[:300]}"
                             )
                         chunks: List[str] = []
+                        token_mapper = (
+                            _CitationMarkerMapper(
+                                _source_label_map(fitted_contexts)
+                            )
+                            if on_token is not None
+                            else None
+                        )
                         final_event: Dict[str, Any] = {}
                         async for line in response.aiter_lines():
                             if not line.strip():
@@ -2478,13 +2649,32 @@ async def generate_answer_with_model_async(
                             chunks.append(content)
                             if on_token is not None:
                                 try:
-                                    on_token(content)
+                                    mapped = (
+                                        token_mapper.feed(content)
+                                        if token_mapper is not None
+                                        else content
+                                    )
+                                    if mapped:
+                                        on_token(mapped)
                                 except Exception:
                                     logger.debug(
                                         "async LLM token callback failed",
                                         exc_info=True,
                                     )
+                        if token_mapper is not None:
+                            tail = token_mapper.flush()
+                            if tail:
+                                try:
+                                    on_token(tail)
+                                except Exception:
+                                    logger.debug(
+                                        "async LLM token flush failed",
+                                        exc_info=True,
+                                    )
                         answer = "".join(chunks).strip()
+                        answer = _map_letter_markers(
+                            answer, _source_label_map(fitted_contexts)
+                        )
                         if not answer:
                             raise RuntimeError("LLM 回傳空回答")
                         usage = chat_usage(provider.api, final_event)
@@ -2517,7 +2707,7 @@ async def generate_answer_with_model_async(
         except Exception as exc:  # noqa: BLE001 - fallback is intentional
             last_error = exc
             _llm_breaker_record(provider.base_url, provider.api, exc)
-            if tokens_emitted:
+            if tokens_emitted or not _should_try_fallback(exc):
                 raise
             errors.append(
                 f"{provider.role} ({provider.base_url}): "
@@ -4008,11 +4198,18 @@ def answer_question(
                             citation_total,
                             allowed_indexes=allowed_indexes,
                         ):
-                            raise RuntimeError("LLM 回答缺少有效引用標記")
+                            raise CitationValidationError(
+                                "LLM 回答缺少有效引用標記"
+                            )
                         answer = candidate
                         break
+                    except CitationValidationError as exc:
+                        last_error = exc
+                        if strict:
+                            break
                     except Exception as exc:
                         last_error = exc
+                        break
                 if answer is not None:
                     status = "operational"
                     if law_sources and citations:
@@ -4033,7 +4230,11 @@ def answer_question(
                 else:
                     answer = _retrieval_answer(citations, law_sources)
                     status = "retrieval_only"
-                    degraded_reason = "llm_error"
+                    degraded_reason = (
+                        "citation_invalid"
+                        if isinstance(last_error, CitationValidationError)
+                        else "llm_error"
+                    )
                     notice = (
                         "LLM 無法產生可驗證的回答"
                         f"（{last_error.__class__.__name__ if last_error else 'Error'}: "

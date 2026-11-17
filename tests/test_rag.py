@@ -26,6 +26,8 @@ from judgment.rag import (
     _raise_for_llm_status,
     _judgment_list_answer,
     _llm_request_payload,
+    _map_letter_markers,
+    _CitationMarkerMapper,
     _search_legal_articles,
     _valid_citation_markers,
     answer_question,
@@ -2027,6 +2029,39 @@ def test_answer_question_resets_tokens_before_strict_retry(
     assert payload["answer"] == "正確回答 [1]"
 
 
+def test_answer_question_does_not_retry_non_citation_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    settings = _settings(
+        law_data_dir=tmp_path,
+        qdrant_url="http://qdrant.test",
+        embedding_url="http://ollama.test",
+        llm_url="http://ollama.test",
+        llm_model="test-model",
+    )
+    calls = {"count": 0}
+
+    def fake_generate(**kwargs):
+        calls["count"] += 1
+        raise RuntimeError("Context size has been exceeded.")
+
+    monkeypatch.setattr("judgment.rag._generate_answer", fake_generate)
+    payload = answer_question(
+        session_factory=session_factory,
+        question="銀行法對於吸收存款與授信有哪些限制？",
+        settings=settings,
+        store=FakeStore(),
+        embedder=FakeEmbedder(),
+    )
+
+    assert calls["count"] == 1
+    assert payload["status"] == "retrieval_only"
+    assert payload["degraded_reason"] == "llm_error"
+
+
 def test_insurance_responsibility_framework(monkeypatch, tmp_path: Path) -> None:
     session_factory = _session_factory()
     _seed_laws(session_factory)
@@ -2746,6 +2781,34 @@ def test_generate_answer_uses_openai_chat_completions(monkeypatch) -> None:
     assert "options" not in payload
 
 
+def test_generate_answer_maps_letter_markers_to_numeric(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "依法規及判決 [A]。"}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 4},
+            }
+
+    monkeypatch.setattr(
+        "judgment.rag.httpx.post", lambda *args, **kwargs: FakeResponse()
+    )
+    answer = generate_answer_with_model(
+        settings=_settings(
+            llm_url="http://x570:11436",
+            llm_api="openai",
+            llm_model="gemma3:4b",
+        ),
+        model="gemma3:4b",
+        question="測試問題",
+        contexts=_rag_context(),
+        timeout=10,
+    )
+    assert answer == "依法規及判決 [1]。"
+
+
 def test_generate_answer_streams_openai_sse(monkeypatch) -> None:
     class FakeStream:
         def __enter__(self):
@@ -2854,44 +2917,28 @@ def test_generate_answer_rejects_actual_context_overflow(
                 "usage": {"prompt_tokens": 5000, "completion_tokens": 4},
             }
 
-    class FallbackResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "message": {"content": "fallback [1]"},
-                "prompt_eval_count": 100,
-                "eval_count": 4,
-            }
-
     def fake_post(url, **kwargs):
         calls.append(url)
-        if "x570" in url:
-            return OverflowResponse()
-        return FallbackResponse()
+        return OverflowResponse()
 
     monkeypatch.setattr("judgment.rag.httpx.post", fake_post)
-    answer = generate_answer_with_model(
-        settings=_settings(
-            llm_url="http://x570:11436",
-            llm_api="openai",
-            llm_model="gemma3:4b",
-            llm_num_ctx=4096,
-            llm_fallback_url="http://127.0.0.1:11434",
-            llm_fallback_model="gemma3:4b",
-            llm_fallback_api="ollama",
-        ),
-        model="gemma3:4b",
-        question="測試問題",
-        contexts=_rag_context(),
-        timeout=10,
-    )
-    assert answer == "fallback [1]"
-    assert calls == [
-        "http://x570:11436/v1/chat/completions",
-        "http://127.0.0.1:11434/api/chat",
-    ]
+    with pytest.raises(RuntimeError, match="exceeded context window"):
+        generate_answer_with_model(
+            settings=_settings(
+                llm_url="http://x570:11436",
+                llm_api="openai",
+                llm_model="gemma3:4b",
+                llm_num_ctx=4096,
+                llm_fallback_url="http://127.0.0.1:11434",
+                llm_fallback_model="gemma3:4b",
+                llm_fallback_api="ollama",
+            ),
+            model="gemma3:4b",
+            question="測試問題",
+            contexts=_rag_context(),
+            timeout=10,
+        )
+    assert calls == ["http://x570:11436/v1/chat/completions"]
 
 
 def test_generate_answer_falls_back_to_ollama_before_any_token(
@@ -2945,6 +2992,71 @@ def test_is_judgment_list_question_detects_judgment_queries() -> None:
     assert not is_judgment_list_question("詐騙判決的法律責任有哪些")
     assert not is_judgment_list_question("違約交割有那些罰則?")
     assert not is_judgment_list_question("原告如何請求返還借款?")
+
+
+def test_citation_marker_mapper_handles_split_tokens() -> None:
+    mapper = _CitationMarkerMapper({1: "A", 2: "B"})
+    assert mapper.feed("依[") == "依"
+    assert mapper.feed("A") == ""
+    assert mapper.feed("]及[") == "[1]及"
+    assert mapper.feed("B]") == "[2]"
+    assert mapper.flush() == ""
+
+    invalid = _CitationMarkerMapper({1: "A"})
+    assert invalid.feed("銀行法第[19]條") == "銀行法第[19]條"
+
+
+def test_llm_prompt_uses_letter_labels_and_strict_at_end() -> None:
+    payload, _ = _llm_request_payload(
+        settings=_settings(llm_keep_alive="30m"),
+        model="gemma3:4b",
+        question="銀行法對吸收存款有哪些限制？",
+        contexts=[
+            {
+                "kind": "law",
+                "index": 1,
+                "law_name": "銀行法",
+                "source_type": "law",
+                "source_label": "法規",
+                "law_level": "法律",
+                "article_count": 1,
+                "articles": [{"article_no": "第29條", "article_content": "非銀行不得經營收受存款業務。"}],
+            },
+            {
+                "kind": "judgment",
+                "index": 2,
+                "jid": "TPDV,114,訴,1,20260101,1",
+                "court": "臺灣臺北地方法院",
+                "jdate": "20260101",
+                "title": "銀行法",
+                "matched_laws": ["銀行法"],
+                "text": "被告違法吸收存款。",
+            },
+        ],
+        strict=True,
+        stream=False,
+    )
+    system_prompt = payload["messages"][0]["content"]
+    user_prompt = payload["messages"][1]["content"]
+    assert "[A] 法規／命令來源" in user_prompt
+    assert "[B] 判決案號" in user_prompt
+    assert "方括號內只能是來源標籤" in user_prompt
+    assert "上一次回答缺少有效來源標籤" in user_prompt
+    assert "上一次回答" not in system_prompt
+    assert user_prompt.rstrip().endswith("未提供的來源。")
+
+
+def test_map_letter_markers_to_numeric_indexes() -> None:
+    labels = {1: "A", 2: "B", 3: "C"}
+    assert (
+        _map_letter_markers("依[A]及[B, C]辦理。", labels)
+        == "依[1]及[2,3]辦理。"
+    )
+    assert (
+        _map_letter_markers("依[A][B]。", labels)
+        == "依[1][2]。"
+    )
+    assert _map_letter_markers("銀行法第[19]條。", labels) == "銀行法第[19]條。"
 
 
 def test_llm_prompt_for_judgment_list_requests_case_details() -> None:

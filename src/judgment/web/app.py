@@ -120,6 +120,7 @@ from ..rag import (
     _fit_contexts_to_prompt_budget,
     _valid_citation_markers,
     answer_question,
+    CitationValidationError,
     generate_answer_with_model_async,
     llm_circuit_snapshot,
     warm_index_coverage,
@@ -3126,13 +3127,18 @@ def create_app(
                             int(state.get("citation_total") or 0),
                             allowed_indexes=allowed_indexes,
                         ):
-                            raise RuntimeError(
+                            raise CitationValidationError(
                                 "LLM 回答缺少有效引用標記"
                             )
                         answer = candidate
                         break
+                    except CitationValidationError as exc:
+                        last_error = exc
+                        if strict:
+                            break
                     except Exception as exc:  # noqa: BLE001
                         last_error = exc
+                        break
                 if answer is not None:
                     result = _llm_final_result(
                         retrieval_result,
@@ -3149,7 +3155,13 @@ def create_app(
                         state,
                         live_settings,
                         started_perf,
-                        degraded_reason="llm_error",
+                        degraded_reason=(
+                            "citation_invalid"
+                            if isinstance(
+                                last_error, CitationValidationError
+                            )
+                            else "llm_error"
+                        ),
                         notice=(
                             "LLM 無法產生可驗證的回答"
                             f"（{last_error.__class__.__name__ if last_error else 'Error'}: "
