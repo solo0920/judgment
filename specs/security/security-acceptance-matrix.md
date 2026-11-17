@@ -2,7 +2,7 @@
 
 - 日期：2026-11-17
 - 原則：程式有防護不等於部署已驗收；每一列都要有可重現證據
-- 目前唯一已確認的真實暴露：**x570 四個 AI 服務的區網存取**。Cloudflare tunnel 目前未開啟，因此 CF 的 origin／service-token 項目是啟動 tunnel 前的門檻，不是現在的公開暴露。
+- 目前唯一已確認的真實暴露：**x570 四個 AI 服務的區網存取**。2026-11-17 已套用 UFW：移除 11434 與 SMB 139/445，11435–11437 只允許 `tailscale0`。MBP 端 LAN 拒絕與 Tailscale allow 已驗證；第二台設備與套用後重開機持續性仍待測。Cloudflare tunnel 目前未開啟，因此 CF 的 origin／service-token 項目是啟動 tunnel 前的門檻，不是現在的公開暴露。
 - 狀態定義：
   - `not_started`：尚未實作或尚未開始驗證
   - `implemented`：程式／設定已存在，尚無部署實測
@@ -13,8 +13,8 @@
 
 | ID | 攻擊面 | 驗收條件 | 必要證據 | 狀態 | 負責角色 |
 |---|---|---|---|---|---|
-| NET-01 | x570 Ollama 11434／AI 服務 | 未授權區網與公網無法存取 | 防火牆規則 + 第二台設備 + 手機行動網路失敗紀錄 | `not_started` | Infra／x570 sudo |
-| NET-02 | x570 llama-server 11435／11436／11437 | 只允許應用主機／管理設備 | 同上；若加 `--api-key`，應用端與 health check 均帶 Bearer | `not_started` | Infra／工程 |
+| NET-01 | x570 Ollama 11434／AI 服務 | 未授權區網與公網無法存取 | 防火牆規則 + 第二台設備 + 手機行動網路失敗紀錄 | `implemented`（MBP LAN 拒絕已驗證；外部待測） | Infra／x570 sudo |
+| NET-02 | x570 llama-server 11435／11436／11437 | 只允許應用主機／管理設備 | 同上；若加 `--api-key`，應用端與 health check 均帶 Bearer | `implemented`（MBP LAN 拒絕已驗證；外部待測） | Infra／工程 |
 | NET-03 | MBP 本機 Ollama 11434（目前已停用） | 只綁 127.0.0.1／::1，不得 listen `*` | `lsof` 顯示 127.0.0.1:11434；LAN IP `nc` 失敗；loopback API 200 | `verified`（目前無 listener） | 工程／本機管理 |
 | NET-04 | 本機 listener 回歸 | Judgment 相關 ports 不得非 loopback；`up.sh` 啟動前失敗即拒絕啟動 | `bash scripts/security_listener_check.sh` 無 FAIL；`up.sh` 兩處 gate | `verified`（每次開機／部署重跑） | 工程 |
 | NET-05 | 第三方本機服務（Logi Options+） | 更新或移除；macOS 應用程式防火牆開啟 | `logioptionsplus_agent` version；`socketfilterfw` state；非 loopback listener | `not_started`（目前 listener `*:59869`、防火牆關閉） | 使用者／本機管理 |
@@ -52,6 +52,10 @@
 MBP Ollama                                → 未執行；11434 無 listener
 MBP llama-server fallback                 → 127.0.0.1:11436／11437；health 200；fallback 實測成功
 MBP Logi Options+                         → *:59869；macOS firewall disabled
+x570 UFW（2026-11-17 21:18–21:24）         → 11434、139/445 已移除；11435–11437 只允許 tailscale0（v4/v6）
+MBP → x570 LAN 11434–11437                → timeout；x570 kernel 記錄 [UFW BLOCK]（IN=wlp4s0，DPT=11434–11437）
+MBP → x570 Tailscale 11435–11437          → TCP open；/health 200；11434 refused
+MBP Tailscale／MagicDNS                    → BackendState=Running；x570 解析為 100.64.0.0/10；peer active/direct
 ```
 
 測試：
@@ -63,12 +67,13 @@ ruff clean
 
 ## 3. 尚未完成的外部驗收
 
-1. **x570 網路隔離**：目前只有 MBP 連線證據；需要第二台設備與手機行動網路失敗證據。
+1. **x570 網路隔離**：MBP 端 LAN 拒絕（含 `[UFW BLOCK]`）與 Tailscale allow 已驗證；仍需第二台設備失敗證據，以及 UFW 套用後重開機的規則持續性。手機行動網路在沒有公開 tunnel 時沒有 public origin 可測，應記為 N/A，不可當成 UFW 證據。
 2. **Access service token**：需要 Cloudflare Access service token；驗證 GET 與寫入 API 都不可無 admin token。
 3. **cloudflared**：確認 tunnel 真正執行位置、origin port（目前 `localhost:920` 疑似 typo）與 Host 標頭。
 4. **XSS**：先做 payload 自動測試與 `safeUrl()`，再上 CSP。
 5. **備份**：先做敏感資料分類；`.env` 不進備份；age 加密與 restore drill。
 6. **API abuse**：先保護 RAG 昂貴端點，而不是只做 admin token 失敗節流。
+7. **Tailscale 路徑依賴**：`.env` 使用 MagicDNS `x570`，目前解析為 `100.64.0.0/10`。Tailscale 離線時 embedding／rerank 會失敗；需確認應用端是明確錯誤或降級，不是無限等待。
 
 ## 4. 驗收規則
 
