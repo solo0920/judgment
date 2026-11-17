@@ -105,14 +105,4 @@ rc=${PIPESTATUS[0]}
 chmod 600 "$local_report" 2>/dev/null || true
 echo "local_report=$local_report"
 
-remote_report="$(ssh "${SSH_OPTS[@]}" "$HOST" 'ls -1t /tmp/judgment-x570-postboot-*.txt 2>/dev/null | head -1' 2>/dev/null || true)"
-if [[ -n "$remote_report" ]]; then
-  remote_name="$(basename "$remote_report")"
-  if scp -p "${SSH_OPTS[@]}" "$HOST:$remote_report" "$HOME/$remote_name" >/dev/null 2>&1; then
-    echo "remote_report=$HOME/$remote_name"
-  else
-    echo "WARN: could not copy $remote_report (check permissions); use local_report" >&2
-  fi
-fi
-
 exit "$rc"

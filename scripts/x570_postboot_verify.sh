@@ -11,30 +11,11 @@
 # Ollama disabled, UFW persistence/rules, Tailscale auto-connect, model health
 # and /props, listeners, GPU/VRAM, and journal errors.
 #
-# The report is written to /tmp and chowned to SUDO_USER when run via sudo,
-# so the MBP wrapper can copy it without a second password prompt.
+# Output goes to stdout. Capture it on the caller:
+#   ssh -t x570 'sudo bash x570_postboot_verify.sh' | tee ~/report.txt
 set -uo pipefail
 
 UNITS="judgment-llm-chat judgment-llm-embedding judgment-reranker"
-STAMP="$(date +%Y%m%d-%H%M%S)"
-OUT_DIR="${X570_OUT_DIR:-/tmp}"
-OUT="$OUT_DIR/judgment-x570-postboot-$STAMP.txt"
-
-if ! mkdir -p "$OUT_DIR" 2>/dev/null || ! : > "$OUT" 2>/dev/null; then
-  OUT_DIR="$HOME"
-  OUT="$OUT_DIR/judgment-x570-postboot-$STAMP.txt"
-  if ! : > "$OUT" 2>/dev/null; then
-    echo "cannot write report to $OUT" >&2
-    exit 1
-  fi
-fi
-
-if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then
-  chown "$SUDO_USER" "$OUT" 2>/dev/null || true
-fi
-chmod 600 "$OUT" 2>/dev/null || true
-
-exec > >(tee "$OUT") 2>&1
 
 PASS=0
 FAIL=0
@@ -62,7 +43,7 @@ printf 'date=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')"
 printf 'boot_time=%s\n' "$(uptime -s 2>/dev/null || who -b 2>/dev/null || echo unknown)"
 printf 'uptime=%s\n' "$(uptime -p 2>/dev/null || uptime)"
 printf 'kernel=%s\n' "$(uname -r)"
-printf 'output=%s\n' "$OUT"
+printf 'output=stdout\n'
 printf 'root_checks=%s\n' "$HAVE_ROOT"
 
 section "systemd units"
@@ -433,7 +414,7 @@ fi
 
 section "summary"
 printf 'pass=%d fail=%d warn=%d\n' "$PASS" "$FAIL" "$WARN"
-printf 'report=%s\n' "$OUT"
+printf 'report=stdout\n'
 if [[ "$HAVE_ROOT" != "1" ]]; then
   echo "NOTE: UFW checks were skipped; rerun with sudo for a full pass."
 fi
