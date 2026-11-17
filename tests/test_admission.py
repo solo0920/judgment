@@ -28,6 +28,34 @@ def test_admission_rejects_when_eta_exceeds_limit() -> None:
     asyncio.run(scenario())
 
 
+def test_admission_queued_callback_and_wait_timeout() -> None:
+    async def scenario() -> None:
+        gate = RagAdmission(
+            max_concurrency=1,
+            max_queue=2,
+            eta_limit_seconds=10.0,
+            initial_service_seconds=1.0,
+        )
+        await gate.acquire()
+        seen = []
+
+        async def queued_waiter() -> None:
+            await gate.acquire(
+                on_queued=lambda position, eta: seen.append(
+                    (position, eta)
+                ),
+                wait_timeout_seconds=0.05,
+            )
+
+        with pytest.raises(RagBusy):
+            await asyncio.wait_for(queued_waiter(), timeout=1.0)
+        assert seen and seen[0][0] == 1
+        assert gate.snapshot["rejected_busy_total"] == 1
+        await gate.release(elapsed_s=0.1)
+
+    asyncio.run(scenario())
+
+
 def test_admission_queues_and_promotes_in_order() -> None:
     async def scenario() -> None:
         gate = RagAdmission(

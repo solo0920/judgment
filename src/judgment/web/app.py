@@ -171,6 +171,10 @@ from .system_usage import build_system_usage
 
 logger = logging.getLogger(__name__)
 
+_ASGI_STARTED: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar(
+    "judgment_asgi_started", default=None
+)
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Manual judgment downloads stream a whole archive through the backend. Keep a
@@ -832,6 +836,9 @@ def _rag_pipeline_snapshot(flow, session_factory=None) -> Dict[str, Any]:
             "rag_status",
             "citation_retry",
             "citation_audit",
+            "asgi_to_flow_ms",
+            "asgi_to_handler_ms",
+            "handler_to_flow_ms",
         )
         if key in metadata
     }
@@ -1093,11 +1100,20 @@ def create_app(
     )
     app.state.llm_admission = RagAdmission(
         max_concurrency=settings.llm_max_concurrent,
-        max_queue=0,
-        eta_limit_seconds=0.0,
-        initial_service_seconds=1.0,
+        max_queue=settings.llm_admission_max_queue,
+        eta_limit_seconds=settings.rag_summary_wait_deadline_seconds,
+        initial_service_seconds=settings.llm_admission_initial_service_seconds,
     )
     app.state.rag_executor = None
+
+    @app.middleware("http")
+    async def record_asgi_start(request: Request, call_next):
+        token = _ASGI_STARTED.set(time.perf_counter())
+        try:
+            return await call_next(request)
+        finally:
+            _ASGI_STARTED.reset(token)
+
     app.state.processing_manager = ProcessingManager(
         settings=settings,
         session_factory=session_factory,
@@ -2811,6 +2827,8 @@ def create_app(
         queue: asyncio.Queue = asyncio.Queue()
         request_id = _incoming_request_id(http_request)
         client_started_at_ms = _client_started_ms(http_request)
+        handler_started_perf = time.perf_counter()
+        asgi_started_perf = _ASGI_STARTED.get()
 
         def listener(event: Dict[str, Any]) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, ("step", event))
@@ -3037,7 +3055,22 @@ def create_app(
                     return
 
                 try:
-                    llm_ticket = await app.state.llm_admission.acquire()
+                    llm_ticket = await app.state.llm_admission.acquire(
+                        on_queued=lambda position, eta_s: queue.put_nowait(
+                            (
+                                "queued",
+                                {
+                                    "type": "queued",
+                                    "lane": "summary",
+                                    "position": position,
+                                    "eta_s": round(eta_s, 2),
+                                },
+                            )
+                        ),
+                        wait_timeout_seconds=(
+                            live_settings.rag_summary_wait_deadline_seconds
+                        ),
+                    )
                 except RagBusy:
                     result = _retrieval_final_result(
                         retrieval_result,
@@ -3215,6 +3248,27 @@ def create_app(
                 flow.set_metadata("answer", (result or {}).get("answer") or "")
                 flow.set_metadata(
                     "rag_status", (result or {}).get("status") or ""
+                )
+                if asgi_started_perf is not None:
+                    flow.set_metadata(
+                        "asgi_to_handler_ms",
+                        round(
+                            (handler_started_perf - asgi_started_perf)
+                            * 1000,
+                            1,
+                        ),
+                    )
+                    flow.set_metadata(
+                        "asgi_to_flow_ms",
+                        round(
+                            (started_perf - asgi_started_perf) * 1000, 1
+                        ),
+                    )
+                flow.set_metadata(
+                    "handler_to_flow_ms",
+                    round(
+                        (started_perf - handler_started_perf) * 1000, 1
+                    ),
                 )
                 if result is not None:
                     flow.set_metadata(

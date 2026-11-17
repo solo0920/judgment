@@ -1177,6 +1177,7 @@ export const api = {
       testMode = false,
       onStep = null,
       onPartial = null,
+      onQueued = null,
       onToken = null,
       onTokenReset = null,
     } = {},
@@ -1268,6 +1269,14 @@ export const api = {
                     onPartial(payload);
                   } catch (error) {
                     /* partial rendering must not break the request */
+                  }
+                }
+              } else if (event === "queued") {
+                if (typeof onQueued === "function") {
+                  try {
+                    onQueued(payload);
+                  } catch (error) {
+                    /* queue rendering must not break the request */
                   }
                 }
               } else if (event === "token") {

@@ -5,7 +5,7 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Dict
+from typing import Callable, Deque, Dict, Optional
 
 
 class RagBusy(RuntimeError):
@@ -82,7 +82,12 @@ class RagAdmission:
         waves = math.ceil(max(1, position) / self.max_concurrency)
         return waves * self._service_ema
 
-    async def acquire(self) -> AdmissionTicket:
+    async def acquire(
+        self,
+        *,
+        on_queued: Optional[Callable[[int, float], None]] = None,
+        wait_timeout_seconds: Optional[float] = None,
+    ) -> AdmissionTicket:
         async with self._lock:
             if (
                 self._active < self.max_concurrency
@@ -107,8 +112,37 @@ class RagAdmission:
             future = asyncio.get_running_loop().create_future()
             self._waiters.append(future)
             self._queued_total += 1
+        if on_queued is not None:
+            try:
+                on_queued(position, eta_s)
+            except Exception:
+                pass
         try:
-            await future
+            if wait_timeout_seconds is not None:
+                await asyncio.wait_for(
+                    future, timeout=max(0.01, wait_timeout_seconds)
+                )
+            else:
+                await future
+        except asyncio.TimeoutError:
+            async with self._lock:
+                promoted = (
+                    future.done()
+                    and not future.cancelled()
+                    and future.exception() is None
+                )
+                try:
+                    self._waiters.remove(future)
+                except ValueError:
+                    pass
+                if promoted:
+                    self._active = max(0, self._active - 1)
+                self._promote_locked()
+                self._rejected_busy_total += 1
+            raise RagBusy(
+                position=position,
+                eta_s=float(wait_timeout_seconds or 0.0),
+            )
         except BaseException:
             async with self._lock:
                 promoted = (

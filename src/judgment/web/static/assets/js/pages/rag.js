@@ -2851,6 +2851,24 @@ export async function render(root) {
       const target = answerElement.querySelector("[data-partial-answer]");
       if (target) target.textContent = "正在重新生成回答…";
     };
+    const applyQueued = (payload) => {
+      if (isStale()) return;
+      const body = answerElement.querySelector(".answer-body");
+      if (!body) return;
+      let element = body.querySelector("[data-summary-queue]");
+      if (!element) {
+        element = document.createElement("div");
+        element.className = "answer-notice";
+        element.dataset.summaryQueue = "true";
+        body.appendChild(element);
+      }
+      const position = Number(payload.position || 0);
+      const eta = Number(payload.eta_s || 0);
+      const lane = payload.lane === "summary" ? "摘要" : "檢索";
+      element.textContent = `${lane}排隊中：前面 ${position} 位，預估約 ${Math.round(
+        eta,
+      )} 秒。`;
+    };
     try {
       const payload = testMode
         ? await api.rag(trimmed, { testMode })
@@ -2859,6 +2877,7 @@ export async function render(root) {
               if (!isStale()) processController?.step(event);
             },
             onPartial: applyPartialAnswer,
+            onQueued: applyQueued,
             onToken: appendPartialToken,
             onTokenReset: resetPartialTokens,
           });

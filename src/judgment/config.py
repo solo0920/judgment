@@ -93,6 +93,9 @@ class Settings:
     llm_timeout_seconds: float = 180.0
     llm_num_ctx: int = 8192
     llm_max_concurrent: int = 4
+    llm_admission_max_queue: int = 8
+    llm_admission_initial_service_seconds: float = 8.0
+    rag_summary_wait_deadline_seconds: float = 20.0
     llm_num_predict: int = 384
     llm_keep_alive: str = "30m"
     rag_top_k: int = 4
@@ -317,6 +320,15 @@ class Settings:
             llm_timeout_seconds=_env_float("LLM_TIMEOUT_SECONDS", 180.0),
             llm_num_ctx=_env_int("LLM_NUM_CTX", 8192),
             llm_max_concurrent=_env_int("LLM_MAX_CONCURRENT", 4),
+            llm_admission_max_queue=_env_int(
+                "LLM_ADMISSION_MAX_QUEUE", 8
+            ),
+            llm_admission_initial_service_seconds=_env_float(
+                "LLM_ADMISSION_INITIAL_SERVICE_SECONDS", 8.0
+            ),
+            rag_summary_wait_deadline_seconds=_env_float(
+                "RAG_SUMMARY_WAIT_DEADLINE_SECONDS", 20.0
+            ),
             llm_num_predict=_env_int("LLM_NUM_PREDICT", 384),
             llm_keep_alive=os.getenv("LLM_KEEP_ALIVE", "30m").strip() or "30m",
             rag_top_k=_env_int("RAG_TOP_K", 4),
