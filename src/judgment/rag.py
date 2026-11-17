@@ -345,6 +345,7 @@ def _rerank_hits(
         model=settings.rerank_model,
         timeout=settings.rerank_timeout_seconds,
         connect_timeout=settings.rerank_connect_timeout_seconds,
+        total_timeout=settings.rerank_total_timeout_seconds,
     )
     if not client.configured:
         return fallback_hits, RerankOutcome(
@@ -448,6 +449,7 @@ def _rerank_law_sources(
         model=settings.rerank_model,
         timeout=settings.rerank_timeout_seconds,
         connect_timeout=settings.rerank_connect_timeout_seconds,
+        total_timeout=settings.rerank_total_timeout_seconds,
     )
     if not client.configured:
         return fallback, RerankOutcome(
@@ -2050,6 +2052,18 @@ def generate_answer_with_model(
                     "strict": strict,
                 },
             ) as llm_segment:
+                if llm_segment is not None:
+                    llm_segment["metadata"].update(
+                        {
+                            "model": provider.model,
+                            "base_url": provider.base_url,
+                            "api": provider.api,
+                            "provider": provider.role,
+                            "fallback": provider.role == "fallback",
+                            "stream": streaming,
+                            "strict": strict,
+                        }
+                    )
                 if not streaming:
                     response = httpx.post(
                         url, json=request_payload, timeout=timeout
@@ -2294,6 +2308,36 @@ def _valid_citation_markers(
     if _INSUFFICIENT_RE.search(answer):
         return not _CASE_NO_RE.search(answer)
     return False
+
+
+def warm_index_coverage(
+    session_factory,
+    settings: Settings,
+    *,
+    force_refresh: bool = True,
+) -> Dict[str, Any]:
+    """Warm the request-path coverage cache for the active index version.
+
+    The web app calls this at startup and then on a timer so the first demo
+    burst does not wait for the multi-million-row count.
+    """
+
+    active_index = active_version(
+        session_factory, alias_name=settings.judgment_vector_alias
+    )
+    collection = (
+        active_index["physical_collection"]
+        if active_index
+        else settings.judgment_vector_collection
+    )
+    return cached_index_coverage(
+        session_factory,
+        collection=collection,
+        model=settings.embedding_model,
+        version_id=active_index["version_id"] if active_index else None,
+        ttl_seconds=settings.rag_coverage_cache_ttl_seconds,
+        force_refresh=force_refresh,
+    )
 
 
 @traced(

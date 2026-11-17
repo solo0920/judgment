@@ -344,6 +344,7 @@ def cached_index_coverage(
     version_id: Optional[int] = None,
     ttl_seconds: float = _COVERAGE_CACHE_TTL_SECONDS,
     cache_stats: Optional[Dict[str, Any]] = None,
+    force_refresh: bool = False,
 ) -> Dict[str, Any]:
     """Return coverage with a process-wide TTL cache and single-flight refresh.
 
@@ -385,7 +386,8 @@ def cached_index_coverage(
     with _coverage_cache_guard:
         entry = _coverage_cache.get(key)
         if (
-            entry is not None
+            not force_refresh
+            and entry is not None
             and entry[2] is session_factory
             and entry[1] > now
         ):
@@ -394,14 +396,17 @@ def cached_index_coverage(
         key_lock = _coverage_cache_locks.setdefault(key, threading.Lock())
 
     # Only one request per key refreshes the count; the rest wait and then
-    # read the value written by the winner.
+    # read the value written by the winner. A forced refresh (background
+    # warmer) updates the value while normal readers keep hitting the fast
+    # path above.
     with key_lock:
         wait_ms = round((time.perf_counter() - started) * 1000, 2)
         now = time.monotonic()
         with _coverage_cache_guard:
             entry = _coverage_cache.get(key)
             if (
-                entry is not None
+                not force_refresh
+                and entry is not None
                 and entry[2] is session_factory
                 and entry[1] > now
             ):
@@ -438,6 +443,7 @@ def cached_index_coverage(
                 cache_hit=True,
                 cache_stale=True,
                 cache_wait_ms=wait_ms,
+                cache_forced=force_refresh,
                 cache_refresh_ms=round(
                     (time.perf_counter() - refresh_started) * 1000, 2
                 ),
@@ -448,6 +454,7 @@ def cached_index_coverage(
             _coverage_cache[key] = (dict(value), expires_at, session_factory)
         record(
             cache_hit=False,
+            cache_forced=force_refresh,
             cache_wait_ms=wait_ms,
             cache_refresh_ms=round(
                 (time.perf_counter() - refresh_started) * 1000, 2

@@ -95,6 +95,7 @@ class Settings:
     rag_score_threshold: float = 0.35
     rag_max_context_chars: int = 4000
     rag_coverage_cache_ttl_seconds: float = 300.0
+    rag_coverage_warmup_enabled: bool = True
     rag_lexical_rrf_enabled: bool = False
     rag_lexical_rrf_weight: float = 2.0
     rag_legal_expansion_enabled: bool = False
@@ -120,6 +121,9 @@ class Settings:
     rerank_model: str = "bge-reranker-v2-m3"
     rerank_timeout_seconds: float = 3.0
     rerank_connect_timeout_seconds: float = 0.75
+    rerank_total_timeout_seconds: float = 4.0
+    rerank_heartbeat_enabled: bool = True
+    rerank_heartbeat_seconds: float = 60.0
     rerank_max_chars: int = 1200
     judgment_index_max_chars: int = 1600
     opendata_judicial_account: str = ""
@@ -306,6 +310,9 @@ class Settings:
             rag_coverage_cache_ttl_seconds=_env_float(
                 "RAG_COVERAGE_CACHE_TTL_SECONDS", 300.0
             ),
+            rag_coverage_warmup_enabled=_env_bool(
+                "RAG_COVERAGE_WARMUP_ENABLED", True
+            ),
             rag_lexical_rrf_enabled=_env_bool(
                 "RAG_LEXICAL_RRF_ENABLED", False
             ),
@@ -367,6 +374,15 @@ class Settings:
             rerank_timeout_seconds=_env_float("RERANK_TIMEOUT_SECONDS", 3.0),
             rerank_connect_timeout_seconds=_env_float(
                 "RERANK_CONNECT_TIMEOUT_SECONDS", 0.75
+            ),
+            rerank_total_timeout_seconds=_env_float(
+                "RERANK_TOTAL_TIMEOUT_SECONDS", 4.0
+            ),
+            rerank_heartbeat_enabled=_env_bool(
+                "RERANK_HEARTBEAT_ENABLED", True
+            ),
+            rerank_heartbeat_seconds=_env_float(
+                "RERANK_HEARTBEAT_SECONDS", 60.0
             ),
             rerank_max_chars=_env_int("RERANK_MAX_CHARS", 1200),
             judgment_index_max_chars=_env_int("JUDGMENT_INDEX_MAX_CHARS", 1600),

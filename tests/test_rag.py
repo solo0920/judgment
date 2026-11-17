@@ -34,6 +34,7 @@ from judgment.rag import (
     generate_answer_with_model,
     is_judgment_list_question,
     is_list_all_question,
+    warm_index_coverage,
 )
 from judgment.rerank import RerankOutcome, RerankResult
 from judgment.law_rag import (
@@ -538,6 +539,81 @@ def test_cached_index_coverage_reuses_and_invalidates(monkeypatch) -> None:
         assert third["indexed_judgments"] == 2
     finally:
         module.invalidate_index_coverage()
+
+
+def test_warm_index_coverage_populates_and_forces_refresh(monkeypatch) -> None:
+    from judgment import judgment_index as module
+
+    session_factory = _session_factory()
+    calls = {"n": 0}
+
+    def fake_index_coverage(
+        session_factory,
+        *,
+        collection: str,
+        model: str,
+        version_id: int | None = None,
+    ) -> dict:
+        calls["n"] += 1
+        return {
+            "total_judgments": 10,
+            "indexed_judgments": calls["n"],
+            "remaining_judgments": 10 - calls["n"],
+            "collection": collection,
+            "model": model,
+            "version_id": version_id,
+            "latest_indexed_at": None,
+        }
+
+    monkeypatch.setattr(module, "index_coverage", fake_index_coverage)
+    module.invalidate_index_coverage()
+    try:
+        first = warm_index_coverage(session_factory, _settings())
+        second = warm_index_coverage(
+            session_factory, _settings(), force_refresh=False
+        )
+        assert calls["n"] == 1
+        assert second == first
+
+        forced = warm_index_coverage(session_factory, _settings())
+        assert calls["n"] == 2
+        assert forced["indexed_judgments"] == 2
+    finally:
+        module.invalidate_index_coverage()
+
+
+def test_llm_error_segment_records_provider(monkeypatch) -> None:
+    def fake_post(url, **kwargs):
+        raise httpx.ConnectError("x570 unavailable")
+
+    monkeypatch.setattr("judgment.rag.httpx.post", fake_post)
+    flow = start_flow(request_id="provider-error", entrypoint="/api/rag/query")
+    try:
+        with pytest.raises(RuntimeError):
+            generate_answer_with_model(
+                settings=_settings(
+                    llm_url="http://x570:11436",
+                    llm_api="openai",
+                    llm_model="gemma3:4b",
+                ),
+                model="gemma3:4b",
+                question="測試問題",
+                contexts=_rag_context(),
+                timeout=1,
+            )
+    finally:
+        clear_flow()
+
+    segments = [
+        segment
+        for segment in flow.to_dict()["segments"]
+        if segment["name"] == "rag.llm_request"
+    ]
+    assert len(segments) == 1
+    assert segments[0]["status"] == "error"
+    assert segments[0]["metadata"]["provider"] == "primary"
+    assert segments[0]["metadata"]["base_url"] == "http://x570:11436"
+    assert segments[0]["metadata"]["stream"] is False
 
 
 def test_answer_question_returns_retrieval_only_without_llm(monkeypatch) -> None:

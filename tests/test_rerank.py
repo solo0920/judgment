@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from judgment.rerank import (
     RerankOutcome,
     RerankResult,
     RerankerClient,
+    rerank_heartbeat,
     rerank_service_test,
 )
 from judgment.web.status import _rerank_metrics
@@ -186,6 +188,66 @@ def test_reranker_timeout_is_bounded() -> None:
     )
     assert clamped.timeout == 0.1
     assert clamped.connect_timeout == 0.1
+
+
+def test_reranker_total_timeout_caps_primary_plus_fallback(monkeypatch) -> None:
+    calls = []
+
+    def slow_failure(url, *, json, timeout):
+        calls.append(url)
+        time.sleep(0.06)
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr("judgment.rerank.httpx.post", slow_failure)
+    client = RerankerClient(
+        ["http://x570:11435", "http://127.0.0.1:11435"],
+        model="bge-reranker-v2-m3",
+        timeout=3.0,
+        total_timeout=0.08,
+    )
+    started = time.perf_counter()
+    outcome = client.rerank("問題", ["A", "B"], top_n=1)
+    elapsed = time.perf_counter() - started
+
+    assert calls == ["http://x570:11435/v1/rerank"]
+    assert outcome.status == "degraded"
+    assert elapsed < 0.5
+    assert any("deadline" in error for error in outcome.errors)
+
+
+def test_rerank_heartbeat_sends_one_small_request(monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, *, json, timeout):
+        calls.append((url, json))
+        return FakeResponse(
+            {"results": [{"index": 0, "relevance_score": 1.0}]}
+        )
+
+    monkeypatch.setattr("judgment.rerank.httpx.post", fake_post)
+    settings = SimpleNamespace(
+        rag_rerank_enabled=True,
+        rerank_url="http://x570:11435",
+        rerank_fallback_url="http://127.0.0.1:11435",
+        rerank_model="bge-reranker-v2-m3",
+        rerank_timeout_seconds=3.0,
+        rerank_connect_timeout_seconds=0.75,
+        rerank_total_timeout_seconds=4.0,
+    )
+
+    result = rerank_heartbeat(settings)
+
+    assert result["status"] == "ok"
+    assert result["provider"] == "x570"
+    assert calls[0][0] == "http://x570:11435/v1/rerank"
+    assert calls[0][1]["top_n"] == 1
+    assert len(calls[0][1]["documents"]) == 1
+    assert len(calls) == 1
+
+    disabled = rerank_heartbeat(
+        SimpleNamespace(rag_rerank_enabled=False)
+    )
+    assert disabled["status"] == "disabled"
 
 
 def test_reranker_status_checks_primary_and_fallback(monkeypatch) -> None:

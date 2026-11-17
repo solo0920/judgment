@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse
 
 import httpx
@@ -130,6 +130,7 @@ class RerankerClient:
         model: str,
         timeout: float = 3.0,
         connect_timeout: float = 0.75,
+        total_timeout: Optional[float] = None,
     ) -> None:
         seen = set()
         normalized: List[str] = []
@@ -145,6 +146,12 @@ class RerankerClient:
         )
         self.timeout = max(0.1, float(timeout))
         self.connect_timeout = max(0.1, min(float(connect_timeout), self.timeout))
+        if total_timeout is None:
+            # Preserve the historical behaviour: each configured endpoint gets
+            # its own timeout budget.
+            self.total_timeout = self.timeout * max(1, len(self.urls))
+        else:
+            self.total_timeout = max(0.1, float(total_timeout))
 
     @property
     def configured(self) -> bool:
@@ -173,10 +180,19 @@ class RerankerClient:
 
         errors: List[str] = []
         started = time.perf_counter()
+        deadline = started + self.total_timeout
         for position, base_url in enumerate(self.urls):
             endpoint = _endpoint(base_url)
             if not endpoint:
                 continue
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0.05:
+                errors.append(
+                    f"{endpoint}: total rerank deadline "
+                    f"({self.total_timeout:.2f}s) exhausted"
+                )
+                break
+            attempt_timeout = min(self.timeout, remaining)
             try:
                 response = httpx.post(
                     endpoint,
@@ -187,8 +203,8 @@ class RerankerClient:
                         "top_n": max(1, int(top_n)),
                     },
                     timeout=httpx.Timeout(
-                        self.timeout,
-                        connect=self.connect_timeout,
+                        attempt_timeout,
+                        connect=min(self.connect_timeout, attempt_timeout),
                     ),
                 )
                 response.raise_for_status()
@@ -244,6 +260,68 @@ RERANK_TEST_DOCUMENTS = (
     "證券交易法第20條規定，有價證券之募集、發行、私募或買賣，不得有虛偽、詐欺或其他足致他人誤信之行為。",
     "刑法第339條規定，意圖為自己或第三人不法之所有，以詐術使人交付財物者，處五年以下有期徒刑。",
 )
+
+
+def rerank_heartbeat(settings: Settings) -> Dict[str, Any]:
+    """Send a tiny scoring request so the reranker model stays warm.
+
+    The request is deliberately much smaller than a real RAG rerank (one
+    short document) so a 60-second heartbeat does not consume meaningful GPU
+    time. The fallback endpoint is only exercised when the primary fails,
+    matching the runtime fallback policy.
+    """
+
+    enabled = bool(getattr(settings, "rag_rerank_enabled", False))
+    urls = [
+        str(getattr(settings, "rerank_url", "") or "").strip().rstrip("/"),
+        str(getattr(settings, "rerank_fallback_url", "") or "").strip().rstrip("/"),
+    ]
+    model = str(
+        getattr(settings, "rerank_model", "") or "bge-reranker-v2-m3"
+    )
+    if not enabled or not any(urls):
+        return {
+            "status": "disabled",
+            "model": model,
+            "latency_ms": 0,
+            "provider": "",
+            "url": "",
+            "errors": [],
+        }
+    timeout = max(
+        0.25,
+        min(float(getattr(settings, "rerank_timeout_seconds", 3.0)), 2.5),
+    )
+    total_timeout = max(
+        0.5,
+        min(
+            float(getattr(settings, "rerank_total_timeout_seconds", 4.0)),
+            2.5,
+        ),
+    )
+    client = RerankerClient(
+        urls,
+        model=model,
+        timeout=timeout,
+        connect_timeout=min(
+            timeout,
+            float(getattr(settings, "rerank_connect_timeout_seconds", 0.75)),
+        ),
+        total_timeout=total_timeout,
+    )
+    outcome = client.rerank(
+        RERANK_TEST_QUERY,
+        RERANK_TEST_DOCUMENTS[:1],
+        top_n=1,
+    )
+    return {
+        "status": "ok" if outcome.status == "ok" else "degraded",
+        "model": outcome.model,
+        "latency_ms": outcome.latency_ms,
+        "provider": outcome.provider,
+        "url": outcome.url,
+        "errors": list(outcome.errors),
+    }
 
 
 def rerank_service_test(

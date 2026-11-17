@@ -113,8 +113,8 @@ from ..ollama_hosts import (
     update_host,
 )
 from ..llm_backends import fetch_context_window
-from ..rag import answer_question
-from ..rerank import rerank_service_test
+from ..rag import answer_question, warm_index_coverage
+from ..rerank import rerank_heartbeat, rerank_service_test
 from ..vector_store import QdrantStore
 from ..index_versions import (
     activate_version,
@@ -534,6 +534,9 @@ _RAG_PIPELINE_SEGMENTS = {
     "rag.coverage",
     "rag.embed_query",
     "rag.qdrant_search",
+    "rag.law_vector_search",
+    "rag.law_retrieval",
+    "rag.law_rerank",
     "rag.rerank",
     "rag.context",
     "rag.llm_request",
@@ -662,6 +665,7 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     resolved_data_dir = Path(data_dir or settings.law_data_dir).expanduser().resolve()
+    owns_session_factory = session_factory is None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -686,6 +690,8 @@ def create_app(
             except Exception:
                 logger.warning("question bank startup revalidation failed", exc_info=True)
         warm_task: Optional[asyncio.Task] = None
+        coverage_task: Optional[asyncio.Task] = None
+        rerank_task: Optional[asyncio.Task] = None
         try:
             server_ctx = await asyncio.to_thread(
                 fetch_context_window,
@@ -749,17 +755,96 @@ def create_app(
                         exc_info=True,
                     )
 
+        async def warm_coverage_cache() -> None:
+            ttl = float(
+                getattr(
+                    app.state.settings,
+                    "rag_coverage_cache_ttl_seconds",
+                    0.0,
+                )
+                or 0.0
+            )
+            if ttl <= 0:
+                return
+            interval = max(30.0, ttl / 2.0)
+            while True:
+                try:
+                    started = time.perf_counter()
+                    await asyncio.to_thread(
+                        warm_index_coverage,
+                        app.state.session_factory,
+                        app.state.settings,
+                    )
+                    logger.debug(
+                        "coverage cache warmed in %.0f ms",
+                        (time.perf_counter() - started) * 1000,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "coverage cache warmup failed", exc_info=True
+                    )
+                await asyncio.sleep(interval)
+
+        async def rerank_warmup_loop() -> None:
+            interval = max(
+                10.0,
+                float(
+                    getattr(
+                        app.state.settings,
+                        "rerank_heartbeat_seconds",
+                        60.0,
+                    )
+                    or 60.0
+                ),
+            )
+            last_status: Optional[str] = None
+            while True:
+                try:
+                    result = await asyncio.to_thread(
+                        rerank_heartbeat, app.state.settings
+                    )
+                    status = str(result.get("status") or "degraded")
+                    app.state.rerank_heartbeat = {
+                        **result,
+                        "checked_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    if status != last_status:
+                        log = (
+                            logger.info
+                            if status == "ok"
+                            else logger.warning
+                        )
+                        log("rerank heartbeat %s: %s", status, result)
+                        last_status = status
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "rerank heartbeat failed", exc_info=True
+                    )
+                await asyncio.sleep(interval)
+
         try:
             await app.state.processing_event_server.start()
             warm_task = asyncio.create_task(warm_processing_snapshots())
+            if owns_session_factory and app.state.settings.rag_coverage_warmup_enabled:
+                coverage_task = asyncio.create_task(warm_coverage_cache())
+            if (
+                app.state.settings.rag_rerank_enabled
+                and app.state.settings.rerank_heartbeat_enabled
+            ):
+                rerank_task = asyncio.create_task(rerank_warmup_loop())
             yield
         finally:
-            if warm_task is not None:
-                warm_task.cancel()
-                try:
-                    await warm_task
-                except asyncio.CancelledError:
-                    pass
+            for task in (warm_task, coverage_task, rerank_task):
+                if task is not None:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
             await app.state.processing_event_server.stop()
             await app.state.event_broker.close()
             if engine is not None:
@@ -779,6 +864,7 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.engine = None
     app.state.llm_context = None
+    app.state.rerank_heartbeat = None
     app.state.processing_manager = ProcessingManager(
         settings=settings,
         session_factory=session_factory,
@@ -2122,11 +2208,13 @@ def create_app(
 
     @app.get("/api/rerank/status")
     def rerank_service_status() -> Dict[str, Any]:
-        return rerank_status(
+        payload = rerank_status(
             runtime_settings(
                 app.state.settings, app.state.session_factory
             )
         )
+        payload["heartbeat"] = app.state.rerank_heartbeat
+        return payload
 
     @app.post("/api/rerank/test")
     def rerank_service_probe() -> Dict[str, Any]:
