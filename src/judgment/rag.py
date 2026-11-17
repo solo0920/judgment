@@ -2000,6 +2000,14 @@ class CitationValidationError(RuntimeError):
     """Raised when a generated answer has no usable source markers."""
 
 
+def _citation_retry_action(*, strict: bool, error: Optional[Exception]) -> str:
+    """Shared retry policy for sync and stream citation attempts."""
+
+    if isinstance(error, CitationValidationError) and not strict:
+        return "retry"
+    return "stop"
+
+
 def _should_try_fallback(exc: Exception) -> bool:
     """Only connection failures may use the fallback provider.
 
@@ -4327,7 +4335,12 @@ def answer_question(
                         break
                     except CitationValidationError as exc:
                         last_error = exc
-                        if strict:
+                        if (
+                            _citation_retry_action(
+                                strict=strict, error=exc
+                            )
+                            == "stop"
+                        ):
                             break
                     except Exception as exc:
                         last_error = exc

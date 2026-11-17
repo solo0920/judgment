@@ -118,6 +118,7 @@ from ..ollama_hosts import (
 from ..llm_backends import fetch_context_window
 from ..rag import (
     _citation_audit,
+    _citation_retry_action,
     _fit_contexts_to_prompt_budget,
     _valid_citation_markers,
     answer_question,
@@ -3193,7 +3194,12 @@ def create_app(
                         break
                     except CitationValidationError as exc:
                         last_error = exc
-                        if strict:
+                        if (
+                            _citation_retry_action(
+                                strict=strict, error=exc
+                            )
+                            == "stop"
+                        ):
                             break
                     except Exception as exc:  # noqa: BLE001
                         last_error = exc

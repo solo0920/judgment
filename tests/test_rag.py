@@ -29,6 +29,8 @@ from judgment.rag import (
     _map_letter_markers,
     _CitationMarkerMapper,
     _citation_audit,
+    _citation_retry_action,
+    CitationValidationError,
     _search_legal_articles,
     _valid_citation_markers,
     answer_question,
@@ -2993,6 +2995,19 @@ def test_is_judgment_list_question_detects_judgment_queries() -> None:
     assert not is_judgment_list_question("詐騙判決的法律責任有哪些")
     assert not is_judgment_list_question("違約交割有那些罰則?")
     assert not is_judgment_list_question("原告如何請求返還借款?")
+
+
+def test_citation_retry_policy_is_shared_and_bounded() -> None:
+    citation_error = CitationValidationError("missing marker")
+    assert _citation_retry_action(
+        strict=False, error=citation_error
+    ) == "retry"
+    assert _citation_retry_action(
+        strict=True, error=citation_error
+    ) == "stop"
+    assert _citation_retry_action(
+        strict=False, error=RuntimeError("context exceeded")
+    ) == "stop"
 
 
 def test_citation_audit_counts_uncited_and_unsupported_sentences() -> None:
