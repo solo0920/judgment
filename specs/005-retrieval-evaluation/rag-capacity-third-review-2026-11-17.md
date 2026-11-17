@@ -50,13 +50,15 @@ cold run 3.76 秒，warm run 8.68 秒。
 不是 token gate。
 ```
 
+追加（同日）：暖機、60 秒 heartbeat、單次總 deadline 已實作並驗證；first_partial p50 1.73 秒、p95 6.83 秒。下一個瓶頸是 `rag.law_rerank` 的第二段 rerank 與 strict retry，見第九節。
+
 ## 一、逐項判定
 
 | 同事的主張 | 判定 | 本輪證據 | 要做的事 |
 |---|---|---|---|
-| coverage 約 1.1 秒是 40 並行 p50 13 秒主因 | **同意，已實作** | 直接量測 `index_coverage` 1,207–1,281 ms；Q4 總耗時 1,188 ms；40 non-LLM p50 12.4 秒 | 已完成 TTL＋single-flight 快取；再加啟動暖機／背景刷新 |
+| coverage 約 1.1 秒是 40 並行 p50 13 秒主因 | **同意，已實作** | 直接量測 `index_coverage` 1,207–1,281 ms；Q4 總耗時 1,188 ms；40 non-LLM p50 12.4 秒 | 已完成 TTL＋single-flight 快取、啟動暖機與背景刷新 |
 | 非串流 20/40 不是 demo 指標 | **同意** | 串流 baseline first_partial p50 8.34／p95 10.83 秒；非串流 p50 12.4 秒不能代表 SSE | 之後的容量驗收以串流 first_partial、queued、degraded、done 為主 |
-| 要列出 provider 分布 | **同意** | baseline 20 mixed：2 次 x570 primary 成功、1 次 MBP fallback 成功、其餘 25 次 LLM 嘗試失敗；fallback 那題 9.49 秒 | error span 也要記 provider；demo 關閉或獨立 gate MBP fallback |
+| 要列出 provider 分布 | **同意** | baseline 20 mixed：2 次 x570 primary 成功、1 次 MBP fallback 成功、其餘 25 次 LLM 嘗試失敗；fallback 那題 9.49 秒 | error span 已補 provider／base_url；demo 關閉或獨立 gate MBP fallback |
 | 「MBP 的 Ollama」fallback | **用詞要修正** | `.env` 是 `LLM_FALLBACK_URL=http://127.0.0.1:11436`、`LLM_FALLBACK_API=openai`、`LLM_FALLBACK_MODEL=gemma3:4b` | 文件與回報一律寫 MBP llama-server；Ollama 不是 runtime fallback |
 | ETA admission，不要固定等 8 秒 | **方向同意，公式要改** | 目前沒有 gate；done p95 仍 35 秒，降級多在 10–20 秒後才發生 | token 加權 ETA、`queued {position, eta_s}`、逾時立即 `degraded` |
 | LLM 改 async HTTP | **同意** | stream 用 `asyncio.to_thread`，default executor 14；LLM 是 sync `httpx.stream` | `httpx.AsyncClient`；retrieval／DB 用獨立 bounded executor；DB pool 對齊 |
@@ -232,20 +234,21 @@ LLM_FALLBACK_API=openai
 
 這是 MBP 上的 llama-server，不是 Ollama。Ollama 沒有被設成 runtime fallback，也不應該被自動啟動來補位。這一點要寫進 demo runbook，避免有人看到 `gemma3:4b` 就誤以為是 Ollama。
 
-### 3. error span 缺少 provider
+### 3. error span 已補上 provider
 
-目前只有成功的 `rag.llm_request` 有 `provider`／`base_url`；失敗的 span 是 `None`。所以 provider 分布只能從成功呼叫推算，不能回答「這次失敗是 primary 還是 fallback 造成」。要補：
+第一版只有成功的 `rag.llm_request` 有 `provider`／`base_url`；失敗的 span 是 `None`。現在進入 span 時就先寫入：
 
 ```text
 rag.llm_request metadata:
   provider=primary/fallback
   base_url=...
-  status=ok/error
-  error_class=...
-  http_status=...
+  api=...
+  fallback=true/false
+  stream=true/false
+  strict=true/false
 ```
 
-否則下一次 burst 還是只能看到「有 27 次失敗」，不知道失敗打到哪裡。
+成功後再補 tokens、ttft、duration；失敗時至少能看出打到哪一台。20 mixed 重測已可直接從失敗 span 讀到 `primary → http://x570:11436` 與 `fallback → http://127.0.0.1:11436`，以及各自的 timeout／context exceeded。
 
 ## 五、ETA admission：方向對，公式要改
 
@@ -362,13 +365,16 @@ q8_0 KV 約一半，但需要 flash attention，且要驗證品質
 - 40 non-LLM p95 由 18.57 秒降到 6.66 秒（cold）／5.46 秒（warm）。
 - 這是目前成本最低、效果最直接的一個修正。
 
-### 2. 還缺的 coverage 暖機
+### 2. 已完成的 coverage 暖機
 
-cold burst 仍要等一次 1.1 秒 count。建議：
+cold burst 原本要等一次 1.1 秒 count。現在 Web app 啟動時會用背景 task 呼叫 `warm_index_coverage()`：
 
-- 啟動時在背景做一次 `cached_index_coverage` 暖機。
-- 或每 TTL/2 做一次背景刷新（例如 150 秒），避免 demo 前剛好過期。
-- 暖機失敗只記 warning，不阻擋應用啟動。
+- 只在使用 app 自己建立的 session factory 時啟動，避免測試注入的 SQLite 與背景 thread 共用連線。
+- 啟動先暖一次，之後每 `max(30, TTL/2)` 秒強制刷新（TTL 300 → 150 秒）。
+- 強制刷新不會清掉舊值；一般讀者仍走 fast path，刷新失敗保留舊值並記 warning。
+- 失敗只記 warning，不阻擋應用啟動。
+
+重啟後直接打 Q4：`duration_ms=81–173 ms`，`rag.coverage` 0.02–0.08 ms 且 `cache_hit=true`；不再有第一個 burst 等 1.1 秒的情況。
 
 ### 3. 答案快取與範例題預熱
 
@@ -391,18 +397,89 @@ prompt／citation schema 版本
 - 相同問題的 single-flight 可以合併，但不同 session／權限不能共用。
 - 範例題預熱要在索引啟動後做，且要記錄命中率與版本。
 
-## 九、修正後的實作順序
+## 九、P0-1／P0-2 實作後驗證（同日追加）
+
+commit `7dac5b6` 已完成：coverage 啟動暖機、失敗 span 記 provider、reranker 啟動暖機、60 秒 heartbeat、單次 rerank 總 deadline。驗證如下。
+
+### 1. Coverage 暖機
+
+重啟後立刻打 Q4「銀行法有多少條文？」：
+
+| 指標 | 結果 |
+|---|---:|
+| duration_ms | 81／147／156／173 ms |
+| rag.coverage | 0.02／0.05／0.06／0.08 ms |
+| cache_hit | true |
+
+和 cold burst 1,338 ms 相比，啟動暖機把第一個請求的 1.1 秒固定成本拿掉。
+
+### 2. Reranker heartbeat
+
+`/api/rerank/status` 現在多了 `heartbeat`：
+
+```json
+{"status":"ok","model":"bge-reranker-v2-m3","latency_ms":35,"provider":"x570","url":"http://x570:11435/v1/rerank"}
+```
+
+- 啟動先打一次，之後每 60 秒一次；只有一個短 query＋一個短 document。
+- primary 成功時不碰 fallback；primary 失敗才走 fallback，和 runtime 策略一致。
+- 狀態掛在 `/api/rerank/status`，不需要翻 log。
+
+### 3. Reranker 總 deadline
+
+用兩個「接受連線但永不出回應」的本機 socket 模擬 primary＋fallback 同時 timeout：
+
+| 設定 | 結果 |
+|---|---|
+| 每個 endpoint 3 秒、無總 deadline | 6,013.5 ms 才 degraded |
+| `total_timeout=1.0` | 1,009.5 ms；第二個 endpoint 直接跳過，error 為 `total rerank deadline (1.00s) exhausted` |
+
+正式設定 `RERANK_TOTAL_TIMEOUT_SECONDS=4`：primary 最多 3 秒，fallback 只剩約 1 秒，不再出現 3+3 的 6.1 秒尾。
+
+### 4. 20 mixed stream 重測
+
+coverage 已暖、heartbeat 已跑、總 deadline=4 秒：
+
+| 指標 | 快取後 warm（先前） | 總 deadline 後 |
+|---|---:|---:|
+| first_partial p50 | 2,201 ms | 1,727 ms |
+| first_partial p95 | 8,677 ms | 6,834 ms |
+| first_partial max | 8,867 ms | 7,034 ms |
+| done p50 | 5,579 ms | 5,873 ms |
+| done p95 | 34,945 ms | 36,039 ms |
+| operational／retrieval_only | 10／10 | 11／9 |
+| error | 0 | 0 |
+
+改善的是中位數與 reranker 雙 timeout 的上限；**p95 仍沒有穩定 ≤4 秒**。失敗 span 現在可直接讀出 provider：本次有 primary 的 context exceeded 與 timeout，也有 fallback 的 8–18 秒失敗，不再只能看成功呼叫。
+
+### 5. p95 的新原因：`rag.law_rerank` 是第二段 rerank
+
+把 waterfall 補上 `rag.law_retrieval`、`rag.law_rerank` 後，可以看到先前被漏掉的第二段 reranker：
+
+- Q3 判決列表（ID 14047）：`rag.law_rerank` 4,006 ms，從 990 ms 開始，第一個 partial 被拖到 5 秒後。這題是判決列表，法規 rerank 對列表排序沒有幫助，但它在 partial 之前。
+- Q5（ID 14049）：`rag.law_rerank` 4,383 ms ＋ `rag.rerank` 945 ms ＋ 第一次 LLM 1,627 ms ＋ strict retry 2,139 ms = first_partial 7,034 ms。
+- 目前 `RERANK_TOTAL_TIMEOUT_SECONDS` 是「每次 `RerankerClient.rerank()`」的預算；`_rerank_law_sources` 每個 source_type 各呼叫一次，所以最壞是「group 數 × 4 秒 ＋ judgment rerank 4 秒」。本次多數是單一 group，但設計上還沒有 request-level 的總預算。
+
+所以下一步不是再加大 reranker timeout，而是：
+
+1. 在 `answer_question` 內建一個 request-level rerank deadline，讓 law rerank 的所有 group 與 judgment rerank 共用。
+2. 判決列表題跳過或大幅縮短 law rerank；列表答案不需要法規 cross-encoder 排序。
+3. 再決定 strict citation retry 是否應在 first partial 之後才發生（目前 Q5 會先送 token 再 strict retry，final partial 被延後）。
+
+做完這三項再重測，才有機會讓 first_partial p95 穩定 ≤4 秒；在那之前，token gate 仍會量到這個尾。
+
+## 十、修正後的實作順序
 
 | 階段 | 工作 | 驗收 | 狀態 |
 |---|---|---|---|
 | P0-0 | x570 權限、`nvidia-smi`、`/props`、`-c 24576` 或 `32768`、4×3,000／4×Q5 | 4/4 或至少 3/4；VRAM／溫度有紀錄；無 context exceeded | **blocked：沒有 SSH／sudo** |
-| P0-1 | coverage TTL／single-flight 快取；啟動暖機或背景刷新；error span 記 provider | 40 non-LLM p95 < 10 秒；Q4 warm < 100 ms；first burst 不再等 1.1 秒 | 快取已完成；暖機／provider metadata 待做 |
-| P0-2 | reranker 暖機、每 60 秒 heartbeat、3 秒總 deadline／fallback 策略 | 20 mixed first_partial p95 穩定 ≤ 4 秒；不再出現 6.1 秒雙 timeout | **本輪新發現，應排在 gate 前** |
+| P0-1 | coverage TTL／single-flight 快取；啟動暖機或背景刷新；error span 記 provider | 40 non-LLM p95 < 10 秒；Q4 warm < 100 ms；first burst 不再等 1.1 秒 | **已完成**（Q4 warm 81–173 ms；40 non-LLM p95 5.5–6.7 秒） |
+| P0-2 | reranker 暖機、每 60 秒 heartbeat、3 秒總 deadline／fallback 策略 | 20 mixed first_partial p95 穩定 ≤ 4 秒；不再出現 6.1 秒雙 timeout | **已實作**；6.1 秒雙 timeout 已消除，p95 6.83 秒仍受 `rag.law_rerank` 與 strict retry 影響 |
 | P0-3 | exact tokenization；token budget gate；ETA 立即降級；citation-only retry；absolute deadline；SSE `queued`／`degraded`／heartbeat | Q5 不被 estimate 誤擋；500／timeout 不再重試；done p95 < 20 秒；降級 < 10 秒 | 待做 |
 | P0-4 | LLM 改 `httpx.AsyncClient`；retrieval／DB 專用 executor；DB pool 對齊；demo 關閉或獨立 gate MBP fallback | 10 個 LLM 不再占滿 14 workers；非 LLM p95 不受 LLM lane 影響 | 待做 |
 | P1-1 | 字母標籤；27 題＋至少 10 題人工抽查；再評估 grammar | citation 合法率、來源覆蓋、忠實度不退步 | 待做 |
-| P1-2 | 答案快取、範例題預熱、single-flight；coverage 背景刷新 | 範例題命中不占 LLM／GPU；cache key／失效正確 | 可提前與 P0-3 並行；key 未完成則不阻塞 gate |
-| P1-3 | 串流 20/40 重測；記錄 first_partial、queued、degraded、done、provider 分布 | 20 mixed p95 ≤ 4 秒；40 mixed 超量請求 < 5 秒 degraded；0 連線中斷 | 待 P0-2～P0-4 |
+| P1-2 | 答案快取、範例題預熱、single-flight；coverage 背景刷新 | 範例題命中不占 LLM／GPU；cache key／失效正確 | coverage 背景刷新已完成；答案快取可提前與 P0-3 並行，key 未完成則不阻塞 gate |
+| P1-3 | 串流 20/40 重測；記錄 first_partial、queued、degraded、done、provider 分布 | 20 mixed p95 ≤ 4 秒；40 mixed 超量請求 < 5 秒 degraded；0 連線中斷 | 待 request-level rerank deadline、P0-3、P0-4 |
 | P2 | session、Turnstile、全域上限；Cloudflare origin／安全驗證 | 公開前全部通過 | 待做 |
 
 與同事順序的差異：
@@ -414,22 +491,22 @@ prompt／citation schema 版本
 5. **串流 20/40 重測應在 P0-2～P0-4 之後。** 現在重測只會量到 reranker 與 LLM retry 的尾，不能驗收 gate。
 6. **安全與 Turnstile 仍在公開之前，不能因為容量測試 0 error 就開 tunnel。**
 
-## 十、限制與未解問題
+## 十一、限制與未解問題
 
 - 20 mixed 串流只跑兩輪（cold／warm），p95 會受 reranker 與 x570 排隊影響；3.76 與 8.68 都是樣本，不是 SLA。
 - 40 non-LLM 也只跑 cold／warm 各一輪；p95 6.66／5.46 秒是 baseline，不是穩定承諾。
 - 沒有 x570 `nvidia-smi`；所有 VRAM、KV、溫度的結論都還是推論。
 - MBP `-c 24576 -np 4` 只驗證 4×2,833，沒有驗證 4×5,000。
-- provider 分布只來自成功呼叫；error span 沒有 provider，還不能回答「失敗打 primary 還是 fallback」。
+- provider 分布現在可從成功與失敗 span 讀出；但本輪仍是 20 mixed 單一輪，比例不是穩定分布。
 - coverage cache 是 process-wide、單 worker；若未來開多 worker，每個 worker 會各自有一份快取，需要共享快取或 sticky routing。
-- cold burst 仍要等一次 1.1 秒 count；啟動暖機／背景刷新尚未實作。
+- 啟動暖機已實作；cold burst 的第一個請求不再等 1.1 秒，但背景刷新仍可能在百萬筆資料上花 1 秒以上，需觀察資料庫負載。
 - 答案快取尚未實作；本輪沒有 cache 命中率、沒有答案忠實度比較。
 - facet／count 快取尚未做；它不在本次 RAG demo 路徑上。
 - `ground_truth_cases` 仍是 0；本輪不宣稱 Recall／nDCG。
 - registry 未觸碰：429 terms、10 active、419 candidates 維持不變；候選沒有啟用，也沒有 `legal_reviewed` 宣告。
 - 法律品質仍未經 30 題人工審查；字母標籤與 grammar 都還是 PoC 階段。
 
-## 十一、回覆同事（濃縮版）
+## 十二、回覆同事（濃縮版）
 
 ```text
 同意你的五點，尤其是第 1 點。coverage 已證實是固定成本：
@@ -439,14 +516,17 @@ index_coverage 單次 1.2 秒，Q4 總耗時 1,188 ms，幾乎全是它。
 已實作 TTL 300 秒＋process-wide single-flight：
 - 40 non-LLM：p50 12.4 → 5.6 秒（cold）／2.6 秒（warm）
 - p95 18.6 → 6.7 秒（cold）／5.5 秒（warm）
-- Q4 warm 68–94 ms
-- cold burst 仍等一次 1.1 秒，所以還要啟動暖機。
+- Q4 warm 68–94 ms（快取）；啟動暖機後重啟首查 81–173 ms
+- cold burst 不再等 1.1 秒（啟動暖機＋每 TTL/2 背景刷新）。
 
 第 2 點成立：串流才是 demo。baseline first_partial p50 8.34／p95 10.83 秒。
 快取後 p50 2.20–3.56 秒，但 p95 3.76–8.68 秒，不穩定。
 原因不是 coverage，而是 reranker 6.1 秒雙 endpoint timeout（3 秒＋3 秒）。
-所以 first_partial p95 ≤4 秒要先把 reranker 暖機／心跳／總 deadline 做完，
-不是直接進 token gate。
+已做 reranker 啟動暖機、60 秒 heartbeat、單次總 deadline 4 秒：
+- 合成雙 timeout 由 6,013 ms 降到 1,010 ms；
+- 20 mixed 重測 p50 1.73／p95 6.83 秒，6.1 秒雙 timeout 不再出現；
+- 但 p95 仍被 rag.law_rerank（4.0 秒）與 strict retry（2.1 秒）拉高，
+  下一步要做 request-level rerank deadline，並讓判決列表題跳過 law rerank。
 
 第 3 點成立：baseline 20 mixed 是 2 次 x570 primary、1 次 MBP fallback、其餘失敗。
 但 fallback 是 MBP llama-server（127.0.0.1:11436，openai API），不是 Ollama。
@@ -463,7 +543,7 @@ sync httpx.stream 會占住 worker，10 個 LLM 就吃掉大部分池子。
 順序調整：
 1. x570 權限（blocked，但持續）
 2. coverage 快取（已完成）＋暖機
-3. reranker 暖機／心跳／deadline（新提前）
+3. reranker 暖機／心跳／單次總 deadline（已完成）；request-level deadline 與 law rerank 預算（下一步）
 4. token gate＋ETA＋citation-only retry＋absolute deadline＋SSE 事件
 5. async LLM＋executor／DB pool＋關閉 demo fallback
 6. 字母標籤＋27 題＋10 題人工
@@ -476,9 +556,12 @@ sync httpx.stream 會占住 worker，10 個 LLM 就吃掉大部分池子。
 
 - `specs/005-retrieval-evaluation/rag-capacity-coverage-cache-raw-2026-11-17.json`：本輪原始結果（Q4 前後、40 non-LLM 前後、20 stream 前後、provider 與 coverage cache metadata）。
 - `specs/005-retrieval-evaluation/rag-capacity-coverage-cache-2026-11-17.csv`：摘要表。
+- `specs/005-retrieval-evaluation/rag-capacity-reranker-deadline-raw-2026-11-17.json`：P0-1／P0-2 追加驗證（coverage 暖機、heartbeat、合成 deadline、20 mixed 重測、`rag.law_rerank` trace）。
+- `specs/005-retrieval-evaluation/rag-capacity-reranker-deadline-2026-11-17.csv`：追加驗證摘要表。
 - `specs/005-retrieval-evaluation/rag-capacity-burst-raw-2026-11-17.json`：第二輪 20 mixed／40 non-LLM 原始結果。
 - `specs/005-retrieval-evaluation/rag-capacity-second-review-2026-11-17.md`：第二輪評估與共用 KV 池量測。
 - `specs/005-retrieval-evaluation/rag-capacity-context-poc.csv`：`-c 24576` 與 context 壓測。
 - `specs/005-retrieval-evaluation/rag-capacity-tokenization-poc.csv`：estimator vs actual tokens。
 - `specs/005-retrieval-evaluation/rag-capacity-letter-poc.csv`：字母標籤 PoC。
-- `tests/test_rag.py`：`test_cached_index_coverage_reuses_and_invalidates` 覆蓋 TTL 快取、invalidation、cache hit metadata。
+- `tests/test_rag.py`：`test_cached_index_coverage_reuses_and_invalidates`、`test_warm_index_coverage_populates_and_forces_refresh`、`test_llm_error_segment_records_provider` 覆蓋 TTL 快取、暖機、失效與失敗 span provider。
+- `tests/test_rerank.py`：`test_reranker_total_timeout_caps_primary_plus_fallback`、`test_rerank_heartbeat_sends_one_small_request` 覆蓋總 deadline 與 heartbeat。

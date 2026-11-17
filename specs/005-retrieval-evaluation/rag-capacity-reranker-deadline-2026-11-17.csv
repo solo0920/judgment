@@ -1,0 +1,6 @@
+scenario,metric,n,p50_ms,p95_ms,max_ms,notes
+20 mixed stream after deadline,first_partial_ms,15,1727.1,6834.3,7033.5,coverage warm; rerank total deadline 4s
+20 mixed stream after deadline,first_token_ms,8,8685.4,33912.5,33912.5,coverage warm; rerank total deadline 4s
+20 mixed stream after deadline,result_ms,20,5873.3,36039.3,36039.3,coverage warm; rerank total deadline 4s
+20 mixed stream after deadline,statuses,20,,,,"{""operational"": 11, ""retrieval_only"": 9}"
+20 mixed stream after deadline,errors,20,,,,0
