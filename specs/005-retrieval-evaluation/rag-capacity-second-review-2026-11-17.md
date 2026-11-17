@@ -1,5 +1,7 @@
 # RAG 容量第二輪評估：共用 KV 池、token 預算與 20/40 突發負載
 
+> 後續評估（第三輪）：`specs/005-retrieval-evaluation/rag-capacity-third-review-2026-11-17.md`。
+
 - 日期：2026-11-17
 - 目的：回應同事第二輪審查，並用新增的 tokenization、letter-label、JSON grammar 與 20/40 突發測試，修正上一輪的判斷
 - 範圍：只做評估與量測，不改 runtime、不啟用 expansion、不改 Qdrant／embedding／reranker pipeline、不進行法律審查
