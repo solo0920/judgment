@@ -1801,6 +1801,15 @@ ssh -t x570 'sudo bash /tmp/judgment-llama-services.sh'
 - 從 Ollama 取出 `gemma3:4b`、`bge-m3:latest`、`qllama/bge-reranker-v2-m3:latest` 的 GGUF，複製到穩定路徑
 - 建立三個 systemd unit：chat 使用 `--alias gemma3:4b --ctx-size 8192`；embedding 使用 `--embedding --pooling cls`；reranker 使用 `--reranking --pooling rank`；三者皆 `--gpu-layers all`
 - 2026-11-17 修正 chat context：先前 `--ctx-size 4096` 會讓 4,292–4,652 token 的 RAG prompt 回 `HTTP 400 exceed_context_size_error`；預設改為 8192。
+
+  兩行完成 x570 與 MBP 同步（第一行需要 x570 SSH／sudo）：
+
+  ```bash
+  bash scripts/set_x570_llm_context.sh 8192
+  bash scripts/apply_local_llm_context.sh 8192
+  ```
+
+  第一行會重裝／重啟 llama-server chat 並用 `/props` 驗證；第二行更新 `.env`、重啟 web，並檢查啟動日誌是否有 context mismatch。
 - Token 估算已改為保守值（中文接近一字一 token，不再用 `chars // 3`）；超過 `num_ctx * 0.9 - num_predict` 時會先丟棄／截斷 context。trace 會記錄 `prompt_tokens_estimated`、`input_tokens`、estimate/actual 比例；實際超過或達到 98% context 會標記失敗並走 fallback，不再靜默接受。
 - 後端啟動時會讀 llama-server `/props` 的 `default_generation_settings.n_ctx`，以 server 實際值作為上限；若與 `LLM_NUM_CTX` 不一致會在啟動日誌 warning。
 - `systemctl enable` 三個 unit，之後 x570 開機自動載入
