@@ -169,16 +169,23 @@ export function apiUrl(path, base = getApiBase()) {
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+// The ?api= query parameter is user-controlled.  Auth redirects and session
+// probes must not follow it; the admin-token path remains available for
+// explicitly configured API bases.
+export function getAuthApiBase() {
+  if (getApiBaseSource() === "query") return "";
+  return getApiBase();
+}
+
 async function sseTicketForRequest() {
   const token = adminTokenForRequest();
-  if (!token) return "";
+  const headers = { Accept: "application/json" };
+  if (token) headers["X-Judgment-Admin-Token"] = token;
   try {
     const response = await fetch(apiUrl("/api/auth/sse-ticket"), {
       method: "POST",
-      headers: {
-        Accept: "application/json",
-        "X-Judgment-Admin-Token": token,
-      },
+      headers,
+      credentials: "include",
     });
     if (!response.ok) return "";
     const payload = await response.json();
@@ -233,7 +240,10 @@ export function subscribeRefresh(
     if (closed) return;
     const params = new URLSearchParams({ topic: list.join(",") });
     if (ticket) params.set("ticket", ticket);
-    source = new EventSource(apiUrl(`/api/events/stream?${params.toString()}`));
+    source = new EventSource(
+      apiUrl(`/api/events/stream?${params.toString()}`),
+      { withCredentials: true },
+    );
     source.onopen = () => {
       opened += 1;
       if (retryTimer) {
@@ -278,7 +288,9 @@ function networkErrorMessage(base) {
 }
 
 async function request(path, options = {}) {
-  const base = getApiBase();
+  const { base: explicitBase, ...fetchOptions } = options;
+  const base =
+    explicitBase !== undefined ? normalizeApiBase(explicitBase) : getApiBase();
   const controller = new AbortController();
   const timeout = options.timeout === undefined ? DEFAULT_TIMEOUT : options.timeout;
   const timer =
@@ -302,8 +314,9 @@ async function request(path, options = {}) {
   let response;
   try {
     response = await fetch(apiUrl(path, base), {
-      ...options,
+      ...fetchOptions,
       headers,
+      credentials: "include",
       signal: controller.signal,
     });
   } catch (error) {
@@ -382,6 +395,7 @@ function reportClientTiming(payload) {
         Accept: "application/json",
       },
       body: JSON.stringify(payload),
+      credentials: "include",
       keepalive: true,
     }).catch(() => {});
   } catch (error) {
@@ -484,6 +498,21 @@ export const powerApi = {
 export const api = {
   health() {
     return request("/api/health");
+  },
+
+  authMe() {
+    return request("/api/auth/me", {
+      base: getAuthApiBase(),
+      trackClient: false,
+    });
+  },
+
+  authLogout() {
+    return request("/api/auth/logout", {
+      method: "POST",
+      base: getAuthApiBase(),
+      trackClient: false,
+    });
   },
 
   status() {

@@ -1,6 +1,6 @@
 # Judgment Security Acceptance Matrix v1.0
 
-- 日期：2026-11-17
+- 日期：2026-11-18
 - 原則：程式有防護不等於部署已驗收；每一列都要有可重現證據
 - 目前唯一已確認的真實暴露：**x570 四個 AI 服務的區網存取**。2026-11-17 已套用 UFW：移除 11434 與 SMB 139/445，11435–11437 只允許 `tailscale0`。MBP 端 LAN 拒絕、Tailscale allow、完整 sudo UFW 驗證與套用後重開機持續性均已通過；第二台設備仍待測。Cloudflare tunnel 目前未開啟，因此 CF 的 origin／service-token 項目是啟動 tunnel 前的門檻，不是現在的公開暴露。
 - 狀態定義：
@@ -33,6 +33,7 @@
 | ABUSE-01 | 昂貴 RAG 端點 | 無限制消耗被限制 | 429／Retry-After、併發測試 | `not_started` | 工程 |
 | AUTH-01 | Actor 身分可信 | actor 由驗證層產生，不信任使用者 header | 遠端／本機 actor 測試、audit log | `not_started` | 工程 |
 | AUTH-02 | 題庫狀態機 | 不可直接建立／更新為 accepted | 狀態轉換 API 測試、角色矩陣 | `not_started` | 工程／法律審閱 |
+| AUTH-03 | Google 帳號登入 | 僅 allowlist 內且 email_verified 的 Google 帳號可取得管理員 session；state／CSRF／cookie 安全 | OAuth start／callback、allowlist 拒絕、HttpOnly／SameSite、remote session 測試 | `implemented`（程式與自動測試完成；Google Cloud 實機待設定） | 工程 |
 | DATA-01 | RAG 問題與答案保留 | 有保留天數與遮罩 | retention job／DB policy／備份清單 | `not_started` | PM／工程 |
 | SUP-01 | 供應鏈 | 依賴與 image 可重現、無高風險 CVE | pip-audit、SBOM、digest pinning、npx 固定版 | `not_started` | 工程 |
 | HIST-01 | Git history | push 前 history 搜不到公開網域與內部連接埠；不含憑證 | `git log -S`／`git log -p` 掃描；目前只有工作樹 redact，歷史仍有 host/ports | `partial` | 工程 |
@@ -59,6 +60,7 @@ MBP Tailscale／MagicDNS                    → BackendState=Running；x570 解�
 x570 UFW 套用後重開（21:32:55）            → boot_id 改變；三個 unit 14 秒後自動 active、NRestarts=0；ufw/tailscaled enabled+active
 重開後 MBP → x570 LAN 11434–11437          → 仍 timeout；kernel 仍有 [UFW BLOCK]；Tailscale 11435–11437 /health 200
 x570 完整 sudo 驗證（21:37）               → pass=54 fail=0 warn=1；UFW status／numbered 與預期規則一致
+Google OAuth（2026-11-18）                  → /api/auth/me、state cookie、callback allowlist、HttpOnly session、remote admin session、Origin 拒絕測試通過；Google Cloud client 尚未設定
 ```
 
 測試：
@@ -77,6 +79,7 @@ ruff clean
 5. **備份**：先做敏感資料分類；`.env` 不進備份；age 加密與 restore drill。
 6. **API abuse**：先保護 RAG 昂貴端點，而不是只做 admin token 失敗節流。
 7. **Tailscale 路徑依賴**：`.env` 使用 MagicDNS `x570`，目前解析為 `100.64.0.0/10`。Tailscale 離線時 embedding／rerank 會失敗；需確認應用端是明確錯誤或降級，不是無限等待。
+8. **Google Cloud OAuth client**：建立 Web application client、填入正確 redirect URI 與 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，完成一次真實 Google 登入；自動測試只涵蓋程式流程，沒有 Google 實機憑證。
 
 ## 4. 驗收規則
 

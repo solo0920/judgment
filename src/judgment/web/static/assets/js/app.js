@@ -1,4 +1,5 @@
 import { api, needsApiConfiguration, subscribeRefresh } from "./api.js";
+import { initAuth } from "./auth.js";
 import { initSettings, refreshSettings } from "./settings.js";
 import { escapeHtml, icon, toast } from "./utils.js";
 import * as homePage from "./pages/home.js";
@@ -178,6 +179,7 @@ function initUpdateBadge() {
 }
 
 function boot() {
+  initAuth();
   initSettings();
   initGlobalShortcuts();
   initUpdateBadge();

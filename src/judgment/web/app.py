@@ -25,7 +25,12 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -34,6 +39,28 @@ from starlette.background import BackgroundTask
 from .. import __version__
 from ..admission import RagAdmission, RagBusy
 from ..config import Settings
+from .auth import (
+    SESSION_COOKIE,
+    allowed_email,
+    build_google_authorization_url,
+    clear_oauth_state_cookie,
+    clear_session_cookie,
+    email_verified,
+    exchange_google_code,
+    google_login_enabled,
+    google_redirect_uri,
+    make_oauth_state_token,
+    make_session_token,
+    new_oauth_state,
+    origin_allowed,
+    read_oauth_state,
+    read_session,
+    redirect_with_auth,
+    safe_next_url,
+    session_secret,
+    set_oauth_state_cookie,
+    set_session_cookie,
+)
 from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
 from ..law_article_versions import check_law_version_status
@@ -277,7 +304,14 @@ def _incoming_request_id(request: Request) -> str:
     return uuid4().hex
 
 
-PUBLIC_API_PATHS = {"/api/health", "/api/home"}
+PUBLIC_API_PATHS = {
+    "/api/health",
+    "/api/home",
+    "/api/auth/me",
+    "/api/auth/logout",
+    "/api/auth/google/start",
+    "/api/auth/google/callback",
+}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 SSE_TICKET_TTL_SECONDS = 120
 
@@ -1208,7 +1242,7 @@ def create_app(
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(cors_origins),
-            allow_credentials=False,
+            allow_credentials=True,
             allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=[
                 "Accept",
@@ -1263,32 +1297,168 @@ def create_app(
                     )
             return await call_next(request)
 
-        expected = str(app.state.settings.admin_token or "")
-        if not expected:
+        current = app.state.settings
+        admin_expected = str(current.admin_token or "")
+        provided = _provided_admin_token(request)
+        if (
+            admin_expected
+            and provided
+            and hmac.compare_digest(provided, admin_expected)
+        ):
+            return await call_next(request)
+
+        session = read_session(request, current)
+        if session is not None:
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and not origin_allowed(
+                request, current, cors_origins
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "不允許的 Origin 對 Google 登入工作階段寫入。"},
+                )
+            return await call_next(request)
+
+        if path == "/api/events/stream":
+            ticket = str(request.query_params.get("ticket") or "")
+            if _valid_sse_ticket(ticket, session_secret(current)):
+                return await call_next(request)
+
+        if not admin_expected:
             return JSONResponse(
                 status_code=403,
                 content={
                     "detail": (
-                        "遠端管理 API 尚未設定 JUDGMENT_ADMIN_TOKEN；"
+                        "遠端管理 API 尚未設定 JUDGMENT_ADMIN_TOKEN 或 Google 登入；"
                         "本機 127.0.0.1 可直接使用。"
                     )
                 },
             )
-        provided = _provided_admin_token(request)
-        if provided and hmac.compare_digest(provided, expected):
-            return await call_next(request)
-        if path == "/api/events/stream":
-            ticket = str(request.query_params.get("ticket") or "")
-            if _valid_sse_ticket(ticket, expected):
-                return await call_next(request)
         return JSONResponse(
             status_code=401,
-            content={"detail": "需要有效的 X-Judgment-Admin-Token 管理權杖。"},
+            content={
+                "detail": "需要有效的管理權杖或 Google 帳號登入。"
+            },
         )
+
+    @app.get("/api/auth/me")
+    def auth_me(request: Request) -> JSONResponse:
+        current = app.state.settings
+        session = read_session(request, current)
+        payload = {
+            "authenticated": bool(session),
+            "email": session.get("email") if session else None,
+            "name": session.get("name") if session else None,
+            "picture": session.get("picture") if session else None,
+            "admin": bool(session),
+            "google_enabled": google_login_enabled(current),
+        }
+        response = JSONResponse(payload)
+        if request.cookies.get(SESSION_COOKIE) and session is None:
+            clear_session_cookie(response)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/api/auth/google/start", name="google_start")
+    def google_start(request: Request) -> RedirectResponse:
+        current = app.state.settings
+        target = safe_next_url(request.query_params.get("next"), request, current)
+        if not google_login_enabled(current):
+            return redirect_with_auth(target, error="google_not_configured")
+        state = new_oauth_state()
+        state_token = make_oauth_state_token(state, target, current)
+        redirect_uri = google_redirect_uri(request, current)
+        response = RedirectResponse(
+            build_google_authorization_url(
+                client_id=current.google_oauth_client_id,
+                redirect_uri=redirect_uri,
+                state=state,
+            ),
+            status_code=302,
+        )
+        set_oauth_state_cookie(response, request, current, state_token)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/api/auth/google/callback", name="google_callback")
+    async def google_callback(request: Request) -> RedirectResponse:
+        current = app.state.settings
+        state = str(request.query_params.get("state") or "")
+        state_data = read_oauth_state(request, current)
+        if not state_data or not hmac.compare_digest(
+            str(state_data.get("state") or ""), state
+        ):
+            response = redirect_with_auth("/", error="state_mismatch")
+            clear_oauth_state_cookie(response)
+            return response
+
+        target = safe_next_url(state_data.get("next"), request, current)
+        if request.query_params.get("error"):
+            response = redirect_with_auth(target, error="access_denied")
+            clear_oauth_state_cookie(response)
+            return response
+
+        code = str(request.query_params.get("code") or "")
+        if not code or not google_login_enabled(current):
+            response = redirect_with_auth(target, error="oauth_failed")
+            clear_oauth_state_cookie(response)
+            return response
+
+        redirect_uri = google_redirect_uri(request, current)
+        try:
+            user = await exchange_google_code(
+                code=code,
+                client_id=current.google_oauth_client_id,
+                client_secret=current.google_oauth_client_secret,
+                redirect_uri=redirect_uri,
+            )
+        except Exception:
+            logger.exception("Google OAuth code exchange failed")
+            response = redirect_with_auth(target, error="oauth_failed")
+            clear_oauth_state_cookie(response)
+            return response
+
+        if not email_verified(user):
+            response = redirect_with_auth(target, error="email_unverified")
+            clear_oauth_state_cookie(response)
+            return response
+
+        email = str(user.get("email") or "").strip().lower()
+        if not allowed_email(email, current):
+            response = redirect_with_auth(target, error="not_allowed")
+            clear_oauth_state_cookie(response)
+            return response
+
+        try:
+            token = make_session_token(user, current)
+        except ValueError:
+            logger.exception("Google login session secret is not configured")
+            response = redirect_with_auth(target, error="oauth_failed")
+            clear_oauth_state_cookie(response)
+            return response
+
+        response = redirect_with_auth(target, ok=True)
+        set_session_cookie(response, request, current, token)
+        clear_oauth_state_cookie(response)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request) -> JSONResponse:
+        current = app.state.settings
+        if not origin_allowed(request, current, cors_origins):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "不允許的 Origin。"},
+            )
+        response = JSONResponse({"ok": True})
+        clear_session_cookie(response)
+        clear_oauth_state_cookie(response)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post("/api/auth/sse-ticket")
     def sse_ticket() -> Dict[str, Any]:
-        ticket = _make_sse_ticket(str(app.state.settings.admin_token or ""))
+        ticket = _make_sse_ticket(session_secret(app.state.settings))
         return {
             "ticket": ticket,
             "expires_in": SSE_TICKET_TTL_SECONDS if ticket else 0,
@@ -1302,6 +1472,7 @@ def create_app(
             or path.startswith("/api/performance")
             or path.startswith("/api/processing")
             or path.startswith("/api/events")
+            or path.startswith("/api/auth")
             or path.startswith("/api/quality")
             or path.startswith("/api/question-bank")
             or path.startswith("/api/benchmark")

@@ -6,6 +6,7 @@ import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlparse
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -35,6 +36,7 @@ from judgment.models import (
 from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
 from judgment.web.app import create_app
+from judgment.web.auth import make_session_token
 
 
 def _seed(session_factory) -> None:
@@ -485,6 +487,7 @@ def test_static_console_is_served(web_client) -> None:
     assert 'aria-label="設定選項"' in page.text
     assert 'id="settings-sidebar"' in page.text
     assert 'id="settings-panel"' in page.text
+    assert 'id="auth-slot"' in page.text
     assert "judgment.appearance" in page.text
     assert 'id="style-trigger"' not in page.text
     assert 'id="style-menu"' not in page.text
@@ -630,6 +633,12 @@ def test_static_console_is_served(web_client) -> None:
     assert "X-Judgment-Admin-Token" in api_js.text
     assert "/api/auth/sse-ticket" in api_js.text
     assert "adminTokenForRequest" in api_js.text
+    assert "authMe" in api_js.text
+    assert "getAuthApiBase" in api_js.text
+    auth_js = web_client.get("/assets/js/auth.js")
+    assert auth_js.status_code == 200
+    assert "google_enabled" in auth_js.text
+    assert "auth-slot" in auth_js.text
     performance_js = web_client.get("/assets/js/pages/performance.js")
     assert performance_js.status_code == 200
     assert "判決向量索引 Pipeline" in performance_js.text
@@ -2475,6 +2484,9 @@ def test_cors_honors_explicit_origin_configuration(web_client) -> None:
             "/api/health", headers={"Origin": "https://allowed.example"}
         )
         assert allowed.headers["access-control-allow-origin"] == "https://allowed.example"
+        assert (
+            allowed.headers["access-control-allow-credentials"] == "true"
+        )
 
         denied = client.get("/api/health", headers={"Origin": "https://other.example"})
         assert "access-control-allow-origin" not in denied.headers
@@ -2550,6 +2562,257 @@ def test_remote_admin_api_without_token_is_forbidden(web_client) -> None:
     with TestClient(app, client=("203.0.113.9", 50000)) as remote:
         denied = remote.get("/api/catalog")
         assert denied.status_code == 403
+
+
+def _oauth_settings(web_client, **overrides):
+    settings = replace(
+        web_client.app.state.settings,
+        google_oauth_client_id="test-client-id",
+        google_oauth_client_secret="test-client-secret",
+        google_oauth_redirect_uri="http://testserver/api/auth/google/callback",
+        google_allowed_emails=("admin@example.com",),
+        auth_session_secret="test-session-secret",
+        admin_token="",
+        cors_allow_origins=("https://app.example",),
+    )
+    return replace(settings, **overrides)
+
+
+def _oauth_app(web_client, **overrides):
+    return create_app(
+        settings=_oauth_settings(web_client, **overrides),
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+
+
+def test_google_login_disabled_reports_and_redirects(web_client) -> None:
+    me = web_client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["authenticated"] is False
+    assert me.json()["google_enabled"] is False
+
+    start = web_client.get("/api/auth/google/start", follow_redirects=False)
+    assert start.status_code == 302
+    assert start.headers["location"].endswith("/?auth_error=google_not_configured")
+
+
+def test_google_login_start_sets_state_and_google_url(web_client) -> None:
+    with TestClient(_oauth_app(web_client)) as client:
+        response = client.get(
+            "/api/auth/google/start?next=/#/rag", follow_redirects=False
+        )
+        assert response.status_code == 302
+        location = response.headers["location"]
+        assert location.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
+        query = parse_qs(urlparse(location).query)
+        assert query["client_id"] == ["test-client-id"]
+        assert query["redirect_uri"] == [
+            "http://testserver/api/auth/google/callback"
+        ]
+        assert query["scope"] == ["openid email profile"]
+        assert query["state"][0]
+        assert response.cookies.get("judgment_oauth_state")
+
+
+def test_google_callback_rejects_state_mismatch(web_client) -> None:
+    with TestClient(_oauth_app(web_client)) as client:
+        start = client.get("/api/auth/google/start", follow_redirects=False)
+        assert start.status_code == 302
+
+        response = client.get(
+            "/api/auth/google/callback?state=wrong&code=fake",
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert response.headers["location"].endswith(
+            "/?auth_error=state_mismatch"
+        )
+
+
+def test_google_callback_creates_session(web_client, monkeypatch) -> None:
+    async def fake_exchange_google_code(**_kwargs):
+        return {
+            "sub": "google-sub-1",
+            "email": "admin@example.com",
+            "email_verified": True,
+            "name": "Admin User",
+            "picture": "",
+        }
+
+    monkeypatch.setattr(
+        sys.modules["judgment.web.app"],
+        "exchange_google_code",
+        fake_exchange_google_code,
+    )
+    with TestClient(_oauth_app(web_client)) as client:
+        start = client.get(
+            "/api/auth/google/start?next=" + quote("/#/rag", safe=""),
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+
+        callback = client.get(
+            f"/api/auth/google/callback?state={state}&code=fake",
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        assert callback.headers["location"] == "/?auth=ok#/rag"
+        assert client.cookies.get("judgment_session")
+
+        me = client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["authenticated"] is True
+        assert me.json()["email"] == "admin@example.com"
+        assert me.json()["admin"] is True
+
+
+def test_google_callback_allows_configured_frontend_next(
+    web_client, monkeypatch
+) -> None:
+    async def fake_exchange_google_code(**_kwargs):
+        return {
+            "sub": "google-sub-next",
+            "email": "admin@example.com",
+            "email_verified": True,
+            "name": "Admin User",
+        }
+
+    monkeypatch.setattr(
+        sys.modules["judgment.web.app"],
+        "exchange_google_code",
+        fake_exchange_google_code,
+    )
+    with TestClient(_oauth_app(web_client)) as client:
+        start = client.get(
+            "/api/auth/google/start?next="
+            + quote("https://app.example/#/rag", safe=""),
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        callback = client.get(
+            f"/api/auth/google/callback?state={state}&code=fake",
+            follow_redirects=False,
+        )
+        assert callback.headers["location"] == "https://app.example/?auth=ok#/rag"
+
+
+def test_google_callback_ignores_untrusted_next(web_client, monkeypatch) -> None:
+    async def fake_exchange_google_code(**_kwargs):
+        return {
+            "sub": "google-sub-untrusted",
+            "email": "admin@example.com",
+            "email_verified": True,
+            "name": "Admin User",
+        }
+
+    monkeypatch.setattr(
+        sys.modules["judgment.web.app"],
+        "exchange_google_code",
+        fake_exchange_google_code,
+    )
+    with TestClient(_oauth_app(web_client)) as client:
+        start = client.get(
+            "/api/auth/google/start?next="
+            + quote("https://evil.example/", safe=""),
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        callback = client.get(
+            f"/api/auth/google/callback?state={state}&code=fake",
+            follow_redirects=False,
+        )
+        assert callback.headers["location"] == "/?auth=ok"
+
+
+def test_google_callback_rejects_unlisted_email(web_client, monkeypatch) -> None:
+    async def fake_exchange_google_code(**_kwargs):
+        return {
+            "sub": "google-sub-2",
+            "email": "other@example.com",
+            "email_verified": True,
+            "name": "Other User",
+        }
+
+    monkeypatch.setattr(
+        sys.modules["judgment.web.app"],
+        "exchange_google_code",
+        fake_exchange_google_code,
+    )
+    with TestClient(_oauth_app(web_client)) as client:
+        start = client.get("/api/auth/google/start", follow_redirects=False)
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        callback = client.get(
+            f"/api/auth/google/callback?state={state}&code=fake",
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        assert callback.headers["location"].endswith("/?auth_error=not_allowed")
+        assert not client.cookies.get("judgment_session")
+
+
+def test_remote_google_session_authorizes_and_rejects_bad_origin(web_client) -> None:
+    settings = _oauth_settings(web_client)
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    token = make_session_token(
+        {
+            "sub": "google-sub-3",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        settings,
+    )
+    with TestClient(app, client=("203.0.113.9", 50000)) as remote:
+        assert remote.get("/api/question-bank/stats").status_code == 403
+
+        remote.cookies.set("judgment_session", token)
+        assert remote.get("/api/question-bank/stats").status_code == 200
+
+        bad_origin = remote.post(
+            "/api/auth/sse-ticket",
+            headers={"Origin": "https://evil.example"},
+        )
+        assert bad_origin.status_code == 403
+
+        good_origin = remote.post(
+            "/api/auth/sse-ticket",
+            headers={"Origin": "https://app.example"},
+        )
+        assert good_origin.status_code == 200
+        assert good_origin.json()["ticket"]
+
+
+def test_google_logout_clears_session(web_client) -> None:
+    settings = _oauth_settings(web_client)
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    token = make_session_token(
+        {
+            "sub": "google-sub-4",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        settings,
+    )
+    with TestClient(app) as client:
+        client.cookies.set("judgment_session", token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        logout = client.post("/api/auth/logout")
+        assert logout.status_code == 200
+        assert logout.json()["ok"] is True
+        set_cookie = logout.headers.get("set-cookie", "")
+        assert "judgment_session=" in set_cookie
+        assert "Max-Age=0" in set_cookie
+        client.cookies.delete("judgment_session")
+        assert client.get("/api/auth/me").json()["authenticated"] is False
 
 
 def test_ollama_host_rejects_unlisted_and_metadata_targets(web_client) -> None:

@@ -65,6 +65,14 @@ class Settings:
     )
     forwarded_allow_ips: str = "127.0.0.1"
     admin_token: str = ""
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""
+    google_allowed_emails: tuple[str, ...] = ("solo4study@gmail.com",)
+    auth_session_secret: str = ""
+    auth_session_ttl_seconds: int = 60 * 60 * 24 * 7
+    auth_cookie_samesite: str = "lax"
+    auth_cookie_secure: str = "auto"
     ollama_allowed_hosts: tuple[str, ...] = ()
     qdrant_url: str = ""
     qdrant_api_key: str = ""
@@ -218,6 +226,26 @@ class Settings:
                 or "127.0.0.1"
             ),
             admin_token=os.getenv("JUDGMENT_ADMIN_TOKEN", "").strip(),
+            google_oauth_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
+            google_oauth_client_secret=os.getenv(
+                "GOOGLE_CLIENT_SECRET", ""
+            ).strip(),
+            google_oauth_redirect_uri=os.getenv(
+                "GOOGLE_REDIRECT_URI", ""
+            ).strip(),
+            google_allowed_emails=_env_csv(
+                "GOOGLE_ALLOWED_EMAILS", ("solo4study@gmail.com",)
+            ),
+            auth_session_secret=os.getenv("AUTH_SESSION_SECRET", "").strip(),
+            auth_session_ttl_seconds=_env_int(
+                "AUTH_SESSION_TTL_SECONDS", 60 * 60 * 24 * 7
+            ),
+            auth_cookie_samesite=(
+                os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower() or "lax"
+            ),
+            auth_cookie_secure=(
+                os.getenv("AUTH_COOKIE_SECURE", "auto").strip().lower() or "auto"
+            ),
             ollama_allowed_hosts=_env_csv("OLLAMA_ALLOWED_HOSTS", ()),
             qdrant_url=os.getenv("QDRANT_URL", "").rstrip("/"),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),

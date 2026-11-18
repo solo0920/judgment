@@ -1062,6 +1062,36 @@ FORWARDED_ALLOW_IPS=127.0.0.1
 JUDGMENT_ADMIN_TOKEN=<以 python -c "import secrets; print(secrets.token_urlsafe(32))" 產生>
 ```
 
+#### Google 帳號登入
+
+Header 右側提供 Google 登入；預設管理員是 `solo4study@gmail.com`。Google 登入是管理權杖之外的另一種管理員驗證方式，不會移除原本的 `JUDGMENT_ADMIN_TOKEN` 或本機 loopback 行為。
+
+在 Google Cloud Console 建立 **Web application** OAuth client，加入授權 redirect URI：
+
+```text
+http://127.0.0.1:9200/api/auth/google/callback
+https://<實際後端網域>/api/auth/google/callback
+```
+
+設定環境變數：
+
+```bash
+GOOGLE_CLIENT_ID=<Google OAuth client id>
+GOOGLE_CLIENT_SECRET=<Google OAuth client secret>
+GOOGLE_REDIRECT_URI=https://<實際後端網域>/api/auth/google/callback
+GOOGLE_ALLOWED_EMAILS=solo4study@gmail.com
+AUTH_SESSION_SECRET=<python -c "import secrets; print(secrets.token_urlsafe(32))" 產生>
+AUTH_COOKIE_SAMESITE=lax
+AUTH_COOKIE_SECURE=auto
+```
+
+- `GOOGLE_ALLOWED_EMAILS` 是登入白名單；只有列出的電子郵件可以取得管理員工作階段。多個帳號以逗號分隔。
+- `GOOGLE_REDIRECT_URI` 留空時會由請求推導；正式環境建議明確設定，且必須與 Google Console 完全一致。
+- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；留空時會退回使用 `JUDGMENT_ADMIN_TOKEN`。
+- FastAPI 同源前端使用 `AUTH_COOKIE_SAMESITE=lax`。若前端部署在 Cloudflare Pages、後端是另一個網域，必須使用 HTTPS、把 Pages origin 加入 `CORS_ALLOW_ORIGINS`，並設 `AUTH_COOKIE_SAMESITE=none`。
+- 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie。
+- 未設定 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 時，header 仍會顯示登入按鈕，但會提示 Google 登入尚未設定；原有管理權杖與本機管理模式不受影響。
+
 安全驗收狀態與證據見 `specs/security/security-acceptance-matrix.md`；未完成的部署項不會因程式測試通過而標成 verified。
 
 每次開機或部署後可跑 listener 回歸檢查；`up.sh` 在啟動 web 前也會自動執行，失敗會拒絕啟動：
