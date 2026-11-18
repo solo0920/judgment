@@ -359,7 +359,13 @@ function stageCounts(stage) {
 }
 
 function stageMeta(stage) {
-  const parts = [`<span>${escapeHtml(stageCounts(stage))}</span>`];
+  const cumulative = ["extract", "raw_parquet"].includes(
+    String(stage.key || ""),
+  );
+  const counts = stageCounts(stage);
+  const countsLabel =
+    cumulative && counts !== "—" ? `累計 ${counts}` : counts;
+  const parts = [`<span>${escapeHtml(countsLabel)}</span>`];
   if (stage.percent === null || stage.percent === undefined) {
     if (stage.status === "running") {
       parts.push('<span class="mono">進度未知</span>');
@@ -3117,7 +3123,10 @@ function workflowStageDetailMarkup(stage, durationLabel) {
   add("耗時", durationLabel, { always: true });
   add("進度", percentText(stage.percent), { always: true });
   const counts = stageCounts(stage);
-  add("資料量", counts !== "—" ? counts : "");
+  const cumulative = ["extract", "raw_parquet"].includes(
+    String(stage.key || ""),
+  );
+  add(cumulative ? "累計資料量" : "資料量", counts !== "—" ? counts : "");
   const ratio = workflowFinancialRatio(stage);
   if (ratio) {
     add("金融案件", `${formatNumber(ratio.matched)} 筆`);
