@@ -14104,21 +14104,31 @@ button.chip:hover {
 }
 
 .judgment-month.is-green {
-  border-color: var(--success);
-  background: var(--success-soft);
-  color: var(--success);
+  border-color: #4f7a00;
+  background: #76b900;
+  color: #102400;
+  font-weight: 650;
 }
 
 .judgment-month.is-gray {
-  border-color: var(--line-strong);
-  background: var(--surface-3);
-  color: var(--muted);
+  border-color: #7e858e;
+  background: #aeb4bc;
+  color: #1c2025;
 }
 
 .judgment-month.is-red {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-  color: var(--danger);
+  border-color: #991b1b;
+  background: #d32f2f;
+  color: #ffffff;
+  font-weight: 650;
+}
+
+.judgment-month.is-green .judgment-month-download {
+  color: #102400;
+}
+
+.judgment-month.is-red .judgment-month-download {
+  color: #ffffff;
 }
 
 .judgment-month.is-empty {

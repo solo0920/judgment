@@ -668,6 +668,9 @@ def test_static_console_is_served(web_client) -> None:
     assert ".processing-month-stage.is-extract" in css.text
     assert ".processing-month-stage.is-raw_parquet" in css.text
     assert ".processing-month-stage.is-filter" in css.text
+    assert ".judgment-month.is-green" in css.text
+    assert "background: #76b900" in css.text
+    assert "background: #d32f2f" in css.text
     assert ".processing-timeline-swatch.is-raw-parquet" in css.text
     assert ".home-hero" in css.text
     assert ".home-rag-flow" in css.text
