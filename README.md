@@ -1975,6 +1975,40 @@ bash scripts/deploy_llama_services_macos.sh --uninstall
 - `scripts/deploy_ollama_preload_macos.sh` 是舊的 Ollama 預載路徑，會啟動 Ollama.app；已不再使用，請勿再執行。
 - `qllama/bge-reranker-v2-m3` 只保留在 Ollama 模型庫作為 GGUF 來源，不再載入 Ollama runtime；rerank 由 MBP 的 llama-server LaunchAgent 提供。
 
+#### MBP Web 主控台開機自動啟動（launchd）
+
+`scripts/deploy_web_macos.sh` 會建立 `com.judgment.web`，讓 MBP 重新登入後不必手動執行 `./up.sh`，Cloudflare tunnel 才不會在重開機後失去 origin：
+
+- 登入後執行 `scripts/mbp_web_autostart.sh`
+- 先等待 Docker daemon（OrbStack／Docker Desktop 可能還在啟動）最多 180 秒
+- 再執行 idempotent 的 `./up.sh`：已在執行的後端、reranker、容器不會重複啟動
+- `up.sh` 會依序確認 PostgreSQL／Qdrant、探測 x570 與 MBP llama-server、啟動 `127.0.0.1:9200` 後端
+- 只在登入時執行一次，沒有 `KeepAlive`；`up.sh` 失敗時不會每 30 秒重試
+- 日誌：`~/Library/Logs/judgment-web-autostart.log` 與 `.run/web.log`
+
+安裝與驗證：
+
+```bash
+bash scripts/deploy_web_macos.sh
+bash scripts/deploy_web_macos.sh --status
+
+# 冷啟動測試：停掉後端，確認 LaunchAgent 會把它拉回來
+tmux kill-session -t judgment-web
+launchctl kickstart -k gui/$(id -u)/com.judgment.web
+curl -s http://127.0.0.1:9200/api/health
+```
+
+管理與移除：
+
+```bash
+bash scripts/deploy_web_macos.sh --restart
+launchctl print gui/$(id -u)/com.judgment.web
+tail -f ~/Library/Logs/judgment-web-autostart.log
+bash scripts/deploy_web_macos.sh --uninstall
+```
+
+`com.judgment.web` 只負責後端與容器；Cloudflare tunnel 由另一個 LaunchAgent `com.cloudflare.cloudflared` 管理，tunnel ingress 指向 `http://127.0.0.1:9200`。
+
 ### 本階段驗證
 
 - `uv run pytest`：465 tests pass（含靜態資源、首頁即時摘要 API／99 條金融法規 11 欄列表／首頁 Pipeline waterfall／管理權杖與 CORS／Ollama SSRF allowlist／Docker loopback 綁定、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／Reranker 服務測試與 test-mode Reranker 階段／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
