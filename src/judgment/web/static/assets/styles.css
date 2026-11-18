@@ -14150,11 +14150,32 @@ button.chip:hover {
   right: 0;
   bottom: 0;
   left: 0;
-  height: 2px;
+  z-index: 2;
+  height: 4px;
+  border-radius: 0 0 2px 2px;
   background: currentColor;
-  opacity: 0.85;
+  opacity: 0.92;
+  pointer-events: none;
   width: var(--month-progress, 0%);
   transition: width 0.35s ease;
+}
+
+.judgment-month.is-active::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  height: 4px;
+  border-radius: 0 0 2px 2px;
+  background: rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.judgment-month.is-downloading {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @keyframes judgment-month-pulse {

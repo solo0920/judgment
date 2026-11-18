@@ -5801,13 +5801,21 @@ export async function render(root) {
     }
     const activeMonths = new Map();
     for (const item of downloads) {
-      if (item.month) activeMonths.set(String(item.month), item.percent);
+      if (item.month) {
+        activeMonths.set(String(item.month), {
+          percent: item.percent,
+          phase: item.phase,
+        });
+      }
     }
     if (month && !activeMonths.has(month)) {
-      activeMonths.set(month, progress.percent);
+      activeMonths.set(month, {
+        percent: progress.percent,
+        phase: progress.phase,
+      });
     }
     panel.querySelectorAll(".judgment-month.is-active").forEach((cell) => {
-      cell.classList.remove("is-active");
+      cell.classList.remove("is-active", "is-downloading");
       cell.removeAttribute("aria-current");
       cell.style.removeProperty("--month-progress");
     });
@@ -5817,8 +5825,11 @@ export async function render(root) {
       );
       if (!cell) continue;
       cell.classList.add("is-active");
+      if (value?.phase === "downloading" || value?.phase === "saving") {
+        cell.classList.add("is-downloading");
+      }
       cell.setAttribute("aria-current", "true");
-      const progressValue = Number(value);
+      const progressValue = Number(value?.percent);
       if (Number.isFinite(progressValue)) {
         cell.style.setProperty(
           "--month-progress",
