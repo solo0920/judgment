@@ -14152,12 +14152,13 @@ button.chip:hover {
   border-width: 1px;
   border-color: #000000;
   outline: none;
-  color: #102400;
+  background-color: var(--bg);
+  color: var(--ink);
   animation: none;
 }
 
 .judgment-month.is-downloading .judgment-month-download {
-  color: #102400;
+  color: var(--ink);
 }
 
 @keyframes judgment-month-pulse {
