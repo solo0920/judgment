@@ -14141,44 +14141,27 @@ button.chip:hover {
   border-color: var(--accent);
   outline: 2px solid var(--info);
   outline-offset: 1px;
+  background-image: linear-gradient(
+    rgba(118, 185, 0, 0.7),
+    rgba(118, 185, 0, 0.7)
+  );
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% var(--month-progress, 0%);
+  transition: background-size 0.35s ease;
   animation: judgment-month-pulse 1.6s ease-in-out infinite;
-}
-
-.judgment-month.is-active::before {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  z-index: 1;
-  width: 4px;
-  height: calc(100% - 6px);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.18);
-  pointer-events: none;
-}
-
-.judgment-month.is-active::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  z-index: 2;
-  width: 4px;
-  height: var(--month-progress, 0%);
-  max-height: calc(100% - 6px);
-  border-radius: 999px;
-  background: #76b900;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
-  opacity: 1;
-  pointer-events: none;
-  transition: height 0.35s ease;
 }
 
 .judgment-month.is-downloading {
   border-color: #00e5ff;
   outline: 2px solid #00e5ff;
   outline-offset: 2px;
+  color: #102400;
   animation: judgment-month-download-pulse 1.6s ease-in-out infinite;
+}
+
+.judgment-month.is-downloading .judgment-month-download {
+  color: #102400;
 }
 
 @keyframes judgment-month-download-pulse {

@@ -182,6 +182,7 @@ from .processing_events import ProcessingEventServer
 from .processing import (
     ProcessingManager,
     active_import_event_stream,
+    apply_live_judgment_pending,
     build_active_import,
     build_processing_bootstrap,
     build_processing_live,
@@ -1275,8 +1276,9 @@ def create_app(
         processing_latest_event_id_provider=lambda: (
             app.state.processing_event_server.latest_event_id()
         ),
-        updates_payload_provider=lambda: update_status(
-            app.state.session_factory
+        updates_payload_provider=lambda: apply_live_judgment_pending(
+            update_status(app.state.session_factory),
+            app.state.settings,
         ),
         status_payload_provider=status_payload,
         judgment_download_payload_provider=lambda: download_status(
@@ -2177,7 +2179,10 @@ def create_app(
 
     @app.get("/api/updates/status")
     def updates_status() -> Dict[str, Any]:
-        return update_status(app.state.session_factory)
+        return apply_live_judgment_pending(
+            update_status(app.state.session_factory),
+            app.state.settings,
+        )
 
     @app.post("/api/updates/check")
     def updates_check(
@@ -2192,7 +2197,10 @@ def create_app(
             )
         if not _UPDATE_CHECK_LOCK.acquire(blocking=False):
             return {
-                **update_status(app.state.session_factory),
+                **apply_live_judgment_pending(
+                    update_status(app.state.session_factory),
+                    app.state.settings,
+                ),
                 "checking": True,
             }
         try:
@@ -2201,7 +2209,10 @@ def create_app(
                 session_factory=app.state.session_factory,
                 source_types=source_types or None,
             )
-            return update_status(app.state.session_factory)
+            return apply_live_judgment_pending(
+                update_status(app.state.session_factory),
+                app.state.settings,
+            )
         finally:
             _UPDATE_CHECK_LOCK.release()
 

@@ -5392,7 +5392,7 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
     })}
     ${
       workflow.update_available
-        ? `<div class="processing-update-notice" role="status">
+        ? `<div class="processing-update-notice" role="status" data-processing-update-notice>
             <span class="processing-update-notice-icon">${icon(
               "refresh",
               14,
@@ -5404,13 +5404,13 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
               <span class="processing-update-mechanism">偵測機制：${escapeHtml(
                 updateMechanism,
               )}${updateCheckedAt ? ` · 檢查時間 ${escapeHtml(updateCheckedAt)}` : ""}</span>
-              <span class="processing-update-message">${escapeHtml(
+              <span class="processing-update-message" data-processing-update-message>${escapeHtml(
                 updateMessage,
               )}</span>
             </span>
             ${
               updateCount > 0
-                ? `<span class="badge badge-warn badge-mono">${icon(
+                ? `<span class="badge badge-warn badge-mono" data-processing-update-count>${icon(
                     "refresh",
                     10,
                   )}${formatNumber(updateCount)}</span>`
@@ -5600,6 +5600,7 @@ export async function render(root) {
   let judgmentStatus = null;
   let judgmentStatusLoading = false;
   let judgmentStatusError = null;
+  let lastJudgmentPendingCount = null;
   let indexStorage = null;
   let indexStorageLoading = false;
   let indexStorageError = null;
@@ -6011,6 +6012,49 @@ export async function render(root) {
         slot.dataset.judgmentMonthCount = String(months.length);
       } else {
         updateJudgmentMonthTable(slot, judgmentStatus);
+      }
+    }
+    if (judgmentStatus) {
+      const info = judgmentBackfillSummary(judgmentStatus);
+      const changed = lastJudgmentPendingCount !== info.pending;
+      lastJudgmentPendingCount = info.pending;
+      const workflow = (lastSnapshot?.workflows || []).find(
+        (item) => item.id === "judgment_download",
+      );
+      if (workflow) {
+        workflow.update_count = info.pending;
+        workflow.update_available = info.pending > 0;
+      }
+      const noticeEl = content.querySelector(
+        "[data-processing-update-notice]",
+      );
+      if (noticeEl) {
+        if (info.pending <= 0) {
+          noticeEl.remove();
+        } else {
+          const countEl = noticeEl.querySelector(
+            "[data-processing-update-count]",
+          );
+          if (countEl) {
+            countEl.innerHTML = `${icon("refresh", 10)}${formatNumber(
+              info.pending,
+            )}`;
+          }
+          const messageEl = noticeEl.querySelector(
+            "[data-processing-update-message]",
+          );
+          if (messageEl) {
+            messageEl.textContent = `判決待補齊 ${formatNumber(
+              info.pending,
+            )} 個月`;
+          }
+        }
+      }
+      if (changed && workflowNav && lastSnapshot) {
+        morphMarkup(
+          workflowNav,
+          workflowNavMarkup(lastSnapshot, activeWorkflowId),
+        );
       }
     }
     syncJudgmentProgress();

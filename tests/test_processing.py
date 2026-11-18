@@ -403,6 +403,77 @@ def test_processing_sections_report_remote_updates_and_actions(
     assert law_workflow["update_message"] == "法規遠端 ZIP 大小變更"
 
 
+def test_processing_snapshot_uses_live_judgment_pending_count(
+    tmp_path: Path, session_factory
+) -> None:
+    settings = _settings(tmp_path)
+    manifest_path = (
+        settings.judgment_data_dir / "raw_rar" / "download_manifest.json"
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "backfill": {
+                    "pending_count": 3,
+                    "resume_from_month": "2026-05",
+                    "resume_from_fileset_id": 73392,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(
+            DownloadUpdateRecord(
+                source_type="judgment",
+                source_url="https://example.test/judgment",
+                status="update_available",
+                update_available=True,
+                checked_at=now,
+                message="判決待補齊 17 個月",
+                details={
+                    "pending_count": 17,
+                    "resume_from_month": "2026-06",
+                },
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+    workflows = {item["id"]: item for item in snapshot["workflows"]}
+    workflow = workflows["judgment_download"]
+    assert workflow["update_available"] is True
+    assert workflow["update_count"] == 3
+    assert workflow["update_message"] == "判決待補齊 3 個月"
+    sections = {section["key"]: section for section in snapshot["sections"]}
+    download = next(
+        stage for stage in sections["judgment"]["stages"] if stage["key"] == "download"
+    )
+    assert (
+        download["lanes"][0]["stage"]["comparison"]["remote_pending"] == 3
+    )
+
+    manifest_path.write_text(
+        json.dumps({"backfill": {"pending_count": 0}}),
+        encoding="utf-8",
+    )
+    future = time.time() + 2
+    os.utime(manifest_path, (future, future))
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+    workflows = {item["id"]: item for item in snapshot["workflows"]}
+    workflow = workflows["judgment_download"]
+    assert workflow["update_available"] is False
+    assert workflow["update_count"] == 0
+
+
 def test_embedding_runtime_reports_host_and_full_model_tag(
     tmp_path: Path, session_factory
 ) -> None:

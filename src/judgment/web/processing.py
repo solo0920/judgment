@@ -139,6 +139,50 @@ def _percent(current: Any, total: Any) -> Optional[float]:
     return round(max(0.0, min(100.0, 100.0 * current_value / total_value)), 1)
 
 
+def apply_live_judgment_pending(
+    update_state: Dict[str, Any], settings: Settings
+) -> Dict[str, Any]:
+    """Overlay the live download manifest pending count on update records.
+
+    The DB update-check row is only refreshed when the online check runs, but
+    the downloader persists the manifest after every completed month.  Using
+    the manifest's backfill count keeps badges current while files finish.
+    """
+
+    try:
+        manifest = _judgment_download_manifest(settings)
+        backfill = manifest.get("backfill") or {}
+        live_pending = _safe_int(backfill.get("pending_count"))
+        if live_pending is None:
+            return update_state
+        sources = update_state.setdefault("sources", {})
+        record = sources.setdefault("judgment", {})
+        details = dict(record.get("details") or {})
+        details["pending_count"] = live_pending
+        resume = str(backfill.get("resume_from_month") or "")
+        if resume:
+            details["resume_from_month"] = resume
+        record["details"] = details
+        record["update_available"] = live_pending > 0
+        record["status"] = (
+            "update_available" if live_pending > 0 else "up_to_date"
+        )
+        record["message"] = (
+            f"判決待補齊 {live_pending} 個月"
+            if live_pending > 0
+            else "判決所有可下載月份皆已是最新"
+        )
+        update_state["update_count"] = sum(
+            1
+            for source in sources.values()
+            if bool((source or {}).get("update_available"))
+        )
+        update_state["any_update"] = int(update_state["update_count"]) > 0
+    except Exception:
+        logger.warning("無法套用即時判決待補齊數量", exc_info=True)
+    return update_state
+
+
 def _safe_int(value: Any) -> Optional[int]:
     try:
         return int(value)
@@ -4517,6 +4561,7 @@ def build_processing_snapshot(
     except Exception:
         logger.warning("無法讀取更新檢查狀態", exc_info=True)
         update_state = {"sources": {}}
+    update_state = apply_live_judgment_pending(update_state, settings)
     update_history_map: Dict[str, List[Dict[str, Any]]] = {}
     for source_key in ("law", "order", "judgment"):
         try:
