@@ -152,6 +152,7 @@ from ..rag import (
     CitationValidationError,
     generate_answer_with_model_async,
     llm_circuit_snapshot,
+    mark_citation_usage,
     warm_index_coverage,
     warm_index_staleness,
 )
@@ -566,6 +567,8 @@ def _api_endpoint_catalog(app: FastAPI) -> List[Dict[str, Any]]:
 def _rag_response_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
     judgments = result.get("judgments") or []
     law_sources = result.get("law_sources") or []
+    reference_judgments = result.get("reference_judgments") or []
+    retrieval = result.get("retrieval") or {}
     status = str(result.get("status") or "")
     return {
         "status": status,
@@ -573,6 +576,10 @@ def _rag_response_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
         "citation_count": len(judgments) + len(law_sources),
         "judgment_citations": len(judgments),
         "law_citations": len(law_sources),
+        "reference_judgments": len(reference_judgments),
+        "judgment_candidates": retrieval.get("judgment_candidates"),
+        "judgment_limit": retrieval.get("judgment_limit"),
+        "judgment_limit_applied": retrieval.get("judgment_limit_applied"),
         "abstain": status not in {"operational"},
         "duration_ms": result.get("duration_ms"),
         "llm_model": result.get("llm_model"),
@@ -708,6 +715,9 @@ def _retrieval_partial(
         "judgments": state.get("citations")
         or retrieval_result.get("judgments")
         or [],
+        "reference_judgments": state.get("reference_judgments")
+        or retrieval_result.get("reference_judgments")
+        or [],
         "law_sources": state.get("law_sources")
         or retrieval_result.get("law_sources")
         or [],
@@ -758,6 +768,9 @@ def _retrieval_final_result(
             else retrieval_result.get("notice") or "",
             "citations": [],
             "judgments": state.get("citations") or [],
+            "reference_judgments": state.get("reference_judgments")
+            or retrieval_result.get("reference_judgments")
+            or [],
             "law_sources": state.get("law_sources") or [],
             "answer_source": result_source,
             "llm_model": None,
@@ -804,10 +817,14 @@ def _llm_final_result(
         "used_indexes": sorted(allowed),
         "dropped_indexes": dropped_indexes,
     }
+    citations = state.get("citations") or []
+    law_sources = state.get("law_sources") or []
+    mark_citation_usage(citations, answer, allowed)
+    mark_citation_usage(law_sources, answer, allowed)
     citation_audit = _citation_audit(
         answer,
-        state.get("citations") or [],
-        state.get("law_sources") or [],
+        citations,
+        law_sources,
         allowed_indexes=allowed_indexes,
     )
     result.update(
@@ -819,8 +836,11 @@ def _llm_final_result(
                 "引用編號可對應下方來源。這不是法律意見。"
             ),
             "citations": [],
-            "judgments": state.get("citations") or [],
-            "law_sources": state.get("law_sources") or [],
+            "judgments": citations,
+            "reference_judgments": state.get("reference_judgments")
+            or retrieval_result.get("reference_judgments")
+            or [],
+            "law_sources": law_sources,
             "matched_terms": state.get("terms") or [],
             "answer_source": "llm",
             "llm_model": settings.llm_model,

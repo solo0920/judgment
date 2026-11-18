@@ -427,6 +427,24 @@ function lawCitationChipMarkup(citation) {
     aria-label="開啟 ${escapeHtml(label)} 的完整條文">${escapeHtml(label)}</button>`;
 }
 
+function citationUsageLabel(item) {
+  const status = String(item?.citation_status || "");
+  if (status === "cited") return "答案引用";
+  if (status === "provided_not_cited") {
+    return "已提供給模型，答案未引用";
+  }
+  if (status === "reference_only") {
+    return "僅供參考（未進入生成 prompt）";
+  }
+  if (item?.used_for_generation === false) {
+    return "僅供參考（未進入生成 prompt）";
+  }
+  if (item?.used_for_generation === true) {
+    return "已提供給模型";
+  }
+  return "";
+}
+
 function judgmentCard(judgment, index) {
   const score =
     judgment.score === null || judgment.score === undefined
@@ -436,12 +454,10 @@ function judgmentCard(judgment, index) {
     .filter(Boolean)
     .map((value) => `<span>${escapeHtml(value)}</span>`)
     .join("");
-  const promptUsage =
-    judgment.used_for_generation === false
-      ? "<span>僅供參考（未進入生成 prompt）</span>"
-      : judgment.used_for_generation === true
-        ? "<span>用於生成答案</span>"
-        : "";
+  const usageLabel = citationUsageLabel(judgment);
+  const promptUsage = usageLabel
+    ? `<span>${escapeHtml(usageLabel)}</span>`
+    : "";
   const lawCitations = (Array.isArray(judgment.law_citations)
     ? judgment.law_citations
     : []
@@ -497,6 +513,54 @@ function judgmentCard(judgment, index) {
   </article>`;
 }
 
+function referenceJudgmentCard(judgment) {
+  const meta = [judgment.court, judgment.jdate]
+    .filter(Boolean)
+    .map((value) => `<span>${escapeHtml(value)}</span>`)
+    .join("");
+  const scores = [
+    judgment.vector_score !== null && judgment.vector_score !== undefined
+      ? `向量 ${Number(judgment.vector_score).toFixed(4)}`
+      : "",
+    judgment.rerank_score !== null && judgment.rerank_score !== undefined
+      ? `rerank ${Number(judgment.rerank_score).toFixed(4)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .map((value) => `<span>${escapeHtml(value)}</span>`)
+    .join("");
+  const headAttributes = judgment.jid
+    ? ` data-action="open-parquet-judgment"
+        data-jid="${escapeHtml(judgment.jid)}"
+        role="button"
+        tabindex="0"
+        title="點擊開啟 DB 儲存原文判決"
+        aria-label="開啟 DB 儲存原文判決 ${escapeHtml(judgment.jid)}"`
+    : "";
+  return `<article class="citation reference-judgment">
+    <span class="citation-index">參</span>
+    <div class="citation-body">
+      <div class="citation-head"${headAttributes}>
+        <h4 class="citation-name">${escapeHtml(
+          judgment.title || judgment.jid || "相關判決",
+        )}</h4>
+        <div class="citation-meta">
+          ${meta || "<span>判決 metadata</span>"}
+          <span>僅供參考（未用於生成答案）</span>
+        </div>
+        ${
+          judgment.jid
+            ? `<div class="citation-meta"><span>${escapeHtml(
+                judgment.jid,
+              )}</span></div>`
+            : ""
+        }
+        ${scores ? `<div class="citation-meta">${scores}</div>` : ""}
+      </div>
+    </div>
+  </article>`;
+}
+
 function citationCard(citation, index) {
   const meta = [
     citation.law_level,
@@ -547,6 +611,7 @@ function lawSourceCard(source, index) {
     source.law_category,
     source.article_count ? `${formatNumber(source.article_count)} 條` : "",
     source.law_modified_date ? `異動 ${formatDate(source.law_modified_date)}` : "",
+    citationUsageLabel(source),
   ]
     .filter(Boolean)
     .map((value) => `<span>${value}</span>`)
@@ -817,7 +882,11 @@ function renderRagModeCard({
 function renderAnswerBody(payload) {
   const citations = Array.isArray(payload.citations) ? payload.citations : [];
   const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
+  const referenceJudgments = Array.isArray(payload.reference_judgments)
+    ? payload.reference_judgments
+    : [];
   const lawSources = Array.isArray(payload.law_sources) ? payload.law_sources : [];
+  const retrieval = payload.retrieval || {};
   const matched = Array.isArray(payload.matched_terms) ? payload.matched_terms : [];
   const status = payload.status || "preview";
   const partial = Boolean(payload.partial);
@@ -845,7 +914,7 @@ function renderAnswerBody(payload) {
       <div class="answer-section-label">
         <span>引用判決 · ${judgments.length} 筆${
           hasGenerationUsage
-            ? `（${usedJudgmentCount} 筆用於生成）`
+            ? `（${usedJudgmentCount} 筆進入 prompt）`
             : ""
         }</span>
         <span>vector retrieval · [編號] 對應回答引用</span>
@@ -854,6 +923,30 @@ function renderAnswerBody(payload) {
         .map((judgment, index) => judgmentCard(judgment, index))
         .join("")}</div>`
     : "";
+  const referenceSection =
+    retrieval.judgment_limit_applied && referenceJudgments.length
+      ? `<div class="reference-judgment-note">
+          <span>本題依題意主要詢問法規規定，故判決僅顯示 ${
+            judgments.length
+          } 筆作為參考。另有 ${
+            referenceJudgments.length
+          } 筆相關判決（${
+            referenceJudgments.some(
+              (judgment) =>
+                judgment.rerank_score !== null &&
+                judgment.rerank_score !== undefined,
+            )
+              ? "依 rerank 分數排序"
+              : "依檢索分數排序"
+          }），</span>
+          <details class="reference-judgments">
+            <summary>展開查看</summary>
+            <div class="citation-list reference-judgment-list">${referenceJudgments
+              .map((judgment) => referenceJudgmentCard(judgment))
+              .join("")}</div>
+          </details>
+        </div>`
+      : "";
   const lawSection = lawSources.length && !showLawAnswer
     ? `<div class="answer-divider"></div>
       <div class="answer-section-label">
@@ -875,7 +968,7 @@ function renderAnswerBody(payload) {
         .join("")}</div>`
     : "";
   let citationSection = showSources
-    ? judgmentSection + lawSection + metadataSection
+    ? judgmentSection + referenceSection + lawSection + metadataSection
     : "";
   if (!citationSection && !partial && !showLawAnswer && !hasFramework) {
     citationSection = `<div class="answer-divider"></div>

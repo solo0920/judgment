@@ -222,7 +222,7 @@ cd /Volumes/USB/judgment-backup-20261108
 | `LLM_FALLBACK_API` | `ollama` | fallback LLM 的 API 種類；x570／MBP llama-server 用 `openai`，Ollama 用 `ollama` |
 | `LLM_MODEL` | 空 | RAG 回答模型；x570 llama-server 別名為 `gemma3:4b` |
 | `LLM_TIMEOUT_SECONDS` | `180` | LLM 請求逾時 |
-| `LLM_NUM_CTX` | `8192` | Ollama context window；OpenAI 路徑的實際上限仍由 llama-server `--ctx-size` 決定 |
+| `LLM_NUM_CTX` | `8192` | 單一併發 slot 的 prompt context 預算。llama-server 使用 `--parallel N` 時應設為 `--ctx-size / N`（例：x570 `24576 / 4 = 6144`）；不要設成總池 `24576`，否則併發請求可能超過 slot 上限。Ollama 路徑則直接使用此值 |
 | `LLM_NUM_PREDICT` | `384` | 最多生成 tokens；OpenAI 路徑送 `max_tokens` |
 | `LLM_KEEP_ALIVE` | `30m` | 舊 Ollama 路徑的模型保持載入時間；llama-server 不使用此設定 |
 | `RAG_TOP_K` | `4` | 最終提供給 LLM 的判決數；啟用 reranker 時建議 `8` |
@@ -1322,6 +1322,8 @@ RAG 現在會區分「法規條文題」與「判決檢索題」：
   - 法規／命令 context 排在判決前面。
   - 法規 citation 編號從 `[1]` 開始，判決接續在後。
   - 預設最多只保留 `RAG_LAW_FIRST_JUDGMENT_LIMIT`（預設 1）筆判決作為輔助，避免判決壓過條文。
+  - 被縮減但仍在 rerank 前段的判決會以 `reference_judgments`（只含 JID、法院、日期、案由、向量/rerank 分數）隨結果回傳；前端顯示「本題…另有 N 筆相關判決，展開查看」，展開項目標示「僅供參考（未用於生成答案）」。這是固定模板，不經 LLM 改寫。
+  - 引用卡使用三種狀態：`答案引用`、`已提供給模型，答案未引用`、`僅供參考`；`used_for_generation` 只表示是否進入 prompt，不再等同答案引用。
   - LLM system prompt 會要求以現行法規／命令條文為主要依據，判決僅作實務補充。
   - 判決卡的引用 chips 以判決實際 `citations` 顯示「法規＋條號＋項次」（例如 `銀行法第125條第1項、第3項`）；點擊可開啟該條完整條文。上方已顯示法規檢索結果時，不再重複下方的法規來源卡。
 - 「銀行法對從業人員有那些規定？」這類問句不再被誤判為「列出相關法規」；`那些規定` 不會觸發 related-laws 清單，也不會提前清空已選出的法規 articles。
@@ -1877,19 +1879,18 @@ ssh -t x570 'sudo bash /tmp/judgment-llama-services.sh'
 
 - 尋找 x570 上的 `llama-server`（也接受 `LLAMA_SERVER_BIN`），偵測 Ollama 的 CUDA backend（`libggml-cuda.so`）並設定 `GGML_BACKEND_PATH`
 - 從 Ollama 取出 `gemma3:4b`、`bge-m3:latest`、`qllama/bge-reranker-v2-m3:latest` 的 GGUF，複製到穩定路徑
-- 建立三個 systemd unit：chat 使用 `--alias gemma3:4b --ctx-size 8192`；embedding 使用 `--embedding --pooling cls`；reranker 使用 `--reranking --pooling rank`；三者皆 `--gpu-layers all`
-- 2026-11-17 修正 chat context：先前 `--ctx-size 4096` 會讓 4,292–4,652 token 的 RAG prompt 回 `HTTP 400 exceed_context_size_error`；預設改為 8192。
-
-  兩行完成 x570 與 MBP 同步（第一行需要 x570 SSH／sudo）：
+- 建立三個 systemd unit：chat 使用 `--alias gemma3:4b --ctx-size 24576 --parallel 4`（每個 slot 6,144 tokens）；embedding 使用 `--embedding --pooling cls`；reranker 使用 `--reranking --pooling rank`；三者皆 `--gpu-layers all`
+- 2026-11-17 修正 chat context：先前 `--ctx-size 4096` 會讓 4,292–4,652 token 的 RAG prompt 回 `HTTP 400 exceed_context_size_error`。目前 x570 是總池 24,576、4 slots，應用端 `LLM_NUM_CTX` 必須是 **每 slot 的 6,144**，不是 24,576。
+- 調整 context 時，先確認 `/props` 的 `n_ctx` 與 `total_slots`，再設定：
 
   ```bash
-  bash scripts/set_x570_llm_context.sh 8192
-  bash scripts/apply_local_llm_context.sh 8192
+  bash scripts/set_x570_llm_context.sh 24576   # server 總池；--parallel 4 時每 slot 6,144
+  bash scripts/apply_local_llm_context.sh 6144  # .env 的每 slot 預算
   ```
 
-  第一行會重裝／重啟 llama-server chat 並用 `/props` 驗證；第二行更新 `.env`、重啟 web，並檢查啟動日誌是否有 context mismatch。
+  不要把 `LLM_NUM_CTX` 設成 24,576；啟動探測的 `min(LLM_NUM_CTX, /props n_ctx)` 不會自動除以 slot 數，超額請求會在 llama-server 端失敗。
 - Token 估算已改為保守值（中文接近一字一 token，不再用 `chars // 3`）；超過 `num_ctx * 0.9 - num_predict` 時會先丟棄／截斷 context。trace 會記錄 `prompt_tokens_estimated`、`input_tokens`、estimate/actual 比例；實際超過或達到 98% context 會標記失敗並走 fallback，不再靜默接受。
-- 後端啟動時會讀 llama-server `/props` 的 `default_generation_settings.n_ctx`，以 server 實際值作為上限；若與 `LLM_NUM_CTX` 不一致會在啟動日誌 warning。
+- 後端啟動時會讀 llama-server `/props` 的 `default_generation_settings.n_ctx`，以 server 實際值作為上限；若與 `LLM_NUM_CTX` 不一致會在啟動日誌 warning。這個值是總池或 slot 值取決於 llama-server 的啟動參數，因此 `LLM_NUM_CTX` 仍應以每 slot 預算為準。
 - `systemctl enable` 三個 unit，之後 x570 開機自動載入
 - 停用 `judgment-ollama-preload.service`，避免 Ollama 與 llama-server 重複占用 VRAM（`ollama.service` 仍保留）
 - 等 `/health` 就緒後，實際呼叫 chat、embedding（檢查 1024 維）與 rerank 端點

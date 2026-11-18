@@ -1199,6 +1199,56 @@ def _build_citations(
     return citations, contexts
 
 
+def _reference_judgments_from_hits(
+    hits: Sequence[Dict[str, Any]],
+    documents: Dict[str, JudgmentDocument],
+) -> List[Dict[str, Any]]:
+    """Describe reranked judgments that were not shown as citations.
+
+    These records are intentionally metadata-only: the UI can list them
+    without fetching full text or calling the LLM again.
+    """
+
+    references: List[Dict[str, Any]] = []
+    for hit in hits:
+        payload = hit.get("payload") or {}
+        jid = str(payload.get("jid") or "")
+        record = documents.get(jid)
+        if record is None:
+            continue
+        vector_score = hit.get("vector_score")
+        if vector_score is None:
+            vector_score = hit.get("score")
+        rerank_score = hit.get("rerank_score")
+        references.append(
+            {
+                "jid": jid,
+                "court": (
+                    record.court_normalized
+                    or payload.get("court")
+                    or ""
+                ),
+                "jdate": record.jdate,
+                "title": record.title,
+                "vector_score": (
+                    round(float(vector_score), 4)
+                    if vector_score is not None
+                    else None
+                ),
+                "rerank_score": (
+                    round(float(rerank_score), 4)
+                    if rerank_score is not None
+                    else None
+                ),
+                "rerank_rank": hit.get("rerank_rank"),
+                "citation_status": "reference_only",
+                "reference_only": True,
+                "used_for_generation": False,
+            }
+        )
+    return references
+
+
 def _law_answer_summary(law_sources: Sequence[Dict[str, Any]]) -> str:
     """Summarize the law/order retrieval result before the LLM answer."""
     if not law_sources:
@@ -2947,6 +2997,43 @@ def _citation_audit(
     }
 
 
+def cited_indexes(answer: str) -> Set[int]:
+    """Return the citation numbers that actually appear in the answer."""
+
+    markers: List[int] = []
+    for group in _CITATION_RE.findall(str(answer or "")):
+        markers.extend(int(value) for value in _CITATION_NUMBER_RE.findall(group))
+    return set(markers)
+
+
+def mark_citation_usage(
+    items: Sequence[Dict[str, Any]],
+    answer: str,
+    allowed_indexes: Optional[Set[int]],
+) -> Set[int]:
+    """Attach the three-state usage label used by the citation UI."""
+
+    cited = cited_indexes(answer)
+    for item in items:
+        try:
+            index = int(item.get("index") or 0)
+        except (TypeError, ValueError):
+            continue
+        if index and index in cited:
+            item["citation_status"] = "cited"
+        elif (
+            index
+            and allowed_indexes is not None
+            and index in allowed_indexes
+        ):
+            item["citation_status"] = "provided_not_cited"
+        else:
+            item["citation_status"] = "reference_only"
+        if allowed_indexes is not None:
+            item["used_for_generation"] = index in allowed_indexes
+    return cited
+
+
 @traced(
     "rag.validate_citations",
     module=__name__,
@@ -3961,6 +4048,7 @@ def answer_question(
         citation_start = len(law_sources) + 1
 
     citations: List[Dict[str, Any]] = []
+    reference_judgments: List[Dict[str, Any]] = []
     judgment_contexts: List[Dict[str, Any]] = []
     context_segment = None
     documents: Dict[str, JudgmentDocument] = {}
@@ -4118,10 +4206,16 @@ def answer_question(
             )
             reranked_count = len(hits)
             if len(hits) > judgment_limit:
+                reference_judgments = _reference_judgments_from_hits(
+                    hits[judgment_limit:], documents
+                )
                 hits = hits[:judgment_limit]
             retrieval["judgment_candidates"] = reranked_count
             retrieval["judgment_limit"] = judgment_limit
             retrieval["judgment_limit_applied"] = reranked_count > len(hits)
+            retrieval["reference_judgment_count"] = len(
+                reference_judgments
+            )
         retrieval["top_k"] = len(hits)
         if hits:
             with trace_segment(
@@ -4472,6 +4566,9 @@ def answer_question(
         degraded_reason = "llm_not_configured"
         notice = "LLM_URL／LLM_MODEL 未設定，只顯示檢索結果，不生成推測內容。"
 
+    mark_citation_usage(citations, answer or "", allowed_indexes)
+    mark_citation_usage(law_sources, answer or "", allowed_indexes)
+
     if scope_probe_payload:
         retrieval["scope_probe"] = scope_probe_payload
         retrieval["scope_probe_notice"] = scope_probe_notice or None
@@ -4510,6 +4607,7 @@ def answer_question(
         "notice": notice,
         "citations": [],
         "judgments": citations,
+        "reference_judgments": reference_judgments,
         "law_sources": law_sources,
         "law_answer": law_answer,
         "law_framework": law_framework,
@@ -4541,6 +4639,7 @@ def answer_question(
                 "_retrieval_state": {
                     "contexts": contexts,
                     "citations": citations,
+                    "reference_judgments": reference_judgments,
                     "law_sources": law_sources,
                     "terms": terms,
                     "law_answer": law_answer,

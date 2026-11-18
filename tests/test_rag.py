@@ -2610,6 +2610,17 @@ def test_bank_personnel_question_keeps_articles_and_law_first_context(
     assert payload["law_sources"][0]["index"] == 1
     assert payload["judgments"][0]["index"] == 2
     assert payload["judgments"][1]["index"] == 3
+    assert payload["retrieval"]["judgment_candidates"] == 3
+    assert payload["retrieval"]["judgment_limit"] == 2
+    assert payload["retrieval"]["judgment_limit_applied"] is True
+    assert len(payload["reference_judgments"]) == 1
+    reference = payload["reference_judgments"][0]
+    assert reference["jid"] == "TPDV,114,訴,3,20260101,1"
+    assert reference["citation_status"] == "reference_only"
+    assert reference["used_for_generation"] is False
+    assert payload["law_sources"][0]["citation_status"] == "cited"
+    assert payload["judgments"][0]["citation_status"] == "provided_not_cited"
+    assert payload["judgments"][1]["citation_status"] == "provided_not_cited"
     assert captured["contexts"][0]["kind"] == "law"
     assert captured["contexts"][1]["jid"] == "TPDV,114,訴,1,20260101,1"
 

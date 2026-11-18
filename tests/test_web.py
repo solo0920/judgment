@@ -936,6 +936,7 @@ def test_llm_final_result_reports_dropped_context_indexes(
     state = {
         "retrieval": {},
         "citations": [{"index": 2, "jid": "J1", "snippet": "判決片段"}],
+        "reference_judgments": [{"jid": "J2", "title": "參考判決"}],
         "law_sources": [
             {
                 "index": 1,
@@ -957,6 +958,22 @@ def test_llm_final_result_reports_dropped_context_indexes(
     prompt_context = result["retrieval"]["prompt_context"]
     assert prompt_context["used_indexes"] == [1]
     assert prompt_context["dropped_indexes"] == [2]
+    assert result["law_sources"][0]["citation_status"] == "cited"
+    assert result["judgments"][0]["citation_status"] == "reference_only"
+    assert result["reference_judgments"][0]["jid"] == "J2"
+
+    result = _llm_final_result(
+        {},
+        state,
+        settings,
+        "依證券交易法 [1]。",
+        {"contexts_after": 2},
+        {1, 2},
+        0.0,
+    )
+    prompt_context = result["retrieval"]["prompt_context"]
+    assert prompt_context["dropped_indexes"] == []
+    assert result["judgments"][0]["citation_status"] == "provided_not_cited"
 
 
 def test_quality_endpoint_reports_raw_parquet(web_client) -> None:

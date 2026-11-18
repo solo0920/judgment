@@ -5667,6 +5667,44 @@ button.chip:hover {
   gap: 9px;
 }
 
+.reference-judgment-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.reference-judgments {
+  display: inline-block;
+  margin-left: 4px;
+}
+
+.reference-judgments[open] {
+  display: block;
+  margin: 8px 0 0;
+}
+
+.reference-judgments summary {
+  display: inline;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.reference-judgments summary:hover {
+  text-decoration: underline;
+}
+
+.reference-judgment-list {
+  margin-top: 8px;
+}
+
+.reference-judgment {
+  grid-template-columns: 28px minmax(0, 1fr);
+  border-style: dashed;
+  background: var(--surface);
+}
+
 .citation {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
