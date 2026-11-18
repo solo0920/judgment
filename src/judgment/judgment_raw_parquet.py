@@ -242,6 +242,7 @@ def _write_archive_raw_parquet_pyarrow(
     candidate_regex: str = "",
     match_progress: Optional[Callable[[int, int], None]] = None,
     match_batch_size: int = 5000,
+    compression: str = "snappy",
 ) -> Dict[str, Any]:
     """Write a raw Parquet backup with a DuckDB candidate prefilter.
 
@@ -375,7 +376,9 @@ def _write_archive_raw_parquet_pyarrow(
         match_seconds = time.perf_counter() - match_started
 
         final_writer = pq.ParquetWriter(
-            temporary, RAW_JUDGMENT_SCHEMA, compression="snappy"
+            temporary,
+            RAW_JUDGMENT_SCHEMA,
+            compression=str(compression or "snappy"),
         )
         with pq.ParquetFile(base_path) as base_file:
             for batch in base_file.iter_batches(

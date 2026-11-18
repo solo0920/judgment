@@ -111,6 +111,11 @@ def main() -> int:
             {},
         ),
         (
+            "pyarrow-zstd",
+            _write_archive_raw_parquet_pyarrow,
+            {"compression": "zstd"},
+        ),
+        (
             "duckdb-snappy",
             write_archive_raw_parquet,
             {"compression": "snappy"},
