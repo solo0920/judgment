@@ -2,7 +2,7 @@
 
 - 日期：2026-11-18
 - 原則：程式有防護不等於部署已驗收；每一列都要有可重現證據
-- 目前唯一已確認的真實暴露：**x570 四個 AI 服務的區網存取**。2026-11-17 已套用 UFW：移除 11434 與 SMB 139/445，11435–11437 只允許 `tailscale0`。MBP 端 LAN 拒絕、Tailscale allow、完整 sudo UFW 驗證與套用後重開機持續性均已通過；第二台設備仍待測。Cloudflare tunnel 目前未開啟，因此 CF 的 origin／service-token 項目是啟動 tunnel 前的門檻，不是現在的公開暴露。
+- 目前唯一已確認的真實暴露：**x570 四個 AI 服務的區網存取**。2026-11-17 已套用 UFW：移除 11434 與 SMB 139/445，11435–11437 只允許 `tailscale0`。MBP 端 LAN 拒絕、Tailscale allow、完整 sudo UFW 驗證與套用後重開機持續性均已通過；第二台設備仍待測。Cloudflare tunnel 已於 2026-11-18 上線，`api-mbp.ragdemo.win` 的 Access application 已移除，改由 FastAPI 的 admin token／Google session 驗證；公開 origin 的受保護 API 無憑證時回 401。
 - 狀態定義：
   - `not_started`：尚未實作或尚未開始驗證
   - `implemented`：程式／設定已存在，尚無部署實測
@@ -19,9 +19,9 @@
 | NET-04 | 本機 listener 回歸 | Judgment 相關 ports 不得非 loopback；`up.sh` 啟動前失敗即拒絕啟動 | `bash scripts/security_listener_check.sh` 無 FAIL；`up.sh` 兩處 gate | `verified`（每次開機／部署重跑） | 工程 |
 | NET-05 | 第三方本機服務（Logi Options+） | 更新或移除；macOS 應用程式防火牆開啟 | `logioptionsplus_agent` version；`socketfilterfw` state；非 loopback listener | `not_started`（目前 listener `*:59869`、防火牆關閉） | 使用者／本機管理 |
 | NET-06 | MBP llama-server fallback 11436／11437 | 只綁 loopback；x570 不可用時可接手 chat／embedding | `lsof` 顯示 `127.0.0.1:11436`／`11437`；`/health`、`/v1/models`、fallback 實測 | `verified` | 工程 |
-| CF-01 | Cloudflare Access 公開入口 | 無 Access 身分不可到 origin；policy／其他 hostname／bypass 規則已檢視 | 公開請求 403 證據 + Zero Trust 政策清單 | `verified`（僅 edge 阻擋；policy 尚未檢視） | Cloudflare admin |
-| CF-02 | Access 通過後仍要求 Admin Token | GET 與寫入 API 都不可無 token 取得／修改 | Access service token + 無 admin token 的 GET／POST 實測 | `not_started` | Cloudflare admin／工程 |
-| CF-03 | cloudflared origin | tunnel 實際執行位置與 origin 正確 | `cloudflared` process／config、`/props`、origin request 紀錄 | `implemented`（LaunchAgent 執行中，origin 已改 9200；public hostname 仍被 Access 擋住） | Infra |
+| CF-01 | Cloudflare 公開入口 | 公開 origin 可達，但受保護 API 無 session／token 一律拒絕；CORS 只回白名單 origin | 公開 GET／POST 401、evil Origin 無 ACAO、正式 Origin preflight 200 | `verified`（Access 已移除；2026-11-18 公開實測） | Cloudflare admin／工程 |
+| CF-02 | 公開 origin 的應用層驗證 | GET 與寫入 API 都不可無 token／session 取得或修改 | 公開 `/api/status`、`/api/processing`、`/api/system-usage`、`/api/ollama/hosts` GET 401；`POST /api/processing/update` 401 | `verified`（抽樣 4 個 GET + 1 個 POST；Access 不再使用） | 工程 |
+| CF-03 | cloudflared origin | tunnel 實際執行位置與 origin 正確 | `cloudflared` process／config、公開 `/api/health` 200、origin request 紀錄 | `verified`（LaunchAgent 執行中；origin `127.0.0.1:9200`；Access 已移除） | Infra |
 | WEB-01 | 跨站 loopback 寫入 | 跨站 POST／PUT／PATCH／DELETE 被拒絕 | Origin／Sec-Fetch-Site 測試與 curl 證據 | `verified` | 工程 |
 | WEB-02 | Host header／DNS rebinding | 未列入白名單 Host 回 400 | `Host: evil.example` 400；localhost／公開網域含 port 測試 | `verified` | 工程 |
 | WEB-03 | CORS `null`／file:// | 預設不允許 file:// 讀取或寫入 | `Origin: null` GET 無 ACAO；POST 403 | `verified` | 工程 |
@@ -41,8 +41,11 @@
 ## 2. 目前已驗證的證據
 
 ```text
-公開 /api/status 無 Access 身分          → 403 Cloudflare Access
-公開 + X-Forwarded-For: 127.0.0.1       → 403（edge）
+公開 /api/health                        → 200（Access 已移除；CF-03）
+公開 /api/status／processing／system-usage／ollama/hosts → 401（應用層驗證）
+公開 POST /api/processing/update        → 401
+公開 Origin: https://judgment.ragdemo.win OPTIONS /api/query → 200；ACAO 與 credentials 正確
+公開 Origin: https://evil.example GET /api/health → 200，但無 ACAO
 本機 + X-Forwarded-For: 203.0.113.9     → 401（origin 要求 token）
 本機 Host: evil.example                 → 400（TrustedHost）
 本機 Origin: null + POST                → 403
@@ -61,8 +64,9 @@ x570 UFW 套用後重開（21:32:55）            → boot_id 改變；三個 un
 重開後 MBP → x570 LAN 11434–11437          → 仍 timeout；kernel 仍有 [UFW BLOCK]；Tailscale 11435–11437 /health 200
 x570 完整 sudo 驗證（21:37）               → pass=54 fail=0 warn=1；UFW status／numbered 與預期規則一致
 Google OAuth（2026-11-18）                  → /api/auth/me、state cookie、callback allowlist、HttpOnly session、remote admin session、Origin 拒絕測試通過；Google Cloud client 尚未設定
-Cloudflare Pages（2026-11-18）               → project `judgment` production deployment 上線；`judgment.ragdemo.win` 已加入 custom domain，等待 CNAME；舊拼字 `judement.ragdemo.win` 仍 active
-cloudflared（2026-11-18）                     → LaunchAgent `com.cloudflare.cloudflared` running；origin 修正為 127.0.0.1:9200；4 條 tunnel connection；`api-mbp.ragdemo.win` 目前回 Access 403
+Cloudflare Pages（2026-11-18）               → `main` @ `73b6806` 自動部署成功；`judgment.ragdemo.win` 200；`config.js` 的 `apiBase` 為 `https://api-mbp.ragdemo.win`；舊拼字 `judement.ragdemo.win` 已無 DNS
+cloudflared（2026-11-18）                     → LaunchAgent `com.cloudflare.cloudflared` running；origin `127.0.0.1:9200`；4 條 tunnel connection；公開 `/api/health` 200；Access application 已移除
+MBP Web 自動啟動（2026-11-18）                → LaunchAgent `com.judgment.web` 已安裝；冷啟動測試殺掉 `judgment-web` 後 kickstart，13 秒內 `/api/health` 恢復 200
 ```
 
 測試：
@@ -74,22 +78,21 @@ ruff clean
 
 ## 3. 尚未完成的外部驗收
 
-1. **x570 網路隔離**：MBP 端 LAN 拒絕（含 `[UFW BLOCK]`）、Tailscale allow、完整 sudo UFW 驗證與套用後重開機持續性已驗證；仍需第二台設備失敗證據。手機行動網路在沒有公開 tunnel 時沒有 public origin 可測，應記為 N/A，不可當成 UFW 證據。
-2. **Access service token**：需要 Cloudflare Access service token；驗證 GET 與寫入 API 都不可無 admin token。
-3. **cloudflared**：tunnel 已由 LaunchAgent 執行，origin 已修正為 `127.0.0.1:9200`。`api-mbp.ragdemo.win` 目前仍有 Cloudflare Access；要走應用層 Google 登入，必須移除該 hostname 的 Access application，或對 `/api/*` 設 Bypass。
-4. **XSS**：先做 payload 自動測試與 `safeUrl()`，再上 CSP。
-5. **備份**：先做敏感資料分類；`.env` 不進備份；age 加密與 restore drill。
-6. **API abuse**：先保護 RAG 昂貴端點，而不是只做 admin token 失敗節流。
-7. **Tailscale 路徑依賴**：`.env` 使用 MagicDNS `x570`，目前解析為 `100.64.0.0/10`。Tailscale 離線時 embedding／rerank 會失敗；需確認應用端是明確錯誤或降級，不是無限等待。
-8. **Google Cloud OAuth client**：建立 Web application client、填入正確 redirect URI 與 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，完成一次真實 Google 登入；自動測試只涵蓋程式流程，沒有 Google 實機憑證。
-9. **Pages custom domain**：在 `ragdemo.win` DNS 新增 `judgment` CNAME 到 `judgment-61m.pages.dev`（Proxied）；Pages 已先行加入 `judgment.ragdemo.win` custom domain，等待 CNAME 驗證。
-10. **Cloudflare Access**：`api-mbp.ragdemo.win` 目前回 403 且帶 `cf-access-domain`；前端跨域 fetch 無法通過。移除 Access application 或對 `/api/*` 設 Bypass 後，才能由 FastAPI 的 Google 登入處理。
+1. **x570 網路隔離**：MBP 端 LAN 拒絕（含 `[UFW BLOCK]`）、Tailscale allow、完整 sudo UFW 驗證與套用後重開機持續性已驗證；仍需第二台設備失敗證據。手機行動網路應測 `api-mbp.ragdemo.win` 的公開入口，但 x570 模型埠不可從公網直達。
+2. **Google Cloud OAuth client**：建立 Web application client、填入正確 redirect URI 與 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，完成一次真實 Google 登入；自動測試只涵蓋程式流程，沒有 Google 實機憑證。
+3. **XSS**：先做 payload 自動測試與 `safeUrl()`，再上 CSP。
+4. **備份**：先做敏感資料分類；`.env` 不進備份；age 加密與 restore drill。
+5. **API abuse**：先保護 RAG 昂貴端點，而不是只做 admin token 失敗節流。
+6. **Tailscale 路徑依賴**：`.env` 使用 MagicDNS `x570`，目前解析為 `100.64.0.0/10`。Tailscale 離線時 embedding／rerank 會失敗；需確認應用端是明確錯誤或降級，不是無限等待。
+7. **重開機／重新登入持續性**：`com.judgment.web` 冷啟動已驗證，但尚未在真正重開機後確認 LaunchAgent 與 tunnel 都會自動恢復；同時確認 Ollama 不再被 Squirrel 拉起。
+8. **對外前的 SSH 硬化**：x570 目前仍開放 `22/tcp` 與密碼登入，公開 tunnel 上線後應限制來源。
 
 ## 4. 驗收規則
 
 - `verified` 只代表有證據，不代表正式 accepted；需 owner 簽核。
 - 不以測試總數取代攻擊面證據。
 - 沒有外部失敗證據，不得把 `NET-01`／`NET-02` 標成 `verified`。
-- 沒有 service token 實測，不得把 `CF-02` 標成 `verified`。
+- 沒有公開 origin 的 GET／POST 401 實測，不得把 `CF-01`／`CF-02` 標成 `verified`。
+- 沒有真實 Google 登入與 allowlist 拒絕實測，不得把 `AUTH-03` 標成 `verified`。
 - 沒有 restore drill，不得把 `BAK-02` 標成 `verified`。
 - 沒有無頭瀏覽器注入測試，不得把 `XSS-01` 標成 `verified`。
