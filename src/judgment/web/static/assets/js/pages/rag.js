@@ -712,72 +712,72 @@ function matchedChipsMarkup(matched, lawSources) {
       .join("")}</div>`;
 }
 
-function renderRerankStrip(rerank, refreshing) {
-  if (!rerank) return "";
-  const providers = Array.isArray(rerank.providers)
-    ? rerank.providers
-    : [];
-  const active = rerank.active || providers.find((item) => item.active);
-  const status = String(rerank.status || "");
-  const model = String(rerank.model || "").trim();
-  const currentLabel = active
-    ? `${active.name}:${model}`
-    : status === "not_configured"
-      ? "未啟用"
-      : "無可用模型";
-  const chips = providers
-    .map((provider) => {
-      const available = provider.status === "operational";
-      const isActive = Boolean(provider.active) || provider === active;
-      const label = `${provider.name || "reranker"}:${model}`;
-      const stateLabel = isActive
-        ? "使用中"
-        : available
-          ? provider.role === "fallback"
-            ? "fallback"
-            : "主要"
-          : "離線";
-      return `<span class="rag-model-button is-static${
-        isActive ? " is-active" : ""
-      }${available ? "" : " is-unavailable"}"
-        title="${escapeHtml(`${label} · ${provider.url || ""}`)}"
-        aria-label="${escapeHtml(`${label}，${stateLabel}`)}">
-        <span class="rag-model-state" aria-hidden="true"></span>
-        <span>${escapeHtml(label)}</span>
-        <span class="rag-model-current">${escapeHtml(stateLabel)}</span>
-      </span>`;
+function modelStateClass(status) {
+  const value = String(status || "");
+  if (value === "operational") return "is-ok";
+  if (value === "standby") return "is-idle";
+  return "is-down";
+}
+
+function modelStateLabel(status) {
+  const value = String(status || "");
+  if (value === "operational") return "";
+  if (value === "standby") return "備援";
+  if (value === "disabled") return "停用";
+  if (value === "not_configured") return "未設定";
+  return "離線";
+}
+
+function renderModelCell(entry) {
+  if (!entry) {
+    return `<span class="rag-model-cell is-empty">
+      <span class="rag-model-state is-idle" aria-hidden="true"></span>
+      <span class="rag-model-name">未設定</span>
+    </span>`;
+  }
+  const label =
+    String(entry.label || "").trim() ||
+    [entry.host, entry.model].filter(Boolean).join(":");
+  const note = modelStateLabel(entry.status);
+  const title = [label, entry.url, note].filter(Boolean).join(" · ");
+  return `<span class="rag-model-cell" title="${escapeHtml(title)}">
+    <span class="rag-model-state ${modelStateClass(entry.status)}" aria-hidden="true"></span>
+    <span class="rag-model-name">${escapeHtml(label)}</span>
+    ${note ? `<span class="rag-model-note">${escapeHtml(note)}</span>` : ""}
+  </span>`;
+}
+
+function renderModelTable(summary, refreshing) {
+  const rows = Array.isArray(summary) ? summary : [];
+  const kinds = [
+    { kind: "chat", label: "Chat" },
+    { kind: "embedding", label: "Embedding" },
+    { kind: "rerank", label: "Rerank" },
+  ];
+  const byKind = new Map(rows.map((row) => [String(row.kind || ""), row]));
+  const body = kinds
+    .map((fallback) => {
+      const row = byKind.get(fallback.kind) || fallback;
+      return `<tr>
+        <td class="rag-model-kind">${escapeHtml(row.label || fallback.label)}</td>
+        <td>${renderModelCell(row.active)}</td>
+        <td>${renderModelCell(row.fallback)}</td>
+      </tr>`;
     })
     .join("");
-  const empty = providers.length
-    ? ""
-    : `<p class="rag-model-empty">尚未設定 reranker URL。</p>`;
-  return `<div class="rag-model-strip rag-model-strip-rerank">
+  return `<div class="rag-model-strip">
     <div class="rag-model-strip-head">
-      <span class="rag-model-strip-title">${icon("layers", 13)} Rerank models</span>
-      ${
-        model
-          ? `<span class="rag-model-strip-base mono">${escapeHtml(
-              model,
-            )}</span>`
-          : ""
-      }
-      <span class="rag-model-strip-current">目前：<strong>${escapeHtml(
-        currentLabel,
-      )}</strong></span>
+      <span class="rag-model-strip-title">${icon("layers", 13)} Models</span>
       <button class="btn btn-ghost btn-sm rag-model-refresh" type="button"
-        data-rag-action="refresh-rerank-models"
+        data-rag-action="refresh-models"
         ${refreshing ? "disabled" : ""}>
-        ${icon("refresh", 12)}<span>${
-          refreshing ? "檢查中…" : "檢查模型"
-        }</span>
+        ${icon("refresh", 12)}<span>${refreshing ? "檢查中…" : "重新檢查"}</span>
       </button>
     </div>
-    ${
-      chips
-        ? `<div class="rag-model-buttons">${chips}</div>`
-        : empty
-    }
-    <p class="rag-model-hint">Reranker 由 llama.cpp 提供；不可用時會回退 Qdrant 排序。</p>
+    <table class="rag-model-table">
+      <thead><tr><th>模型</th><th>使用中</th><th>Fallback</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
   </div>`;
 }
 
@@ -785,64 +785,14 @@ function renderRagModeCard({
   tone,
   title,
   text,
-  models,
-  currentModel,
-  currentProviderName,
-  baseUrl,
-  modelState,
-  untestedProviders = [],
-  rerank = null,
-  rerankRefreshing = false,
-  busy,
-  refreshing,
+  modelSummary = [],
+  refreshing = false,
 }) {
-  const toneClass = tone === "ok" ? "is-ok" : tone === "warn" ? "is-warn" : "is-info";
+  const toneClass =
+    tone === "ok" ? "is-ok" : tone === "warn" ? "is-warn" : "is-info";
   const iconName = tone === "ok" ? "check" : tone === "warn" ? "alert" : "info";
   const badgeClass =
     tone === "ok" ? "badge-ok" : tone === "warn" ? "badge-warn" : "badge-info";
-  const options = Array.isArray(models) ? models : [];
-  const providerNames = [
-    ...new Set(options.map((item) => item.providerName).filter(Boolean)),
-  ];
-  const currentLabel =
-    currentModel && currentProviderName
-      ? `${currentProviderName}:${currentModel}`
-      : currentModel;
-  const buttons = options
-    .map((option) => {
-      const active =
-        option.model === currentModel &&
-        (!currentProviderName ||
-          option.providerName === currentProviderName);
-      const label = option.providerName
-        ? `${option.providerName}:${option.model}`
-        : option.model;
-      return `<button class="rag-model-button${
-        active ? " is-active" : ""
-      }" type="button" data-rag-model="${escapeHtml(option.model)}"
-        data-rag-provider="${escapeHtml(
-          option.hostId === null || option.hostId === undefined
-            ? ""
-            : String(option.hostId),
-        )}"
-        title="${escapeHtml(
-          option.baseUrl ? `${label} · ${option.baseUrl}` : label,
-        )}"
-        aria-pressed="${active}" ${busy || refreshing ? "disabled" : ""}>
-        <span class="rag-model-state" aria-hidden="true"></span>
-        <span>${escapeHtml(label)}</span>
-        ${active ? `<span class="rag-model-current">使用中</span>` : ""}
-      </button>`;
-    })
-    .join("");
-  const untested = (modelState?.models || []).filter(
-    (item) => item.status === "untested",
-  ).length;
-  const emptyCopy = modelState
-    ? untested
-      ? `尚有 ${formatNumber(untested)} 個模型未測試 chat 能力；按「檢查模型」後即可切換。`
-      : "目前 provider 沒有可用的 chat 模型。"
-    : "無法取得模型清單；請確認 Ollama 服務是否啟動。";
   return `<section class="rag-mode-card ${toneClass}">
     <div class="rag-mode-head">
       <span class="rag-mode-icon" aria-hidden="true">${icon(iconName, 14)}</span>
@@ -850,48 +800,9 @@ function renderRagModeCard({
         <strong>${escapeHtml(title)}</strong>
         <p>${escapeHtml(text)}</p>
       </div>
-      <span class="badge ${badgeClass}">${formatNumber(
-        options.length,
-      )} 個 chat model${
-        providerNames.length ? ` · ${providerNames.length} 台主機` : ""
-      }</span>
+      <span class="badge ${badgeClass}">3 個模型</span>
     </div>
-    <div class="rag-model-strip">
-      <div class="rag-model-strip-head">
-        <span class="rag-model-strip-title">${icon("brain", 13)} Chat models</span>
-        ${
-          baseUrl
-            ? `<span class="rag-model-strip-base mono">${escapeHtml(
-                baseUrl,
-              )}</span>`
-            : ""
-        }
-        <span class="rag-model-strip-current">${
-          currentLabel
-            ? `目前：<strong>${escapeHtml(currentLabel)}</strong>`
-            : "尚未選擇"
-        }</span>
-        <button class="btn btn-ghost btn-sm rag-model-refresh" type="button"
-          data-rag-action="refresh-chat-models"
-          ${busy || refreshing ? "disabled" : ""}>
-          ${icon("refresh", 12)}<span>${refreshing ? "檢查中…" : "檢查模型"}</span>
-        </button>
-      </div>
-      ${
-        buttons
-          ? `<div class="rag-model-buttons">${buttons}</div>
-             <p class="rag-model-hint">點選模型切換；切換後套用下一次提問，不影響已完成的回答。</p>`
-          : `<p class="rag-model-empty">${escapeHtml(emptyCopy)}</p>`
-      }
-      ${
-        untestedProviders.length
-          ? `<p class="rag-model-hint rag-model-untested-hint">${escapeHtml(
-              untestedProviders.join("、"),
-            )} 尚有模型尚未檢查 chat 能力；請按「檢查模型」。</p>`
-          : ""
-      }
-    </div>
-    ${renderRerankStrip(rerank, rerankRefreshing)}
+    ${renderModelTable(modelSummary, refreshing)}
   </section>`;
 }
 
@@ -1313,11 +1224,8 @@ export async function render(root) {
   let testMode = false;
   let testModels = { embedding: [], llm: [] };
   let modeStatus = null;
-  let modeModelState = null;
   let modeError = null;
-  let modeModelBusy = false;
   let modeModelRefreshing = false;
-  let modeRerankRefreshing = false;
 
   root.innerHTML = `<section class="page rag-page">
     <div class="rag-layout">
@@ -2020,97 +1928,19 @@ export async function render(root) {
     await refreshHistory();
   };
 
-  const modeLlmService = () =>
-    (modeStatus?.services || []).find((item) => item.id === "llm") || null;
-
   const paintModeNotice = () => {
     const heroNotice = root.querySelector("#rag-mode-notice");
     if (!heroNotice) return;
-    const providers = Array.isArray(modeModelState?.providers)
-      ? modeModelState.providers
+    const modelSummary = Array.isArray(modeStatus?.model_summary)
+      ? modeStatus.model_summary
       : [];
-    const modelOptions = new Map();
-    for (const provider of providers) {
-      if (!provider || !Array.isArray(provider.chat_models)) continue;
-      for (const model of provider.chat_models) {
-        const providerName = String(provider.name || "").trim();
-        const label = providerName ? `${providerName}:${model}` : model;
-        const option = {
-          model,
-          providerName,
-          hostId:
-            provider.host_id === null || provider.host_id === undefined
-              ? null
-              : Number(provider.host_id),
-          baseUrl: String(provider.base_url || "").trim(),
-          isEffective: Boolean(provider.is_effective),
-        };
-        const existing = modelOptions.get(label);
-        // The effective provider wins when two backends share a display name,
-        // e.g. x570 Ollama on :11434 and x570 llama-server on :11436.
-        if (!existing || (option.isEffective && !existing.isEffective)) {
-          modelOptions.set(label, option);
-        }
-      }
-    }
-    const models = [...modelOptions.values()];
-    if (!models.length && Array.isArray(modeModelState?.chat_models)) {
-      const fallbackProvider = String(
-        modeModelState?.provider_name || "",
-      ).trim();
-      const fallbackHostId = modeModelState?.provider?.host_id;
-      const fallbackBaseUrl = String(
-        modeModelState?.base_url || "",
-      ).trim();
-      for (const model of modeModelState.chat_models) {
-        models.push({
-          model,
-          providerName: fallbackProvider,
-          hostId:
-            fallbackHostId === null || fallbackHostId === undefined
-              ? null
-              : Number(fallbackHostId),
-          baseUrl: fallbackBaseUrl,
-          isEffective: true,
-        });
-      }
-    }
-    const untestedProviders = providers
-      .filter(
-        (provider) =>
-          Array.isArray(provider?.models) &&
-          provider.models.length > 0 &&
-          (!Array.isArray(provider.chat_models) ||
-            provider.chat_models.length === 0),
-      )
-      .map((provider) => String(provider.name || "").trim())
-      .filter(Boolean);
-    const currentModel = String(modeLlmService()?.model || "").trim();
-    const baseUrl = String(modeModelState?.base_url || "").trim();
-    const currentProviderName = String(
-      modeModelState?.provider_name || "",
-    ).trim();
-    const rerank = modeStatus
-      ? (modeStatus.services || []).find(
-          (item) => item.id === "reranker",
-        ) || null
-      : null;
     if (!modeStatus) {
       if (!modeError) return;
       heroNotice.innerHTML = renderRagModeCard({
         tone: "warn",
         title: "無法取得 RAG 服務狀態",
-        text:
-          modeError.message || "請稍後再試，或前往系統狀態頁查看。",
-        models,
-        currentModel,
-        currentProviderName,
-        baseUrl,
-        modelState: modeModelState,
-        untestedProviders,
-        rerank,
-        rerankRefreshing: modeRerankRefreshing,
-        busy: modeModelBusy,
+        text: modeError.message || "請稍後再試，或前往系統狀態頁查看。",
+        modelSummary,
         refreshing: modeModelRefreshing,
       });
       return;
@@ -2126,15 +1956,7 @@ export async function render(root) {
         text: `Qdrant、Embedding 與 LLM 均可使用；目前索引涵蓋 ${formatNumber(
           indexed,
         )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
-        models,
-        currentModel,
-        currentProviderName,
-        baseUrl,
-        modelState: modeModelState,
-        untestedProviders,
-        rerank,
-        rerankRefreshing: modeRerankRefreshing,
-        busy: modeModelBusy,
+        modelSummary,
         refreshing: modeModelRefreshing,
       });
     } else if (rag?.status === "degraded") {
@@ -2142,15 +1964,7 @@ export async function render(root) {
         tone: "warn",
         title: "部分 AI 元件未就緒",
         text: rag.detail || "RAG 會降級為只顯示檢索結果。",
-        models,
-        currentModel,
-        currentProviderName,
-        baseUrl,
-        modelState: modeModelState,
-        untestedProviders,
-        rerank,
-        rerankRefreshing: modeRerankRefreshing,
-        busy: modeModelBusy,
+        modelSummary,
         refreshing: modeModelRefreshing,
       });
     } else {
@@ -2160,116 +1974,40 @@ export async function render(root) {
         text:
           rag?.detail ||
           "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
-        models,
-        currentModel,
-        currentProviderName,
-        baseUrl,
-        modelState: modeModelState,
-        untestedProviders,
-        rerank,
-        rerankRefreshing: modeRerankRefreshing,
-        busy: modeModelBusy,
+        modelSummary,
         refreshing: modeModelRefreshing,
       });
     }
   };
 
   const loadModeNotice = async () => {
-    const [statusResult, modelsResult] = await Promise.allSettled([
-      api.status(),
-      api.llmModels(),
-    ]);
-    if (disposed) return;
-    modeStatus =
-      statusResult.status === "fulfilled" ? statusResult.value : null;
-    modeModelState =
-      modelsResult.status === "fulfilled" ? modelsResult.value : null;
-    modeError =
-      statusResult.status === "rejected" ? statusResult.reason : null;
-    paintModeNotice();
-  };
-
-  const chooseChatModel = async (model, hostId = null) => {
-    if (!model || modeModelBusy || modeModelRefreshing) return;
-    const currentModel = String(modeLlmService()?.model || "").trim();
-    const currentProviderName = String(
-      modeModelState?.provider_name || "",
-    ).trim();
-    const targetProvider = (modeModelState?.providers || []).find(
-      (provider) =>
-        hostId !== null &&
-        provider?.host_id !== null &&
-        provider?.host_id !== undefined &&
-        Number(provider.host_id) === Number(hostId),
-    );
-    const targetProviderName = String(
-      targetProvider?.name || (hostId === null ? currentProviderName : ""),
-    ).trim();
-    if (
-      model === currentModel &&
-      (!hostId ||
-        !targetProviderName ||
-        targetProviderName === currentProviderName)
-    ) {
-      return;
-    }
-    const label = targetProviderName
-      ? `${targetProviderName}:${model}`
-      : model;
-    modeModelBusy = true;
-    paintModeNotice();
     try {
-      await api.selectLlmModel(model, hostId);
-      toast(`已切換 chat model：${label}`, "ok", 3500);
+      const status = await api.status();
+      if (disposed) return;
+      modeStatus = status;
+      modeError = null;
     } catch (error) {
-      toast(
-        error.message || "無法切換 chat model。",
-        "danger",
-        6000,
-      );
-    } finally {
-      modeModelBusy = false;
-      if (!disposed) await loadModeNotice();
+      if (disposed) return;
+      modeStatus = null;
+      modeError = error;
     }
+    paintModeNotice();
   };
 
-  const refreshChatModels = async () => {
-    if (modeModelRefreshing || modeModelBusy) return;
+  const refreshModels = async () => {
+    if (modeModelRefreshing) return;
     modeModelRefreshing = true;
-    paintModeNotice();
-    try {
-      await api.testLlmModels();
-      toast("已更新 chat model 清單。", "ok", 3500);
-    } catch (error) {
-      toast(
-        error.message || "無法檢查 chat model。",
-        "danger",
-        6000,
-      );
-    } finally {
-      modeModelRefreshing = false;
-      if (!disposed) await loadModeNotice();
-    }
-  };
-
-  const refreshRerankModels = async () => {
-    if (modeRerankRefreshing) return;
-    modeRerankRefreshing = true;
     paintModeNotice();
     try {
       const status = await api.status();
       if (disposed) return;
       modeStatus = status;
       modeError = null;
-      toast("已更新 rerank model 狀態。", "ok", 3000);
+      toast("已更新模型狀態。", "ok", 2500);
     } catch (error) {
-      toast(
-        error.message || "無法檢查 rerank model。",
-        "danger",
-        6000,
-      );
+      toast(error.message || "無法檢查模型。", "danger", 6000);
     } finally {
-      modeRerankRefreshing = false;
+      modeModelRefreshing = false;
       if (!disposed) paintModeNotice();
     }
   };
@@ -2956,23 +2694,8 @@ export async function render(root) {
   });
 
   root.addEventListener("click", async (event) => {
-    const modelButton = event.target.closest("[data-rag-model]");
-    if (modelButton) {
-      const hostId = modelButton.dataset.ragProvider
-        ? Number(modelButton.dataset.ragProvider)
-        : null;
-      await chooseChatModel(
-        modelButton.dataset.ragModel || "",
-        Number.isFinite(hostId) ? hostId : null,
-      );
-      return;
-    }
-    if (event.target.closest('[data-rag-action="refresh-rerank-models"]')) {
-      await refreshRerankModels();
-      return;
-    }
-    if (event.target.closest('[data-rag-action="refresh-chat-models"]')) {
-      await refreshChatModels();
+    if (event.target.closest('[data-rag-action="refresh-models"]')) {
+      await refreshModels();
     }
   });
 

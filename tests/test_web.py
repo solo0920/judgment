@@ -790,6 +790,12 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
     assert payload["data"]["law_count"] == 2
     assert payload["data"]["order_count"] == 1
     assert payload["data"]["article_count"] == 5
+    assert [row["kind"] for row in payload["model_summary"]] == [
+        "chat",
+        "embedding",
+        "rerank",
+    ]
+    assert all(row["active"] is None for row in payload["model_summary"])
     assert payload["recent_runs"][0]["status"] == "success"
     assert [layer["id"] for layer in payload["architecture"]["layers"]] == [
         "client",
@@ -845,6 +851,73 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
     assert sum(stage["duration_ms"] for stage in pipeline_stages) == pipeline[
         "total_ms"
     ]
+
+
+def test_status_model_summary_labels_host_and_model(tmp_path: Path) -> None:
+    from judgment.web.status import _model_summary
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path,
+        law_api_url="",
+        order_api_url="",
+        embedding_url="http://x570:11437",
+        embedding_fallback_url="http://127.0.0.1:11437",
+        llm_url="http://x570:11436",
+        llm_fallback_url="http://127.0.0.1:11436",
+        llm_model="gemma3:4b",
+        llm_fallback_model="gemma3:4b",
+        rerank_url="http://x570:11435",
+        rerank_fallback_url="http://127.0.0.1:11435",
+        rerank_model="bge-reranker-v2-m3",
+    )
+    summary = _model_summary(
+        settings,
+        embedding={
+            "status": "operational",
+            "active_role": "primary",
+            "active_url": settings.embedding_url,
+            "active_model": "bge-m3",
+        },
+        llm={
+            "status": "operational",
+            "active_role": "primary",
+            "active_url": settings.llm_url,
+            "active_model": "gemma3:4b",
+        },
+        rerank={
+            "status": "operational",
+            "active": {
+                "role": "primary",
+                "url": settings.rerank_url,
+                "model": settings.rerank_model,
+                "status": "operational",
+            },
+            "providers": [
+                {
+                    "name": "x570",
+                    "role": "primary",
+                    "url": settings.rerank_url,
+                    "model": settings.rerank_model,
+                    "status": "operational",
+                },
+                {
+                    "name": "local",
+                    "role": "fallback",
+                    "url": settings.rerank_fallback_url,
+                    "model": settings.rerank_model,
+                    "status": "operational",
+                },
+            ],
+        },
+    )
+    rows = {row["kind"]: row for row in summary}
+    assert rows["chat"]["active"]["label"] == "x570:gemma3:4b"
+    assert rows["chat"]["fallback"]["label"] == "mbp:gemma3:4b"
+    assert rows["embedding"]["active"]["label"] == "x570:bge-m3"
+    assert rows["embedding"]["fallback"]["label"] == "mbp:bge-m3"
+    assert rows["rerank"]["active"]["label"] == "x570:bge-reranker-v2-m3"
+    assert rows["rerank"]["fallback"]["label"] == "mbp:bge-reranker-v2-m3"
 
 
 def test_quality_endpoint_reports_raw_parquet(web_client) -> None:

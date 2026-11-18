@@ -4180,6 +4180,95 @@ button.chip:hover {
   flex: none;
 }
 
+.rag-model-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.rag-model-table th {
+  padding: 0 8px 5px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 8.5px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.rag-model-table th:first-child {
+  width: 84px;
+}
+
+.rag-model-table th:last-child,
+.rag-model-table td:last-child {
+  padding-right: 0;
+}
+
+.rag-model-table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.rag-model-table tr:last-child td {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.rag-model-kind {
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rag-model-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rag-model-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-model-cell.is-empty .rag-model-name,
+.rag-model-name.is-muted {
+  color: var(--faint);
+}
+
+.rag-model-note {
+  flex: none;
+  color: var(--faint);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.rag-model-table .rag-model-state {
+  width: 5px;
+  height: 5px;
+  background: var(--faint);
+}
+
+.rag-model-table .rag-model-state.is-ok {
+  background: var(--success);
+}
+
+.rag-model-table .rag-model-state.is-idle {
+  background: var(--faint);
+}
+
+.rag-model-table .rag-model-state.is-down {
+  background: var(--danger);
+}
+
 .rag-model-buttons {
   display: flex;
   flex-wrap: wrap;

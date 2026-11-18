@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import func, select, text
@@ -319,6 +320,9 @@ def _embedding_metrics(
             "latency_ms": None,
             "detail": f"未設定 EMBEDDING_URL（模型：{model}）",
             "model": model,
+            "active_url": None,
+            "active_model": model,
+            "active_role": "primary",
         }
     candidates: List[tuple[str, str]] = []
     for index, url in enumerate((base_url, fallback_url, *fallback_urls)):
@@ -350,6 +354,9 @@ def _embedding_metrics(
             "model": model,
             "models": primary_detail["models"],
             "api": primary_api,
+            "active_url": primary_url,
+            "active_model": model,
+            "active_role": "primary",
         }
     for url, url_api in candidates[1:]:
         fallback_detail = provider_models_detail(url, url_api)
@@ -365,6 +372,9 @@ def _embedding_metrics(
                 "model": model,
                 "models": fallback_detail["models"],
                 "api": url_api,
+                "active_url": url,
+                "active_model": model,
+                "active_role": "fallback",
             }
     return {
         "status": "degraded",
@@ -377,6 +387,9 @@ def _embedding_metrics(
         "model": model,
         "models": primary_detail["models"],
         "api": primary_api,
+        "active_url": primary_url,
+        "active_model": model,
+        "active_role": "primary",
     }
 
 
@@ -505,12 +518,17 @@ def _llm_metrics(
     started = time.perf_counter()
     base_url = base_url.rstrip("/")
     model = model.strip()
+    fallback_url = str(fallback_url or "").strip().rstrip("/")
+    fallback_model = str(fallback_model or model).strip()
     if not model:
         return {
             "status": "not_configured",
             "latency_ms": None,
             "detail": "未設定 LLM_MODEL",
             "model": None,
+            "active_url": None,
+            "active_model": None,
+            "active_role": "primary",
         }
     if not base_url:
         return {
@@ -518,6 +536,9 @@ def _llm_metrics(
             "latency_ms": None,
             "detail": f"未設定 LLM_URL（模型：{model}）",
             "model": model,
+            "active_url": None,
+            "active_model": model,
+            "active_role": "primary",
         }
     detail = provider_models_detail(base_url, api)
     if detail["status"] == "operational" and provider_model_available(
@@ -530,9 +551,10 @@ def _llm_metrics(
             "model": model,
             "models": detail["models"],
             "api": api,
+            "active_url": base_url,
+            "active_model": model,
+            "active_role": "primary",
         }
-    fallback_url = str(fallback_url or "").strip().rstrip("/")
-    fallback_model = str(fallback_model or model).strip()
     if fallback_url and fallback_url != base_url:
         fallback_detail = provider_models_detail(fallback_url, fallback_api)
         if fallback_detail["status"] == "operational" and provider_model_available(
@@ -548,6 +570,9 @@ def _llm_metrics(
                 "model": fallback_model,
                 "models": fallback_detail["models"],
                 "api": fallback_api,
+                "active_url": fallback_url,
+                "active_model": fallback_model,
+                "active_role": "fallback",
             }
     return {
         "status": "degraded",
@@ -560,6 +585,9 @@ def _llm_metrics(
         "model": model,
         "models": detail["models"],
         "api": api,
+        "active_url": base_url,
+        "active_model": model,
+        "active_role": "primary",
     }
 
 
@@ -668,6 +696,135 @@ def _legal_index_metrics(
         }
 
 
+def _model_host(url: str) -> str:
+    host = str(urlparse(str(url or "")).hostname or "").strip()
+    if host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
+        return "mbp"
+    return host or "—"
+
+
+def _model_entry(
+    url: str,
+    model: str,
+    *,
+    status: str,
+    role: str,
+) -> Optional[Dict[str, Any]]:
+    url = str(url or "").strip().rstrip("/")
+    if not url:
+        return None
+    model = str(model or "").strip()
+    host = _model_host(url)
+    return {
+        "role": role,
+        "host": host,
+        "model": model,
+        "label": f"{host}:{model}" if model else host,
+        "url": url,
+        "status": status or "unknown",
+    }
+
+
+def _model_summary(
+    settings: Settings,
+    *,
+    embedding: Dict[str, Any],
+    llm: Dict[str, Any],
+    rerank: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    chat_role = str(llm.get("active_role") or "primary")
+    chat_active = _model_entry(
+        llm.get("active_url") or settings.llm_url,
+        llm.get("active_model") or settings.llm_model,
+        status=str(llm.get("status") or "unknown"),
+        role=chat_role,
+    )
+    chat_fallback = _model_entry(
+        settings.llm_fallback_url,
+        settings.llm_fallback_model or settings.llm_model,
+        status=(
+            str(llm.get("status") or "unknown")
+            if chat_role == "fallback"
+            else "standby"
+        ),
+        role="fallback",
+    )
+
+    embedding_role = str(embedding.get("active_role") or "primary")
+    embedding_active = _model_entry(
+        embedding.get("active_url") or settings.embedding_url,
+        embedding.get("active_model") or settings.embedding_model,
+        status=str(embedding.get("status") or "unknown"),
+        role=embedding_role,
+    )
+    embedding_fallback = _model_entry(
+        settings.embedding_fallback_url,
+        settings.embedding_model,
+        status=(
+            str(embedding.get("status") or "unknown")
+            if embedding_role == "fallback"
+            else "standby"
+        ),
+        role="fallback",
+    )
+
+    rerank_providers = list(rerank.get("providers") or [])
+    rerank_primary = next(
+        (item for item in rerank_providers if item.get("role") == "primary"),
+        None,
+    )
+    rerank_fallback = next(
+        (item for item in rerank_providers if item.get("role") == "fallback"),
+        None,
+    )
+    rerank_active = rerank.get("active") or rerank_primary
+    rerank_active_entry = (
+        _model_entry(
+            rerank_active.get("url") or settings.rerank_url,
+            rerank_active.get("model") or settings.rerank_model,
+            status=str(
+                rerank_active.get("status")
+                or rerank.get("status")
+                or "unknown"
+            ),
+            role=str(rerank_active.get("role") or "primary"),
+        )
+        if rerank_active
+        else None
+    )
+    rerank_fallback_entry = (
+        _model_entry(
+            rerank_fallback.get("url"),
+            rerank_fallback.get("model") or settings.rerank_model,
+            status=str(rerank_fallback.get("status") or "standby"),
+            role="fallback",
+        )
+        if rerank_fallback
+        else None
+    )
+
+    return [
+        {
+            "kind": "chat",
+            "label": "Chat",
+            "active": chat_active,
+            "fallback": chat_fallback,
+        },
+        {
+            "kind": "embedding",
+            "label": "Embedding",
+            "active": embedding_active,
+            "fallback": embedding_fallback,
+        },
+        {
+            "kind": "rerank",
+            "label": "Rerank",
+            "active": rerank_active_entry,
+            "fallback": rerank_fallback_entry,
+        },
+    ]
+
+
 def build_status(
     *,
     session_factory: sessionmaker[Session],
@@ -760,6 +917,13 @@ def build_status(
         rag_finished_at,
         rag_ms,
     ) = _timed_call(lambda: _rag_metrics(qdrant, embedding, llm))
+
+    model_summary = _model_summary(
+        settings,
+        embedding=embedding,
+        llm=llm,
+        rerank=rerank,
+    )
 
     coverage_started_at = datetime.now(timezone.utc)
     coverage_started = time.perf_counter()
@@ -1078,6 +1242,7 @@ def build_status(
         "environment": os.getenv("APP_ENV", "development"),
         "pipeline": pipeline_payload,
         "services": services,
+        "model_summary": model_summary,
         "data": {
             "law_count": postgres["law_count"],
             "order_count": postgres["order_count"],
