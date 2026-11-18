@@ -3978,12 +3978,20 @@ def _import_archive_stage_status(
     stage: Optional[Dict[str, Any]],
     *,
     imported: bool,
+    pending_update: bool = False,
+    stage_key: str = "",
 ) -> str:
     status = str((stage or {}).get("status") or "")
     if status == "running":
         return "processing"
     if status in {"success", "skipped"}:
         return "complete"
+    if pending_update and stage_key in {"extract", "raw_parquet"}:
+        # The month already has an older Parquet backup, but a newer archive
+        # was downloaded.  Its two leading stages must be rebuilt, so show
+        # them as queued instead of reusing the old "complete" colour.
+        if status in {"", "pending", "interrupted"}:
+            return "pending"
     # finish_run() marks every pending archive stage with the terminal run
     # status (for example "interrupted").  Those archives were never started,
     # so keep their historical imported state instead of turning them red.
@@ -4071,6 +4079,9 @@ def _merge_import_timeline_stages(
         imported = bool(month.get("imported")) and not (
             month.get("unimported_files") or []
         )
+        pending_update = bool(month.get("imported")) and bool(
+            month.get("unimported_files") or []
+        )
         candidates = archives_by_month.get(str(month.get("month") or "")) or []
         archive = max(candidates, key=_import_archive_rank) if candidates else None
         stages: Dict[str, str] = {}
@@ -4080,15 +4091,22 @@ def _merge_import_timeline_stages(
                 (archive.get("stages") or {}).get(stage) if archive else None
             )
             stages[stage] = _import_archive_stage_status(
-                stage_data, imported=imported
+                stage_data,
+                imported=imported,
+                pending_update=pending_update,
+                stage_key=stage,
             )
             progress = _import_stage_progress(stage_data)
             if progress is not None:
                 stage_progress[stage] = progress
-        if parquet_by_month.get(str(month.get("month") or "")) == "complete":
+        if (
+            parquet_by_month.get(str(month.get("month") or "")) == "complete"
+            and not pending_update
+        ):
             # A complete Parquet backup means both the RAR check and the raw
             # backup already succeeded, even if this run is briefly touching
-            # the archive again to reuse it.
+            # the archive again to reuse it.  Update-pending months are the
+            # exception: their newer archive still has to rebuild both.
             stages["extract"] = "complete"
             stages["raw_parquet"] = "complete"
             stage_progress["extract"] = 100.0

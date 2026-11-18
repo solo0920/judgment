@@ -589,6 +589,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "已取代月份" in processing_js.text
     assert "is-running" in processing_js.text
     assert "is-complete" in processing_js.text
+    assert "is-pending" in processing_js.text
+    assert "待更新（淺色）" in processing_js.text
     assert "is-partial" in processing_js.text
     assert "is-partial-state" in processing_js.text
     assert "patchProcessingTimelines" in processing_js.text
@@ -676,9 +678,14 @@ def test_static_console_is_served(web_client) -> None:
     assert ".processing-month-stage.is-raw_parquet" in css.text
     assert ".processing-month-stage.is-filter" in css.text
     assert (
+        ".processing-month.import-month .processing-month-stage.is-pending"
+        in css.text
+    )
+    assert (
         ".processing-month.import-month .processing-month-stage.is-running"
         in css.text
     )
+    assert ".processing-timeline-swatch.is-pending-state" in css.text
     assert "var(--bg) var(--stage-progress" in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text

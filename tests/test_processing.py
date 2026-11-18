@@ -2319,6 +2319,87 @@ def test_merge_import_timeline_stages_uses_raw_parquet_for_first_two_cells() -> 
     assert month["import_overall"] == "incomplete"
 
 
+def test_merge_import_timeline_stages_marks_update_pending_cells() -> None:
+    import_timeline = {
+        "months": [
+            {
+                "month": "202608",
+                "status": "gray",
+                "imported": True,
+                "has_update": True,
+                "local_files": ["202608--(20261116Update).rar"],
+                "imported_files": ["202608--(20261016Update).rar"],
+                "unimported_files": ["202608--(20261116Update).rar"],
+            },
+            {
+                "month": "202607",
+                "status": "gray",
+                "imported": True,
+                "has_update": True,
+                "local_files": ["202607--(20261116Update).rar"],
+                "imported_files": ["202607--(20261016Update).rar"],
+                "unimported_files": ["202607--(20261116Update).rar"],
+            },
+        ],
+    }
+    archives = {
+        "items": [
+            {
+                "name": "202608--(20261116Update).rar",
+                "status": "pending",
+                "stages": {
+                    "extract": {"status": "pending"},
+                    "raw_parquet": {"status": "pending"},
+                    "filter": {"status": "pending"},
+                    "postgres": {"status": "pending"},
+                },
+            },
+            {
+                "name": "202607--(20261116Update).rar",
+                "status": "running",
+                "stages": {
+                    "extract": {"status": "success"},
+                    "raw_parquet": {"status": "success"},
+                    "filter": {"status": "running"},
+                    "postgres": {"status": "pending"},
+                },
+            },
+        ]
+    }
+    file_timelines = [
+        {
+            "key": "judgment",
+            "months": [
+                {"month": "202608", "stages": {"parquet": "complete"}},
+                {"month": "202607", "stages": {"parquet": "complete"}},
+            ],
+        }
+    ]
+
+    processing_module._merge_import_timeline_stages(
+        import_timeline, archives, file_timelines
+    )
+    months = {item["month"]: item for item in import_timeline["months"]}
+
+    # Unprocessed update months keep their queued RAR/backup cells light even
+    # though the previous import already left a complete Parquet behind.
+    assert months["202608"]["import_stages"] == {
+        "extract": "pending",
+        "raw_parquet": "pending",
+        "filter": "incomplete",
+        "postgres": "incomplete",
+    }
+    assert months["202608"]["import_overall"] == "incomplete"
+    # As soon as the new archive's stages succeed, the cells turn solid.
+    assert months["202607"]["import_stages"] == {
+        "extract": "complete",
+        "raw_parquet": "complete",
+        "filter": "processing",
+        "postgres": "incomplete",
+    }
+    assert months["202607"]["import_overall"] == "processing"
+
+
 def test_merge_import_timeline_stages_keeps_reused_active_cells_complete() -> None:
     import_timeline = {
         "active_month": "202601",

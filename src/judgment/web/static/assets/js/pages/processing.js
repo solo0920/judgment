@@ -89,6 +89,7 @@ const FILE_TIMELINE_STAGE_PROGRESS_KEYS = {
 const FILE_TIMELINE_STATUS_LABELS = {
   complete: "完成",
   incomplete: "未完成",
+  pending: "待更新",
   processing: "處理中",
   empty: "無資料",
   not_applicable: "已取代",
@@ -96,6 +97,7 @@ const FILE_TIMELINE_STATUS_LABELS = {
 const FILE_TIMELINE_STATUS_CLASSES = {
   complete: "is-green",
   incomplete: "is-red",
+  pending: "is-pending",
   processing: "is-gray",
   empty: "is-empty",
   not_applicable: "is-empty",
@@ -1829,7 +1831,9 @@ function timelineMonthCellMarkup({
     .map((stage) => {
       const status = statuses[stage] || "empty";
       const workflowId =
-        status === "incomplete" ? workflowForStage(stage) : "";
+        status === "incomplete" || status === "pending"
+          ? workflowForStage(stage)
+          : "";
       const tag = workflowId ? "button" : "span";
       const action = workflowId
         ? ` type="button" data-timeline-workflow="${escapeHtml(workflowId)}"`
@@ -1854,7 +1858,9 @@ function timelineMonthCellMarkup({
               ? "is-partial"
               : status === "incomplete"
                 ? "is-incomplete"
-                : "is-empty";
+                : status === "pending"
+                  ? "is-pending"
+                  : "is-empty";
       const classes =
         neutralVariant
           ? [
@@ -1866,6 +1872,7 @@ function timelineMonthCellMarkup({
             ]
           : [
               "processing-month-stage",
+              `is-${stage}`,
               FILE_TIMELINE_STATUS_CLASSES[status] || "is-empty",
               stageStateClass,
               workflowId ? "is-actionable" : "",
@@ -4233,6 +4240,7 @@ function importTimelineMarkup(workflow) {
       <div class="index-month-are-key processing-timeline-legend" aria-label="階段狀態圖例">
         <span class="processing-timeline-legend-label">狀態</span>
         <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
+        <span><i class="processing-timeline-swatch is-pending-state"></i>待更新（淺色）</span>
         <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成</span>
         <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
         <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
@@ -4246,7 +4254,7 @@ function importTimelineMarkup(workflow) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；空心方塊表示尚未完成；執行中的方塊以淡色垂直進度條表示；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
+      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的 RAR／原始資料方格以淺色表示，完成後轉為實心深色；空心方塊表示尚未完成；執行中的方塊以淡色垂直進度條表示；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
     </div>
   </section>`;
 }
