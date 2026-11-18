@@ -14174,8 +14174,24 @@ button.chip:hover {
 }
 
 .judgment-month.is-downloading {
-  outline: 2px solid var(--accent);
+  border-color: #00e5ff;
+  outline: 2px solid #00e5ff;
   outline-offset: 2px;
+  animation: judgment-month-download-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes judgment-month-download-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(0, 229, 255, 0.35),
+      0 0 8px rgba(0, 229, 255, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(0, 229, 255, 0.55),
+      0 0 16px rgba(0, 229, 255, 0.55);
+  }
 }
 
 @keyframes judgment-month-pulse {
