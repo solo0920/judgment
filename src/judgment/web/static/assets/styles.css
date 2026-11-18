@@ -17939,7 +17939,12 @@ a.qb-bank-law:hover {
   box-sizing: border-box;
 }
 
-.workflow-wf-stage.is-pending .rag-wf-track,
+.workflow-wf-stage.is-pending .rag-wf-track {
+  background-color: color-mix(in srgb, var(--stage-color) 10%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--stage-color) 28%, transparent);
+}
+
 .workflow-wf-stage.is-skipped .rag-wf-track,
 .workflow-wf-stage.is-idle .rag-wf-track {
   opacity: 0.55;

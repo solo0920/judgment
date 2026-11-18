@@ -2400,6 +2400,67 @@ def test_merge_import_timeline_stages_marks_update_pending_cells() -> None:
     assert months["202607"]["import_overall"] == "processing"
 
 
+def test_merge_import_timeline_stages_exposes_filter_postgres_progress() -> None:
+    import_timeline = {
+        "months": [
+            {
+                "month": "202608",
+                "status": "gray",
+                "imported": True,
+                "has_update": True,
+                "local_files": ["202608--(20261116Update).rar"],
+                "imported_files": ["202608--(20261016Update).rar"],
+                "unimported_files": ["202608--(20261116Update).rar"],
+            }
+        ],
+    }
+    archives = {
+        "items": [
+            {
+                "name": "202608--(20261116Update).rar",
+                "status": "running",
+                "stages": {
+                    "extract": {"status": "success"},
+                    "raw_parquet": {"status": "success"},
+                    "filter": {
+                        "status": "running",
+                        "current": 37,
+                        "total": 100,
+                    },
+                    "postgres": {
+                        "status": "running",
+                        "current": 12,
+                        "total": 100,
+                    },
+                },
+            }
+        ]
+    }
+    file_timelines = [
+        {
+            "key": "judgment",
+            "months": [{"month": "202608", "stages": {"parquet": "complete"}}],
+        }
+    ]
+
+    processing_module._merge_import_timeline_stages(
+        import_timeline, archives, file_timelines
+    )
+    month = import_timeline["months"][0]
+
+    assert month["import_stages"] == {
+        "extract": "complete",
+        "raw_parquet": "complete",
+        "filter": "processing",
+        "postgres": "processing",
+    }
+    assert month["import_stage_progress"] == {
+        "filter": 37.0,
+        "postgres": 12.0,
+    }
+    assert month["import_overall"] == "processing"
+
+
 def test_merge_import_timeline_stages_keeps_reused_active_cells_complete() -> None:
     import_timeline = {
         "active_month": "202601",

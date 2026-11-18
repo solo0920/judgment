@@ -591,6 +591,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "is-complete" in processing_js.text
     assert "is-pending" in processing_js.text
     assert "待更新（淺色）" in processing_js.text
+    assert "monthUpdate.import_stage_progress" in processing_js.text
     assert "is-partial" in processing_js.text
     assert "is-partial-state" in processing_js.text
     assert "patchProcessingTimelines" in processing_js.text
@@ -691,6 +692,10 @@ def test_static_console_is_served(web_client) -> None:
         in css.text
     )
     assert ".processing-timeline-swatch.is-pending-state" in css.text
+    assert (
+        ".workflow-wf-stage.is-pending .rag-wf-track" in css.text
+    )
+    assert "var(--stage-color) 10%, transparent" in css.text
     assert "var(--stage-mix, 48%)" in css.text
     assert "var(--stage-mix, 42%)" in css.text
     assert ".judgment-month.is-green" in css.text
