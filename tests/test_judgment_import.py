@@ -25,7 +25,10 @@ from judgment.judgment_import import (
     parse_court,
 )
 from judgment.judgment_backup import apply_raw_deltas_backwards
-from judgment.judgment_raw_parquet import find_reusable_raw_parquets
+from judgment.judgment_raw_parquet import (
+    find_reusable_raw_parquets,
+    write_archive_raw_parquet,
+)
 from judgment.judgment_versioning import (
     judgment_history,
     list_snapshot_dicts,
@@ -147,6 +150,21 @@ def test_load_law_list_strips_scope_notes(tmp_path: Path) -> None:
     assert set(law_list.names) == {"銀行法", "保險法", "災害防救法"}
     scoped = next(entry for entry in law_list.entries if entry["name"] == "災害防救法")
     assert "金融紓困" in scoped["scope"]
+
+
+def test_raw_parquet_preserves_exact_raw_json(tmp_path: Path) -> None:
+    archive = tmp_path / "202601.rar"
+    archive.write_bytes(b"")
+    exact = '{\n  "JID": "J1",\n  "JFULL": "line\\nvalue"\n}'
+    result = write_archive_raw_parquet(
+        archive,
+        tmp_path,
+        [(json.loads(exact), exact)],
+    )
+    rows = pq.read_table(result["path"]).to_pylist()
+    assert rows[0]["raw_json"] == exact
+    parquet = pq.ParquetFile(result["path"])
+    assert parquet.metadata.row_group(0).column(0).compression.upper() == "ZSTD"
 
 
 def test_extract_citations_requires_names_and_articles(tmp_path: Path) -> None:
