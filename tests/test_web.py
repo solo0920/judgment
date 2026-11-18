@@ -541,6 +541,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "update_mechanism" in processing_js.text
     assert "processing-update-action" in processing_js.text
     assert "data-processing-update-notice" in processing_js.text
+    assert "judgment:processing-pending" in processing_js.text
     assert "立即執行" in processing_js.text
     assert "processing-download-active" in processing_js.text
     assert "data-judgment-downloads-list" in processing_js.text
@@ -655,6 +656,7 @@ def test_static_console_is_served(web_client) -> None:
     app_js = web_client.get("/assets/js/app.js")
     assert app_js.status_code == 200
     assert 'DEFAULT_ROUTE = "home"' in app_js.text
+    assert "judgment:processing-pending" in app_js.text
 
     css = web_client.get("/assets/styles.css")
     assert css.status_code == 200

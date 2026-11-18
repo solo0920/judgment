@@ -139,6 +139,18 @@ def _percent(current: Any, total: Any) -> Optional[float]:
     return round(max(0.0, min(100.0, 100.0 * current_value / total_value)), 1)
 
 
+def _cached_import_pending_count() -> Optional[int]:
+    """Read the last processing snapshot's unimported-month count."""
+
+    try:
+        cache_path = _processing_snapshot_cache_path(default_state_path())
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        capabilities = payload.get("capabilities") or {}
+        return _safe_int(capabilities.get("unprocessed_archives"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def apply_live_judgment_pending(
     update_state: Dict[str, Any], settings: Settings
 ) -> Dict[str, Any]:
@@ -154,6 +166,9 @@ def apply_live_judgment_pending(
         backfill = manifest.get("backfill") or {}
         live_pending = _safe_int(backfill.get("pending_count"))
         if live_pending is None:
+            cached_import_pending = _cached_import_pending_count()
+            if cached_import_pending is not None:
+                update_state["import_pending_count"] = cached_import_pending
             return update_state
         sources = update_state.setdefault("sources", {})
         record = sources.setdefault("judgment", {})
@@ -180,6 +195,9 @@ def apply_live_judgment_pending(
         update_state["any_update"] = int(update_state["update_count"]) > 0
     except Exception:
         logger.warning("無法套用即時判決待補齊數量", exc_info=True)
+    cached_import_pending = _cached_import_pending_count()
+    if cached_import_pending is not None:
+        update_state["import_pending_count"] = cached_import_pending
     return update_state
 
 
@@ -4654,6 +4672,14 @@ def build_processing_snapshot(
             if definition["id"] == "normalize_courts"
             else None
         )
+        import_pending = (
+            int(local.get("unprocessed") or 0)
+            if definition["id"] == "judgment_import"
+            else None
+        )
+        workflow_pending_count = (
+            import_pending if import_pending is not None else court_pending
+        )
         workflow_update_available = bool(
             update_record.get("update_available")
         )
@@ -4694,6 +4720,14 @@ def build_processing_snapshot(
             update_message = (
                 f"偵測到 {court_pending:,} 筆判決需要法院名稱正規化。"
             )
+        if import_pending:
+            workflow_update_available = True
+            update_count = import_pending
+            update_origin = "本機"
+            update_mechanism = (
+                "raw_rar 判決壓縮檔與 PostgreSQL 已匯入月份比對"
+            )
+            update_message = f"待匯入 {import_pending:,} 個月判決"
         active_run_label = ""
         if active_runs:
             active_run = active_runs[0]
@@ -4725,7 +4759,7 @@ def build_processing_snapshot(
                 ),
                 "can_run": bool(workflow_runnable),
                 "start_blocked_reason": active_run_label,
-                "pending_count": court_pending,
+                "pending_count": workflow_pending_count,
                 "update_available": workflow_update_available,
                 "update_count": update_count,
                 "update_origin": update_origin,

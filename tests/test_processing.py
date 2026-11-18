@@ -403,6 +403,24 @@ def test_processing_sections_report_remote_updates_and_actions(
     assert law_workflow["update_message"] == "法規遠端 ZIP 大小變更"
 
 
+def test_processing_snapshot_marks_unimported_judgment_months(
+    tmp_path: Path, session_factory
+) -> None:
+    settings = _settings(tmp_path)
+    (settings.judgment_data_dir / "raw_rar" / "202601.rar").write_bytes(b"a")
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+    workflows = {item["id"]: item for item in snapshot["workflows"]}
+    workflow = workflows["judgment_import"]
+    assert workflow["update_available"] is True
+    assert workflow["update_count"] == 1
+    assert workflow["pending_count"] == 1
+    assert workflow["update_message"] == "待匯入 1 個月判決"
+    assert workflow["update_origin"] == "本機"
+
+
 def test_processing_snapshot_uses_live_judgment_pending_count(
     tmp_path: Path, session_factory
 ) -> None:

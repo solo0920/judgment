@@ -7003,6 +7003,13 @@ export async function render(root) {
       }
     }
     lastSnapshot = snapshot;
+    window.dispatchEvent(
+      new CustomEvent("judgment:processing-pending", {
+        detail: {
+          count: Number(snapshot.capabilities?.unprocessed_archives) || 0,
+        },
+      }),
+    );
       const stageById = new Map();
       for (const section of snapshot.sections || []) {
         for (const stage of section.stages || []) {

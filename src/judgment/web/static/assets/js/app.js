@@ -156,17 +156,34 @@ function initUpdateBadge() {
     badge.hidden = true;
     link.appendChild(badge);
   }
+  let sourceCount = 0;
+  let importPending = 0;
+  const renderBadge = () => {
+    const count = sourceCount + (importPending > 0 ? 1 : 0);
+    if (count > 0) {
+      badge.textContent = String(
+        importPending > 0 && sourceCount === 0 ? importPending : count,
+      );
+      badge.title =
+        importPending > 0
+          ? `法規／命令／判決有 ${sourceCount} 項更新；判決匯入待處理 ${importPending} 個月`
+          : `法規／命令／判決有 ${sourceCount} 項更新`;
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  };
   const refresh = async (data = null) => {
     try {
       const info = data || (await api.updatesStatus());
-      const count = Number(info.update_count) || 0;
-      if (count > 0) {
-        badge.textContent = String(count);
-        badge.title = `法規／命令／判決有 ${count} 項更新`;
-        badge.hidden = false;
-      } else {
-        badge.hidden = true;
+      sourceCount = Number(info.update_count) || 0;
+      if (
+        info &&
+        Object.prototype.hasOwnProperty.call(info, "import_pending_count")
+      ) {
+        importPending = Number(info.import_pending_count) || 0;
       }
+      renderBadge();
     } catch (error) {
       badge.hidden = true;
     }
@@ -175,6 +192,10 @@ function initUpdateBadge() {
   subscribeRefresh("updates", (_topic, payload) =>
     refresh(payload?.snapshot || null),
   );
+  window.addEventListener("judgment:processing-pending", (event) => {
+    importPending = Number(event.detail?.count) || 0;
+    renderBadge();
+  });
   window.addEventListener("judgment:updates-changed", () => refresh());
 }
 
