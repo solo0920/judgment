@@ -14104,20 +14104,20 @@ button.chip:hover {
 }
 
 .judgment-month.is-green {
-  border-color: #b9c0c8;
+  border-color: #000000;
   background: #76b900;
   color: #102400;
   font-weight: 650;
 }
 
 .judgment-month.is-gray {
-  border-color: #b9c0c8;
+  border-color: #000000;
   background: #dfe3e8;
   color: #20252b;
 }
 
 .judgment-month.is-red {
-  border-color: #b9c0c8;
+  border-color: #000000;
   background: #d32f2f;
   color: #ffffff;
   font-weight: 650;
@@ -14150,7 +14150,7 @@ button.chip:hover {
 
 .judgment-month.is-downloading {
   border-width: 1px;
-  border-color: #b9c0c8;
+  border-color: #000000;
   outline: none;
   color: #102400;
   animation: judgment-month-download-glow 1.6s ease-in-out infinite;
@@ -14164,13 +14164,13 @@ button.chip:hover {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px #b9c0c8,
-      0 0 6px rgba(185, 192, 200, 0.55);
+      0 0 0 1px #000000,
+      0 0 6px rgba(0, 0, 0, 0.45);
   }
   50% {
     box-shadow:
-      0 0 0 1px #b9c0c8,
-      0 0 12px rgba(185, 192, 200, 0.75);
+      0 0 0 1px #000000,
+      0 0 12px rgba(0, 0, 0, 0.65);
   }
 }
 
