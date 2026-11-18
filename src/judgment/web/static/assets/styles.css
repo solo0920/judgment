@@ -14144,34 +14144,34 @@ button.chip:hover {
   animation: judgment-month-pulse 1.6s ease-in-out infinite;
 }
 
+.judgment-month.is-active::before {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 1;
+  width: 4px;
+  height: calc(100% - 6px);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
 .judgment-month.is-active::after {
   content: "";
   position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  right: 3px;
+  bottom: 3px;
   z-index: 2;
-  height: 4px;
-  border-radius: 0 0 2px 2px;
+  width: 4px;
+  height: var(--month-progress, 0%);
+  max-height: calc(100% - 6px);
+  border-radius: 999px;
   background: #76b900;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
   opacity: 1;
   pointer-events: none;
-  width: var(--month-progress, 0%);
-  transition: width 0.35s ease;
-}
-
-.judgment-month.is-active::before {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 1;
-  height: 4px;
-  border-radius: 0 0 2px 2px;
-  background: rgba(0, 0, 0, 0.18);
-  pointer-events: none;
+  transition: height 0.35s ease;
 }
 
 .judgment-month.is-downloading {
