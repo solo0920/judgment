@@ -597,7 +597,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "patchProcessingTimelines" in processing_js.text
     assert "active_coverage" in processing_js.text
     assert "--stage-progress" in processing_js.text
-    assert "--stage-mix" in processing_js.text
+    assert 'style="--stage-progress:' in processing_js.text
     assert "完成月份" in processing_js.text
     assert "完成率" in processing_js.text
     assert "完成階段" in processing_js.text
@@ -696,8 +696,8 @@ def test_static_console_is_served(web_client) -> None:
         ".workflow-wf-stage.is-pending .rag-wf-track" in css.text
     )
     assert "var(--stage-color) 10%, transparent" in css.text
-    assert "var(--stage-mix, 48%)" in css.text
-    assert "var(--stage-mix, 42%)" in css.text
+    assert "var(--block-color) var(--stage-progress, 0%)" in css.text
+    assert "color-mix(in srgb, var(--block-color) 32%, transparent)" in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text
