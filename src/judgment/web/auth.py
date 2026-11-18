@@ -153,7 +153,16 @@ def read_oauth_state(
     return data
 
 
+def is_loopback_request(request: Request) -> bool:
+    host = str(request.url.hostname or "").strip().lower()
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
 def cookie_secure(request: Request, settings: Settings) -> bool:
+    # Local HTTP development must still be able to test Google login even when
+    # the production deployment uses Secure + SameSite=None.
+    if is_loopback_request(request):
+        return False
     mode = str(settings.auth_cookie_secure or "auto").strip().lower()
     if mode in {"1", "true", "yes", "on", "always"}:
         return True
@@ -173,10 +182,16 @@ def cookie_samesite(settings: Settings) -> str:
     return value if value in {"lax", "strict", "none"} else "lax"
 
 
+def request_samesite(request: Request, settings: Settings) -> str:
+    if is_loopback_request(request):
+        return "lax"
+    return cookie_samesite(settings)
+
+
 def set_session_cookie(
     response: Response, request: Request, settings: Settings, token: str
 ) -> None:
-    samesite = cookie_samesite(settings)
+    samesite = request_samesite(request, settings)
     response.set_cookie(
         SESSION_COOKIE,
         token,

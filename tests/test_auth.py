@@ -5,11 +5,15 @@ from pathlib import Path
 import pytest
 
 from judgment.config import Settings
+from starlette.requests import Request
+
 from judgment.web.auth import (
     allowed_email,
+    cookie_secure,
     google_login_enabled,
     make_session_token,
     make_signed_token,
+    request_samesite,
     session_secret,
     verify_signed_token,
 )
@@ -73,3 +77,37 @@ def test_make_session_token_requires_secret() -> None:
     settings = _settings(auth_session_secret="", admin_token="")
     with pytest.raises(ValueError):
         make_session_token({"email": "admin@example.com"}, settings)
+
+
+def _request(host: str, scheme: str = "http") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "scheme": scheme,
+            "server": (host, 9200),
+            "client": ("127.0.0.1", 12345),
+            "path": "/",
+            "query_string": b"",
+            "headers": [(b"host", f"{host}:9200".encode())],
+        }
+    )
+
+
+def test_local_http_uses_lax_non_secure_cookie_despite_production_config() -> None:
+    settings = _settings(
+        auth_cookie_samesite="none",
+        auth_cookie_secure="true",
+    )
+    local = _request("127.0.0.1")
+    assert request_samesite(local, settings) == "lax"
+    assert cookie_secure(local, settings) is False
+
+
+def test_external_https_honors_production_cookie_config() -> None:
+    settings = _settings(
+        auth_cookie_samesite="none",
+        auth_cookie_secure="true",
+    )
+    external = _request("api-mbp.ragdemo.win", scheme="https")
+    assert request_samesite(external, settings) == "none"
+    assert cookie_secure(external, settings) is True
