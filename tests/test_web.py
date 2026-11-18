@@ -679,6 +679,10 @@ def test_static_console_is_served(web_client) -> None:
     assert ".processing-month-stage.is-raw_parquet" in css.text
     assert ".processing-month-stage.is-filter" in css.text
     assert (
+        ".processing-month.index-month .processing-month-stage.is-pending"
+        in css.text
+    )
+    assert (
         ".processing-month.import-month .processing-month-stage.is-pending"
         in css.text
     )

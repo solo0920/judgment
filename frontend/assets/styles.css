@@ -18127,6 +18127,7 @@ a.qb-bank-law:hover {
   --block-color: #f59e0b;
 }
 
+.processing-month.index-month .processing-month-stage.is-pending,
 .processing-month.import-month .processing-month-stage.is-pending {
   background: color-mix(in srgb, var(--block-color) 32%, transparent);
   box-shadow: inset 0 0 0 1px
