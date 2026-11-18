@@ -18132,8 +18132,7 @@ a.qb-bank-law:hover {
     to top,
     color-mix(in srgb, var(--block-color) 48%, var(--surface-2))
       var(--stage-progress, 0%),
-    color-mix(in srgb, var(--block-color) 14%, transparent)
-      var(--stage-progress, 0%)
+    var(--bg) var(--stage-progress, 0%)
   );
   box-shadow: inset 0 0 0 1px var(--block-color);
 }

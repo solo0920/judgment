@@ -678,6 +678,7 @@ def test_static_console_is_served(web_client) -> None:
         ".processing-month.import-month .processing-month-stage.is-running"
         in css.text
     )
+    assert "var(--bg) var(--stage-progress" in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text
