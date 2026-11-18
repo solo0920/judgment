@@ -14153,29 +14153,26 @@ button.chip:hover {
 }
 
 .judgment-month.is-downloading {
-  border-color: #00e5ff;
-  outline: 2px solid #00e5ff;
-  outline-offset: 2px;
+  border-width: 2px;
+  outline: none;
   color: #102400;
-  animation: judgment-month-download-pulse 1.6s ease-in-out infinite;
+  animation: none;
+}
+
+.judgment-month.is-green.is-downloading {
+  border-color: #4f7a00;
+}
+
+.judgment-month.is-gray.is-downloading {
+  border-color: #b9c0c8;
+}
+
+.judgment-month.is-red.is-downloading {
+  border-color: #991b1b;
 }
 
 .judgment-month.is-downloading .judgment-month-download {
   color: #102400;
-}
-
-@keyframes judgment-month-download-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 2px rgba(0, 229, 255, 0.35),
-      0 0 8px rgba(0, 229, 255, 0.35);
-  }
-  50% {
-    box-shadow:
-      0 0 0 3px rgba(0, 229, 255, 0.55),
-      0 0 16px rgba(0, 229, 255, 0.55);
-  }
 }
 
 @keyframes judgment-month-pulse {
