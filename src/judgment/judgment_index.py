@@ -293,6 +293,14 @@ _coverage_cache_locks: Dict[
     Tuple[int, str, str, Optional[int]], threading.Lock
 ] = {}
 _coverage_cache_guard = threading.Lock()
+_staleness_cache: Dict[
+    Tuple[int, str, str, Optional[int]],
+    Tuple[Dict[str, Any], float, Any],
+] = {}
+_staleness_cache_locks: Dict[
+    Tuple[int, str, str, Optional[int]], threading.Lock
+] = {}
+_staleness_cache_guard = threading.Lock()
 
 
 def _coverage_cache_key(
@@ -316,7 +324,7 @@ def invalidate_index_coverage(
     model: Optional[str] = None,
     version_id: Optional[int] = None,
 ) -> int:
-    """Drop cached coverage values matching the supplied filters."""
+    """Drop cached coverage and staleness values matching the filters."""
 
     target_collection = str(collection) if collection is not None else None
     target_model = str(model) if model is not None else None
@@ -333,6 +341,16 @@ def invalidate_index_coverage(
                 continue
             _coverage_cache.pop(key, None)
             removed += 1
+    with _staleness_cache_guard:
+        for key in list(_staleness_cache):
+            _, key_collection, key_model, key_version = key
+            if target_collection is not None and key_collection != target_collection:
+                continue
+            if target_model is not None and key_model != target_model:
+                continue
+            if target_version is not None and key_version != target_version:
+                continue
+            _staleness_cache.pop(key, None)
     return removed
 
 
@@ -452,6 +470,130 @@ def cached_index_coverage(
         expires_at = time.monotonic() + ttl
         with _coverage_cache_guard:
             _coverage_cache[key] = (dict(value), expires_at, session_factory)
+        record(
+            cache_hit=False,
+            cache_forced=force_refresh,
+            cache_wait_ms=wait_ms,
+            cache_refresh_ms=round(
+                (time.perf_counter() - refresh_started) * 1000, 2
+            ),
+        )
+        return dict(value)
+
+
+def cached_index_staleness(
+    session_factory: Any,
+    *,
+    collection: str,
+    model: str,
+    version_id: Optional[int] = None,
+    ttl_seconds: float = _COVERAGE_CACHE_TTL_SECONDS,
+    cache_stats: Optional[Dict[str, Any]] = None,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    """Return staleness with a process-wide TTL cache and single-flight refresh.
+
+    Exact missing/changed/stale counts require several multi-million-row
+    aggregates, so request paths should use this wrapper.  Indexing and
+    processing code that makes decisions should keep using ``index_staleness``.
+    """
+
+    started = time.perf_counter()
+
+    def record(**values: Any) -> None:
+        if cache_stats is None:
+            return
+        cache_stats.update(values)
+        cache_stats.setdefault(
+            "cache_lookup_ms",
+            round((time.perf_counter() - started) * 1000, 2),
+        )
+
+    ttl = max(0.0, float(ttl_seconds))
+    if ttl <= 0:
+        value = index_staleness(
+            session_factory,
+            collection=collection,
+            model=model,
+            version_id=version_id,
+        )
+        record(cache_hit=False, cache_disabled=True)
+        return value
+    key = _coverage_cache_key(
+        session_factory,
+        collection=collection,
+        model=model,
+        version_id=version_id,
+    )
+    now = time.monotonic()
+    with _staleness_cache_guard:
+        entry = _staleness_cache.get(key)
+        if (
+            not force_refresh
+            and entry is not None
+            and entry[2] is session_factory
+            and entry[1] > now
+        ):
+            record(cache_hit=True, cache_wait_ms=0.0)
+            return dict(entry[0])
+        key_lock = _staleness_cache_locks.setdefault(key, threading.Lock())
+
+    with key_lock:
+        wait_ms = round((time.perf_counter() - started) * 1000, 2)
+        now = time.monotonic()
+        with _staleness_cache_guard:
+            entry = _staleness_cache.get(key)
+            if (
+                not force_refresh
+                and entry is not None
+                and entry[2] is session_factory
+                and entry[1] > now
+            ):
+                record(cache_hit=True, cache_wait_ms=wait_ms)
+                return dict(entry[0])
+            stale = (
+                dict(entry[0])
+                if entry is not None and entry[2] is session_factory
+                else None
+            )
+        refresh_started = time.perf_counter()
+        try:
+            value = index_staleness(
+                session_factory,
+                collection=collection,
+                model=model,
+                version_id=version_id,
+            )
+        except Exception:
+            if stale is None:
+                raise
+            logger.warning(
+                "index staleness refresh failed; serving stale cache",
+                exc_info=True,
+            )
+            with _staleness_cache_guard:
+                _staleness_cache[key] = (
+                    stale,
+                    time.monotonic()
+                    + min(ttl, _COVERAGE_CACHE_FAILURE_TTL_SECONDS),
+                    session_factory,
+                )
+            record(
+                cache_hit=True,
+                cache_stale=True,
+                cache_wait_ms=wait_ms,
+                cache_forced=force_refresh,
+                cache_refresh_ms=round(
+                    (time.perf_counter() - refresh_started) * 1000, 2
+                ),
+            )
+            return dict(stale)
+        with _staleness_cache_guard:
+            _staleness_cache[key] = (
+                dict(value),
+                time.monotonic() + ttl,
+                session_factory,
+            )
         record(
             cache_hit=False,
             cache_forced=force_refresh,

@@ -14,7 +14,7 @@ from sqlalchemy import func, or_, select
 from .config import Settings
 from .embeddings import EmbeddingError, OllamaEmbedder
 from .judgment_citations import law_citations_for_record
-from .judgment_index import cached_index_coverage
+from .judgment_index import cached_index_coverage, cached_index_staleness
 from .index_versions import active_version
 from .law_rag import (
     LAW_ALIASES,
@@ -2959,6 +2959,37 @@ def warm_index_coverage(
         else settings.judgment_vector_collection
     )
     return cached_index_coverage(
+        session_factory,
+        collection=collection,
+        model=settings.embedding_model,
+        version_id=active_index["version_id"] if active_index else None,
+        ttl_seconds=settings.rag_coverage_cache_ttl_seconds,
+        force_refresh=force_refresh,
+    )
+
+
+def warm_index_staleness(
+    session_factory,
+    settings: Settings,
+    *,
+    force_refresh: bool = True,
+) -> Dict[str, Any]:
+    """Warm the request-path staleness cache for the active index version.
+
+    ``index_staleness`` performs several multi-million-row aggregates.  The web
+    app keeps this snapshot warm so ``/api/status`` and the status event topic
+    do not block on those queries every time a page opens.
+    """
+
+    active_index = active_version(
+        session_factory, alias_name=settings.judgment_vector_alias
+    )
+    collection = (
+        active_index["physical_collection"]
+        if active_index
+        else settings.judgment_vector_collection
+    )
+    return cached_index_staleness(
         session_factory,
         collection=collection,
         model=settings.embedding_model,

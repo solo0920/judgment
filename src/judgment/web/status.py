@@ -17,7 +17,7 @@ from ..embeddings import (
     provider_models_detail,
 )
 from ..index_versions import active_version
-from ..judgment_index import index_coverage, index_staleness
+from ..judgment_index import cached_index_coverage, cached_index_staleness
 from ..legal_index import assess_legal_index_freshness, legal_index_status
 from ..models import (
     DownloadRun,
@@ -765,11 +765,12 @@ def build_status(
     coverage_started = time.perf_counter()
     coverage_failed = False
     try:
-        coverage = index_coverage(
+        coverage = cached_index_coverage(
             session_factory,
             collection=qdrant_collection,
             model=embedding_model,
             version_id=active_index["version_id"] if active_index else None,
+            ttl_seconds=settings.rag_coverage_cache_ttl_seconds,
         )
     except Exception:
         coverage_failed = True
@@ -788,11 +789,12 @@ def build_status(
     staleness_started = time.perf_counter()
     staleness_failed = False
     try:
-        staleness = index_staleness(
+        staleness = cached_index_staleness(
             session_factory,
             collection=qdrant_collection,
             model=embedding_model,
             version_id=active_index["version_id"] if active_index else None,
+            ttl_seconds=settings.rag_coverage_cache_ttl_seconds,
         )
     except Exception:
         staleness_failed = True

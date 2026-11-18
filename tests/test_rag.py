@@ -10,7 +10,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
-from judgment.judgment_index import build_index_text, index_coverage, index_judgments
+from judgment.judgment_index import (
+    build_index_text,
+    cached_index_staleness,
+    index_coverage,
+    index_judgments,
+)
 from judgment.models import (
     Base,
     JudgmentDocument,
@@ -40,6 +45,7 @@ from judgment.rag import (
     is_judgment_list_question,
     is_list_all_question,
     warm_index_coverage,
+    warm_index_staleness,
 )
 from judgment.rerank import RerankOutcome, RerankResult
 from judgment.law_rag import (
@@ -583,6 +589,116 @@ def test_warm_index_coverage_populates_and_forces_refresh(monkeypatch) -> None:
         forced = warm_index_coverage(session_factory, _settings())
         assert calls["n"] == 2
         assert forced["indexed_judgments"] == 2
+    finally:
+        module.invalidate_index_coverage()
+
+
+def test_cached_index_staleness_reuses_and_invalidates(monkeypatch) -> None:
+    from judgment import judgment_index as module
+
+    session_factory = _session_factory()
+    calls = {"n": 0}
+
+    def fake_index_staleness(
+        session_factory,
+        *,
+        collection: str,
+        model: str,
+        version_id: int | None = None,
+    ) -> dict:
+        calls["n"] += 1
+        return {
+            "status": "fresh" if calls["n"] > 1 else "stale",
+            "fresh": calls["n"] > 1,
+            "total_judgments": 10,
+            "indexed_judgments": 10,
+            "missing_judgments": 0,
+            "changed_judgments": 0,
+            "stale_judgments": 0,
+            "pending_judgments": 0,
+            "collection": collection,
+            "model": model,
+            "version_id": version_id,
+        }
+
+    monkeypatch.setattr(module, "index_staleness", fake_index_staleness)
+    module.invalidate_index_coverage()
+    try:
+        first = cached_index_staleness(
+            session_factory,
+            collection="staleness-test",
+            model="bge-m3",
+            version_id=1,
+        )
+        second_stats: dict = {}
+        second = cached_index_staleness(
+            session_factory,
+            collection="staleness-test",
+            model="bge-m3",
+            version_id=1,
+            cache_stats=second_stats,
+        )
+        assert calls["n"] == 1
+        assert second["status"] == first["status"] == "stale"
+        assert second_stats["cache_hit"] is True
+
+        module.invalidate_index_coverage(
+            collection="staleness-test",
+            model="bge-m3",
+            version_id=1,
+        )
+        third = cached_index_staleness(
+            session_factory,
+            collection="staleness-test",
+            model="bge-m3",
+            version_id=1,
+        )
+        assert calls["n"] == 2
+        assert third["status"] == "fresh"
+    finally:
+        module.invalidate_index_coverage()
+
+
+def test_warm_index_staleness_populates_and_forces_refresh(monkeypatch) -> None:
+    from judgment import judgment_index as module
+
+    session_factory = _session_factory()
+    calls = {"n": 0}
+
+    def fake_index_staleness(
+        session_factory,
+        *,
+        collection: str,
+        model: str,
+        version_id: int | None = None,
+    ) -> dict:
+        calls["n"] += 1
+        return {
+            "status": "fresh",
+            "fresh": True,
+            "total_judgments": 10,
+            "indexed_judgments": 10,
+            "missing_judgments": 0,
+            "changed_judgments": 0,
+            "stale_judgments": 0,
+            "pending_judgments": 0,
+            "collection": collection,
+            "model": model,
+            "version_id": version_id,
+        }
+
+    monkeypatch.setattr(module, "index_staleness", fake_index_staleness)
+    module.invalidate_index_coverage()
+    try:
+        first = warm_index_staleness(session_factory, _settings())
+        second = warm_index_staleness(
+            session_factory, _settings(), force_refresh=False
+        )
+        assert calls["n"] == 1
+        assert second == first
+
+        warm_index_staleness(session_factory, _settings())
+        assert calls["n"] == 2
     finally:
         module.invalidate_index_coverage()
 

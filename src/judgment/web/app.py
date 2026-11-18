@@ -153,6 +153,7 @@ from ..rag import (
     generate_answer_with_model_async,
     llm_circuit_snapshot,
     warm_index_coverage,
+    warm_index_staleness,
 )
 from ..rerank import rerank_heartbeat, rerank_service_test
 from ..vector_store import QdrantStore
@@ -1039,6 +1040,38 @@ def create_app(
                     )
                 await asyncio.sleep(interval)
 
+        async def warm_staleness_cache() -> None:
+            ttl = float(
+                getattr(
+                    app.state.settings,
+                    "rag_coverage_cache_ttl_seconds",
+                    0.0,
+                )
+                or 0.0
+            )
+            if ttl <= 0:
+                return
+            interval = max(30.0, ttl / 2.0)
+            while True:
+                try:
+                    started = time.perf_counter()
+                    await asyncio.to_thread(
+                        warm_index_staleness,
+                        app.state.session_factory,
+                        app.state.settings,
+                    )
+                    logger.debug(
+                        "staleness cache warmed in %.0f ms",
+                        (time.perf_counter() - started) * 1000,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "staleness cache warmup failed", exc_info=True
+                    )
+                await asyncio.sleep(interval)
+
         async def rerank_warmup_loop() -> None:
             interval = max(
                 10.0,
@@ -1080,9 +1113,13 @@ def create_app(
 
         try:
             await app.state.processing_event_server.start()
+            coverage_task = None
+            staleness_task = None
+            rerank_task = None
             warm_task = asyncio.create_task(warm_processing_snapshots())
             if owns_session_factory and app.state.settings.rag_coverage_warmup_enabled:
                 coverage_task = asyncio.create_task(warm_coverage_cache())
+                staleness_task = asyncio.create_task(warm_staleness_cache())
             if (
                 app.state.settings.rag_rerank_enabled
                 and app.state.settings.rerank_heartbeat_enabled
@@ -1090,7 +1127,12 @@ def create_app(
                 rerank_task = asyncio.create_task(rerank_warmup_loop())
             yield
         finally:
-            for task in (warm_task, coverage_task, rerank_task):
+            for task in (
+                warm_task,
+                coverage_task,
+                staleness_task,
+                rerank_task,
+            ):
                 if task is not None:
                     task.cancel()
                     try:
