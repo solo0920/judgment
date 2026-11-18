@@ -1058,6 +1058,15 @@ CORS      https://judgment.ragdemo.win
 Google    https://api-mbp.ragdemo.win/api/auth/google/callback
 ```
 
+建置與部署 Pages：
+
+```bash
+uv run python scripts/build_frontend.py --api-base https://api-mbp.ragdemo.win
+npx wrangler pages deploy frontend --project-name judgment --branch main
+```
+
+Pages 專案的 production branch 是 `main`；手動部署會立即上線，但之後 main 的 Git 部署可能覆蓋。要讓變更長期生效，應把部署分支合併到 main，或調整 Pages 的 production branch。
+
 若 `api-mbp.ragdemo.win` 另外套用了 Cloudflare Access，瀏覽器從 Pages 發出的 fetch 會在 edge 先收到 403，永遠到不了 FastAPI。要走應用層 Google 登入時，應移除該 hostname 的 Access application，或至少對 `/api/*` 設 Bypass；不要在前端放置 Access service token。
 
 #### 管理權杖與 CORS 設定
