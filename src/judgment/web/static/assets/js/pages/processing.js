@@ -5378,6 +5378,21 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
                   )}${formatNumber(updateCount)}</span>`
                 : '<span class="badge badge-warn">可更新</span>'
             }
+            <button class="btn btn-primary btn-sm processing-update-action" type="button"
+              data-processing-action="run-workflow"
+              data-workflow-id="${escapeHtml(workflow.id)}"
+              ${canRun ? "" : "disabled"}
+              title="${escapeHtml(
+                canRun
+                  ? "立即執行此流程，補齊待更新資料"
+                  : disabledReason,
+              )}">
+              ${
+                busy
+                  ? '<span class="spinner" aria-hidden="true"></span>'
+                  : icon("download", 14)
+              }<span>${busy ? runStatusLabel : "更新"}</span>
+            </button>
           </div>`
         : ""
     }

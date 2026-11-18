@@ -3061,6 +3061,13 @@ LIMIT ${l} OFFSET ${p}`,warnings:u,meta:{store:n,filters:a,client_side:!0}}}asyn
               <span class="processing-update-message">${r(f)}</span>
             </span>
             ${d>0?`<span class="badge badge-warn badge-mono">${m("refresh",10)}${c(d)}</span>`:'<span class="badge badge-warn">\u53EF\u66F4\u65B0</span>'}
+            <button class="btn btn-primary btn-sm processing-update-action" type="button"
+              data-processing-action="run-workflow"
+              data-workflow-id="${r(e.id)}"
+              ${o?"":"disabled"}
+              title="${r(o?"\u7ACB\u5373\u57F7\u884C\u6B64\u6D41\u7A0B\uFF0C\u88DC\u9F4A\u5F85\u66F4\u65B0\u8CC7\u6599":l)}">
+              ${i?'<span class="spinner" aria-hidden="true"></span>':m("download",14)}<span>${i?B:"\u66F4\u65B0"}</span>
+            </button>
           </div>`:""}
     ${["legal_index_versions","law_download","order_download"].includes(e.id)?Td(e.index_timelines,{titleSuffix:e.id==="legal_index_versions"?"\u7D22\u5F15\u7248\u672C\u6642\u9593\u8868":"\u4E0B\u8F09\u6642\u9593\u8868"}):""}
     ${e.id==="normalize_courts"?ne:""}

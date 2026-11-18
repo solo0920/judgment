@@ -13188,6 +13188,7 @@ button.chip:hover {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  flex-wrap: wrap;
   padding: 9px 11px;
   border: 1px solid var(--warning);
   border-radius: var(--radius-card);
@@ -13230,6 +13231,11 @@ button.chip:hover {
 .processing-update-notice .badge {
   flex: none;
   margin-left: auto;
+}
+
+.processing-update-action {
+  flex: none;
+  margin-left: 2px;
 }
 
 .processing-update-count {
