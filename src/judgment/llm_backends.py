@@ -94,6 +94,10 @@ def chat_payload(
         }
         if num_predict is not None and int(num_predict) > 0:
             payload["max_tokens"] = int(num_predict)
+        if stream:
+            # llama-server (and OpenAI-compatible servers) only return token
+            # usage in a streaming response when this option is set.
+            payload["stream_options"] = {"include_usage": True}
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -174,6 +178,21 @@ def stream_delta(api: str | None, event: Mapping[str, Any]) -> tuple[str, bool]:
     if isinstance(message, Mapping):
         content = str(message.get("content") or "")
     return content, bool(event.get("done"))
+
+
+def stream_finish_reason(api: str | None, event: Mapping[str, Any]) -> Optional[str]:
+    """Return the provider's finish reason for a terminal stream event."""
+
+    if is_openai_api(api):
+        choices = event.get("choices") or []
+        if isinstance(choices, list) and choices:
+            first = choices[0] if isinstance(choices[0], Mapping) else {}
+            value = first.get("finish_reason")
+            if value:
+                return str(value)
+        return None
+    value = event.get("done_reason")
+    return str(value) if value else None
 
 
 @dataclass(frozen=True)

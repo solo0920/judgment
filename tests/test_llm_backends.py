@@ -15,6 +15,7 @@ from judgment.llm_backends import (
     fetch_context_window,
     normalize_api,
     stream_delta,
+    stream_finish_reason,
 )
 
 
@@ -77,12 +78,36 @@ def test_openai_chat_payload_uses_standard_fields_only() -> None:
     assert payload["response_format"] == {"type": "json_object"}
     assert "options" not in payload
     assert "keep_alive" not in payload
+    assert "stream_options" not in payload
     assert chat_url("http://x570:11436", OPENAI_API).endswith(
         "/v1/chat/completions"
     )
     assert embeddings_url("http://x570:11437", OPENAI_API).endswith(
         "/v1/embeddings"
     )
+
+
+def test_openai_streaming_payload_requests_usage() -> None:
+    payload = chat_payload(
+        api=OPENAI_API,
+        model="gemma3:4b",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+        num_predict=128,
+    )
+    assert payload["stream"] is True
+    assert payload["stream_options"] == {"include_usage": True}
+    assert stream_finish_reason(
+        OPENAI_API,
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ) == "stop"
+    assert stream_finish_reason(
+        OPENAI_API,
+        {"choices": [], "usage": {"prompt_tokens": 10}},
+    ) is None
+    assert stream_finish_reason(
+        OLLAMA_API, {"done": True, "done_reason": "length"}
+    ) == "length"
 
 
 def test_ollama_chat_payload_keeps_native_options() -> None:

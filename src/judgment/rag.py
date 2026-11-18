@@ -51,6 +51,7 @@ from .llm_backends import (
     chat_usage,
     is_openai_api,
     stream_delta,
+    stream_finish_reason,
 )
 from .models import JudgmentDocument
 from .observability import trace_segment, traced
@@ -1186,6 +1187,7 @@ def _build_citations(
         contexts.append(
             {
                 "index": index,
+                "kind": "judgment",
                 "jid": record.jid,
                 "court": citation["court"],
                 "jdate": record.jdate,
@@ -1990,7 +1992,11 @@ def _guard_prompt_tokens(
     if estimated_tokens and actual_tokens:
         ratio = estimated_tokens / actual_tokens
         budget_meta["prompt_token_estimate_ratio"] = round(ratio, 4)
-        budget_meta["prompt_tokens_suspected_truncation"] = ratio > 1.25
+        # The estimator counts one token per CJK character, while Gemma's
+        # tokenizer usually packs ~1.3 characters per token.  A ratio up to
+        # ~1.5 is therefore normal for Chinese prompts; only a larger gap
+        # suggests the provider actually dropped part of the prompt.
+        budget_meta["prompt_tokens_suspected_truncation"] = ratio > 1.5
     else:
         budget_meta["prompt_token_estimate_ratio"] = None
         budget_meta["prompt_tokens_suspected_truncation"] = False
@@ -2407,6 +2413,7 @@ def generate_answer_with_model(
                 )
                 first_token_at: Optional[float] = None
                 final_event: Dict[str, Any] = {}
+                finish_reason: Optional[str] = None
                 with httpx.stream(
                     "POST", url, json=request_payload, timeout=timeout
                 ) as response:
@@ -2429,6 +2436,10 @@ def generate_answer_with_model(
                         content, done = stream_delta(
                             provider.api, event
                         )
+                        if done:
+                            finish_reason = stream_finish_reason(
+                                provider.api, event
+                            ) or finish_reason
                         if done or event.get("usage"):
                             final_event = event
                         if not content:
@@ -2488,6 +2499,7 @@ def generate_answer_with_model(
                                 "contexts_dropped"
                             ],
                             "output_tokens": usage["output_tokens"],
+                            "finish_reason": finish_reason,
                             "ttft_ms": (
                                 round(
                                     (first_token_at - request_started) * 1000,
@@ -2627,6 +2639,7 @@ async def generate_answer_with_model_async(
                             else None
                         )
                         final_event: Dict[str, Any] = {}
+                        finish_reason: Optional[str] = None
                         async for line in response.aiter_lines():
                             if not line.strip():
                                 continue
@@ -2647,6 +2660,10 @@ async def generate_answer_with_model_async(
                             content, done = stream_delta(
                                 provider.api, event
                             )
+                            if done:
+                                finish_reason = stream_finish_reason(
+                                    provider.api, event
+                                ) or finish_reason
                             if done or event.get("usage"):
                                 final_event = event
                             if not content:
@@ -2696,6 +2713,26 @@ async def generate_answer_with_model_async(
                                 {
                                     "input_tokens": usage["input_tokens"],
                                     "output_tokens": usage["output_tokens"],
+                                    "finish_reason": finish_reason,
+                                    "prompt_tokens_estimated": budget_meta[
+                                        "prompt_tokens_estimated"
+                                    ],
+                                    "contexts_dropped": budget_meta[
+                                        "contexts_dropped"
+                                    ],
+                                    "context_text_truncated": budget_meta[
+                                        "text_truncated"
+                                    ],
+                                    "prompt_token_estimate_ratio": (
+                                        budget_meta.get(
+                                            "prompt_token_estimate_ratio"
+                                        )
+                                    ),
+                                    "prompt_tokens_suspected_truncation": (
+                                        budget_meta.get(
+                                            "prompt_tokens_suspected_truncation"
+                                        )
+                                    ),
                                     "ttft_ms": (
                                         round(
                                             (
@@ -4079,9 +4116,12 @@ def answer_question(
             judgment_limit = max(
                 1, settings.rag_law_first_judgment_limit
             )
+            reranked_count = len(hits)
             if len(hits) > judgment_limit:
                 hits = hits[:judgment_limit]
+            retrieval["judgment_candidates"] = reranked_count
             retrieval["judgment_limit"] = judgment_limit
+            retrieval["judgment_limit_applied"] = reranked_count > len(hits)
         retrieval["top_k"] = len(hits)
         if hits:
             with trace_segment(
@@ -4196,7 +4236,8 @@ def answer_question(
         law_sources=law_sources,
     )
     law_contexts = [
-        {**source, "text": law_source_text(source)} for source in law_sources
+        {**source, "kind": "law", "text": law_source_text(source)}
+        for source in law_sources
     ]
     contexts = (
         law_contexts + judgment_contexts
@@ -4216,6 +4257,22 @@ def answer_question(
                 "law_chunks": len(law_contexts),
                 "citation_count": citation_total,
                 "context_chars": context_chars,
+                "judgment_context_chars": sum(
+                    len(str(context.get("text") or ""))
+                    for context in judgment_contexts
+                ),
+                "law_context_chars": sum(
+                    len(str(context.get("text") or ""))
+                    for context in law_contexts
+                ),
+                "contexts_by_index": [
+                    {
+                        "index": context.get("index"),
+                        "kind": context.get("kind") or "unknown",
+                        "chars": len(str(context.get("text") or "")),
+                    }
+                    for context in contexts
+                ],
                 "token_estimate": estimate_prompt_tokens(
                     "".join(
                         str(context.get("text") or "")
@@ -4262,10 +4319,10 @@ def answer_question(
             "used_indexes": sorted(allowed_indexes),
             "dropped_indexes": sorted(
                 {
-                    int(citation.get("index") or 0)
-                    for citation in citations
-                    if int(citation.get("index") or 0)
-                    not in allowed_indexes
+                    int(item.get("index") or 0)
+                    for item in [*citations, *law_sources]
+                    if int(item.get("index") or 0)
+                    and int(item.get("index") or 0) not in allowed_indexes
                 }
             ),
         }

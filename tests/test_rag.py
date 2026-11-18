@@ -137,7 +137,17 @@ def test_prompt_token_guard_rejects_actual_overflow() -> None:
         provider=provider,
     )
     assert budget_meta["prompt_token_estimate_ratio"] == 1.3
-    assert budget_meta["prompt_tokens_suspected_truncation"] is True
+    assert budget_meta["prompt_tokens_suspected_truncation"] is False
+    high_ratio_meta = {
+        "ctx_tokens": 4096,
+        "prompt_tokens_estimated": 3600,
+    }
+    _guard_prompt_tokens(
+        usage={"input_tokens": 2000},
+        budget_meta=high_ratio_meta,
+        provider=provider,
+    )
+    assert high_ratio_meta["prompt_tokens_suspected_truncation"] is True
 
 
 def test_llm_request_payload_sends_numeric_keep_alive_as_number() -> None:
@@ -2530,7 +2540,10 @@ def test_llm_prompt_includes_law_sources(tmp_path: Path) -> None:
     assert payload["status"] == "operational"
     assert len(payload["law_sources"]) == 1
     assert payload["law_sources"][0]["index"] == 2
-    assert [context.get("kind") for context in captured["contexts"]] == [None, "law"]
+    assert [context.get("kind") for context in captured["contexts"]] == [
+        "judgment",
+        "law",
+    ]
 
 
 def test_bank_personnel_question_keeps_articles_and_law_first_context(
@@ -2942,7 +2955,14 @@ def test_generate_answer_streams_openai_sse(monkeypatch) -> None:
         def iter_lines(self):
             yield 'data: {"choices":[{"delta":{"content":"測試"}}]}'
             yield ""
-            yield 'data: {"choices":[{"delta":{"content":"回答 [1]"}}]}'
+            yield (
+                'data: {"choices":[{"delta":{"content":"回答 [1]"},'
+                '"finish_reason":"stop"}]}'
+            )
+            yield (
+                'data: {"choices":[],"usage":{"prompt_tokens":100,'
+                '"completion_tokens":6}}'
+            )
             yield "data: [DONE]"
 
     calls = []
@@ -2970,6 +2990,7 @@ def test_generate_answer_streams_openai_sse(monkeypatch) -> None:
     assert calls[0][0] == "POST"
     assert calls[0][1] == "http://x570:11436/v1/chat/completions"
     assert calls[0][2]["stream"] is True
+    assert calls[0][2]["stream_options"] == {"include_usage": True}
 
 
 def test_citation_validation_rejects_dropped_context_indexes() -> None:
@@ -3019,6 +3040,7 @@ def test_answer_marks_contexts_used_for_generation(
     prompt_context = payload["retrieval"]["prompt_context"]
     assert prompt_context["contexts_dropped"] >= 1
     assert prompt_context["used_indexes"]
+    assert prompt_context["dropped_indexes"] == [2, 3]
 
 
 def test_generate_answer_rejects_actual_context_overflow(
