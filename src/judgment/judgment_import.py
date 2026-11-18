@@ -486,19 +486,19 @@ def import_judgments(
     source_dir = Path(data_dir or settings.judgment_data_dir).expanduser().resolve()
     source_list = Path(law_list_path or settings.judgment_law_list).expanduser().resolve()
     law_list = load_law_list(source_list)
-    pattern = build_citation_pattern(law_list)
+    citation_pattern = build_citation_pattern(law_list)
     candidate_regex = build_candidate_regex(law_list)
 
     if archives is None:
         if not source_dir.is_dir():
             raise FileNotFoundError(f"找不到判決資料目錄：{source_dir}")
         archive_paths = []
-        for pattern in ("*.rar", "*.7z", "*.zip"):
-            archive_paths.extend(sorted(source_dir.glob(pattern)))
+        for glob_pattern in ("*.rar", "*.7z", "*.zip"):
+            archive_paths.extend(sorted(source_dir.glob(glob_pattern)))
         raw_rar_dir = source_dir / "raw_rar"
         if raw_rar_dir.is_dir():
-            for pattern in ("*.rar", "*.7z", "*.zip"):
-                archive_paths.extend(sorted(raw_rar_dir.glob(pattern)))
+            for glob_pattern in ("*.rar", "*.7z", "*.zip"):
+                archive_paths.extend(sorted(raw_rar_dir.glob(glob_pattern)))
     else:
         archive_paths = [Path(item).expanduser().resolve() for item in archives]
     if not archive_paths:
@@ -1132,7 +1132,7 @@ def import_judgments(
                     obj, archive=archive
                 ),
                 match_transform=lambda obj: _raw_match_fields(
-                    obj, pattern=pattern
+                    obj, pattern=citation_pattern
                 ),
                 candidate_regex=candidate_regex,
                 match_progress=on_match_progress,

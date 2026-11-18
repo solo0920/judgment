@@ -752,6 +752,40 @@ def test_second_import_resumes_successful_archives(
     engine.dispose()
 
 
+def test_import_without_explicit_archives_keeps_citation_pattern(
+    tmp_path: Path,
+) -> None:
+    law_list = tmp_path / "laws.md"
+    law_list.write_text("銀行法\n", encoding="utf-8")
+    archive = tmp_path / "202603--auto.rar"
+    _write_archive(
+        archive,
+        [
+            _judgment("A1", "臺灣臺北地方法院民事判決\n依銀行法第1條規定。"),
+            _judgment("A2", "臺灣臺北地方法院刑事判決\n被告涉犯刑法第1條。"),
+        ],
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path / "laws",
+        law_api_url="https://example.test/law",
+        order_api_url="https://example.test/order",
+        judgment_data_dir=tmp_path,
+        judgment_law_list=law_list,
+        auto_create_schema=False,
+    )
+
+    summary = import_judgments(
+        settings=settings,
+        data_dir=tmp_path,
+        law_list_path=law_list,
+        raw_only=True,
+    )
+
+    assert summary["status"] == "raw_only"
+    assert summary["raw_parquet_rows"] == 2
+
+
 def test_raw_only_backs_up_without_filtering_or_database(
     tmp_path: Path, monkeypatch
 ) -> None:
