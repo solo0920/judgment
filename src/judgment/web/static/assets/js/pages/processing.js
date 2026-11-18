@@ -1760,16 +1760,22 @@ function timelineMonthCellMarkup({
     const wantsProgress =
       status === "processing" ||
       (stage === "qdrant" && status === "incomplete");
-    if (
-      variant !== "index" ||
-      typeof stageProgress !== "function" ||
-      !wantsProgress
+    if (!wantsProgress) return null;
+    let value;
+    if (typeof stageProgress === "function") {
+      value = stageProgress(stage, monthKey, status);
+    } else if (
+      variant === "import" &&
+      stageProgress &&
+      typeof stageProgress === "object"
     ) {
+      value = stageProgress[stage];
+    } else {
       return null;
     }
-    const value = Number(stageProgress(stage, monthKey, status));
-    return Number.isFinite(value)
-      ? Math.max(0, Math.min(100, value))
+    const parsed = Number(value);
+    return Number.isFinite(parsed)
+      ? Math.max(0, Math.min(100, parsed))
       : null;
   };
   const stageTitle = stageOrder
@@ -1855,6 +1861,7 @@ function timelineMonthCellMarkup({
           : [
               "processing-month-stage",
               FILE_TIMELINE_STATUS_CLASSES[status] || "is-empty",
+              stageStateClass,
               workflowId ? "is-actionable" : "",
             ];
       const progressStyle =
@@ -4170,6 +4177,7 @@ function importTimelineMarkup(workflow) {
           stageOrder,
           stageLabels,
           stageStatuses: month?.import_stages || {},
+          stageProgress: month?.import_stage_progress || {},
           overall: month?.import_overall || "empty",
           active: Boolean(month?.active),
           workflowForStage: () => "judgment_import",
@@ -7336,6 +7344,12 @@ export async function render(root) {
           ...(month.import_stages || {}),
           ...(update.import_stages || {}),
         };
+        if (update.import_stage_progress) {
+          month.import_stage_progress = {
+            ...(month.import_stage_progress || {}),
+            ...(update.import_stage_progress || {}),
+          };
+        }
         if (update.import_overall) {
           month.import_overall = update.import_overall;
         }

@@ -3990,6 +3990,16 @@ def _import_archive_stage_status(
     return "complete" if imported else "incomplete"
 
 
+def _import_stage_progress(stage_data: Optional[Dict[str, Any]]) -> Optional[float]:
+    if not isinstance(stage_data, dict):
+        return None
+    current = _safe_int(stage_data.get("current"))
+    total = _safe_int(stage_data.get("total"))
+    if current is None or total is None or total <= 0:
+        return None
+    return round(min(100.0, max(0.0, current / total * 100.0)), 1)
+
+
 def _import_archive_rank(archive: Dict[str, Any]) -> Tuple[int, str]:
     statuses = [
         str(((archive.get("stages") or {}).get(stage) or {}).get("status") or "")
@@ -4064,6 +4074,7 @@ def _merge_import_timeline_stages(
         candidates = archives_by_month.get(str(month.get("month") or "")) or []
         archive = max(candidates, key=_import_archive_rank) if candidates else None
         stages: Dict[str, str] = {}
+        stage_progress: Dict[str, float] = {}
         for stage in IMPORT_TIMELINE_STAGES:
             stage_data = (
                 (archive.get("stages") or {}).get(stage) if archive else None
@@ -4071,12 +4082,17 @@ def _merge_import_timeline_stages(
             stages[stage] = _import_archive_stage_status(
                 stage_data, imported=imported
             )
+            progress = _import_stage_progress(stage_data)
+            if progress is not None:
+                stage_progress[stage] = progress
         if parquet_by_month.get(str(month.get("month") or "")) == "complete":
             # A complete Parquet backup means both the RAR check and the raw
             # backup already succeeded, even if this run is briefly touching
             # the archive again to reuse it.
             stages["extract"] = "complete"
             stages["raw_parquet"] = "complete"
+            stage_progress["extract"] = 100.0
+            stage_progress["raw_parquet"] = 100.0
         processing_stages = [
             stage
             for stage in IMPORT_TIMELINE_STAGES
@@ -4097,6 +4113,7 @@ def _merge_import_timeline_stages(
             stages[active_phase] = "processing"
         overall = _import_overall_status(stages)
         month["import_stages"] = stages
+        month["import_stage_progress"] = stage_progress
         month["import_overall"] = overall
         summary[overall] = int(summary.get(overall) or 0) + 1
     active_entry = next(
@@ -5047,6 +5064,7 @@ def _live_import_month_updates(
         if not month:
             continue
         stages: Dict[str, str] = {}
+        stage_progress: Dict[str, float] = {}
         for key in IMPORT_TIMELINE_STAGES:
             raw_stage = (archive.get("stages") or {}).get(key) or {}
             status = str(raw_stage.get("status") or "")
@@ -5056,6 +5074,9 @@ def _live_import_month_updates(
                 stages[key] = "complete"
             elif status in {"failed", "interrupted"}:
                 stages[key] = "incomplete"
+            progress = _import_stage_progress(raw_stage)
+            if progress is not None:
+                stage_progress[key] = progress
         phase = str(active_import.get("active_phase") or "")
         phase_applied = False
         if (
@@ -5071,6 +5092,7 @@ def _live_import_month_updates(
         update: Dict[str, Any] = {
             "month": month,
             "import_stages": stages,
+            "import_stage_progress": stage_progress,
         }
         if archive_status == "running" or phase_applied:
             update["import_overall"] = "processing"

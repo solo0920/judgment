@@ -545,6 +545,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "立即執行" in processing_js.text
     assert "processing-download-active" in processing_js.text
     assert "data-judgment-downloads-list" in processing_js.text
+    assert "import_stage_progress" in processing_js.text
     assert "processing-run-strip" in processing_js.text
     assert "中止執行" in processing_js.text
     assert "index-wf-chart" in processing_js.text
@@ -673,6 +674,10 @@ def test_static_console_is_served(web_client) -> None:
     assert ".processing-month-stage.is-extract" in css.text
     assert ".processing-month-stage.is-raw_parquet" in css.text
     assert ".processing-month-stage.is-filter" in css.text
+    assert (
+        ".processing-month.import-month .processing-month-stage.is-running"
+        in css.text
+    )
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text

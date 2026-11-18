@@ -1110,6 +1110,8 @@ def import_judgments(
                     archive.name,
                     "raw_parquet",
                     status="running",
+                    current=processed,
+                    total=total,
                     message=f"建立 {month_label} 原始 Parquet 備份：{message}",
                 )
                 state.update_stage(
@@ -1731,6 +1733,7 @@ def import_judgments(
                         "postgres": {
                             "status": "running",
                             "current": archive_stored,
+                            "total": archive_candidates,
                             "message": (
                                 f"{month_label}：已寫入 "
                                 f"{archive_stored:,} 筆。"

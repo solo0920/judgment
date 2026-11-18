@@ -44,6 +44,8 @@ from judgment.web.processing import (
     ProcessingManager,
     _build_timeline,
     _import_month_timeline,
+    _import_stage_progress,
+    _merge_import_timeline_stages,
     _index_month_coverage_runtime,
     _pipeline_processes_from_ps,
     build_processing_plan,
@@ -401,6 +403,64 @@ def test_processing_sections_report_remote_updates_and_actions(
     assert "Content-Length" in law_workflow["update_mechanism"]
     assert "僅記錄" in law_workflow["update_mechanism"]
     assert law_workflow["update_message"] == "法規遠端 ZIP 大小變更"
+
+
+def test_import_timeline_reports_separate_stage_progress() -> None:
+    timeline = {
+        "months": [
+            {
+                "month": "202601",
+                "imported": False,
+                "unimported_files": ["202601.rar"],
+            }
+        ]
+    }
+    archives = {
+        "items": [
+            {
+                "name": "202601.rar",
+                "stages": {
+                    "extract": {
+                        "status": "running",
+                        "current": 25,
+                        "total": 100,
+                    },
+                    "raw_parquet": {
+                        "status": "running",
+                        "current": 50,
+                        "total": 200,
+                    },
+                    "filter": {
+                        "status": "running",
+                        "current": 10,
+                        "total": 40,
+                    },
+                    "postgres": {
+                        "status": "running",
+                        "current": 5,
+                        "total": 20,
+                    },
+                },
+            }
+        ]
+    }
+
+    _merge_import_timeline_stages(timeline, archives, [])
+    month = timeline["months"][0]
+
+    assert month["import_stages"] == {
+        "extract": "processing",
+        "raw_parquet": "processing",
+        "filter": "processing",
+        "postgres": "processing",
+    }
+    assert month["import_stage_progress"] == {
+        "extract": 25.0,
+        "raw_parquet": 25.0,
+        "filter": 25.0,
+        "postgres": 25.0,
+    }
+    assert _import_stage_progress({"current": 0, "total": 0}) is None
 
 
 def test_processing_snapshot_marks_unimported_judgment_months(
