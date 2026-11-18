@@ -152,6 +152,7 @@ class Settings:
     judgment_download_start_id: int = 71644
     judgment_download_known_latest_id: int = 72011
     judgment_download_allow_off_hours: bool = True
+    judgment_download_concurrency: int = 6
     judgment_raw_rar_keep_versions: bool = True
     judgment_raw_parquet_keep_versions: bool = False
     judgment_vector_history_collection: str = "judgment_documents_history"
@@ -474,6 +475,9 @@ class Settings:
             ),
             judgment_download_allow_off_hours=_env_bool(
                 "JUDGMENT_DOWNLOAD_ALLOW_OFF_HOURS", True
+            ),
+            judgment_download_concurrency=_env_int(
+                "JUDGMENT_DOWNLOAD_CONCURRENCY", 6
             ),
             judgment_raw_rar_keep_versions=_env_bool(
                 "JUDGMENT_RAW_RAR_KEEP_VERSIONS", True

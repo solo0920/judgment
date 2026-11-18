@@ -368,6 +368,115 @@ def test_download_progress_reports_aggregate_size_and_eta(tmp_path: Path) -> Non
     progress.close()
 
 
+def test_download_progress_reports_concurrent_files(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+    raw_dir.mkdir(parents=True)
+    first = {
+        "fileset_id": 71234,
+        "filename": "202203--(20261015Update).rar",
+        "resource_description": "202203--(20261015Update)",
+    }
+    second = {
+        "fileset_id": 71235,
+        "filename": "202204--(20261015Update).rar",
+        "resource_description": "202204--(20261015Update)",
+    }
+    progress = judgment_download.DownloadProgress(raw_dir, update_interval=0)
+    progress.plan(files_total=2, bytes_total=3000)
+    progress.checking_file(first, index=1, total=2)
+    progress.start_file(first, 1000, index=1, total=2)
+    progress.start_file(second, 2000, index=2, total=2)
+    progress.update_file(71234, 250, 1000)
+    progress.update_file(71235, 500, 2000)
+
+    payload = judgment_download.download_status(settings)["progress"]
+    assert payload["active_downloads"] == 2
+    assert len(payload["downloads"]) == 2
+    assert [item["fileset_id"] for item in payload["downloads"]] == [
+        71234,
+        71235,
+    ]
+    assert [item["percent"] for item in payload["downloads"]] == [25.0, 25.0]
+    assert payload["run_bytes_done"] == 750
+    assert payload["run_percent"] == 25.0
+
+    progress.finish_file(71234, 1000, planned=True, throughput_bps=100)
+    payload = judgment_download.download_status(settings)["progress"]
+    assert payload["active_downloads"] == 1
+    assert payload["run_files_done"] == 1
+    assert payload["run_bytes_done"] == 1500
+    assert payload["run_percent"] == 50.0
+
+    progress.finish_file(71235, 2000, planned=True, throughput_bps=100)
+    payload = judgment_download.download_status(settings)["progress"]
+    assert payload["active_downloads"] == 0
+    assert payload["run_files_done"] == 2
+    assert payload["run_bytes_done"] == 3000
+    assert payload["run_percent"] == 100.0
+
+    progress.close()
+
+
+
+def test_run_download_downloads_up_to_six_months_concurrently(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+    import time
+
+    months = [
+        (72020 + index, f"2026{index + 1:02d}") for index in range(8)
+    ]
+
+    class ConcurrentClient(FakeClient):
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def resources(self, category: str) -> list[dict]:
+            return _month_resources(months)
+
+        def metadata(self, fileset_id: int):
+            return _month_metadata(months, fileset_id)
+
+        def download(
+            self,
+            *,
+            fileset_id: int,
+            destination: Path,
+            expected_size,
+            progress=None,
+        ):
+            with self.lock:
+                type(self).active += 1
+                type(self).max_active = max(
+                    type(self).max_active, type(self).active
+                )
+            try:
+                time.sleep(0.03)
+                return super().download(
+                    fileset_id=fileset_id,
+                    destination=destination,
+                    expected_size=expected_size,
+                    progress=progress,
+                )
+            finally:
+                with self.lock:
+                    type(self).active -= 1
+
+    ConcurrentClient.instances.clear()
+    ConcurrentClient.active = 0
+    ConcurrentClient.max_active = 0
+    monkeypatch.setattr(
+        judgment_download, "JudicialOpenDataClient", ConcurrentClient
+    )
+    result = judgment_download.run_download(
+        settings=_settings(tmp_path),
+    )
+    assert result["downloaded"] == 8
+    assert 1 < ConcurrentClient.max_active <= 6
+
 def test_download_status_ignores_dead_progress(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     raw_dir = settings.judgment_data_dir / "raw_rar"

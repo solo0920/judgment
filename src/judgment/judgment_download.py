@@ -6,7 +6,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -224,11 +226,16 @@ class JudicialOpenDataClient:
             headers={"User-Agent": settings.user_agent},
         )
         self.token = ""
+        self._auth_lock = threading.Lock()
 
     def close(self) -> None:
         self.client.close()
 
     def authenticate(self) -> None:
+        with self._auth_lock:
+            self._authenticate_locked()
+
+    def _authenticate_locked(self) -> None:
         account = str(self.settings.opendata_judicial_account or "").strip()
         password = str(self.settings.opendata_judicial_password or "")
         if not account or not password:
@@ -671,12 +678,19 @@ class DownloadProgress:
         self.run_bytes_done = 0
         self.run_current_bytes = 0
         self.run_throughput_bps: Optional[float] = None
+        self._lock = threading.RLock()
+        self._active: Dict[int, Dict[str, Any]] = {}
+        self._active_seq = 0
         self.update_interval = max(0.0, float(update_interval))
         self._last_write = 0.0
         self._payload: Dict[str, Any] = {}
         self.set(phase="preparing", message="準備檢查判決壓縮檔", force=True)
 
     def _write(self, *, force: bool = False) -> None:
+        with self._lock:
+            self._write_locked(force=force)
+
+    def _write_locked(self, *, force: bool = False) -> None:
         current = time.monotonic()
         if not force and current - self._last_write < self.update_interval:
             return
@@ -694,7 +708,22 @@ class DownloadProgress:
         )
         payload["download_elapsed_seconds"] = round(download_elapsed, 1)
         payload["download_started_at"] = self.download_started_at or None
-        bytes_done = max(0, self.run_bytes_done + self.run_current_bytes)
+        active_bytes = sum(
+            max(0, int(item.get("bytes_written") or 0))
+            for item in self._active.values()
+            if item.get("planned", True)
+        )
+        bytes_done = max(
+            0, self.run_bytes_done + self.run_current_bytes + active_bytes
+        )
+        payload["downloads"] = [
+            dict(item)
+            for item in sorted(
+                self._active.values(),
+                key=lambda item: int(item.get("seq") or 0),
+            )
+        ]
+        payload["active_downloads"] = len(self._active)
         payload["run_files_total"] = self.run_files_total
         payload["run_files_done"] = self.run_files_done
         payload["run_bytes_total"] = self.run_bytes_total
@@ -843,6 +872,202 @@ class DownloadProgress:
     def set_throughput(self, throughput_bps: Optional[float]) -> None:
         if throughput_bps and throughput_bps > 0:
             self.run_throughput_bps = float(throughput_bps)
+
+    @staticmethod
+    def _file_item(
+        entry: Dict[str, Any],
+        *,
+        phase: str,
+        index: Optional[int],
+        total: Optional[int],
+        bytes_written: int = 0,
+        total_bytes: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        fileset_id = int(entry["fileset_id"])
+        item: Dict[str, Any] = {
+            "fileset_id": fileset_id,
+            "month": _month_label(
+                str(entry.get("resource_description") or entry.get("filename") or "")
+            ),
+            "filename": str(entry.get("filename") or ""),
+            "phase": phase,
+            "candidate_index": index,
+            "candidate_total": total,
+            "bytes_written": max(0, int(bytes_written)),
+            "total_bytes": total_bytes,
+            "percent": None,
+        }
+        if total_bytes and total_bytes > 0:
+            item["percent"] = round(
+                min(100.0, item["bytes_written"] / total_bytes * 100.0),
+                1,
+            )
+        return item
+
+    def _current_from_item(
+        self,
+        item: Dict[str, Any],
+        *,
+        message: str,
+    ) -> None:
+        self._payload = {
+            "phase": str(item.get("phase") or "downloading"),
+            "message": message,
+            "month": str(item.get("month") or ""),
+            "filename": str(item.get("filename") or ""),
+            "fileset_id": item.get("fileset_id"),
+            "candidate_index": item.get("candidate_index"),
+            "candidate_total": item.get("candidate_total"),
+            "bytes_written": item.get("bytes_written"),
+            "total_bytes": item.get("total_bytes"),
+            "percent": item.get("percent"),
+        }
+        self.run_current_bytes = 0
+
+    def checking_file(
+        self,
+        entry: Dict[str, Any],
+        *,
+        index: Optional[int] = None,
+        total: Optional[int] = None,
+        message: str = "檢查檔案版本",
+        planned: bool = True,
+    ) -> None:
+        with self._lock:
+            item = self._file_item(
+                entry,
+                phase="checking",
+                index=index,
+                total=total,
+            )
+            item["planned"] = bool(planned)
+            self._active_seq += 1
+            item["seq"] = self._active_seq
+            self._active[int(entry["fileset_id"])] = item
+            self._current_from_item(item, message=message)
+            self._write_locked(force=True)
+
+    def start_file(
+        self,
+        entry: Dict[str, Any],
+        total_bytes: Optional[int],
+        *,
+        index: Optional[int] = None,
+        total: Optional[int] = None,
+        planned: bool = True,
+    ) -> None:
+        with self._lock:
+            if self.download_started_monotonic is None:
+                self.download_started_monotonic = time.monotonic()
+                self.download_started_at = now_taipei().isoformat()
+            item = self._file_item(
+                entry,
+                phase="downloading",
+                index=index,
+                total=total,
+                total_bytes=total_bytes,
+            )
+            item["planned"] = bool(planned)
+            existing = self._active.get(int(entry["fileset_id"]))
+            item["seq"] = (
+                int(existing.get("seq") or 0)
+                if existing
+                else self._active_seq + 1
+            )
+            self._active_seq = max(self._active_seq, int(item["seq"]))
+            self._active[int(entry["fileset_id"])] = item
+            self._current_from_item(item, message="下載判決壓縮檔")
+            self._write_locked(force=True)
+
+    def update_file(
+        self,
+        fileset_id: int,
+        written: int,
+        total_bytes: Optional[int] = None,
+    ) -> None:
+        with self._lock:
+            item = self._active.get(int(fileset_id))
+            if item is None:
+                return
+            item["bytes_written"] = max(0, int(written))
+            if total_bytes is not None:
+                item["total_bytes"] = int(total_bytes)
+            total_value = item.get("total_bytes")
+            item["percent"] = (
+                round(
+                    min(100.0, item["bytes_written"] / total_value * 100.0),
+                    1,
+                )
+                if isinstance(total_value, int) and total_value > 0
+                else None
+            )
+            self._current_from_item(item, message="下載判決壓縮檔")
+            self._write_locked()
+
+    def save_file(
+        self,
+        entry: Dict[str, Any],
+        *,
+        written: Optional[int] = None,
+        index: Optional[int] = None,
+        total: Optional[int] = None,
+        planned: bool = True,
+    ) -> None:
+        with self._lock:
+            item = self._active.get(int(entry["fileset_id"]))
+            if item is None:
+                item = self._file_item(
+                    entry,
+                    phase="saving",
+                    index=index,
+                    total=total,
+                )
+                item["planned"] = bool(planned)
+                self._active_seq += 1
+                item["seq"] = self._active_seq
+            item["phase"] = "saving"
+            item["bytes_written"] = max(0, int(written or 0))
+            item["total_bytes"] = item["bytes_written"]
+            item["percent"] = 100.0 if item["bytes_written"] else None
+            self._active[int(entry["fileset_id"])] = item
+            self._current_from_item(item, message="驗證檔案並更新月份狀態")
+            self._write_locked(force=True)
+
+    def finish_file(
+        self,
+        fileset_id: int,
+        written: int,
+        *,
+        planned: bool = True,
+        throughput_bps: Optional[float] = None,
+    ) -> None:
+        with self._lock:
+            item = self._active.pop(int(fileset_id), None)
+            if planned:
+                self.run_files_done += 1
+                self.run_bytes_done += max(0, int(written))
+            if throughput_bps and throughput_bps > 0:
+                self.run_throughput_bps = float(throughput_bps)
+            if item is not None:
+                self._current_from_item(
+                    {**item, "phase": "saving", "percent": 100.0},
+                    message="完成",
+                )
+            self._write_locked(force=True)
+
+    def drop_file(self, fileset_id: int) -> None:
+        with self._lock:
+            self._active.pop(int(fileset_id), None)
+            self._write_locked(force=True)
+
+    def fail_file(self, fileset_id: int, error: BaseException | str) -> None:
+        with self._lock:
+            item = self._active.pop(int(fileset_id), None)
+            if item is not None:
+                item["phase"] = "error"
+                item["error"] = str(error)
+                self._current_from_item(item, message="下載失敗")
+            self._write_locked(force=True)
 
     def preparing(self, message: str = "準備檢查判決壓縮檔") -> None:
         self.set(phase="preparing", message=message)
@@ -1644,6 +1869,13 @@ def run_download(
         stats["pending_before"] = pending_before
         persist_manifest()
 
+        state_lock = threading.Lock()
+        stop_event = threading.Event()
+
+        def recent_throughput() -> Optional[float]:
+            with state_lock:
+                return _recent_throughput(samples)
+
         def perform_entry(
             entry: Dict[str, Any],
             position: int,
@@ -1651,52 +1883,67 @@ def run_download(
             *,
             verification_mode: bool = False,
         ) -> Tuple[str, Optional[Exception]]:
+            if stop_event.is_set():
+                return "stopped", None
+            if not off_hours_allowed and not window_is_open(current_time()):
+                return "window_closed", None
             fileset_id = int(entry["fileset_id"])
             local_path = raw_dir / entry["filename"]
-            progress.checking(
+            progress.checking_file(
                 entry,
                 index=position,
                 total=total,
                 message=(
                     "驗證既有檔案版本" if verification_mode else "檢查檔案版本"
                 ),
+                planned=fileset_id in plan_ids,
             )
             try:
                 remote = plan_metadata.get(fileset_id)
                 if remote is None:
                     remote = client.metadata(fileset_id)
             except Exception as exc:
-                stats["errors"] += 1
+                with state_lock:
+                    stats["errors"] += 1
+                progress.fail_file(fileset_id, exc)
                 _log(f"fileset {fileset_id} metadata 失敗：{exc}")
                 return "error", exc
             if remote is None:
-                stats["missing"] += 1
+                with state_lock:
+                    stats["missing"] += 1
+                progress.fail_file(fileset_id, "fileset 不存在")
                 _log(f"fileset {fileset_id} 不存在，略過。")
                 return "missing", None
-            stats["checked"] += 1
-            previous = files_map.get(str(fileset_id))
+            with state_lock:
+                stats["checked"] += 1
+                previous = files_map.get(str(fileset_id))
             if _unchanged(local_path, remote, previous):
-                stats["skipped"] += 1
-                if previous is None:
-                    files_map[str(fileset_id)] = {
-                        "fileset_id": fileset_id,
-                        "filename": entry["filename"],
-                        "resource_description": entry["resource_description"],
-                        "format": entry["format"],
-                        "size_bytes": local_path.stat().st_size,
-                        "last_modified": remote.get("last_modified") or "",
-                        "etag": remote.get("etag") or "",
-                        "content_type": remote.get("content_type") or "",
-                        "source_url": FILESET_URL.format(fileset_id=fileset_id),
-                        "checked_at": current_time().isoformat(),
-                    }
+                with state_lock:
+                    stats["skipped"] += 1
+                    if previous is None:
+                        files_map[str(fileset_id)] = {
+                            "fileset_id": fileset_id,
+                            "filename": entry["filename"],
+                            "resource_description": entry[
+                                "resource_description"
+                            ],
+                            "format": entry["format"],
+                            "size_bytes": local_path.stat().st_size,
+                            "last_modified": remote.get("last_modified") or "",
+                            "etag": remote.get("etag") or "",
+                            "content_type": remote.get("content_type") or "",
+                            "source_url": FILESET_URL.format(
+                                fileset_id=fileset_id
+                            ),
+                            "checked_at": current_time().isoformat(),
+                        }
                 _log(f"fileset {fileset_id} 未變更：{entry['filename']}")
-                if fileset_id in plan_ids:
-                    progress.file_completed(
-                        local_path.stat().st_size,
-                        planned=True,
-                        throughput_bps=_recent_throughput(samples),
-                    )
+                progress.finish_file(
+                    fileset_id,
+                    local_path.stat().st_size,
+                    planned=fileset_id in plan_ids,
+                    throughput_bps=recent_throughput(),
+                )
                 return "skipped", None
             action = "更新" if local_path.is_file() else "下載"
             size = remote.get("content_length")
@@ -1705,6 +1952,7 @@ def run_download(
                 + (f"（{size} bytes）" if size else "")
             )
             if check_only:
+                progress.drop_file(fileset_id)
                 return "check", None
             resume_offset = plan_resume_offsets.get(fileset_id)
             if resume_offset is None:
@@ -1717,22 +1965,28 @@ def run_download(
                     remaining_bytes = max(0, int(size) - resume_offset)
                 except (TypeError, ValueError):
                     remaining_bytes = None
-            if not off_hours_allowed and _deadline_reached(
-                current_time(),
-                remaining_bytes=remaining_bytes,
-                samples=samples,
-                buffer_seconds=deadline_buffer_seconds,
-            ):
+            deadline_hit = False
+            if not off_hours_allowed:
+                with state_lock:
+                    deadline_hit = _deadline_reached(
+                        current_time(),
+                        remaining_bytes=remaining_bytes,
+                        samples=samples,
+                        buffer_seconds=deadline_buffer_seconds,
+                    )
+            if deadline_hit:
+                progress.drop_file(fileset_id)
                 _log(
                     f"接近 06:00，尚未開始 fileset {fileset_id}；"
                     "下次會從此月份續傳。"
                 )
                 return "deadline", None
-            progress.downloading(
+            progress.start_file(
                 entry,
                 size,
                 index=position,
                 total=total,
+                planned=fileset_id in plan_ids,
             )
             started = time.monotonic()
             last_error: Optional[Exception] = None
@@ -1745,7 +1999,11 @@ def run_download(
                         fileset_id=fileset_id,
                         destination=local_path,
                         expected_size=size,
-                        progress=progress.bytes,
+                        progress=lambda current, total_bytes: (
+                            progress.update_file(
+                                fileset_id, current, total_bytes
+                            )
+                        ),
                     )
                     last_error = None
                     break
@@ -1767,50 +2025,57 @@ def run_download(
                         f"（{attempt}/{attempts}）：{exc}"
                     )
             if last_error is not None:
-                stats["errors"] += 1
+                with state_lock:
+                    stats["errors"] += 1
+                progress.fail_file(fileset_id, last_error)
                 return "error", last_error
             elapsed = max(0.0, time.monotonic() - started)
             transferred = max(0, written - resume_offset)
             if transferred > 0 and elapsed > 0:
-                samples.append((transferred, elapsed))
-                del samples[:-THROUGHPUT_SAMPLE_LIMIT]
-            stats["downloaded"] += 1
-            stats["bytes_downloaded"] += written
-            if action == "更新":
-                stats["updated"] += 1
-            files_map[str(fileset_id)] = {
-                "fileset_id": fileset_id,
-                "filename": entry["filename"],
-                "resource_description": entry["resource_description"],
-                "format": entry["format"],
-                "size_bytes": written,
-                "sha256": sha256,
-                "last_modified": remote.get("last_modified") or "",
-                "etag": remote.get("etag") or "",
-                "content_type": remote.get("content_type") or "",
-                "source_url": FILESET_URL.format(fileset_id=fileset_id),
-                "downloaded_at": current_time().isoformat(),
-            }
-            progress.saving(
+                with state_lock:
+                    samples.append((transferred, elapsed))
+                    del samples[:-THROUGHPUT_SAMPLE_LIMIT]
+            with state_lock:
+                stats["downloaded"] += 1
+                stats["bytes_downloaded"] += written
+                if action == "更新":
+                    stats["updated"] += 1
+                files_map[str(fileset_id)] = {
+                    "fileset_id": fileset_id,
+                    "filename": entry["filename"],
+                    "resource_description": entry["resource_description"],
+                    "format": entry["format"],
+                    "size_bytes": written,
+                    "sha256": sha256,
+                    "last_modified": remote.get("last_modified") or "",
+                    "etag": remote.get("etag") or "",
+                    "content_type": remote.get("content_type") or "",
+                    "source_url": FILESET_URL.format(fileset_id=fileset_id),
+                    "downloaded_at": current_time().isoformat(),
+                }
+            progress.save_file(
                 entry,
                 written=written,
                 index=position,
                 total=total,
+                planned=fileset_id in plan_ids,
             )
-            progress.file_completed(
+            progress.finish_file(
+                fileset_id,
                 written,
                 planned=fileset_id in plan_ids,
-                throughput_bps=_recent_throughput(samples),
+                throughput_bps=recent_throughput(),
             )
-            removed = _prune_month_versions(
-                raw_dir,
-                entry,
-                files_map,
-                keep_versions=bool(
-                    settings.judgment_raw_rar_keep_versions
-                ),
-                history_files=manifest.setdefault("history_files", {}),
-            )
+            with state_lock:
+                removed = _prune_month_versions(
+                    raw_dir,
+                    entry,
+                    files_map,
+                    keep_versions=bool(
+                        settings.judgment_raw_rar_keep_versions
+                    ),
+                    history_files=manifest.setdefault("history_files", {}),
+                )
             if removed:
                 _log(
                     f"fileset {fileset_id} 新版本已下載，封存/移除同月份舊檔："
@@ -1923,19 +2188,19 @@ def run_download(
                     else None
                 ),
             )
-        for position, entry in enumerate(queue, 1):
-            if stop_reason:
-                break
-            if not off_hours_allowed and not window_is_open(current_time()):
-                stop_reason = "window_closed"
-                _log(
-                    "已到 06:00 或不在允許的下載時段；"
-                    "已完成部分會保留，下次從待下載月份續傳。"
-                )
-                break
-            result, error = perform_entry(
-                entry, position, total_candidates
-            )
+        max_workers = max(
+            1,
+            min(6, int(settings.judgment_download_concurrency or 6)),
+        )
+
+        def record_result(
+            entry: Dict[str, Any],
+            result: str,
+            error: Optional[Exception],
+        ) -> None:
+            nonlocal months_cache, backfill, stop_reason
+            if result == "stopped":
+                return
             month = _month_label(
                 entry.get("resource_description") or entry.get("filename") or ""
             )
@@ -1954,16 +2219,64 @@ def run_download(
                     "error": str(error or "fileset 不存在"),
                     "at": current_time().isoformat(),
                 }
-            months_cache = refresh_months()
-            backfill = _sync_backfill(
-                manifest, months_cache, latest_by_month
+            with state_lock:
+                months_cache = refresh_months()
+                backfill = _sync_backfill(
+                    manifest, months_cache, latest_by_month
+                )
+                backfill["failures"] = failures
+                backfill["verification"] = verification
+                persist_manifest()
+            if result in {"deadline", "window_closed"}:
+                stop_reason = (
+                    "deadline" if result == "deadline" else "window_closed"
+                )
+                stop_event.set()
+                if result == "window_closed":
+                    _log(
+                        "已到 06:00 或不在允許的下載時段；"
+                        "已完成部分會保留，下次從待下載月份續傳。"
+                    )
+
+        if max_workers <= 1 or check_only or not off_hours_allowed:
+            if max_workers > 1 and not check_only and not off_hours_allowed:
+                _log("嚴格下載時段模式：維持循序下載以估算時段截止。")
+            for position, entry in enumerate(queue, 1):
+                if stop_reason:
+                    break
+                if not off_hours_allowed and not window_is_open(
+                    current_time()
+                ):
+                    record_result(entry, "window_closed", None)
+                    break
+                result, error = perform_entry(
+                    entry, position, total_candidates
+                )
+                record_result(entry, result, error)
+                if stop_reason:
+                    break
+        else:
+            _log(
+                f"並行下載：最多 {max_workers} 個月份檔案同時下載。"
             )
-            backfill["failures"] = failures
-            backfill["verification"] = verification
-            persist_manifest()
-            if result == "deadline":
-                stop_reason = "deadline"
-                break
+            with ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="judgment-download",
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        perform_entry, entry, position, total_candidates
+                    ): entry
+                    for position, entry in enumerate(queue, 1)
+                }
+                for future in as_completed(futures):
+                    entry = futures[future]
+                    try:
+                        result, error = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        result, error = "error", exc
+                    record_result(entry, result, error)
+
 
         pending_after = len(
             _pending_entries(months_cache, latest_by_month)

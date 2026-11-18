@@ -5311,18 +5311,27 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
         ${
           workflow.id === "judgment_download"
             ? `<div class="processing-download-progress" data-judgment-progress hidden>
-                <div class="processing-download-progress-head">
-                  <span class="badge badge-info" data-judgment-progress-phase>準備中</span>
-                  <strong class="processing-download-progress-month mono" data-judgment-progress-month>—</strong>
-                  <span class="processing-download-progress-file mono" data-judgment-progress-filename>—</span>
+                <div data-judgment-current>
+                  <div class="processing-download-progress-head">
+                    <span class="badge badge-info" data-judgment-progress-phase>準備中</span>
+                    <strong class="processing-download-progress-month mono" data-judgment-progress-month>—</strong>
+                    <span class="processing-download-progress-file mono" data-judgment-progress-filename>—</span>
+                  </div>
+                  <div class="processing-download-progress-track">
+                    <span data-judgment-progress-bar></span>
+                  </div>
+                  <div class="processing-download-progress-meta">
+                    <span data-judgment-progress-percent>—</span>
+                    <span data-judgment-progress-size>—</span>
+                    <span class="muted" data-judgment-progress-note></span>
+                  </div>
                 </div>
-                <div class="processing-download-progress-track">
-                  <span data-judgment-progress-bar></span>
-                </div>
-                <div class="processing-download-progress-meta">
-                  <span data-judgment-progress-percent>—</span>
-                  <span data-judgment-progress-size>—</span>
-                  <span class="muted" data-judgment-progress-note></span>
+                <div class="processing-download-active" data-judgment-downloads hidden>
+                  <div class="processing-download-active-head">
+                    <span>同時下載</span>
+                    <span data-judgment-downloads-count>—</span>
+                  </div>
+                  <div class="processing-download-active-list" data-judgment-downloads-list></div>
                 </div>
                 <div class="processing-download-run" data-judgment-run hidden>
                   <div class="processing-download-run-head">
@@ -5682,6 +5691,12 @@ export async function render(root) {
       if (pendingNote) pendingNote.textContent = "已啟動，等待進度回報";
       const pendingRun = box.querySelector("[data-judgment-run]");
       if (pendingRun) pendingRun.hidden = true;
+      const pendingDownloads = box.querySelector(
+        "[data-judgment-downloads]",
+      );
+      if (pendingDownloads) pendingDownloads.hidden = true;
+      const pendingCurrent = box.querySelector("[data-judgment-current]");
+      if (pendingCurrent) pendingCurrent.hidden = false;
       return;
     }
     const phaseLabels = {
@@ -5694,6 +5709,83 @@ export async function render(root) {
       finalizing: "整理中",
     };
     const phaseLabel = phaseLabels[progress.phase] || "處理中";
+    const downloads = Array.isArray(progress.downloads)
+      ? progress.downloads
+      : [];
+    const hasDownloads = downloads.length > 0;
+    const currentBox = box.querySelector("[data-judgment-current]");
+    if (currentBox) currentBox.hidden = hasDownloads;
+    const downloadsBox = box.querySelector("[data-judgment-downloads]");
+    if (downloadsBox) {
+      downloadsBox.hidden = !hasDownloads;
+      const countElement = box.querySelector(
+        "[data-judgment-downloads-count]",
+      );
+      if (countElement) {
+        countElement.textContent = `${formatNumber(
+          downloads.length,
+        )} 個進行中`;
+      }
+      const listElement = box.querySelector(
+        "[data-judgment-downloads-list]",
+      );
+      if (listElement && hasDownloads) {
+        listElement.innerHTML = downloads
+          .map((item) => {
+            const itemPhase =
+              phaseLabels[item.phase] || phaseLabel || "處理中";
+            const written = Number(item.bytes_written);
+            const total = Number(item.total_bytes);
+            const hasTotal = Number.isFinite(total) && total > 0;
+            const rawPercent = item.percent;
+            const percent =
+              rawPercent === null ||
+              rawPercent === undefined ||
+              rawPercent === ""
+                ? hasTotal && Number.isFinite(written)
+                  ? (written / total) * 100
+                  : null
+                : Number(rawPercent);
+            const indeterminate =
+              percent === null || !Number.isFinite(percent);
+            const percentText = indeterminate
+              ? "—"
+              : `${Math.min(100, Math.max(0, percent)).toFixed(
+                  percent >= 10 ? 0 : 1,
+                )}%`;
+            const sizeText = hasTotal
+              ? `${formatBytes(written)} / ${formatBytes(total)}`
+              : Number.isFinite(written) && written > 0
+                ? formatBytes(written)
+                : "—";
+            return `<div class="processing-download-active-item">
+              <div class="processing-download-active-line">
+                <strong class="mono">${escapeHtml(
+                  item.month || "—",
+                )}</strong>
+                <span class="processing-download-active-file mono" title="${escapeHtml(
+                  item.filename || "",
+                )}">${escapeHtml(item.filename || "—")}</span>
+                <span class="processing-download-active-percent mono">${escapeHtml(
+                  percentText,
+                )}</span>
+              </div>
+              <div class="processing-download-active-track${
+                indeterminate ? " is-indeterminate" : ""
+              }"><span style="width:${
+                indeterminate
+                  ? ""
+                  : `${Math.min(100, Math.max(0, percent)).toFixed(1)}%`
+              }"></span></div>
+              <div class="processing-download-active-meta">
+                <span>${escapeHtml(itemPhase)}</span>
+                <span>${escapeHtml(sizeText)}</span>
+              </div>
+            </div>`;
+          })
+          .join("");
+      }
+    }
     const phase = box.querySelector("[data-judgment-progress-phase]");
     if (phase) phase.textContent = phaseLabel;
     const month = progress.month || "";
@@ -5707,13 +5799,31 @@ export async function render(root) {
       filenameElement.textContent = filename || "—";
       filenameElement.title = filename;
     }
-    if (month) {
+    const activeMonths = new Map();
+    for (const item of downloads) {
+      if (item.month) activeMonths.set(String(item.month), item.percent);
+    }
+    if (month && !activeMonths.has(month)) {
+      activeMonths.set(month, progress.percent);
+    }
+    panel.querySelectorAll(".judgment-month.is-active").forEach((cell) => {
+      cell.classList.remove("is-active");
+      cell.removeAttribute("aria-current");
+      cell.style.removeProperty("--month-progress");
+    });
+    for (const [key, value] of activeMonths) {
       const cell = panel.querySelector(
-        `[data-judgment-month-key="${month}"]`,
+        `[data-judgment-month-key="${key}"]`,
       );
-      if (cell) {
-        cell.classList.add("is-active");
-        cell.setAttribute("aria-current", "true");
+      if (!cell) continue;
+      cell.classList.add("is-active");
+      cell.setAttribute("aria-current", "true");
+      const progressValue = Number(value);
+      if (Number.isFinite(progressValue)) {
+        cell.style.setProperty(
+          "--month-progress",
+          `${Math.min(100, Math.max(0, progressValue)).toFixed(1)}%`,
+        );
       }
     }
     const written = Number(progress.bytes_written);

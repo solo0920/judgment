@@ -14144,6 +14144,19 @@ button.chip:hover {
   animation: judgment-month-pulse 1.6s ease-in-out infinite;
 }
 
+.judgment-month.is-active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.85;
+  width: var(--month-progress, 0%);
+  transition: width 0.35s ease;
+}
+
 @keyframes judgment-month-pulse {
   0%,
   100% {
@@ -14675,6 +14688,108 @@ html.processing-ollama-dragging body {
   font-family: var(--font-mono);
   font-size: 9.5px;
 }
+
+.processing-download-active {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.processing-download-active[hidden] {
+  display: none;
+}
+
+.processing-download-active-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.processing-download-active-head span:last-child {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+}
+
+.processing-download-active-list {
+  display: grid;
+  gap: 6px;
+}
+
+.processing-download-active-item {
+  display: grid;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+}
+
+.processing-download-active-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.processing-download-active-line strong {
+  flex: none;
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.processing-download-active-file {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.processing-download-active-percent {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.processing-download-active-track {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.processing-download-active-track > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--success), var(--accent));
+  transition: width 0.35s ease;
+}
+
+.processing-download-active-track.is-indeterminate > span {
+  width: 34%;
+  animation: processing-download-progress-slide 1.15s ease-in-out infinite;
+}
+
+.processing-download-active-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+}
+
 
 .processing-download-run {
   display: grid;
