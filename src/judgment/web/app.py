@@ -787,9 +787,22 @@ def _llm_final_result(
 ) -> Dict[str, Any]:
     result = dict(retrieval_result)
     retrieval = dict(state.get("retrieval") or {})
+    allowed = set(allowed_indexes or ())
+    dropped_indexes = sorted(
+        {
+            int(item.get("index") or 0)
+            for item in [
+                *(state.get("citations") or []),
+                *(state.get("law_sources") or []),
+            ]
+            if int(item.get("index") or 0)
+            and int(item.get("index") or 0) not in allowed
+        }
+    )
     retrieval["prompt_context"] = {
         **prompt_meta,
-        "used_indexes": sorted(allowed_indexes),
+        "used_indexes": sorted(allowed),
+        "dropped_indexes": dropped_indexes,
     }
     citation_audit = _citation_audit(
         answer,

@@ -920,6 +920,45 @@ def test_status_model_summary_labels_host_and_model(tmp_path: Path) -> None:
     assert rows["rerank"]["fallback"]["label"] == "mbp:bge-reranker-v2-m3"
 
 
+def test_llm_final_result_reports_dropped_context_indexes(
+    tmp_path: Path,
+) -> None:
+    from judgment.web.app import _llm_final_result
+
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path,
+        law_api_url="",
+        order_api_url="",
+        llm_url="http://x570:11436",
+        llm_model="gemma3:4b",
+    )
+    state = {
+        "retrieval": {},
+        "citations": [{"index": 2, "jid": "J1", "snippet": "判決片段"}],
+        "law_sources": [
+            {
+                "index": 1,
+                "law_name": "證券交易法",
+                "source_label": "法規",
+            }
+        ],
+        "terms": ["證券交易法"],
+    }
+    result = _llm_final_result(
+        {},
+        state,
+        settings,
+        "依證券交易法 [1]。",
+        {"contexts_after": 1},
+        {1},
+        0.0,
+    )
+    prompt_context = result["retrieval"]["prompt_context"]
+    assert prompt_context["used_indexes"] == [1]
+    assert prompt_context["dropped_indexes"] == [2]
+
+
 def test_quality_endpoint_reports_raw_parquet(web_client) -> None:
     response = web_client.get("/api/quality")
     assert response.status_code == 200
