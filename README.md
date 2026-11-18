@@ -1049,6 +1049,17 @@ cloudflared tunnel run --url http://127.0.0.1:9200 judgment-api
 
 後端建議只綁定 `127.0.0.1`，由本機的 cloudflared 對外提供 HTTPS。`judgment-web` 已啟用 proxy headers，`FORWARDED_ALLOW_IPS` 預設為 `127.0.0.1`，只信任本機 cloudflared／反向代理送來的 `X-Forwarded-*`；不要在直接對外時使用 `*`。
 
+本次部署使用：
+
+```text
+Frontend  https://judgment.ragdemo.win       Cloudflare Pages project `judgment`
+Backend   https://api-mbp.ragdemo.win        cloudflared tunnel → http://127.0.0.1:9200
+CORS      https://judgment.ragdemo.win
+Google    https://api-mbp.ragdemo.win/api/auth/google/callback
+```
+
+若 `api-mbp.ragdemo.win` 另外套用了 Cloudflare Access，瀏覽器從 Pages 發出的 fetch 會在 edge 先收到 403，永遠到不了 FastAPI。要走應用層 Google 登入時，應移除該 hostname 的 Access application，或至少對 `/api/*` 設 Bypass；不要在前端放置 Access service token。
+
 #### 管理權杖與 CORS 設定
 
 `#/tests`／`#/status` 的「系統測試」可設定 API Base 與管理權杖。本機 `127.0.0.1` 請求可直接使用；透過 cloudflared、LAN 或反向代理連線時，所有非公開 API 需要 `JUDGMENT_ADMIN_TOKEN`，前端會以 `X-Judgment-Admin-Token` 送出。`/api/health` 與 `/api/home` 保持公開，其餘 `/api/*`（含 `/api/status`、`/api/performance`、`/api/system-usage`、SSE）都受保護。SSE 使用短效 ticket，避免把長期權杖放入 EventSource URL。`127.0.0.1`／`localhost` 被視為本機管理員；若主機有多個使用者，請限制本機登入權限或在反向代理前面再加一層驗證。
