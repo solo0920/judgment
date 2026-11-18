@@ -10,6 +10,8 @@
 
 **Pipeline Waterfall 規格**: [`pipeline-waterfall.md`](pipeline-waterfall.md)（全站所有以時間軸呈現 pipeline 的視圖 MUST 依此建置）
 
+**Progress Visualization 規格**: [`progress-visualization.md`](progress-visualization.md)（全站階段進度圖 MUST 使用 25% 未完成淺色、完成色進度填充與 100% 實心完成；四階段共用同一組 class、CSS 與 SSE 契約）
+
 **Source of Truth**: 目前程式碼（`src/judgment/web/`、`src/judgment/web/static/assets/js/`、`src/judgment/*.py` 與 `scripts/`）為唯一事實來源。若本文件與程式行為不一致，以程式為準，並 MUST 在同一次變更同步更新本規格，不得保留未實作的 MUST 或已移除的 UI／API。
 
 **Input**: 使用者提供之需求（原文摘要）：

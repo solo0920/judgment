@@ -2152,7 +2152,7 @@ function lawIndexTimelineMarkup(
       <div class="index-month-are-key processing-timeline-legend" aria-label="階段狀態圖例">
         <span class="processing-timeline-legend-label">狀態</span>
         <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
-        <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成</span>
+        <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成（25% 淺色）</span>
         <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
         <span><i class="processing-timeline-swatch is-empty"></i>無資料／已取代</span>
       </div>
@@ -2165,7 +2165,7 @@ function lawIndexTimelineMarkup(
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">D：下載版本；P：raw Parquet + PostgreSQL 就緒；I：active 索引覆蓋（由法規／命令索引流程維護）。實心方塊表示完成，空心方塊表示未完成，執行中的方塊以進度條填充，淡色空心方塊表示無資料或已取代。舊版本顯示「已取代」，不需重建索引。滑鼠移到月份可查看版本編號、下載時間與筆數。</p>
+      <p class="judgment-months-hint">D：下載版本；P：raw Parquet + PostgreSQL 就緒；I：active 索引覆蓋（由法規／命令索引流程維護）。實心方塊表示完成，未完成階段以 25% 淺色表示，執行中的方塊以完成色進度條填充，淡色空心方塊表示無資料或已取代。舊版本顯示「已取代」，不需重建索引。滑鼠移到月份可查看版本編號、下載時間與筆數。</p>
     </div>
   </section>`;
 }
@@ -2479,8 +2479,8 @@ function processingTimelinesMarkup(snapshot) {
           <div class="index-month-are-key processing-timeline-legend" aria-label="階段狀態圖例">
             <span class="processing-timeline-legend-label">狀態</span>
             <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
-            <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成</span>
-            <span><i class="processing-timeline-swatch is-partial-state"></i>已處理（淡色）</span>
+            <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成（25% 淺色）</span>
+            <span><i class="processing-timeline-swatch is-partial-state"></i>已處理（進度條）</span>
             <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
             <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
           </div>
@@ -2511,7 +2511,7 @@ function processingTimelinesMarkup(snapshot) {
             timeline.key === "judgment"
               ? "判決以裁判書月份顯示。"
               : "法規／命令以來源版本月份顯示。"
-          }每格由左至右為下載、Parquet、PostgreSQL、Qdrant 四個階段；實心方塊表示完成，空心方塊表示未完成，Qdrant 之前已處理但尚未完成時以淡橙色實心方塊表示，執行中的方塊以進度條填充，淡色空心方塊表示無資料。滑鼠移到月份或色塊可查看各階段狀態與進度。</p>
+          }每格由左至右為下載、Parquet、PostgreSQL、Qdrant 四個階段；實心方塊表示完成，未完成階段以 25% 淺色表示，Qdrant 之前已處理但尚未完成時以完成色進度條填充，淡色空心方塊表示無資料。滑鼠移到月份或色塊可查看各階段狀態與進度。</p>
         </div>
       </section>`;
     })
@@ -3581,7 +3581,7 @@ function indexWorkflowProgressMarkup(workflow) {
         <span>${totalDuration > 0 ? escapeHtml(formatIndexWorkflowDuration(totalDuration)) : "—"}</span>
       </div>
       <div class="rag-wf-stages">${rows}</div>
-      <p class="rag-wf-hint">階段依執行順序由左至右接續排列，上一階段的結束即下一階段的開始；已完成階段填滿顏色，進行中或未完成階段只著色已完成比例，其餘以同色空心框表示，等待與略過階段不繪製 bar。極短階段會以最小可見寬度呈現。點選任一階段可查看開始／結束時間、進度與詳細數據。</p>
+      <p class="rag-wf-hint">階段依執行順序由左至右接續排列，上一階段的結束即下一階段的開始；已完成階段填滿顏色，進行中或未完成階段只著色已完成比例，其餘未完成區段以同色 25% 淺色表示，等待階段保留空心軌道、略過階段不繪製 bar。極短階段會以最小可見寬度呈現。點選任一階段可查看開始／結束時間、進度與詳細數據。</p>
     </div>
     <div class="index-wf-overall">
       <div class="index-wf-overall-head">
@@ -3851,12 +3851,12 @@ function workflowProgressMarkup(workflow) {
       </div>
       <div class="rag-wf-legend workflow-wf-legend" aria-label="階段狀態圖例">
         <span><i class="is-solid-state"></i>完成</span>
-        <span><i class="is-hollow-state"></i>未完成</span>
+        <span><i class="is-hollow-state"></i>未完成（25% 淺色）</span>
         <span><i class="is-progress-state"></i>執行中（進度條）</span>
         <span><i class="is-empty-state"></i>等待／略過</span>
       </div>
       <div class="rag-wf-stages">${rows}</div>
-      <p class="rag-wf-hint">階段依執行順序由左至右接續排列，上一階段的結束即下一階段的開始；已完成階段填滿顏色，執行中或未完成階段只著色已完成比例，其餘以同色空心框表示，等待與略過階段不繪製 bar。極短階段會以最小可見寬度呈現。點選任一階段可查看開始／結束時間、進度與詳細數據。</p>
+      <p class="rag-wf-hint">階段依執行順序由左至右接續排列，上一階段的結束即下一階段的開始；已完成階段填滿顏色，執行中或未完成階段只著色已完成比例，其餘未完成區段以同色 25% 淺色表示，等待階段保留空心軌道、略過階段不繪製 bar。極短階段會以最小可見寬度呈現。點選任一階段可查看開始／結束時間、進度與詳細數據。</p>
     </div>
     <div class="workflow-wf-overall">
       <div class="workflow-wf-overall-head">
@@ -4146,7 +4146,7 @@ function indexMonthGridMarkup(runtime) {
       <span><i class="is-active"></i>A · 上一個正式版本既有覆蓋，不列入本次新版本完成數</span>
       <span><i class="is-reuse"></i>R · 本次沿用既有向量，不重新計算 embedding</span>
       <span><i class="is-embed"></i>E · 本次重新計算 embedding 的新增或變更向量</span>
-      <span><i class="is-outline"></i>空心框 · 該月 R／E 尚未完成</span>
+      <span><i class="is-outline"></i>25% 淺色 · 該月 R／E 尚未完成</span>
       <span><i class="is-current"></i>目前索引月份 · 以外框標示，padding 不使用底色</span>
     </div>
     <div class="judgment-months-scroll">
@@ -4158,7 +4158,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（重用向量）、E（新 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；填滿表示完成，空心框表示該月 R／E 尚未完成。綠色：新版本完成或 active 基線；灰色：尚未開始；目前索引月份以外框標示，padding 不使用底色；空白：沒有該月份資料。滑鼠移到月份可查看新版本與 active 筆數、來源檔案與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（重用向量）、E（新 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；填滿表示完成，25% 淺色表示該月 R／E 尚未完成。綠色：新版本完成或 active 基線；灰色：尚未開始；目前索引月份以外框標示，padding 不使用底色；空白：沒有該月份資料。滑鼠移到月份可查看新版本與 active 筆數、來源檔案與目前案號。</p>
   </div>`;
 }
 
@@ -4241,7 +4241,7 @@ function importTimelineMarkup(workflow) {
         <span class="processing-timeline-legend-label">狀態</span>
         <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
         <span><i class="processing-timeline-swatch is-pending-state"></i>待更新（淺色）</span>
-        <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成</span>
+        <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成（25% 淺色）</span>
         <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
         <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
       </div>
@@ -4254,7 +4254,7 @@ function importTimelineMarkup(workflow) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的四個階段方格以淺橘／淺紅／淺紫／淺藍表示，完成後轉為實心深色；空心方塊表示尚未完成；執行中的方塊以完成色垂直進度條填充，未完成區段維持待更新淺色；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
+      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的四個階段方格以淺橘／淺紅／淺紫／淺藍表示，完成後轉為實心深色；尚未完成階段以 25% 淺色表示；執行中的方塊以完成色垂直進度條填充，未完成區段維持 25% 淺色；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
     </div>
   </section>`;
 }

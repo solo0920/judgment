@@ -695,9 +695,18 @@ def test_static_console_is_served(web_client) -> None:
     assert (
         ".workflow-wf-stage.is-pending .rag-wf-track" in css.text
     )
-    assert "var(--stage-color) 10%, transparent" in css.text
+    assert "var(--stage-color) 25%, transparent" in css.text
     assert "var(--block-color) var(--stage-progress, 0%)" in css.text
     assert "color-mix(in srgb, var(--block-color) 25%, transparent)" in css.text
+    assert (
+        "var(--block-color, var(--line-strong)) 25%"
+        in css.text
+    )
+    assert (
+        "var(--bar-color, var(--stage-color)) 25%"
+        in css.text
+    )
+    assert "var(--ink) 25%, transparent" in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text
@@ -3338,3 +3347,23 @@ def test_data_fuzzy_suggestions_and_multi_keyword_query(web_client) -> None:
     )
     assert judgment_query.status_code == 200
     assert judgment_query.json()["total"] == 1
+
+
+def test_progress_visualization_spec_is_canonical() -> None:
+    spec = (
+        Path(__file__).resolve().parents[1]
+        / "specs"
+        / "004-web-console"
+        / "progress-visualization.md"
+    )
+    text = spec.read_text(encoding="utf-8")
+    for phrase in (
+        "25%",
+        "var(--block-color)",
+        "is-pending",
+        "is-running",
+        "is-complete",
+        "SSE",
+        "Progress Visualization",
+    ):
+        assert phrase in text

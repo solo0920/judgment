@@ -2,9 +2,9 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.3
+**Version**: 1.4
 
-**Last Updated**: 2026-11-16
+**Last Updated**: 2026-11-19
 
 **Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline、`#/home` 的即時摘要載入 Pipeline，以及未來新增的任何 pipeline waterfall。
 
@@ -12,7 +12,9 @@
 
 **Parent Specification**: [`spec.md`](spec.md)
 
-**Visual Reference**: `#/performance` 的 RAG Pipeline waterfall。判決向量索引 Pipeline 是「接續階段 + 部分完成 + 空心未完成 bar」的參考實作。
+**Visual Reference**: `#/performance` 的 RAG Pipeline waterfall。判決向量索引 Pipeline 是「接續階段 + 部分完成 + 25% 淺色未完成 bar」的參考實作。
+
+**Related Specification**: [`progress-visualization.md`](progress-visualization.md)（全站階段進度的 25% 淺色、完成色填充與狀態 class 契約）
 
 ---
 
@@ -60,7 +62,7 @@
 | Track | 每個階段列的完整灰色時間軸底軌。 |
 | Bar | 放在 track 上、表示階段或 span 時間區間的色塊。 |
 | Filled bar | 以階段顏色填滿的已完成部分。 |
-| Hollow bar | 以階段顏色 1px 外框、內部透明的未完成部分。 |
+| Hollow bar | 以階段顏色 25% 淺色填充、外加 1px 同色外框的未完成部分。 |
 | Axis | Waterfall 頂端的 `0 ms` 至總耗時時間軸。 |
 | Details | 點擊階段列後展開的明細區。 |
 | Tooltip | 滑鼠移到階段或 bar 上顯示的資訊卡。 |
@@ -74,7 +76,7 @@
 ```text
 0 ms                                              14h 15m 48s
 ──────────────────────────────────────────────────────────────
-[選用] 圖例：已完成／未完成空心／Model Load
+[選用] 圖例：已完成／未完成（25% 淺色）／Model Load
 ──────────────────────────────────────────────────────────────
 ■ 01  階段名稱                                  67 ms · 完成  >
       階段說明／主機:模型
@@ -84,7 +86,7 @@
       階段說明
       [████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░]
 ──────────────────────────────────────────────────────────────
-操作提示：接續排列、空心未完成、點擊展開明細
+操作提示：接續排列、未完成 25% 淺色、點擊展開明細
 ```
 
 ### 4.1 Axis
@@ -96,7 +98,7 @@
 ### 4.2 圖例
 
 - 當階段內含多種 bar 顏色（例如 Model Load 的藍色前段與推論的階段色）時，MUST 顯示圖例說明顏色語意。
-- 未完成空心 bar 的語意 SHOULD 在圖例或操作提示中說明。
+- 未完成 25% 淺色 bar 的語意 SHOULD 在圖例或操作提示中說明。
 - 圖例不得取代階段列的狀態文字；顏色不得是唯一資訊來源。
 
 ### 4.3 階段列
@@ -117,7 +119,7 @@
 Chart 下方 MUST 有一段簡短提示，說明：
 
 - bar 由左至右接續排列，上一階段結束即下一階段開始。
-- 已完成階段填滿、未完成部分為同色空心框。
+- 已完成階段填滿、未完成部分為同色 25% 淺色。
 - 等待與略過階段不繪製 bar。
 - 極短階段會以最小可見寬度呈現。
 - 點擊階段可展開明細。
@@ -218,8 +220,8 @@ width = clamp(duration / total * 100, 0, 100 - left)%
 
 - `running` 階段的持續時間 MUST 以 `now - started_at` 計算，讓 bar 隨時間延伸。
 - Bar 的 slot 代表目前已花費的時間；slot 內只著色 `percent` 的已完成比例。
-- 未完成比例 MUST 以同色空心 bar 呈現，不得把整個 slot 填滿。
-- 若 `percent` 不可得，MUST 顯示空心 bar 與 `—`／「進度未知」，不得假設 100%。
+- 未完成比例 MUST 以同色 25% 淺色 bar 呈現，不得把整個 slot 填滿。
+- 若 `percent` 不可得，MUST 顯示 25% 淺色 bar 與 `—`／「進度未知」，不得假設 100%。
 
 ---
 
@@ -230,9 +232,9 @@ width = clamp(duration / total * 100, 0, 100 - left)%
 | Status | Bar | 填色比例 | Metadata 範例 |
 | --- | --- | --- | --- |
 | `success` | 繪製 slot | `100%` 填滿 | `67 ms · 完成` |
-| `running` | 繪製 slot 至目前時間 | `percent` 填滿，其餘空心 | `14h 15m · 67.9% · 執行中` |
-| `failed` | 繪製 slot | 已完成比例填滿，其餘空心；錯誤色 | `— · 失敗` |
-| `stale` | 繪製 slot | 已完成比例填滿，其餘空心；錯誤色 | `— · 已中止` |
+| `running` | 繪製 slot 至目前時間 | `percent` 填滿，其餘 25% 淺色 | `14h 15m · 67.9% · 執行中` |
+| `failed` | 繪製 slot | 已完成比例填滿，其餘 25% 淺色；錯誤色 | `— · 失敗` |
+| `stale` | 繪製 slot | 已完成比例填滿，其餘 25% 淺色；錯誤色 | `— · 已中止` |
 | `pending` | 不繪製 bar | — | `— · 等待` |
 | `skipped` | 不繪製 bar | — | `— · 略過` |
 
@@ -250,15 +252,15 @@ fillWidth   = slotWidth * clamp(percent, 0, 100) / 100
 hollowWidth = slotWidth - fillWidth
 ```
 
-- 未完成部分 MUST 是與填色相同顏色的 `1px` 外框、內部透明（`background: transparent`）的空心 bar。
-- 空心 bar MUST 與填色 bar 無縫接續，不得留下額外間距。
-- 空心 bar MUST 使用 `box-sizing: border-box`，確保高度不因外框增加。
-- 不得以灰色底軌直接代替空心 bar；未完成部分必須能看出是哪個階段的顏色。
+- 未完成部分 MUST 是與填色相同顏色的 `25%` 淺色填充，外加 `1px` 同色外框。
+- 未完成 bar MUST 與填色 bar 無縫接續，不得留下額外間距。
+- 未完成 bar MUST 使用 `box-sizing: border-box`，確保高度不因外框增加。
+- 不得以灰色底軌直接代替未完成 bar；未完成部分必須能看出是哪個階段的顏色。
 
 ### 7.4 等待與略過
 
 - `pending` 與 `skipped` 階段不繪製 bar。
-- Track MAY 以較低透明度呈現，讓使用者知道該階段尚未開始或被略過。
+- 等待階段的 track SHOULD 以 25% 階段色呈現；略過階段 MAY 以較低透明度呈現。
 - Metadata MUST 顯示 `— · 等待` 或 `— · 略過`。
 
 ### 7.5 多段 bar
@@ -273,7 +275,7 @@ hollowWidth = slotWidth - fillWidth
 ### 7.6 錯誤狀態
 
 - `failed`／`stale` MUST 在階段列顯示明確的失敗或中止文字。
-- 錯誤階段的填滿與空心外框 SHOULD 使用 danger 色，讓錯誤在時間軸上可直接辨識。
+- 錯誤階段的填滿與未完成區段 SHOULD 使用 danger 色，讓錯誤在時間軸上可直接辨識。
 - 錯誤原因與解法 MUST 可在展開明細或 hover 資訊卡中查看。
 
 ---
@@ -289,8 +291,8 @@ hollowWidth = slotWidth - fillWidth
 | Bar 高度 | `12px`（單 lane）；多 lane 為 `6px` |
 | Bar 圓角 | `2px` |
 | Bar 最小寬度 | 由 slot 規則控制；sequential bar 的 CSS `min-width` 為 `0` |
-| 空心外框 | `1px solid var(--bar-color, var(--stage-color))` |
-| 空心背景 | `transparent` |
+| 未完成外框 | `1px solid var(--bar-color, var(--stage-color))` |
+| 未完成背景 | `color-mix(in srgb, var(--bar-color, var(--stage-color)) 25%, transparent)` |
 | 階段色塊 | `8×8px`，圓角 `2px` |
 | 階段名稱 | `10.5px`，粗體 |
 | 階段說明 | `8.5px`，淡色 |
@@ -383,8 +385,8 @@ hollowWidth = slotWidth - fillWidth
 - [ ] 接續階段的「上一階段結束」等於「下一階段開始」。
 - [ ] 極短階段有最小可見寬度，且不與相鄰階段重疊。
 - [ ] 已完成階段整條填滿階段色。
-- [ ] 進行中／部分完成階段只填滿 `percent`，其餘為同色 `1px` 空心外框。
-- [ ] 空心 bar 內部透明、高度不因外框改變。
+- [ ] 進行中／部分完成階段只填滿 `percent`，其餘為同色 25% 淺色 + 1px 外框。
+- [ ] 未完成 bar 為 25% 同色淺色、高度不因外框改變。
 - [ ] 等待與略過階段不繪製 bar。
 - [ ] Model Load 與推論 bar 接續，顏色與明細分組正確。
 - [ ] 展開明細包含狀態、開始、結束、耗時、進度與階段專屬資料。
@@ -411,7 +413,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 - 第二段 left 等於第一段 left + width。
 - 第三段 left 等於第二段 left + width。
 - Filled + hollow 等於該階段的 slot。
-- Hollow 的 `background-color` 為透明，`border` 為階段色。
+- Unfilled 的 `background-color` 為階段色 25% 淺色，`border` 為階段色。
 
 ---
 
@@ -441,7 +443,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
   - `.index-wf-*` 只保留索引 Pipeline 的包裝與階段編號。
   - `.workflow-wf-*` 只保留非索引 workflow 的包裝、階段編號、狀態圖例與整體進度。
   - `.status-wf-*` 只保留服務總覽載入 Pipeline 的包裝與階段編號。
-  - `.index-wf-bar.is-hollow`、`.workflow-wf-bar.is-hollow`：未完成空心 bar。
+  - `.index-wf-bar.is-hollow`、`.workflow-wf-bar.is-hollow`：未完成 25% 淺色 bar。
 
 ### 14.2 移植規則
 
@@ -449,7 +451,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 - MAY 增加頁面專屬 wrapper 或階段編號 class，但 MUST NOT 複製一套新的 waterfall CSS。
 - 新 pipeline 的資料 adapter MUST 先轉成第 5 節的 stage／span／segment 契約，再交給 renderer。
 - 若需要新的 bar 行為（例如新的 segment 類型），MUST 先更新本規格，再新增共用樣式。
-- 既有 `renderWaterfallStages` 未涵蓋的行為（例如空心未完成 bar）SHOULD 逐步抽成共用 helper，避免每個頁面各自實作。
+- 既有 `renderWaterfallStages` 未涵蓋的行為（例如未完成 25% 淺色 bar）SHOULD 逐步抽成共用 helper，避免每個頁面各自實作。
 
 ### 14.3 新增 pipeline 的實作步驟
 
@@ -501,7 +503,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 - 每個階段都從 track 左端開始，看起來像多條獨立進度條。
 - 每個階段平均分配相同寬度，忽略實際耗時。
 - 進行中階段整條填滿，讓 67.9% 看起來像 100%。
-- 未完成部分只留灰色底軌，沒有同色空心外框。
+- 未完成部分只留灰色底軌，沒有同色 25% 淺色填充。
 - 已完成階段與進行中階段使用相同的填色比例。
 - 以 CSS `min-width` 讓短 bar 重疊，而不是使用 slot 最小寬度。
 - 只靠 hover 顯示開始／結束／Token／錯誤等必要資訊。
@@ -516,6 +518,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.4 | 2026-11-19 | 對齊全站進度規格：未完成區段改為階段色 25% 淺色 + 1px 外框；等待軌道使用 25% 階段色。 |
 | 1.3 | 2026-11-16 | 將 `#/home` 即時摘要載入 Pipeline 納入適用範圍；新增 `/api/home` 階段計時、`home-wf-slow` 最慢階段標示與 `HOME_WF_OPEN_STAGES` 參考實作。 |
 | 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
 | 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |

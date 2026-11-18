@@ -17839,11 +17839,20 @@ a.qb-bank-law:hover {
    completed portion is colored, matching the waterfall's progress semantics. */
 .index-wf-bar.is-hollow {
   border: 1px solid var(--bar-color, var(--stage-color));
-  background: transparent;
+  background: color-mix(
+    in srgb,
+    var(--bar-color, var(--stage-color)) 25%,
+    transparent
+  );
   box-sizing: border-box;
 }
 
-.index-wf-stage.is-pending .rag-wf-track,
+.index-wf-stage.is-pending .rag-wf-track {
+  background-color: color-mix(in srgb, var(--stage-color) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--stage-color) 45%, transparent);
+}
+
 .index-wf-stage.is-skipped .rag-wf-track {
   opacity: 0.55;
 }
@@ -17935,14 +17944,18 @@ a.qb-bank-law:hover {
    completed portion is colored. */
 .workflow-wf-bar.is-hollow {
   border: 1px solid var(--bar-color, var(--stage-color));
-  background: transparent;
+  background: color-mix(
+    in srgb,
+    var(--bar-color, var(--stage-color)) 25%,
+    transparent
+  );
   box-sizing: border-box;
 }
 
 .workflow-wf-stage.is-pending .rag-wf-track {
-  background-color: color-mix(in srgb, var(--stage-color) 10%, transparent);
+  background-color: color-mix(in srgb, var(--stage-color) 25%, transparent);
   box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--stage-color) 28%, transparent);
+    color-mix(in srgb, var(--stage-color) 45%, transparent);
 }
 
 .workflow-wf-stage.is-skipped .rag-wf-track,
@@ -17959,8 +17972,9 @@ a.qb-bank-law:hover {
 }
 
 .workflow-wf-legend i.is-hollow-state {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--ink);
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ink) 58%, transparent);
 }
 
 .workflow-wf-legend i.is-progress-state {
@@ -18068,7 +18082,12 @@ a.qb-bank-law:hover {
   background: linear-gradient(
     to top,
     var(--block-color, var(--line-strong)) var(--fill, 0%),
-    var(--surface-3) var(--fill, 0%)
+    color-mix(
+        in srgb,
+        var(--block-color, var(--line-strong)) 25%,
+        transparent
+      )
+      var(--fill, 0%)
   );
 }
 
@@ -18088,9 +18107,19 @@ a.qb-bank-law:hover {
   background: linear-gradient(
     to top,
     var(--block-color, var(--line-strong)) var(--fill, 0%),
-    var(--bg) var(--fill, 0%)
+    color-mix(
+        in srgb,
+        var(--block-color, var(--line-strong)) 25%,
+        transparent
+      )
+      var(--fill, 0%)
   );
-  box-shadow: inset 0 0 0 1px var(--block-color, var(--line-strong));
+  box-shadow: inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--block-color, var(--line-strong)) 58%,
+      transparent
+    );
 }
 
 /* Processing overview timelines reuse the index month-cell geometry. Each
@@ -18155,8 +18184,9 @@ a.qb-bank-law:hover {
 }
 
 .processing-month.index-month .processing-month-stage.is-incomplete {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--block-color);
+  background: color-mix(in srgb, var(--block-color) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--block-color) 58%, transparent);
 }
 
 .processing-month.index-month .processing-month-stage.is-running {
@@ -18170,7 +18200,12 @@ a.qb-bank-law:hover {
 }
 
 .processing-month.index-month .processing-month-stage.is-partial {
-  background: color-mix(in srgb, var(--block-color) 42%, var(--surface-2));
+  background: linear-gradient(
+    to top,
+    var(--block-color) var(--stage-progress, 0%),
+    color-mix(in srgb, var(--block-color) 25%, transparent)
+      var(--stage-progress, 0%)
+  );
   box-shadow: inset 0 0 0 1px var(--block-color);
 }
 
@@ -18223,8 +18258,9 @@ a.qb-bank-law:hover {
 }
 
 .index-month-are-key i.is-outline {
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1px var(--faint);
+  background: color-mix(in srgb, var(--faint) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--faint) 58%, transparent);
 }
 
 .index-month-are-key i.is-current {
@@ -18289,8 +18325,9 @@ a.qb-bank-law:hover {
 }
 
 .processing-timeline-legend .processing-timeline-swatch.is-hollow-state {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--ink);
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ink) 58%, transparent);
 }
 
 .processing-timeline-legend .processing-timeline-swatch.is-progress-state {
@@ -18303,7 +18340,11 @@ a.qb-bank-law:hover {
 }
 
 .processing-timeline-legend .processing-timeline-swatch.is-partial-state {
-  background: color-mix(in srgb, #f59e0b 42%, var(--surface-2));
+  background: linear-gradient(
+    to top,
+    #f59e0b 50%,
+    color-mix(in srgb, #f59e0b 25%, transparent) 50%
+  );
   box-shadow: inset 0 0 0 1px #f59e0b;
 }
 
