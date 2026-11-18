@@ -14666,6 +14666,50 @@ html.processing-ollama-dragging body {
   font-size: 9.5px;
 }
 
+.processing-download-run {
+  display: grid;
+  gap: 5px;
+  margin-top: 3px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.processing-download-run[hidden] {
+  display: none;
+}
+
+.processing-download-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.processing-download-run-head strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.processing-download-run-track {
+  height: 4px;
+}
+
+.processing-download-run-track > span {
+  background: linear-gradient(90deg, var(--success), var(--accent));
+}
+
+.processing-download-progress.is-indeterminate
+  .processing-download-run-track
+  > span {
+  width: 0;
+  animation: none;
+  transform: none;
+}
+
 .processing-workflow-run {
   padding: 16px;
 }

@@ -334,6 +334,40 @@ def test_download_progress_is_exposed_and_cleared(tmp_path: Path) -> None:
     assert judgment_download.download_status(settings)["progress"] is None
 
 
+def test_download_progress_reports_aggregate_size_and_eta(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+    raw_dir.mkdir(parents=True)
+    entry = {
+        "fileset_id": 71234,
+        "filename": "202203--(20261015Update).rar",
+        "resource_description": "202203--(20261015Update)",
+    }
+    progress = judgment_download.DownloadProgress(raw_dir, update_interval=0)
+    progress.plan(files_total=2, bytes_total=2000)
+    progress.downloading(entry, 1000, index=1, total=2)
+    progress.bytes(500, 1000)
+
+    payload = judgment_download.download_status(settings)["progress"]
+    assert payload["run_files_total"] == 2
+    assert payload["run_files_done"] == 0
+    assert payload["run_bytes_total"] == 2000
+    assert payload["run_bytes_done"] == 500
+    assert payload["run_percent"] == 25.0
+    assert payload["elapsed_seconds"] >= 0
+    assert payload["download_started_at"]
+
+    progress.file_completed(1000, planned=True, throughput_bps=100)
+    payload = judgment_download.download_status(settings)["progress"]
+    assert payload["run_files_done"] == 1
+    assert payload["run_bytes_done"] == 1000
+    assert payload["run_percent"] == 50.0
+    assert payload["eta_seconds"] == 10.0
+    assert payload["estimated_total_seconds"] >= 10.0
+
+    progress.close()
+
+
 def test_download_status_ignores_dead_progress(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     raw_dir = settings.judgment_data_dir / "raw_rar"

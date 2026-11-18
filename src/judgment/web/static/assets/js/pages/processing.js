@@ -23,6 +23,21 @@ const INDEX_RATE_BASELINES = new Map();
 const INDEX_WF_OPEN_STAGES = new Set();
 const WORKFLOW_WF_OPEN_STAGES = new Set();
 
+function formatSpanSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${Math.round(seconds)} 秒`;
+  const totalMinutes = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (totalMinutes < 60) return `${totalMinutes} 分 ${secs} 秒`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours < 24) return `${hours} 小時 ${minutes} 分`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return `${days} 天 ${restHours} 小時`;
+}
+
 const STATUS_META = {
   running: { label: "執行中", tone: "info" },
   success: { label: "完成", tone: "ok" },
@@ -5309,6 +5324,20 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
                   <span data-judgment-progress-size>—</span>
                   <span class="muted" data-judgment-progress-note></span>
                 </div>
+                <div class="processing-download-run" data-judgment-run hidden>
+                  <div class="processing-download-run-head">
+                    <span>整體進度</span>
+                    <span><strong data-judgment-run-percent>—</strong> · <span data-judgment-run-files>—</span></span>
+                  </div>
+                  <div class="processing-download-progress-track processing-download-run-track">
+                    <span data-judgment-run-bar></span>
+                  </div>
+                  <div class="processing-download-progress-meta">
+                    <span data-judgment-run-size>—</span>
+                    <span data-judgment-run-elapsed>—</span>
+                    <span data-judgment-run-eta>—</span>
+                  </div>
+                </div>
               </div>`
             : ""
         }
@@ -5384,7 +5413,7 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
               ${canRun ? "" : "disabled"}
               title="${escapeHtml(
                 canRun
-                  ? "立即執行此流程，補齊待更新資料"
+                  ? "立即執行；會先計算總大小與預估時間"
                   : disabledReason,
               )}">
               ${
@@ -5623,6 +5652,8 @@ export async function render(root) {
     if ((!progress || progress.active === false) && !hasActiveRun) {
       box.hidden = true;
       box.classList.remove("is-indeterminate");
+      const idleRun = box.querySelector("[data-judgment-run]");
+      if (idleRun) idleRun.hidden = true;
       return;
     }
     box.hidden = false;
@@ -5649,10 +5680,13 @@ export async function render(root) {
       if (pendingSize) pendingSize.textContent = "—";
       const pendingNote = box.querySelector("[data-judgment-progress-note]");
       if (pendingNote) pendingNote.textContent = "已啟動，等待進度回報";
+      const pendingRun = box.querySelector("[data-judgment-run]");
+      if (pendingRun) pendingRun.hidden = true;
       return;
     }
     const phaseLabels = {
       preparing: "準備中",
+      planning: "計算大小",
       scanning: "掃描中",
       checking: "檢查中",
       downloading: "下載中",
@@ -5743,6 +5777,92 @@ export async function render(root) {
         notes.push(String(progress.message));
       }
       noteElement.textContent = notes.join(" · ");
+    }
+    const runBox = box.querySelector("[data-judgment-run]");
+    const hasRun =
+      progress.run_files_total !== null &&
+      progress.run_files_total !== undefined;
+    if (runBox) {
+      runBox.hidden = !hasRun;
+      if (hasRun) {
+        const runFilesTotal = Number(progress.run_files_total) || 0;
+        const runFilesDone = Number(progress.run_files_done) || 0;
+        const runBytesTotal =
+          progress.run_bytes_total === null ||
+          progress.run_bytes_total === undefined
+            ? null
+            : Number(progress.run_bytes_total);
+        const runBytesDone = Number(progress.run_bytes_done) || 0;
+        const runPercentRaw = progress.run_percent;
+        const runPercent =
+          runPercentRaw === null ||
+          runPercentRaw === undefined ||
+          runPercentRaw === ""
+            ? null
+            : Number(runPercentRaw);
+        const runBar = box.querySelector("[data-judgment-run-bar]");
+        if (runBar) {
+          runBar.style.width =
+            runPercent === null || !Number.isFinite(runPercent)
+              ? ""
+              : `${Math.min(100, Math.max(0, runPercent)).toFixed(1)}%`;
+        }
+        const runPercentElement = box.querySelector(
+          "[data-judgment-run-percent]",
+        );
+        if (runPercentElement) {
+          runPercentElement.textContent =
+            runPercent === null || !Number.isFinite(runPercent)
+              ? "—"
+              : `${runPercent.toFixed(runPercent >= 10 ? 0 : 1)}%`;
+        }
+        const runFilesElement = box.querySelector(
+          "[data-judgment-run-files]",
+        );
+        if (runFilesElement) {
+          runFilesElement.textContent = `${formatNumber(
+            runFilesDone,
+          )} / ${formatNumber(runFilesTotal)} 個月`;
+        }
+        const runSizeElement = box.querySelector("[data-judgment-run-size]");
+        const planningRun = progress.phase === "planning";
+        if (runSizeElement) {
+          if (runBytesTotal !== null && runBytesTotal > 0) {
+            runSizeElement.textContent = `已下載 ${formatBytes(
+              runBytesDone,
+            )} / ${formatBytes(runBytesTotal)}`;
+          } else {
+            runSizeElement.textContent = `已下載 ${formatBytes(
+              runBytesDone,
+            )} · ${planningRun ? "總量計算中" : "總量未知"}`;
+          }
+        }
+        const runElapsedElement = box.querySelector(
+          "[data-judgment-run-elapsed]",
+        );
+        if (runElapsedElement) {
+          runElapsedElement.textContent = `已花 ${formatSpanSeconds(
+            progress.elapsed_seconds,
+          )}`;
+        }
+        const runEtaElement = box.querySelector("[data-judgment-run-eta]");
+        if (runEtaElement) {
+          const eta = Number(progress.eta_seconds);
+          const total = Number(progress.estimated_total_seconds);
+          if (Number.isFinite(eta) && eta >= 0) {
+            runEtaElement.textContent = `剩餘 ${formatSpanSeconds(
+              eta,
+            )} · 預估總計 ${formatSpanSeconds(total)}`;
+          } else {
+            runEtaElement.textContent =
+              planningRun &&
+              (progress.run_bytes_total === null ||
+                progress.run_bytes_total === undefined)
+                ? "剩餘時間：計算中"
+                : "剩餘時間：—";
+          }
+        }
+      }
     }
   };
 

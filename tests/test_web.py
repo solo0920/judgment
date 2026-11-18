@@ -540,7 +540,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "pending_count" in processing_js.text
     assert "update_mechanism" in processing_js.text
     assert "processing-update-action" in processing_js.text
-    assert "立即執行此流程" in processing_js.text
+    assert "立即執行" in processing_js.text
     assert "processing-run-strip" in processing_js.text
     assert "中止執行" in processing_js.text
     assert "index-wf-chart" in processing_js.text

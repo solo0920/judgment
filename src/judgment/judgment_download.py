@@ -662,6 +662,15 @@ class DownloadProgress:
         self.path = raw_dir / PROGRESS_NAME
         self.pid = os.getpid()
         self.started_at = now_taipei().isoformat()
+        self.started_monotonic = time.monotonic()
+        self.download_started_at = ""
+        self.download_started_monotonic: Optional[float] = None
+        self.run_files_total: Optional[int] = None
+        self.run_files_done = 0
+        self.run_bytes_total: Optional[int] = None
+        self.run_bytes_done = 0
+        self.run_current_bytes = 0
+        self.run_throughput_bps: Optional[float] = None
         self.update_interval = max(0.0, float(update_interval))
         self._last_write = 0.0
         self._payload: Dict[str, Any] = {}
@@ -676,6 +685,47 @@ class DownloadProgress:
         payload["pid"] = self.pid
         payload["started_at"] = self.started_at
         payload["updated_at"] = now_taipei().isoformat()
+        elapsed_seconds = max(0.0, current - self.started_monotonic)
+        payload["elapsed_seconds"] = round(elapsed_seconds, 1)
+        download_elapsed = (
+            max(0.0, current - self.download_started_monotonic)
+            if self.download_started_monotonic is not None
+            else 0.0
+        )
+        payload["download_elapsed_seconds"] = round(download_elapsed, 1)
+        payload["download_started_at"] = self.download_started_at or None
+        bytes_done = max(0, self.run_bytes_done + self.run_current_bytes)
+        payload["run_files_total"] = self.run_files_total
+        payload["run_files_done"] = self.run_files_done
+        payload["run_bytes_total"] = self.run_bytes_total
+        payload["run_bytes_done"] = bytes_done
+        payload["run_percent"] = None
+        payload["eta_seconds"] = None
+        payload["estimated_total_seconds"] = None
+        if self.run_bytes_total and self.run_bytes_total > 0:
+            payload["run_percent"] = round(
+                min(100.0, max(0.0, bytes_done / self.run_bytes_total * 100.0)),
+                1,
+            )
+        throughput = self.run_throughput_bps
+        if not throughput and download_elapsed > 0 and bytes_done > 0:
+            throughput = bytes_done / download_elapsed
+        payload["throughput_bytes_per_second"] = (
+            round(float(throughput), 1) if throughput else None
+        )
+        if (
+            self.run_bytes_total
+            and self.run_bytes_total > bytes_done
+            and throughput
+            and throughput > 0
+        ):
+            remaining_seconds = (
+                float(self.run_bytes_total - bytes_done) / float(throughput)
+            )
+            payload["eta_seconds"] = round(remaining_seconds, 1)
+            payload["estimated_total_seconds"] = round(
+                elapsed_seconds + remaining_seconds, 1
+            )
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -715,6 +765,11 @@ class DownloadProgress:
             "total_bytes": total_bytes,
             "percent": None,
         }
+        self.run_current_bytes = (
+            max(0, int(bytes_written))
+            if isinstance(bytes_written, int)
+            else 0
+        )
         if entry is not None:
             payload["month"] = _month_label(
                 str(
@@ -741,6 +796,53 @@ class DownloadProgress:
             )
         self._payload = payload
         self._write(force=force)
+
+    def planning(
+        self,
+        index: int,
+        total: int,
+        entry: Optional[Dict[str, Any]] = None,
+        message: str = "計算下載大小",
+    ) -> None:
+        self.set(
+            phase="planning",
+            message=message,
+            entry=entry,
+            index=index,
+            total=total,
+            force=True,
+        )
+
+    def plan(
+        self,
+        *,
+        files_total: int,
+        bytes_total: Optional[int],
+    ) -> None:
+        self.run_files_total = max(0, int(files_total))
+        self.run_bytes_total = (
+            max(0, int(bytes_total)) if bytes_total is not None else None
+        )
+        self._write(force=True)
+
+    def file_completed(
+        self,
+        written: int,
+        *,
+        planned: bool = True,
+        throughput_bps: Optional[float] = None,
+    ) -> None:
+        if planned:
+            self.run_files_done += 1
+            self.run_bytes_done += max(0, int(written))
+        self.run_current_bytes = 0
+        if throughput_bps and throughput_bps > 0:
+            self.run_throughput_bps = float(throughput_bps)
+        self._write(force=True)
+
+    def set_throughput(self, throughput_bps: Optional[float]) -> None:
+        if throughput_bps and throughput_bps > 0:
+            self.run_throughput_bps = float(throughput_bps)
 
     def preparing(self, message: str = "準備檢查判決壓縮檔") -> None:
         self.set(phase="preparing", message=message)
@@ -775,6 +877,9 @@ class DownloadProgress:
         index: Optional[int] = None,
         total: Optional[int] = None,
     ) -> None:
+        if self.download_started_monotonic is None:
+            self.download_started_monotonic = time.monotonic()
+            self.download_started_at = now_taipei().isoformat()
         self.set(
             phase="downloading",
             message="下載判決壓縮檔",
@@ -1557,7 +1662,9 @@ def run_download(
                 ),
             )
             try:
-                remote = client.metadata(fileset_id)
+                remote = plan_metadata.get(fileset_id)
+                if remote is None:
+                    remote = client.metadata(fileset_id)
             except Exception as exc:
                 stats["errors"] += 1
                 _log(f"fileset {fileset_id} metadata 失敗：{exc}")
@@ -1584,6 +1691,12 @@ def run_download(
                         "checked_at": current_time().isoformat(),
                     }
                 _log(f"fileset {fileset_id} 未變更：{entry['filename']}")
+                if fileset_id in plan_ids:
+                    progress.file_completed(
+                        local_path.stat().st_size,
+                        planned=True,
+                        throughput_bps=_recent_throughput(samples),
+                    )
                 return "skipped", None
             action = "更新" if local_path.is_file() else "下載"
             size = remote.get("content_length")
@@ -1593,9 +1706,11 @@ def run_download(
             )
             if check_only:
                 return "check", None
-            resume_offset = _part_resume_offset(
-                local_path, fileset_id, remote
-            )
+            resume_offset = plan_resume_offsets.get(fileset_id)
+            if resume_offset is None:
+                resume_offset = _part_resume_offset(
+                    local_path, fileset_id, remote
+                )
             remaining_bytes: Optional[int] = None
             if size is not None:
                 try:
@@ -1682,6 +1797,11 @@ def run_download(
                 index=position,
                 total=total,
             )
+            progress.file_completed(
+                written,
+                planned=fileset_id in plan_ids,
+                throughput_bps=_recent_throughput(samples),
+            )
             removed = _prune_month_versions(
                 raw_dir,
                 entry,
@@ -1699,6 +1819,7 @@ def run_download(
             return ("updated" if action == "更新" else "downloaded"), None
 
         queue: List[Dict[str, Any]] = []
+        plan_entries: List[Dict[str, Any]] = []
         if status_only:
             _log("僅更新月份狀態；不檢查檔案 metadata，也不下載。")
             stop_reason = "status_only"
@@ -1717,6 +1838,7 @@ def run_download(
                 for entry in selected
                 if int(entry["fileset_id"]) not in pending_ids
             ]
+            plan_entries = pending
             _log(
                 f"增量模式：待補齊 {len(pending)} 個月，另檢查既有 "
                 f"{len(local_entries)} 檔、baseline 與最新 fileset。"
@@ -1738,6 +1860,7 @@ def run_download(
             )
         else:
             queue = _pending_entries(months_cache, latest_by_month)
+            plan_entries = queue
             if queue:
                 first = queue[0]
                 _log(
@@ -1749,6 +1872,57 @@ def run_download(
                 _log("所有可下載月份皆已下載；開始驗證既有檔案。")
 
         total_candidates = len(queue)
+        plan_metadata: Dict[int, Dict[str, Any]] = {}
+        plan_resume_offsets: Dict[int, int] = {}
+        plan_ids = {int(entry["fileset_id"]) for entry in plan_entries}
+        if plan_entries and not check_only:
+            total_bytes = 0
+            known_bytes = 0
+            progress.plan(
+                files_total=len(plan_entries),
+                bytes_total=None,
+            )
+            for position, entry in enumerate(plan_entries, 1):
+                fileset_id = int(entry["fileset_id"])
+                progress.planning(
+                    position,
+                    len(plan_entries),
+                    entry,
+                )
+                try:
+                    remote = client.metadata(fileset_id)
+                except Exception as exc:
+                    _log(
+                        f"fileset {fileset_id} 大小檢查失敗：{exc}"
+                    )
+                    remote = None
+                if remote:
+                    plan_metadata[fileset_id] = remote
+                    size = remote.get("content_length")
+                    if size is not None:
+                        try:
+                            total_bytes += max(0, int(size))
+                            known_bytes += 1
+                        except (TypeError, ValueError):
+                            pass
+                    try:
+                        plan_resume_offsets[fileset_id] = (
+                            _part_resume_offset(
+                                raw_dir / entry["filename"],
+                                fileset_id,
+                                remote,
+                            )
+                        )
+                    except Exception:
+                        plan_resume_offsets[fileset_id] = 0
+            progress.plan(
+                files_total=len(plan_entries),
+                bytes_total=(
+                    total_bytes
+                    if known_bytes == len(plan_entries) and total_bytes > 0
+                    else None
+                ),
+            )
         for position, entry in enumerate(queue, 1):
             if stop_reason:
                 break
