@@ -23,6 +23,7 @@ set -euo pipefail
 LABEL="${JUDGMENT_WEB_AGENT_LABEL:-com.judgment.web}"
 DOMAIN="gui/$(id -u)"
 PORT="${JUDGMENT_PORT:-9200}"
+TMUX_SESSION="${JUDGMENT_WEB_TMUX_SESSION:-judgment-web}"
 REPO_DIR="${JUDGMENT_REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 WRAPPER="${REPO_DIR}/scripts/mbp_web_autostart.sh"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
@@ -130,9 +131,35 @@ restart_agent() {
     echo "尚未載入 ${LABEL}；請先執行 bash $0。" >&2
     exit 1
   fi
+  # up.sh is idempotent and leaves a healthy backend alone, so stop the
+  # current process first; otherwise edits to .env would never be reloaded.
+  stop_backend
   launchctl kickstart -k "${DOMAIN}/${LABEL}"
   wait_for_backend "${LABEL}" 180
-  echo "已重啟 ${LABEL}。"
+  echo "已重啟 ${LABEL}（含後端，會重新載入 .env）。"
+}
+
+stop_backend() {
+  if command -v tmux >/dev/null 2>&1; then
+    tmux kill-session -t "${TMUX_SESSION}" >/dev/null 2>&1 || true
+  fi
+  local _ pid
+  for _ in $(seq 1 20); do
+    if ! lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  pid="$(lsof -nP -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  if [[ -n "${pid}" ]]; then
+    echo "連接埠 ${PORT} 仍被 pid ${pid} 佔用，嘗試終止…"
+    kill "${pid}" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+      kill -0 "${pid}" 2>/dev/null || return 0
+      sleep 0.5
+    done
+    kill -9 "${pid}" 2>/dev/null || true
+  fi
 }
 
 uninstall() {

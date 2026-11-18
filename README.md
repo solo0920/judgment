@@ -2007,6 +2007,8 @@ tail -f ~/Library/Logs/judgment-web-autostart.log
 bash scripts/deploy_web_macos.sh --uninstall
 ```
 
+`--restart` 會先停止現有的 `judgment-web` session，再讓 LaunchAgent 重新執行 `./up.sh`，所以可用來套用 `.env` 變更；單純 kickstart 會因為 `up.sh` 的 idempotent 檢查而保留舊後端。
+
 `com.judgment.web` 只負責後端與容器；Cloudflare tunnel 由另一個 LaunchAgent `com.cloudflare.cloudflared` 管理，tunnel ingress 指向 `http://127.0.0.1:9200`。
 
 ### 本階段驗證
