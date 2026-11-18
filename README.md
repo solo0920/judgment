@@ -415,18 +415,20 @@ uv run judgment-import-judgments \
 
 DuckDB 現在同時負責原始備份的前置候選篩選與 PostgreSQL 匯入的候選掃描；Python Regex 只做精確引用解析。
 
-原始 Parquet 建立流程：
+原始 Parquet 建立流程（一次處理一個月份 archive）：
 
-1. 邊解壓縮邊寫入 base raw Parquet（`raw_json` 保持原文）
-2. DuckDB 讀取 base Parquet，移除空白後以法規名稱做寬鬆候選篩選：
+1. 串流解壓縮該月份，將每個 JSON 物件以每 20,000 筆一批寫入 DuckDB 暫存表（`raw_json` 保持原文）
+2. DuckDB 對暫存表移除空白後，以法規名稱做寬鬆候選篩選：
    ```sql
    WHERE regexp_matches(
      regexp_replace(json_extract_string(raw_json, '$.JFULL'), '[\s\p{Z}\x{000B}\x{001C}-\x{001F}\x{0085}]+', '', 'g'),
      '<法規名稱 alternation>'
    )
    ```
-3. Python 只對 DuckDB 候選執行精確的法規名稱＋條號解析
-4. 將 base 欄位與精確匹配結果合併成最終 `raw.parquet`
+3. Python 只對 DuckDB 候選執行精確的法規名稱＋條號解析，匹配結果寫回 DuckDB 的 `matches` 暫存表
+4. DuckDB 以 `COPY ... (FORMAT PARQUET, COMPRESSION ZSTD)` 一次輸出該月份的 `raw.parquet`
+
+每個月份最後只有一份 `raw.parquet`；不再建立 base Parquet 後再重寫最終檔。ZSTD 會比原本的 Snappy 更小，代價是壓縮時間略增。
 
 DuckDB 候選 Regex 會把每個法規名稱字元展開成所有 NFKC 等價字元（例如 `U+F9BE` 會對應到「料」），避免判決全文使用相容異體字時漏掉候選；Python 端仍以 NFKC 正規化後的精確解析為準。
 
@@ -654,7 +656,7 @@ uv run judgment-normalize-courts --all
 - **判決金融覆蓋統計**：首頁「重要數據」、資料庫分頁與處理總覽會以相同 summary 卡片順序顯示「判決總件數」、「金融相關總件數」與「JUDGMENT COVERAGE · 金融案件佔比」，比例卡片下方註明「金融相關判決占全部已備份判決的比例。」。判決總件數取自最新判決原始 Parquet manifest 的 `row_count` 加總；金融相關總件數取自 PostgreSQL `judgment_documents` 的 current 筆數；佔比為兩者相除。首頁使用 `/api/home`，資料庫分頁使用 `/api/judgment-stats`／catalog 的 `judgment_stats`，處理總覽使用 processing snapshot 的 `judgment_stats`；三處皆由後端同一套 `judgment_stats_from_counts` 定義提供，資料不足時顯示 `—`。
 - **處理總覽時間表**：分為「法規」「命令」「判決」三張 `import-files-card`，並與索引檔案時間表使用相同幾何（2×3 指標、summary row、`index-current-row`、可水平捲動表格）。每格四個 `index-month-block` 依序為下載／Parquet／PostgreSQL／Qdrant，固定使用綠色／粉色／藍色／橘色；完成階段為實心方塊、未完成為同色空心框、Qdrant 已處理但未完成為淡橙色實心方塊、alias 切換後轉為實心橘色、執行中為與已處理相同的淡色垂直進度條、無資料為淡色空心框，不再顯示灰色「處理中」方塊；SSE `index_runtime` 更新時目前處理月份會立即移動到新月份，前一月份轉為已處理淡橙色。法規／命令以來源版本月份（`update_date`）顯示，目前列與 tooltip 顯示 `version_code`；舊來源版本的 Qdrant 階段顯示淡色空心方塊與「已取代」，不列為未完成，只有最新 current 版本需要 Qdrant 索引。判決以 manifest／本機檔／DB 的 368 個月顯示，四個階段分別由本機 `.rar`、raw Parquet manifest、PostgreSQL `issue_month`、Qdrant 月份覆蓋率判定；目前匯入 archive 的執行中階段會以淡色垂直進度條標示。空心未完成階段可點選，會切換到對應 workflow 面板（下載→該來源下載、Parquet／PostgreSQL→下載或判決匯入、Qdrant→法規索引或 Qdrant判決向量索引版本建置），只切換面板、不會自動啟動流程。判決時間表標頭另顯示 Embedding 與 Rerank 使用的主機與模型（例如 `x570 bge-m3:latest`、`x570 bge-reranker-v2-m3`），滑鼠移入可查看端點。後端以 SSE `/api/events/stream` 的 `processing` topic 作為唯一即時進度來源：初次連線推送完整 snapshot，後續推送由 processing state 直接組成的 live payload（`active_import`、workflow 階段訊息／進度、import timeline 月份更新）；前端只套用 payload 並就地更新 DOM，不再 GET `/api/processing` 取得進度，也不重建時間表或重設捲動位置；沒有固定前端 polling timer。
 - **NUL 位元組清理**：判決全文、標題、法院、引用與其他 metadata 寫入 PostgreSQL 前會移除 NUL（0x00）位元組；PostgreSQL text／JSONB 不接受 NUL，未清理會造成整個匯入 batch 失敗。原始 Parquet 與 `raw_json` 仍保留原始內容，不影響備份。
-- **原始備份**：判決壓縮檔會先將每個 JSON 物件以原始文字寫入 `JUDGMENT_DATA_DIR/parquet/raw_judgments/.../raw.parquet`；`raw_json` 保留未修改的原始文字，另外附加案號、法院、案由、裁判日期、命中法規與引用等查詢欄位。這個階段在金融法規篩選之前完成。法規／命令則在解析前寫入 `LAW_DATA_DIR/raw_parquet/.../laws.parquet`，原始 ZIP 仍保留在 `raw/`。
+- **原始備份**：判決壓縮檔會先將每個 JSON 物件以原始文字暫存到 DuckDB，再以 DuckDB `COPY` 一次輸出該月份的 `JUDGMENT_DATA_DIR/parquet/raw_judgments/.../raw.parquet`（ZSTD 壓縮）；`raw_json` 保留未修改的原始文字，另外附加案號、法院、案由、裁判日期、命中法規與引用等查詢欄位。這個階段在金融法規篩選之前完成，且每個月份只保留一份最終 raw Parquet。法規／命令則在解析前寫入 `LAW_DATA_DIR/raw_parquet/.../laws.parquet`，原始 ZIP 仍保留在 `raw/`。
   - 2026-11-08 已補建既有 24 個判決 RAR：2,485,151 筆原始 JSON，Parquet 約 6.2 GB；既有法規／命令也補建原始 Parquet（法規 1,351、命令 10,454）。
 - **整體時間**：以各階段實際耗時比例組成堆疊長條，而非用筆數推估。
 - **外部程序**：後端以 `ps` 偵測直接在 terminal 啟動的 `judgment-index-vectors`、`judgment-index-legal-articles`、`judgment-import-judgments`、`judgment-law-download` 與 `judgment.processing_update`。這些程序若沒有寫入狀態檔，只會標示「外部程序」與可驗證的整體覆蓋率；不會替它們產生假的逐階段百分比。外部法規／命令下載、判決匯入或資料更新執行中時，各 workflow 的執行按鈕會停用，避免重疊處理。

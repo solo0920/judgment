@@ -836,6 +836,8 @@ def test_raw_only_backs_up_without_filtering_or_database(
         "R1",
         "R2",
     ]
+    parquet = pq.ParquetFile(raw_path)
+    assert parquet.metadata.row_group(0).column(0).compression.upper() == "ZSTD"
     def fail_scan(_path: Path):
         raise AssertionError("existing raw Parquet must not be scanned again")
 

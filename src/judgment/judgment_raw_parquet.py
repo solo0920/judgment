@@ -229,7 +229,7 @@ def _empty_match_fields() -> Dict[str, Any]:
     }
 
 
-def write_archive_raw_parquet(
+def _write_archive_raw_parquet_pyarrow(
     archive: Path,
     data_dir: Path,
     entries: Iterable[Tuple[Dict[str, Any], str]],
@@ -453,6 +453,299 @@ def write_archive_raw_parquet(
             except OSError:
                 logger.exception(
                     "failed to remove temporary raw manifest %s", temporary_manifest
+                )
+
+    return {
+        "path": destination,
+        "manifest_path": manifest_path,
+        "rows": rows,
+        "candidate_rows": candidate_rows,
+        "size_bytes": compressed_bytes,
+        "reused": False,
+        "duration_ms": duration_ms,
+        "write_ms": int((write_seconds + match_seconds) * 1000),
+        "match_ms": int(match_seconds * 1000),
+    }
+
+
+def write_archive_raw_parquet(
+    archive: Path,
+    data_dir: Path,
+    entries: Iterable[Tuple[Dict[str, Any], str]],
+    *,
+    run_token: str = "",
+    batch_size: int = 20000,
+    row_progress: Optional[RowProgress] = None,
+    entry_transform: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    match_transform: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    candidate_regex: str = "",
+    match_progress: Optional[Callable[[int, int], None]] = None,
+    match_batch_size: int = 20000,
+) -> Dict[str, Any]:
+    """Stage one archive in DuckDB, then write one compressed Parquet file.
+
+    DuckDB receives the complete month in a temporary table.  Citation
+    matching is still performed by the existing Python parser, but the result
+    is written once with DuckDB's ZSTD Parquet writer.  This avoids the old
+    intermediate base Parquet file and the pyarrow final rewrite.
+    """
+
+    try:
+        stat = archive.stat()
+        size_bytes = int(stat.st_size)
+        mtime_ns = int(stat.st_mtime_ns)
+    except OSError:
+        size_bytes = 0
+        mtime_ns = 0
+    now = datetime.now(timezone.utc)
+    token = (run_token or uuid4().hex)[:10]
+    destination_dir = (
+        raw_judgment_root(data_dir)
+        / _archive_key(archive)
+        / now.strftime("%Y%m%d")
+        / f"{now.strftime('%H%M%S')}-{token}"
+    )
+    destination = destination_dir / "raw.parquet"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(
+        f".{destination.name}.{os.getpid()}.{uuid4().hex[:6]}.tmp"
+    )
+    connection = duckdb.connect()
+    started = time.perf_counter()
+    write_seconds = 0.0
+    match_seconds = 0.0
+    rows = 0
+    candidate_rows = 0
+    base_batch: List[Dict[str, Any]] = []
+    match_batch: List[Dict[str, Any]] = []
+
+    match_schema = pa.schema(
+        [
+            pa.field("entry_index", pa.int64()),
+            pa.field("matched_laws", pa.list_(pa.string())),
+            pa.field("matched_laws_text", pa.string()),
+            pa.field("citations", pa.string()),
+            pa.field("citation_count", pa.int32()),
+        ]
+    )
+
+    def insert_base(batch: List[Dict[str, Any]]) -> None:
+        nonlocal rows, write_seconds
+        if not batch:
+            return
+        table = pa.Table.from_pylist(batch, schema=RAW_BASE_JUDGMENT_SCHEMA)
+        connection.register("base_batch", table)
+        try:
+            write_started = time.perf_counter()
+            connection.execute("INSERT INTO base SELECT * FROM base_batch")
+            write_seconds += time.perf_counter() - write_started
+        finally:
+            connection.unregister("base_batch")
+        rows += len(batch)
+        if row_progress is not None:
+            row_progress(rows)
+
+    def insert_matches(batch: List[Dict[str, Any]]) -> None:
+        if not batch:
+            return
+        table = pa.Table.from_pylist(batch, schema=match_schema)
+        connection.register("matches_batch", table)
+        try:
+            connection.execute("INSERT INTO matches SELECT * FROM matches_batch")
+        finally:
+            connection.unregister("matches_batch")
+
+    try:
+        connection.execute(
+            """
+            CREATE TABLE base (
+                source_archive VARCHAR,
+                entry_index BIGINT,
+                jid VARCHAR,
+                jyear VARCHAR,
+                jcase VARCHAR,
+                jno VARCHAR,
+                jdate VARCHAR,
+                court VARCHAR,
+                court_normalized VARCHAR,
+                title VARCHAR,
+                pdf_url VARCHAR,
+                content_hash VARCHAR,
+                full_text_length INTEGER,
+                raw_json VARCHAR
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE matches (
+                entry_index BIGINT,
+                matched_laws VARCHAR[],
+                matched_laws_text VARCHAR,
+                citations VARCHAR,
+                citation_count INTEGER
+            )
+            """
+        )
+        allowed = set(RAW_BASE_JUDGMENT_SCHEMA.names)
+        for entry_index, (obj, raw_json) in enumerate(entries, start=1):
+            row: Dict[str, Any] = {
+                "source_archive": archive.name,
+                "entry_index": entry_index,
+                "jid": str(obj.get("JID") or "").strip(),
+                "raw_json": raw_json,
+            }
+            if entry_transform is not None:
+                extra = entry_transform(obj)
+                if isinstance(extra, dict):
+                    row.update(extra)
+            base_batch.append(
+                {key: value for key, value in row.items() if key in allowed}
+            )
+            if len(base_batch) >= max(1, int(batch_size)):
+                insert_base(base_batch)
+                base_batch = []
+        insert_base(base_batch)
+        base_batch = []
+
+        where = ""
+        parameters: List[Any] = []
+        if candidate_regex:
+            where = (
+                "WHERE regexp_matches("
+                "regexp_replace(coalesce(json_extract_string(raw_json, '$.JFULL'), ''), "
+                f"'{CANDIDATE_WHITESPACE_PATTERN}', '', 'g'), ?)"
+            )
+            parameters.append(candidate_regex)
+        count_row = connection.execute(
+            f"SELECT count(*) FROM base {where}", parameters
+        ).fetchone()
+        candidate_rows = int(count_row[0] if count_row else 0)
+        if match_transform is not None:
+            match_started = time.perf_counter()
+            cursor = connection.execute(
+                f"""
+                SELECT entry_index, raw_json
+                FROM base
+                {where}
+                ORDER BY entry_index
+                """,
+                parameters,
+            )
+            processed = 0
+            while True:
+                candidate_batch = cursor.fetchmany(max(1, int(match_batch_size)))
+                if not candidate_batch:
+                    break
+                for entry_index, raw_json in candidate_batch:
+                    try:
+                        obj = json.loads(raw_json)
+                    except ValueError:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    extra = match_transform(obj)
+                    if not isinstance(extra, dict):
+                        continue
+                    match_batch.append(
+                        {
+                            "entry_index": int(entry_index),
+                            "matched_laws": extra.get("matched_laws") or [],
+                            "matched_laws_text": extra.get("matched_laws_text")
+                            or "",
+                            "citations": extra.get("citations") or "[]",
+                            "citation_count": int(
+                                extra.get("citation_count") or 0
+                            ),
+                        }
+                    )
+                processed += len(candidate_batch)
+                if match_progress is not None:
+                    match_progress(processed, candidate_rows)
+            insert_matches(match_batch)
+            match_batch = []
+            match_seconds = time.perf_counter() - match_started
+
+        path_sql = str(temporary).replace("'", "''")
+        write_started = time.perf_counter()
+        connection.execute(
+            f"""
+            COPY (
+                SELECT
+                    b.source_archive,
+                    b.entry_index,
+                    b.jid,
+                    b.jyear,
+                    b.jcase,
+                    b.jno,
+                    b.jdate,
+                    b.court,
+                    b.court_normalized,
+                    b.title,
+                    b.pdf_url,
+                    b.content_hash,
+                    b.full_text_length,
+                    coalesce(m.matched_laws, []::VARCHAR[]) AS matched_laws,
+                    coalesce(m.matched_laws_text, chr(10) || chr(10))
+                        AS matched_laws_text,
+                    coalesce(m.citations, '[]') AS citations,
+                    coalesce(m.citation_count, 0) AS citation_count,
+                    b.raw_json
+                FROM base b
+                LEFT JOIN matches m USING (entry_index)
+                ORDER BY b.entry_index
+            ) TO '{path_sql}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
+        )
+        write_seconds += time.perf_counter() - write_started
+        os.replace(temporary, destination)
+    except BaseException:
+        for path in (temporary,):
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    logger.exception(
+                        "failed to remove temporary raw parquet %s", path
+                    )
+        raise
+    finally:
+        connection.close()
+
+    compressed_bytes = destination.stat().st_size if destination.exists() else 0
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    manifest = {
+        "version": RAW_SCHEMA_VERSION,
+        "archive_name": archive.name,
+        "archive_path": str(archive.resolve()),
+        "archive_size_bytes": size_bytes,
+        "archive_mtime_ns": mtime_ns,
+        "row_count": rows,
+        "candidate_count": candidate_rows,
+        "compressed_bytes": compressed_bytes,
+        "raw_path": str(destination),
+        "run_token": token,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    manifest_path = destination_dir / "manifest.json"
+    temporary_manifest = manifest_path.with_name(
+        f".{manifest_path.name}.{os.getpid()}.{uuid4().hex[:6]}.tmp"
+    )
+    try:
+        temporary_manifest.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary_manifest, manifest_path)
+    finally:
+        if temporary_manifest.exists():
+            try:
+                temporary_manifest.unlink()
+            except OSError:
+                logger.exception(
+                    "failed to remove temporary raw manifest %s",
+                    temporary_manifest,
                 )
 
     return {
