@@ -1238,23 +1238,9 @@ def create_app(
         )
 
     cors_origins = _cors_origins(settings.cors_allow_origins)
-    if cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=list(cors_origins),
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=[
-                "Accept",
-                "Content-Type",
-                "Authorization",
-                "X-Judgment-Request-Id",
-                "X-Judgment-Client-Started-At",
-                "X-Judgment-Admin-Token",
-            ],
-            expose_headers=["X-Judgment-Request-Id"],
-            max_age=600,
-        )
+    # CORS is added at the end of create_app so it wraps the auth middleware.
+    # Otherwise 401/403 responses from admin_auth_middleware bypass
+    # CORSMiddleware and browsers report a network error instead of the detail.
 
     @app.middleware("http")
     async def admin_auth_middleware(request: Request, call_next):
@@ -3564,6 +3550,27 @@ def create_app(
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
             },
+        )
+
+    # Add CORS last so it is the outermost middleware.  Auth failures (401/403)
+    # must still carry Access-Control-Allow-Origin, otherwise the browser hides
+    # the response and the frontend shows "cannot connect to server".
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(cors_origins),
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=[
+                "Accept",
+                "Content-Type",
+                "Authorization",
+                "X-Judgment-Request-Id",
+                "X-Judgment-Client-Started-At",
+                "X-Judgment-Admin-Token",
+            ],
+            expose_headers=["X-Judgment-Request-Id"],
+            max_age=600,
         )
 
     return app

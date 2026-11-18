@@ -1231,6 +1231,7 @@ export const api = {
         method: "POST",
         headers,
         body: JSON.stringify({ question }),
+        credentials: "include",
         signal: controller.signal,
       });
     } catch (error) {

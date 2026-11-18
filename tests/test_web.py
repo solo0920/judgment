@@ -635,6 +635,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "adminTokenForRequest" in api_js.text
     assert "authMe" in api_js.text
     assert "getAuthApiBase" in api_js.text
+    stream_fetch = api_js.text.split(
+        'apiUrl("/api/rag/query/stream"', 1
+    )[1].split("});", 1)[0]
+    assert 'credentials: "include"' in stream_fetch
     auth_js = web_client.get("/assets/js/auth.js")
     assert auth_js.status_code == 200
     assert "google_enabled" in auth_js.text
@@ -2553,6 +2557,7 @@ def test_remote_admin_api_without_token_is_forbidden(web_client) -> None:
     settings = replace(
         web_client.app.state.settings,
         admin_token="",
+        cors_allow_origins=("https://app.example",),
     )
     app = create_app(
         settings=settings,
@@ -2560,8 +2565,17 @@ def test_remote_admin_api_without_token_is_forbidden(web_client) -> None:
         data_dir=web_client.app.state.data_dir,
     )
     with TestClient(app, client=("203.0.113.9", 50000)) as remote:
-        denied = remote.get("/api/catalog")
+        denied = remote.get(
+            "/api/catalog",
+            headers={"Origin": "https://app.example"},
+        )
         assert denied.status_code == 403
+        # Auth errors must still be readable by the browser.
+        assert (
+            denied.headers["access-control-allow-origin"]
+            == "https://app.example"
+        )
+        assert denied.headers["access-control-allow-credentials"] == "true"
 
 
 def _oauth_settings(web_client, **overrides):
