@@ -14104,7 +14104,7 @@ button.chip:hover {
 }
 
 .judgment-month.is-green {
-  border-color: #4f7a00;
+  border-color: #b9c0c8;
   background: #76b900;
   color: #102400;
   font-weight: 650;
@@ -14117,7 +14117,7 @@ button.chip:hover {
 }
 
 .judgment-month.is-red {
-  border-color: #991b1b;
+  border-color: #b9c0c8;
   background: #d32f2f;
   color: #ffffff;
   font-weight: 650;
@@ -14138,9 +14138,6 @@ button.chip:hover {
 
 .judgment-month.is-active {
   z-index: 1;
-  border-color: var(--accent);
-  outline: 2px solid var(--info);
-  outline-offset: 1px;
   background-image: linear-gradient(
     rgba(118, 185, 0, 0.7),
     rgba(118, 185, 0, 0.7)
@@ -14149,30 +14146,32 @@ button.chip:hover {
   background-position: bottom;
   background-size: 100% var(--month-progress, 0%);
   transition: background-size 0.35s ease;
-  animation: judgment-month-pulse 1.6s ease-in-out infinite;
 }
 
 .judgment-month.is-downloading {
-  border-width: 2px;
+  border-width: 1px;
+  border-color: #b9c0c8;
   outline: none;
   color: #102400;
-  animation: none;
-}
-
-.judgment-month.is-green.is-downloading {
-  border-color: #4f7a00;
-}
-
-.judgment-month.is-gray.is-downloading {
-  border-color: #b9c0c8;
-}
-
-.judgment-month.is-red.is-downloading {
-  border-color: #991b1b;
+  animation: judgment-month-download-glow 1.6s ease-in-out infinite;
 }
 
 .judgment-month.is-downloading .judgment-month-download {
   color: #102400;
+}
+
+@keyframes judgment-month-download-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px #b9c0c8,
+      0 0 6px rgba(185, 192, 200, 0.55);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px #b9c0c8,
+      0 0 12px rgba(185, 192, 200, 0.75);
+  }
 }
 
 @keyframes judgment-month-pulse {
