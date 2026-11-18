@@ -21,7 +21,7 @@
 | NET-06 | MBP llama-server fallback 11436／11437 | 只綁 loopback；x570 不可用時可接手 chat／embedding | `lsof` 顯示 `127.0.0.1:11436`／`11437`；`/health`、`/v1/models`、fallback 實測 | `verified` | 工程 |
 | CF-01 | Cloudflare Access 公開入口 | 無 Access 身分不可到 origin；policy／其他 hostname／bypass 規則已檢視 | 公開請求 403 證據 + Zero Trust 政策清單 | `verified`（僅 edge 阻擋；policy 尚未檢視） | Cloudflare admin |
 | CF-02 | Access 通過後仍要求 Admin Token | GET 與寫入 API 都不可無 token 取得／修改 | Access service token + 無 admin token 的 GET／POST 實測 | `not_started` | Cloudflare admin／工程 |
-| CF-03 | cloudflared origin | tunnel 實際執行位置與 origin 正確 | `cloudflared` process／config、`/props`、origin request 紀錄 | `not_started` | Infra |
+| CF-03 | cloudflared origin | tunnel 實際執行位置與 origin 正確 | `cloudflared` process／config、`/props`、origin request 紀錄 | `implemented`（LaunchAgent 執行中，origin 已改 9200；public hostname 仍被 Access 擋住） | Infra |
 | WEB-01 | 跨站 loopback 寫入 | 跨站 POST／PUT／PATCH／DELETE 被拒絕 | Origin／Sec-Fetch-Site 測試與 curl 證據 | `verified` | 工程 |
 | WEB-02 | Host header／DNS rebinding | 未列入白名單 Host 回 400 | `Host: evil.example` 400；localhost／公開網域含 port 測試 | `verified` | 工程 |
 | WEB-03 | CORS `null`／file:// | 預設不允許 file:// 讀取或寫入 | `Origin: null` GET 無 ACAO；POST 403 | `verified` | 工程 |
@@ -61,6 +61,8 @@ x570 UFW 套用後重開（21:32:55）            → boot_id 改變；三個 un
 重開後 MBP → x570 LAN 11434–11437          → 仍 timeout；kernel 仍有 [UFW BLOCK]；Tailscale 11435–11437 /health 200
 x570 完整 sudo 驗證（21:37）               → pass=54 fail=0 warn=1；UFW status／numbered 與預期規則一致
 Google OAuth（2026-11-18）                  → /api/auth/me、state cookie、callback allowlist、HttpOnly session、remote admin session、Origin 拒絕測試通過；Google Cloud client 尚未設定
+Cloudflare Pages（2026-11-18）               → project `judgment` production deployment 上線；`judgment.ragdemo.win` 已加入 custom domain，等待 CNAME；舊拼字 `judement.ragdemo.win` 仍 active
+cloudflared（2026-11-18）                     → LaunchAgent `com.cloudflare.cloudflared` running；origin 修正為 127.0.0.1:9200；4 條 tunnel connection；`api-mbp.ragdemo.win` 目前回 Access 403
 ```
 
 測試：
@@ -74,12 +76,14 @@ ruff clean
 
 1. **x570 網路隔離**：MBP 端 LAN 拒絕（含 `[UFW BLOCK]`）、Tailscale allow、完整 sudo UFW 驗證與套用後重開機持續性已驗證；仍需第二台設備失敗證據。手機行動網路在沒有公開 tunnel 時沒有 public origin 可測，應記為 N/A，不可當成 UFW 證據。
 2. **Access service token**：需要 Cloudflare Access service token；驗證 GET 與寫入 API 都不可無 admin token。
-3. **cloudflared**：確認 tunnel 真正執行位置、origin port（目前 `localhost:920` 疑似 typo）與 Host 標頭。
+3. **cloudflared**：tunnel 已由 LaunchAgent 執行，origin 已修正為 `127.0.0.1:9200`。`api-mbp.ragdemo.win` 目前仍有 Cloudflare Access；要走應用層 Google 登入，必須移除該 hostname 的 Access application，或對 `/api/*` 設 Bypass。
 4. **XSS**：先做 payload 自動測試與 `safeUrl()`，再上 CSP。
 5. **備份**：先做敏感資料分類；`.env` 不進備份；age 加密與 restore drill。
 6. **API abuse**：先保護 RAG 昂貴端點，而不是只做 admin token 失敗節流。
 7. **Tailscale 路徑依賴**：`.env` 使用 MagicDNS `x570`，目前解析為 `100.64.0.0/10`。Tailscale 離線時 embedding／rerank 會失敗；需確認應用端是明確錯誤或降級，不是無限等待。
 8. **Google Cloud OAuth client**：建立 Web application client、填入正確 redirect URI 與 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，完成一次真實 Google 登入；自動測試只涵蓋程式流程，沒有 Google 實機憑證。
+9. **Pages custom domain**：在 `ragdemo.win` DNS 新增 `judgment` CNAME 到 `judgment-61m.pages.dev`（Proxied）；Pages 已先行加入 `judgment.ragdemo.win` custom domain，等待 CNAME 驗證。
+10. **Cloudflare Access**：`api-mbp.ragdemo.win` 目前回 403 且帶 `cf-access-domain`；前端跨域 fetch 無法通過。移除 Access application 或對 `/api/*` 設 Bypass 後，才能由 FastAPI 的 Google 登入處理。
 
 ## 4. 驗收規則
 
