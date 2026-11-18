@@ -677,7 +677,6 @@ def test_static_console_is_served(web_client) -> None:
     assert "background: #dfe3e8" in css.text
     assert "--month-progress" in css.text
     assert ".judgment-month.is-downloading" in css.text
-    assert "judgment-month-download-glow" in css.text
     assert "border-color: #000000" in css.text
     assert ".processing-timeline-swatch.is-raw-parquet" in css.text
     assert ".home-hero" in css.text

@@ -14153,25 +14153,11 @@ button.chip:hover {
   border-color: #000000;
   outline: none;
   color: #102400;
-  animation: judgment-month-download-glow 1.6s ease-in-out infinite;
+  animation: none;
 }
 
 .judgment-month.is-downloading .judgment-month-download {
   color: #102400;
-}
-
-@keyframes judgment-month-download-glow {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 1px #000000,
-      0 0 6px rgba(0, 0, 0, 0.45);
-  }
-  50% {
-    box-shadow:
-      0 0 0 1px #000000,
-      0 0 12px rgba(0, 0, 0, 0.65);
-  }
 }
 
 @keyframes judgment-month-pulse {
