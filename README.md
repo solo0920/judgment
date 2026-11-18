@@ -432,6 +432,16 @@ DuckDB 現在同時負責原始備份的前置候選篩選與 PostgreSQL 匯入�
 
 DuckDB 候選 Regex 會把每個法規名稱字元展開成所有 NFKC 等價字元（例如 `U+F9BE` 會對應到「料」），避免判決全文使用相容異體字時漏掉候選；Python 端仍以 NFKC 正規化後的精確解析為準。
 
+
+單月 raw Parquet 寫入效能可用下列腳本在管線閒置時比較（2–3 次取中位數）：
+
+```bash
+uv run python scripts/benchmark_raw_parquet.py \
+  --archive data/judgments/raw_rar/200212--(20261015Update).rar --runs 3
+```
+
+腳本會比較舊 pyarrow/Snappy、DuckDB/Snappy、DuckDB/ZSTD level 1 與 DuckDB/ZSTD 預設，並輸出耗時與檔案大小。
+
 PostgreSQL 匯入階段：
 
 ```sql

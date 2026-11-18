@@ -481,6 +481,8 @@ def write_archive_raw_parquet(
     candidate_regex: str = "",
     match_progress: Optional[Callable[[int, int], None]] = None,
     match_batch_size: int = 20000,
+    compression: str = "zstd",
+    compression_level: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Stage one archive in DuckDB, then write one compressed Parquet file.
 
@@ -667,6 +669,12 @@ def write_archive_raw_parquet(
             match_seconds = time.perf_counter() - match_started
 
         path_sql = str(temporary).replace("'", "''")
+        compression_name = str(compression or "zstd").strip().upper()
+        compression_options = f"COMPRESSION {compression_name}"
+        if compression_level is not None and compression_name == "ZSTD":
+            compression_options += (
+                f", COMPRESSION_LEVEL {max(1, int(compression_level))}"
+            )
         write_started = time.perf_counter()
         connection.execute(
             f"""
@@ -694,7 +702,7 @@ def write_archive_raw_parquet(
                 FROM base b
                 LEFT JOIN matches m USING (entry_index)
                 ORDER BY b.entry_index
-            ) TO '{path_sql}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{path_sql}' (FORMAT PARQUET, {compression_options})
             """
         )
         write_seconds += time.perf_counter() - write_started
