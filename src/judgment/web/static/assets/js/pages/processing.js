@@ -4256,7 +4256,7 @@ function importTimelineMarkup(workflow) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的 RAR／原始資料方格以淺橘／淺紅表示，完成後轉為實心深色；空心方塊表示尚未完成；執行中的方塊以淡色垂直進度條表示，並隨完成比例加深；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
+      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的四個階段方格以淺橘／淺紅／淺紫／淺藍表示，完成後轉為實心深色；空心方塊表示尚未完成；執行中的方塊以淡色垂直進度條表示，並隨完成比例加深；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
     </div>
   </section>`;
 }

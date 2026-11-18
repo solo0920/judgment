@@ -3986,10 +3986,12 @@ def _import_archive_stage_status(
         return "processing"
     if status in {"success", "skipped"}:
         return "complete"
-    if pending_update and stage_key in {"extract", "raw_parquet"}:
+    if pending_update:
         # The month already has an older Parquet backup, but a newer archive
-        # was downloaded.  Its two leading stages must be rebuilt, so show
-        # them as queued instead of reusing the old "complete" colour.
+        # was downloaded.  Every stage of that archive is queued again, so
+        # show the whole cell in its light stage colour instead of reusing
+        # the old "complete" colour for the first two stages or leaving the
+        # last two as hollow "incomplete" outlines.
         if status in {"", "pending", "interrupted"}:
             return "pending"
     # finish_run() marks every pending archive stage with the terminal run

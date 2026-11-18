@@ -2224,8 +2224,8 @@ def test_merge_import_timeline_stages_uses_four_import_stages() -> None:
     assert months["202603"]["import_stages"] == {
         "extract": "complete",
         "raw_parquet": "complete",
-        "filter": "incomplete",
-        "postgres": "incomplete",
+        "filter": "pending",
+        "postgres": "pending",
     }
     assert months["202603"]["import_overall"] == "incomplete"
     # A pending archive whose stages were force-marked interrupted by
@@ -2386,8 +2386,8 @@ def test_merge_import_timeline_stages_marks_update_pending_cells() -> None:
     assert months["202608"]["import_stages"] == {
         "extract": "pending",
         "raw_parquet": "pending",
-        "filter": "incomplete",
-        "postgres": "incomplete",
+        "filter": "pending",
+        "postgres": "pending",
     }
     assert months["202608"]["import_overall"] == "incomplete"
     # As soon as the new archive's stages succeed, the cells turn solid.
@@ -2395,7 +2395,7 @@ def test_merge_import_timeline_stages_marks_update_pending_cells() -> None:
         "extract": "complete",
         "raw_parquet": "complete",
         "filter": "processing",
-        "postgres": "incomplete",
+        "postgres": "pending",
     }
     assert months["202607"]["import_overall"] == "processing"
 
