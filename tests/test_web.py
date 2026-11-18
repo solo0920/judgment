@@ -697,7 +697,7 @@ def test_static_console_is_served(web_client) -> None:
     )
     assert "var(--stage-color) 10%, transparent" in css.text
     assert "var(--block-color) var(--stage-progress, 0%)" in css.text
-    assert "color-mix(in srgb, var(--block-color) 32%, transparent)" in css.text
+    assert "color-mix(in srgb, var(--block-color) 25%, transparent)" in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text
