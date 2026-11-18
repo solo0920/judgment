@@ -986,6 +986,14 @@ uv run python scripts/build_frontend.py --api-base https://api.example.com
 
 建置需要 Node.js：腳本優先使用 PATH 中的 `esbuild`，找不到時透過 `npx` 取得。修改前端原始碼後需重新執行才會更新 `frontend/`。
 
+`./up.sh` 在偵測到前端原始碼較新時也會自動重建 `frontend/`。為避免把 Cloudflare Pages 使用的 API base 覆蓋成空字串，請在 `.env` 設定：
+
+```dotenv
+FRONTEND_API_BASE=https://api-mbp.ragdemo.win
+```
+
+未設定 `FRONTEND_API_BASE` 時，`up.sh` 會沿用現有 `frontend/config.js` 的 `apiBase`，不會直接改成空值。
+
 ```text
 frontend/
 ├── index.html       # 相對資源路徑，載入 config.js 與 bundled app.js

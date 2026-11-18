@@ -64,6 +64,9 @@ fi
 if [[ -z "${QDRANT_API_KEY:-}" ]]; then
   QDRANT_API_KEY="$(read_env_value QDRANT_API_KEY)"
 fi
+if [[ -z "${FRONTEND_API_BASE:-}" ]]; then
+  FRONTEND_API_BASE="$(read_env_value FRONTEND_API_BASE)"
+fi
 
 RERANK_PORT="${RERANK_PORT:-11435}"
 RERANK_LOCAL_HOST="${RERANK_LOCAL_HOST:-127.0.0.1}"
@@ -168,9 +171,24 @@ need_frontend_build() {
     2>/dev/null | grep -q .
 }
 
+frontend_api_base() {
+  if [[ -n "${FRONTEND_API_BASE:-}" ]]; then
+    printf '%s' "${FRONTEND_API_BASE}"
+    return 0
+  fi
+  # Preserve the deployed API base when rebuilding from a newer checkout.
+  sed -n 's/^[[:space:]]*apiBase:[[:space:]]*"\([^"]*\)",.*/\1/p' \
+    frontend/config.js 2>/dev/null | head -1
+}
+
 if need_frontend_build; then
+  api_base="$(frontend_api_base || true)"
   echo "建置 standalone frontend…"
-  uv run python scripts/build_frontend.py
+  if [[ -n "${api_base}" ]]; then
+    uv run python scripts/build_frontend.py --api-base "${api_base}"
+  else
+    uv run python scripts/build_frontend.py
+  fi
 fi
 
 should_start_reranker() {
