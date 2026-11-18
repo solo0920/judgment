@@ -172,6 +172,15 @@ llama-server --ctx-size 24576 --parallel 4
 
 這是 requirement「Ollama 不得成為 runtime fallback」的必要修正。
 
+2026-11-18 追查重開機仍自動啟動的原因：Ollama 0.40.16 使用 macOS 13+ `SMAppService` 註冊 app bundle 內的 `Contents/Library/LaunchAgents/com.ollama.ollama.plist`，該 job `RunAtLoad=true`，程式是 `Squirrel background`；登入後由它拉起 `Ollama hidden` 與 `ollama serve`（`127.0.0.1:11434`）。這不是一般 Login Item，所以只 kill process 或看「登入項目」清單都會誤判。已執行：
+
+```bash
+launchctl disable gui/$(id -u)/com.ollama.ollama
+launchctl bootout gui/$(id -u)/com.ollama.ollama
+```
+
+驗證：`launchctl print-disabled gui/$(id -u)` 顯示 `com.ollama.ollama => disabled`；`lsof -nP -iTCP:11434 -sTCP:LISTEN` 無輸出；無 Ollama process。若要從 BTM 徹底移除，還需在 System Settings → General → Login Items & Extensions → Allow in the Background 關閉 Ollama／Squirrel；手動開啟 Ollama 仍可使用，只是不再自動啟動。
+
 ## 五、目前判定
 
 ```text
