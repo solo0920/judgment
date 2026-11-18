@@ -26,6 +26,8 @@ from judgment.judgment_import import (
 )
 from judgment.judgment_backup import apply_raw_deltas_backwards
 from judgment.judgment_raw_parquet import (
+    _write_archive_raw_parquet_duckdb,
+    _write_archive_raw_parquet_pyarrow,
     find_reusable_raw_parquets,
     write_archive_raw_parquet,
 )
@@ -150,6 +152,48 @@ def test_load_law_list_strips_scope_notes(tmp_path: Path) -> None:
     assert set(law_list.names) == {"銀行法", "保險法", "災害防救法"}
     scoped = next(entry for entry in law_list.entries if entry["name"] == "災害防救法")
     assert "金融紓困" in scoped["scope"]
+
+
+def test_pyarrow_and_duckdb_raw_schemas_match(tmp_path: Path) -> None:
+    archive = tmp_path / "202602.rar"
+    archive.write_bytes(b"")
+    exact = '{"JID": "J2", "JFULL": "銀行法第1條"}'
+    entries = [(json.loads(exact), exact)]
+    pyarrow_result = _write_archive_raw_parquet_pyarrow(
+        archive,
+        tmp_path / "pyarrow",
+        entries,
+        compression="zstd",
+        compression_level=3,
+    )
+    duckdb_result = _write_archive_raw_parquet_duckdb(
+        archive,
+        tmp_path / "duckdb",
+        entries,
+        compression="zstd",
+    )
+    pyarrow_schema = pq.ParquetFile(pyarrow_result["path"]).schema_arrow
+    duckdb_schema = pq.ParquetFile(duckdb_result["path"]).schema_arrow
+    assert [field.name for field in pyarrow_schema] == [
+        field.name for field in duckdb_schema
+    ]
+    assert [str(field.type) for field in pyarrow_schema] == [
+        str(field.type) for field in duckdb_schema
+    ]
+    # DuckDB marks some fields non-null while pyarrow leaves them nullable.
+    # Readers tolerate that difference; the glob read below is the contract.
+    duck = __import__("duckdb").connect()
+    try:
+        row = duck.execute(
+            "SELECT count(*) FROM read_parquet(?)",
+            [[
+                str(pyarrow_result["path"]),
+                str(duckdb_result["path"]),
+            ]],
+        ).fetchone()
+    finally:
+        duck.close()
+    assert row[0] == 2
 
 
 def test_raw_parquet_preserves_exact_raw_json(tmp_path: Path) -> None:

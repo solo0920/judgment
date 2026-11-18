@@ -28,8 +28,8 @@ from judgment.judgment_import import (
     load_law_list,
 )
 from judgment.judgment_raw_parquet import (
+    _write_archive_raw_parquet_duckdb,
     _write_archive_raw_parquet_pyarrow,
-    write_archive_raw_parquet,
 )
 
 
@@ -86,6 +86,12 @@ def main() -> int:
     parser.add_argument("--law-list", type=Path)
     parser.add_argument("--runs", type=int, default=2)
     parser.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        help="只跑指定組合（可重複）",
+    )
+    parser.add_argument(
         "--output-root",
         type=Path,
         default=Path("/tmp/judgment-raw-parquet-bench"),
@@ -116,21 +122,32 @@ def main() -> int:
             {"compression": "zstd"},
         ),
         (
+            "pyarrow-zstd-3",
+            _write_archive_raw_parquet_pyarrow,
+            {"compression": "zstd", "compression_level": 3},
+        ),
+        (
             "duckdb-snappy",
-            write_archive_raw_parquet,
+            _write_archive_raw_parquet_duckdb,
             {"compression": "snappy"},
         ),
         (
             "duckdb-zstd-1",
-            write_archive_raw_parquet,
+            _write_archive_raw_parquet_duckdb,
             {"compression": "zstd", "compression_level": 1},
         ),
         (
             "duckdb-zstd-default",
-            write_archive_raw_parquet,
+            _write_archive_raw_parquet_duckdb,
             {"compression": "zstd"},
         ),
     ]
+    if args.only:
+        combinations = [
+            item for item in combinations if item[0] in set(args.only)
+        ]
+        if not combinations:
+            raise SystemExit("--only 沒有符合的組合")
     results: Dict[str, Dict[str, object]] = {}
     for name, writer, options in combinations:
         def run_writer(*writer_args, _writer=writer, _options=options, **kwargs):

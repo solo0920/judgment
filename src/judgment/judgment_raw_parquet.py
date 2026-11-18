@@ -243,6 +243,7 @@ def _write_archive_raw_parquet_pyarrow(
     match_progress: Optional[Callable[[int, int], None]] = None,
     match_batch_size: int = 5000,
     compression: str = "snappy",
+    compression_level: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Write a raw Parquet backup with a DuckDB candidate prefilter.
 
@@ -379,6 +380,11 @@ def _write_archive_raw_parquet_pyarrow(
             temporary,
             RAW_JUDGMENT_SCHEMA,
             compression=str(compression or "snappy"),
+            compression_level=(
+                int(compression_level)
+                if compression_level is not None
+                else None
+            ),
         )
         with pq.ParquetFile(base_path) as base_file:
             for batch in base_file.iter_batches(
@@ -471,7 +477,7 @@ def _write_archive_raw_parquet_pyarrow(
     }
 
 
-def write_archive_raw_parquet(
+def _write_archive_raw_parquet_duckdb(
     archive: Path,
     data_dir: Path,
     entries: Iterable[Tuple[Dict[str, Any], str]],
@@ -770,6 +776,27 @@ def write_archive_raw_parquet(
         "write_ms": int((write_seconds + match_seconds) * 1000),
         "match_ms": int(match_seconds * 1000),
     }
+
+
+def write_archive_raw_parquet(
+    archive: Path,
+    data_dir: Path,
+    entries: Iterable[Tuple[Dict[str, Any], str]],
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Write one archive with the fastest measured raw-Parquet path.
+
+    Controlled benchmarks showed pyarrow + ZSTD level 3 matches the DuckDB
+    writer's size closely while avoiding DuckDB staging overhead.  The DuckDB
+    implementation remains available as ``_write_archive_raw_parquet_duckdb``
+    for experiments.
+    """
+
+    kwargs.setdefault("compression", "zstd")
+    kwargs.setdefault("compression_level", 3)
+    return _write_archive_raw_parquet_pyarrow(
+        archive, data_dir, entries, **kwargs
+    )
 
 
 def iter_raw_judgment_json(
