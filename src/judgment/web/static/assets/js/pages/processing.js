@@ -5601,6 +5601,7 @@ export async function render(root) {
   const content = root.querySelector("#processing-root");
   const workflowNav = root.querySelector("#processing-workflows");
   const stopButton = root.querySelector("#processing-stop");
+  let stopRequested = false;
   const stageTooltip = document.createElement("div");
   stageTooltip.className = "processing-stage-tooltip";
   stageTooltip.hidden = true;
@@ -6969,11 +6970,42 @@ export async function render(root) {
     clearStageHover();
   };
 
+  const hasActiveProcessingRun = (snapshot) => {
+    if (Array.isArray(snapshot?.active_runs) && snapshot.active_runs.length) {
+      return true;
+    }
+    if (
+      (snapshot?.workflows || []).some((workflow) => workflow.active_run)
+    ) {
+      return true;
+    }
+    return String(snapshot?.update?.status || "") === "running";
+  };
+
+  const lockStopButtons = () => {
+    content
+      .querySelectorAll('[data-processing-action="stop"]')
+      .forEach((button) => setBusy(button, true, "停止中…"));
+    if (stopButton) setBusy(stopButton, true, "停止中…");
+  };
+
+  const unlockStopButtons = () => {
+    content
+      .querySelectorAll('[data-processing-action="stop"]')
+      .forEach((button) => setBusy(button, false));
+    if (stopButton) setBusy(stopButton, false);
+  };
+
   const syncControls = (snapshot) => {
     const capabilities = snapshot.capabilities || {};
+    if (stopRequested && !hasActiveProcessingRun(snapshot)) {
+      stopRequested = false;
+      unlockStopButtons();
+    }
     if (!actionBusy && stopButton) {
       stopButton.hidden = !capabilities.can_stop_update;
     }
+    if (stopRequested) lockStopButtons();
   };
 
   const repaintFromSnapshot = () => {
@@ -7726,8 +7758,9 @@ export async function render(root) {
   };
 
   const stopUpdate = async (button) => {
-    if (actionBusy) return;
+    if (actionBusy || stopRequested) return;
     actionBusy = true;
+    stopRequested = true;
     setBusy(button, true, "停止中…");
     try {
       const result = await api.stopProcessingUpdate();
@@ -7735,13 +7768,19 @@ export async function render(root) {
         if (operation.kind === "upgrade") stageOperations.delete(id);
       }
       repaintFromSnapshot();
+      void refresh({ silent: true });
       toast(result.message || "已送出停止訊號。", "info", 6000);
     } catch (error) {
+      stopRequested = false;
+      setBusy(button, false);
       toast(error.message || "無法停止資料更新。", "danger", 7000);
     } finally {
       actionBusy = false;
-      setBusy(button, false);
-      if (lastSnapshot) syncControls(lastSnapshot);
+      if (stopRequested) {
+        lockStopButtons();
+      } else if (lastSnapshot) {
+        syncControls(lastSnapshot);
+      }
     }
   };
 

@@ -545,6 +545,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "立即執行" in processing_js.text
     assert "processing-download-active" in processing_js.text
     assert "data-judgment-downloads-list" in processing_js.text
+    assert "stopRequested" in processing_js.text
     assert "import_stage_progress" in processing_js.text
     assert "processing-run-strip" in processing_js.text
     assert "中止執行" in processing_js.text
