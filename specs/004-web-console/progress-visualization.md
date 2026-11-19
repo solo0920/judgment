@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.2
+**Version**: 1.4
 
 **Last Updated**: 2026-11-19
 
@@ -37,7 +37,7 @@
   - 原始資料檢查／Parquet 備份
   - 金融法規篩選
   - PostgreSQL metadata
-- `#/processing` 判決下載、判決處理、法規處理、命令處理月份時間表。
+- `#/processing` 判決匯入四階段、處理總覽法規／命令／判決四階段月份時間表。
 - `#/processing` 法規／命令索引版本時間表（D／P／I）。
 - `#/processing` 判決向量索引 Pipeline 與 workflow 流程進度 waterfall。
 - `#/processing` Qdrant A／R／E 月份覆蓋圖的填充區段。
@@ -48,6 +48,7 @@
 - 只有耗時、沒有完成比例概念的純 duration bar（例如 RAG Pipeline 的 span bar）。
 - 服務狀態、統計長條圖、靜態架構圖。
 - 「無資料／已取代」的淡色空心外框；此狀態不是未完成，而是沒有可計算的進度。
+- 判決下載版本狀態表（最新版／舊版／缺失）、法院名稱檢查、條文歷史檢查等 categorical status table；它們是單一狀態地圖，使用狀態色與 summary，不套用 25% 填充公式。若未來改成 stage progress，MUST 改依本規格並同步更新 domain spec。
 - 整體流程的 aggregate progress bar（例如「整體進度 59.9%」），其填色為 aggregate gradient，不是單一階段色。
 
 ### 2.3 全站統一使用條款
@@ -167,15 +168,18 @@ A／R／E 的具體映射：
 | 分格 | 完成判定來源 | 不得使用 |
 | --- | --- | --- |
 | A | active collection 對該月份的覆蓋 | 本次 run R／E 進度 |
-| R | 本次 run baseline archive 的 `processed / total` | active collection 覆蓋、E 進度 |
-| E | 本次 run latest archive 的 `processed / total` | active collection 覆蓋、R 進度 |
+| R | 無 E backlog 月份：active 覆蓋；有 E backlog 月份：本次 run baseline archive 的 `processed / total` | 有 E backlog 時用 active 覆蓋、E 進度 |
+| E | 無 E backlog 月份：active 覆蓋；有 E backlog 月份：本次 run latest archive 的 `processed / total` | 有 E backlog 時用 active 覆蓋、R 進度 |
+
+「E backlog」指該月 latest archive 尚未被 active collection 完整覆蓋。無 E backlog 的未變更月份不需要新 embedding，R／E 可顯示實心；一旦仍有 E backlog，R／E 必須顯示本次 run 進度，未處理前維持 25% 淺色。
 
 回歸案例（MUST 納入驗收）：
 
-- active 覆蓋 100%、本次 run processed 0：A 可為實心，R／E MUST 為 0% 淺色。
+- latest archive active 覆蓋 100%（無 E backlog）、本次 run processed 0：A 可為實心，R／E MAY 為實心完成。
+- latest archive active 覆蓋未滿（有 E backlog）、本次 run processed 0：A 可為實心，R／E MUST 為 0% 淺色。
 - 本次 run processed 67%：R／E MUST 顯示 67% 實色 + 33% 淺色，不得整格實心。
 - Summary 的 A 基線月份 MUST 由 A 分格聚合，不得使用 R 完成數。
-- Sidebar E badge 與時間表 E 本次未完成 MAY 不同，但 UI MUST 說明前者是 active 覆蓋 backlog。
+- Sidebar E badge MUST 與 summary E 未完成（E backlog）一致。
 
 ---
 
@@ -290,7 +294,7 @@ DOM 結構固定為：
   - 較舊的 archive 是 A／R 基線，A／R 填充比例使用 baseline `processed / total`；E 填充比例使用最新 archive 的 `processed / total`。
   - MUST NOT 把同月份所有 archive 的 total／processed 相加作為單一分格比例；這會把 delta archive 與基線 archive 重複計算，讓已完成月份看起來仍是淺色。
 - completed 月份仍必須是 100% 實心；只有最新 archive 尚未完成的 E 分格維持 25% 淺色或進度填充。
-- build mode MUST 以 active collection 的 archive 覆蓋補上本次 run 尚未處理的未變更月份；已完成分格必須是實心，不得因 `--fill:0%` 而顯示 25% 淺色。
+- build mode 先以 latest archive 的 active 覆蓋判斷是否有 E backlog：無 E backlog 的未變更月份，R／E 可使用 active 覆蓋顯示實心；仍有 E backlog 的月份，R／E MUST 使用本次 run 進度，尚未處理時維持 25% 淺色。
 - 每個 A／R／E 分格 MUST 明確套用 `is-complete`／`is-incomplete`／`is-empty`；不得只依 `--fill` 數值推導狀態。
 - A／R／E 的完成／未完成統計 MUST 以「月份」為單位，不得標示為 RAR 檔數；同一月份可能有多個 archive，內容未變更的更新檔案會沿用既有向量。
 
@@ -428,4 +432,6 @@ DOM class：
 | --- | --- | --- |
 | 1.1 | 2026-11-19 | 補入月份小格精確 DOM／CSS：12px 分格容器、1px gap、25% 未完成底、完成色進度填充、100% 實心；明訂實線 `is-current` 與虛線 `is-processing-current` 幾何、禁止外框／分格動畫，並新增 archive-level 進度與全站統一使用條款。 |
 | 1.2 | 2026-11-19 | 新增全站資料語意契約：完成只能由同一 series 的 processed/total 判定，基線只能是獨立 series，summary 與 cell 同源，backlog badge 分離；補 A／R／E 回歸案例與驗收。 |
+| 1.3 | 2026-11-19 | 補回無 E backlog 未變更月份的 active 覆蓋完成規則；有 E backlog 的 R／E 才使用本次 run 進度，修正舊月份被全部畫成淺色的回歸。 |
+| 1.4 | 2026-11-19 | 釐清適用範圍：categorical 下載／檢查狀態表不套用 25% 進度公式；判決匯入初次載入即標示 `is-processing-current` 虛線框；完成 partial 進度樣式一致性。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

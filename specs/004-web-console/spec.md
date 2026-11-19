@@ -52,7 +52,7 @@
 - Embedding strip 模型標籤 MUST 去除結尾 `:latest` 後再比較與顯示；同一「主機＋模型」只能有一個 chip，不得重複顯示 `bge-m3:latest` 與 `bge-m3`。
 - Canonical host API 為 `/api/llama-server/hosts`；舊 `/api/ollama/*` 只保留為隱藏 alias，MUST NOT 出現在 API 端點目錄。
 - 非執行中的索引 run MUST 以 `GET /api/processing/embedding-hosts` 顯示目前設定的即時測試，不得顯示上次 run 的舊主機清單。
-- 全站時間表一致性 MUST 同時包含視覺與資料語意：每個分格的 `is-complete` 只能由該 series 自己的 `processed / total` 判定，active collection 等基線只能是獨立 series，不得用來填充 R／E；summary MUST 與畫面 cell 同源，backlog badge MUST 分開計算。詳見 [`progress-visualization.md`](progress-visualization.md) §5.1。
+- 全站時間表一致性 MUST 同時包含視覺與資料語意：每個分格的 `is-complete` 只能由該 series 的完成條件判定；active collection 等基線只能是獨立 series。R／E 僅在 latest archive 已完整覆蓋、沒有 E backlog 的未變更月份，才可用 active 覆蓋顯示完成；仍有 E backlog 時 MUST 使用本次 run 進度。summary MUST 與畫面 cell 同源，backlog badge MUST 分開計算。詳見 [`progress-visualization.md`](progress-visualization.md) §5.1。
 
 ### Current Functional Surface（目前網站功能）
 
