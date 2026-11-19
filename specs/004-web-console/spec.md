@@ -49,6 +49,7 @@
 - 使用者可見名稱 MUST 為 `llama-server`；MUST NOT 出現 `Ollama`。
 - x570 MUST 為 chat／embedding／rerank 的 primary，MBP MUST 為 fallback；`11434` MUST NOT 作為目前 llama-server 端點。
 - Model Provider 與 processing host strip MUST 使用同一套主機狀態：選用實心「使用中」、其他可用淡色「可用」、失敗灰色「無法取得」。
+- Embedding strip 模型標籤 MUST 去除結尾 `:latest` 後再比較與顯示；同一「主機＋模型」只能有一個 chip，不得重複顯示 `bge-m3:latest` 與 `bge-m3`。
 - Canonical host API 為 `/api/llama-server/hosts`；舊 `/api/ollama/*` 只保留為隱藏 alias，MUST NOT 出現在 API 端點目錄。
 - 非執行中的索引 run MUST 以 `GET /api/processing/embedding-hosts` 顯示目前設定的即時測試，不得顯示上次 run 的舊主機清單。
 

@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical infrastructure + UI naming spec）
 
-**Version**: 1.1
+**Version**: 1.2
 
 **Last Updated**: 2026-11-19
 
@@ -194,12 +194,36 @@
 ### 5.3 其他頁面
 
 - `#/rag`：模型 strip 使用 `主機:模型`；目前使用中的 chip 實心心；hover 顯示 base URL；不得產生重複的同名主機 chip。
-- Embedding 主機 strip：模型標籤 MUST 先移除結尾的 `:latest` 再比較與顯示（例如 `x570:bge-m3:latest` 與 `x570:bge-m3` 視為同一模型）；不得因 legacy tag 後綴而多出一個重複的 `使用中` chip。
+- Embedding 主機 strip：模型標籤正規化與去重 MUST 依 5.4；不得因 legacy `:latest` 後綴而多出一個重複的 `使用中` chip。
 - `#/tests`：模型清單、測試文案、錯誤訊息使用 llama-server。
 - `#/performance`：索引階段 label 使用 `llama-server Embedding`。
 - `#/quality`／題庫：AI 生成文案與結果使用 llama-server。
 - `#/status`：架構圖、Model Provider、API 端點目錄與頁尾不得出現 Ollama。
 - 所有 workflow 的 stage key `ollama` 可保留為內部 key；label MUST 為 `llama-server 連線測試`。
+
+### 5.4 模型標籤正規化與去重
+
+Embedding strip 的「目前」標籤有兩個來源，必須先正規化再比較：
+
+| 來源 | 範例 | 說明 |
+| --- | --- | --- |
+| 法規／命令索引階段 `legal_qdrant.model.label` | `x570:bge-m3:latest` | 可能是舊 Ollama run 留下的 tag 後綴。 |
+| llama-server host registry `/v1/models` | `x570:bge-m3` | llama-server 回傳的 canonical alias。 |
+
+規則：
+
+- 正規化 MUST 去除字串前後空白，並只移除**結尾**的 `:latest`；其他 tag（例如 `gemma3:4b`）MUST 保持不變。
+- 「目前」標籤、host chip 標籤與切換確認訊息 MUST 使用正規化後的值。
+- 比較目前模型與 registry 選項時 MUST 使用正規化後的值；若相符，該選項直接標示 `is-active` 與「使用中」，不得再插入靜態 chip。
+- 只有在目前模型無法對應任何 registry 選項時，才允許插入**一個**靜態「使用中」chip，避免目前模型在清單中消失。
+- 去重 MUST 以「主機 + 正規化模型」為單位；不得合併不同主機，也不得合併不同 base model。
+
+| 目前標籤 | Registry 標籤 | 顯示結果 |
+| --- | --- | --- |
+| `x570:bge-m3:latest` | `x570:bge-m3` | 一個 `x570:bge-m3 使用中` chip。 |
+| `x570:bge-m3` | `x570:bge-m3` | 一個 `x570:bge-m3 使用中` chip。 |
+| `x570:bge-m3:latest` | `x570:bge-m3`、`mbp:bge-m3` | `x570:bge-m3 使用中` 與 `mbp:bge-m3` 兩個 chip，沒有重複。 |
+| `x570:gemma3:4b` | `x570:gemma3:4b` | tag `:4b` 不得被移除。 |
 
 ---
 
@@ -229,6 +253,9 @@
 - [ ] `#/status` Model Provider 表單預設 port 為 11437，標題為 `llama-server 主機與模型`。
 - [ ] `bge-m3` 在模型能力清單中為 `Embedding`，不得為 chat。
 - [ ] Embedding strip 的 `x570:bge-m3:latest` 與 registry 的 `x570:bge-m3` 正規化為同一 chip，不得重複顯示。
+- [ ] `x570:bge-m3:latest`、`x570:bge-m3`、`mbp:bge-m3` 同時存在時，畫面只有兩個 chip：x570 使用中、MBP 可用。
+- [ ] `gemma3:4b` 等非 `:latest` tag 不會被正規化破壞。
+- [ ] 目前模型不在 registry 時，只出現一個靜態「使用中」chip。
 - [ ] 完整 `uv run pytest`、`ruff check`、`node --check` 通過。
 
 ---
@@ -239,3 +266,4 @@
 | --- | --- | --- |
 | 1.0 | 2026-11-19 | 建立全站 llama-server canonical 規格：x570 primary／MBP fallback、OpenAI 相容端點、host registry、live probe、全站命名與 strip 顯示契約。 |
 | 1.1 | 2026-11-19 | Embedding strip 模型標籤正規化移除 `:latest`，避免 `bge-m3:latest` 與 `bge-m3` 重複顯示。 |
+| 1.2 | 2026-11-19 | 新增模型標籤正規化與去重專節：來源、只移除結尾 `:latest`、主機＋模型去重、靜態 chip fallback 與範例。 |
