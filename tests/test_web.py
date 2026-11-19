@@ -3388,3 +3388,26 @@ def test_progress_visualization_spec_is_canonical() -> None:
         "MUST NOT 使用 `judgment-month-pulse`",
     ):
         assert phrase in text
+
+
+def test_judgment_vector_index_spec_is_canonical() -> None:
+    spec = (
+        Path(__file__).resolve().parents[1]
+        / "specs"
+        / "009-judgment-vector-index"
+        / "spec.md"
+    )
+    text = spec.read_text(encoding="utf-8")
+    for phrase in (
+        "Qdrant 判決向量索引",
+        "latest archive",
+        "baseline archives",
+        "archiveUpdateRank",
+        "source_archive",
+        "unchanged",
+        "不是從 `raw_rar` 檔案清單選出",
+        "以月份計，不是 RAR 檔數",
+        "coverage-only",
+        "A／R／E",
+    ):
+        assert phrase in text

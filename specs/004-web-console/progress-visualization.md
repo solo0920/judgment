@@ -12,6 +12,8 @@
 
 **Related Specification**: [`pipeline-waterfall.md`](pipeline-waterfall.md)（時間軸、slot、展開明細與 hover 契約）
 
+**Feature Specification**: [`../009-judgment-vector-index/spec.md`](../009-judgment-vector-index/spec.md)（Qdrant 判決向量索引版本建置的 archive、A／R／E 與月份判斷機制）
+
 ---
 
 ## 1. 目的
