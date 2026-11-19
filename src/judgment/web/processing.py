@@ -1036,13 +1036,15 @@ def _month_are_state(
 def _index_month_are(
     runtime: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Build archive-aware A/R/E month states and summary counts.
+    """Build active-coverage backlog states for pending badges.
 
     The newest archive supplies E.  Older archives form the A/R baseline; a
-    single-archive month uses that archive for both.  Build-mode months may
-    already be covered by the active version even though the current run has
-    not reached them yet, so active coverage and current-run progress are
-    combined with ``max`` per archive instead of adding archive rows together.
+    single-archive month uses that archive for both.  This helper intentionally
+    combines active coverage with run progress with ``max`` so a month already
+    covered by the active collection is not counted as new backlog merely
+    because the current run has not reached it yet.  The processing timeline's
+    visible R/E blocks use current-run progress only and are computed in
+    ``processing.js``.
     """
 
     data = runtime or {}

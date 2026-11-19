@@ -601,8 +601,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "rag-model-buttons" in processing_js.text
     assert "llama-server 連線測試" in processing_js.text
     assert "normalizeModelLabel" in processing_js.text
-    assert "isProcessingArchive" in processing_js.text
-    assert "group.currentArchive === row.archive" in processing_js.text
+    assert "R 本次完成" in processing_js.text
+    assert "R 本次未完成" in processing_js.text
+    assert "E 本次完成" in processing_js.text
     assert "embeddingHostsProbe" in processing_js.text
     assert "refresh-index-hosts" in processing_js.text
     assert "目前設定即時測試" in processing_js.text
