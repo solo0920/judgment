@@ -591,7 +591,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "is-complete" in processing_js.text
     assert "is-pending" in processing_js.text
     assert "待更新（淺色）" in processing_js.text
-    assert "monthUpdate.import_stage_progress" in processing_js.text
+    assert "archive-level percent from the processing snapshot" in processing_js.text
     assert "is-current-frame" in processing_js.text
     assert "is-processing-frame" in processing_js.text
     assert "is-partial" in processing_js.text

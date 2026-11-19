@@ -7266,20 +7266,14 @@ export async function render(root) {
     }
     const monthUpdates = [];
     if (eventMonthKey && event.month_stages) {
-      const monthUpdate = {
+      // The importer event's percent is the global pipeline percent.  Month
+      // cells use the archive-level percent from the processing snapshot;
+      // mixing the two would make the same cell jump back and forth.
+      monthUpdates.push({
         month: eventMonthKey,
         import_stages: event.month_stages,
         import_overall: event.month_overall || "",
-      };
-      if (event.stage && event.percent !== undefined) {
-        const percent = Number(event.percent);
-        if (Number.isFinite(percent)) {
-          monthUpdate.import_stage_progress = {
-            [event.stage]: percent,
-          };
-        }
-      }
-      monthUpdates.push(monthUpdate);
+      });
     }
     let activeImport = null;
     if (event.type === "archive_started" && eventMonthKey) {

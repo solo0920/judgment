@@ -206,7 +206,8 @@ unfilled    = slotWidth - fillWidth
 
 - 初次載入：`processing` topic 推送完整 snapshot。
 - 後續更新：`processing` topic 的 live payload 更新 `workflow.progress` 與 `import_timeline_months`。
-- importer `progress` event 必須攜帶 `stage`、`current`、`total`、`percent`；前端轉成 `import_stage_progress[stage]`，讓月份方格立即更新。
+- importer `progress` event 的 `percent` 是**全域 pipeline percent**，只用於 workflow 階段進度，MUST NOT 寫入月份方格的 `import_stage_progress`；否則會與 processing snapshot 的 archive-level percent 使用不同分母，造成同一方格來回跳動。
+- 月份方格的 `import_stage_progress` MUST 只使用 processing snapshot／state 中該 archive 的 `current / total`。
 - 同一階段不得另建第二套事件格式或前端輪詢。
 
 ---
