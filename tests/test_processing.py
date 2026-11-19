@@ -46,6 +46,7 @@ from judgment.web.processing import (
     _import_month_timeline,
     _import_stage_progress,
     _merge_import_timeline_stages,
+    _index_month_are,
     _index_month_coverage_runtime,
     _index_month_counts,
     _pipeline_processes_from_ps,
@@ -1985,6 +1986,136 @@ def test_index_month_counts_use_latest_archive_for_e() -> None:
         "embed_complete": 1,
         "embed_incomplete": 2,
         "total_months": 3,
+    }
+
+
+def test_index_month_counts_build_mode_uses_active_archive_coverage() -> None:
+    runtime = {
+        "build_mode": "reuse",
+        "run_status": "running",
+        "months": [
+            {
+                "month": "201603",
+                "archive": "201603--(20260715Update).rar",
+                "total": 100,
+                "processed": 0,
+                "reused": 0,
+                "embedded": 0,
+            },
+            {
+                "month": "202603",
+                "archive": "202603--(20261016Update).rar",
+                "total": 1000,
+                "processed": 0,
+                "reused": 0,
+                "embedded": 0,
+            },
+            {
+                "month": "202603",
+                "archive": "202603--(20261116Update).rar",
+                "total": 7,
+                "processed": 0,
+                "reused": 0,
+                "embedded": 0,
+            },
+            {
+                "month": "202609",
+                "archive": "202609--(20261116Update).rar",
+                "total": 10,
+                "processed": 0,
+                "reused": 0,
+                "embedded": 0,
+            },
+        ],
+        "active_coverage": {
+            "201603": {"processed": 100, "total": 100},
+            "202603": {"processed": 1002, "total": 1007},
+            "202609": {"processed": 0, "total": 0},
+        },
+        "active_archive_coverage": {
+            "201603": {
+                "201603--(20260715Update).rar": {
+                    "processed": 100,
+                    "total": 100,
+                }
+            },
+            "202603": {
+                "202603--(20261016Update).rar": {
+                    "processed": 1000,
+                    "total": 1000,
+                },
+                "202603--(20261116Update).rar": {
+                    "processed": 2,
+                    "total": 7,
+                },
+            },
+            "202609": {},
+        },
+    }
+
+    assert _index_month_counts(runtime) == {
+        "active": 2,
+        "reuse_complete": 2,
+        "reuse_incomplete": 1,
+        "embed_complete": 1,
+        "embed_incomplete": 2,
+        "total_months": 3,
+    }
+    states = {item["month"]: item for item in _index_month_are(runtime)["months"]}
+    assert states["201603"]["reuse"]["complete"] is True
+    assert states["201603"]["embed"]["complete"] is True
+    assert states["202603"]["reuse"]["complete"] is True
+    assert states["202603"]["embed"]["complete"] is False
+    assert states["202603"]["embed"]["processed"] == 2
+    assert states["202603"]["embed"]["total"] == 7
+    assert states["202609"]["reuse"]["complete"] is False
+    assert states["202609"]["embed"]["complete"] is False
+
+
+def test_index_month_counts_build_mode_falls_back_to_month_coverage() -> None:
+    counts = _index_month_counts(
+        {
+            "build_mode": "reuse",
+            "months": [
+                {
+                    "month": "201603",
+                    "archive": "201603--(20260715Update).rar",
+                    "total": 100,
+                    "processed": 0,
+                    "reused": 0,
+                    "embedded": 0,
+                },
+                {
+                    "month": "202603",
+                    "archive": "202603--(20261016Update).rar",
+                    "total": 1000,
+                    "processed": 0,
+                    "reused": 0,
+                    "embedded": 0,
+                },
+                {
+                    "month": "202603",
+                    "archive": "202603--(20261116Update).rar",
+                    "total": 7,
+                    "processed": 0,
+                    "reused": 0,
+                    "embedded": 0,
+                },
+            ],
+            "active_coverage": {
+                "201603": {"processed": 100, "total": 100},
+                "202603": {"processed": 1000, "total": 1000},
+            },
+        }
+    )
+
+    assert counts == {
+        "active": 2,
+        "reuse_complete": 2,
+        "reuse_incomplete": 0,
+        "embed_complete": 1,
+        "embed_incomplete": 1,
+        "total_months": 2,
     }
 
 

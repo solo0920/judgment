@@ -1853,6 +1853,7 @@ def build_index_version(
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             active_coverage: Dict[str, Any] = {}
+            active_archive_coverage: Dict[str, Dict[str, Any]] = {}
             if active:
                 try:
                     coverage = index_month_coverage(
@@ -1865,20 +1866,44 @@ def build_index_version(
                             active.get("embedding_model") or model
                         ),
                     )
-                    active_coverage = {
-                        str(item["month"]): {
-                            "processed": int(item["processed"]),
-                            "total": int(item["total"]),
-                            "percent": item.get("percent"),
-                        }
-                        for item in coverage.get("months") or []
-                        if item.get("month")
-                    }
+                    for item in coverage.get("months") or []:
+                        month = str(item.get("month") or "")
+                        if not month:
+                            continue
+                        archive = str(item.get("archive") or "")
+                        processed = int(item.get("processed") or 0)
+                        total = int(item.get("total") or 0)
+                        month_entry = active_coverage.setdefault(
+                            month, {"processed": 0, "total": 0}
+                        )
+                        month_entry["processed"] += processed
+                        month_entry["total"] += total
+                        if archive:
+                            active_archive_coverage.setdefault(month, {})[
+                                archive
+                            ] = {
+                                "processed": processed,
+                                "total": total,
+                                "percent": item.get("percent"),
+                            }
+                    for month_entry in active_coverage.values():
+                        total = int(month_entry.get("total") or 0)
+                        month_entry["percent"] = (
+                            round(
+                                100.0
+                                * int(month_entry.get("processed") or 0)
+                                / total,
+                                1,
+                            )
+                            if total
+                            else None
+                        )
                 except Exception:
                     logger.warning(
                         "無法取得 active collection 月份覆蓋", exc_info=True
                     )
             runtime["active_coverage"] = active_coverage
+            runtime["active_archive_coverage"] = active_archive_coverage
             try:
                 with session_factory() as session:
                     first_pending = session.execute(

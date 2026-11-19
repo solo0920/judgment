@@ -3943,10 +3943,47 @@ function archiveUpdateRank(name) {
   return match ? Number(match[1]) : 0;
 }
 
+function indexMonthCoverageValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function indexMonthAreBlock(processed, total) {
+  const safeTotal = indexMonthCoverageValue(total);
+  const safeProcessed = indexMonthCoverageValue(processed);
+  if (safeTotal <= 0) {
+    return {
+      processed: 0,
+      total: 0,
+      percent: null,
+      fill: 0,
+      complete: false,
+      empty: true,
+      stateClass: "is-empty",
+    };
+  }
+  const percent = Math.min(
+    100,
+    Math.round((safeProcessed / safeTotal) * 1000) / 10,
+  );
+  const complete = safeProcessed >= safeTotal;
+  return {
+    processed: safeProcessed,
+    total: safeTotal,
+    percent,
+    fill: complete ? 100 : percent,
+    complete,
+    empty: false,
+    stateClass: complete ? "is-complete" : "is-incomplete",
+  };
+}
+
 function indexMonthGridMarkup(runtime) {
   const months = Array.isArray(runtime.months) ? runtime.months : [];
   const current = runtime.current || {};
+  const coverageOnly = Boolean(runtime.coverage_only);
   const activeCoverage = runtime.active_coverage || {};
+  const activeArchiveCoverage = runtime.active_archive_coverage || {};
   const groups = new Map();
   for (const item of months) {
     const key = String(item.month || "");
@@ -3959,45 +3996,26 @@ function indexMonthGridMarkup(runtime) {
         key,
         year: key.slice(0, 4),
         monthNo,
-        total: 0,
-        processed: 0,
-        activeTotal: 0,
-        activeProcessed: 0,
-        reused: 0,
-        embedded: 0,
+        rows: [],
         archives: [],
-        archiveRows: [],
         current: false,
         preparing: false,
+        currentArchive: "",
         jid: "",
       };
       groups.set(key, group);
     }
-    group.total += Number(item.total) || 0;
-    group.processed += Number(item.processed) || 0;
-    const activeItem = activeCoverage[key] || {};
-    group.activeTotal = Math.max(
-      group.activeTotal,
-      Number(activeItem.total) || 0,
-    );
-    group.activeProcessed = Math.max(
-      group.activeProcessed,
-      Number(activeItem.processed) || 0,
-    );
-    group.reused += Number(item.reused) || 0;
-    group.embedded += Number(item.embedded) || 0;
-    if (item.archive) group.archives.push(String(item.archive));
-    group.archiveRows.push({
-      archive: String(item.archive || ""),
-      total: Number(item.total) || 0,
-      processed: Number(item.processed) || 0,
+    const archive = String(item.archive || "");
+    group.rows.push({
+      archive,
+      total: indexMonthCoverageValue(item.total),
+      processed: indexMonthCoverageValue(item.processed),
     });
-    if (
-      current.month === key &&
-      (!current.archive || current.archive === item.archive)
-    ) {
+    if (archive) group.archives.push(archive);
+    if (current.month === key && (!current.archive || current.archive === archive)) {
       group.current = true;
       group.preparing = Boolean(current.preparing);
+      group.currentArchive = String(current.archive || archive || "");
       group.jid = String(current.jid || "");
     }
   }
@@ -4012,70 +4030,86 @@ function indexMonthGridMarkup(runtime) {
     embedIncomplete: 0,
   };
   for (const group of groups.values()) {
-    if (runtime.coverage_only && group.archiveRows.length) {
-      const rows = [...group.archiveRows].sort(
-        (left, right) =>
-          archiveUpdateRank(right.archive) -
-          archiveUpdateRank(left.archive),
-      );
-      const latest = rows[0];
-      const older = rows.slice(1);
-      const baselineRows = older.length ? older : [latest];
-      const baselineTotal = baselineRows.reduce(
-        (sum, row) => sum + row.total,
-        0,
-      );
-      const baselineProcessed = baselineRows.reduce(
-        (sum, row) => sum + row.processed,
-        0,
-      );
-      const baselineComplete =
-        baselineTotal > 0 && baselineProcessed >= baselineTotal;
-      const latestComplete =
-        latest.total > 0 && latest.processed >= latest.total;
-      group.coverage_only = true;
-      group.latestArchive = latest.archive;
-      group.latestTotal = latest.total;
-      group.latestProcessed = latest.processed;
-      group.baselineTotal = baselineTotal;
-      group.baselineProcessed = baselineProcessed;
-      group.currentComplete = latestComplete;
-      group.kind = older.length ? "embed" : "reuse";
-      if (baselineComplete) {
-        counts.active += 1;
-        counts.reuseComplete += 1;
-      } else {
-        counts.reuseIncomplete += 1;
-      }
-      if (latestComplete) counts.embedComplete += 1;
-      else counts.embedIncomplete += 1;
-      continue;
-    }
-    const currentComplete =
-      group.total > 0 && group.processed >= group.total;
-    const activeComplete =
-      group.activeTotal > 0 && group.activeProcessed >= group.activeTotal;
-    const kind =
-      group.embedded > 0
-        ? "embed"
-        : group.reused > 0
-          ? "reuse"
-          : activeComplete
-            ? "reuse"
-            : "embed";
-    group.kind = kind;
-    group.currentComplete = currentComplete;
-    if (kind === "reuse") {
-      if (currentComplete) counts.reuseComplete += 1;
-      else counts.reuseIncomplete += 1;
-    } else if (currentComplete) {
-      counts.embedComplete += 1;
+    const rows = [...group.rows].sort(
+      (left, right) =>
+        archiveUpdateRank(right.archive) - archiveUpdateRank(left.archive),
+    );
+    const latest = rows[0];
+    const baselineRows = rows.length > 1 ? rows.slice(1) : [latest];
+    const activeMonth = activeCoverage[group.key] || {};
+    const archiveMap = activeArchiveCoverage[group.key] || {};
+    let activeTotal = indexMonthCoverageValue(activeMonth.total);
+    let activeProcessed = indexMonthCoverageValue(activeMonth.processed);
+    const covered = new Map();
+    if (coverageOnly) {
+      for (const row of rows) covered.set(row.archive, row.processed);
     } else {
-      counts.embedIncomplete += 1;
+      let knownActive = 0;
+      for (const row of rows) {
+        const entry = archiveMap[row.archive];
+        if (!entry) continue;
+        const entryProcessed = indexMonthCoverageValue(entry.processed);
+        knownActive += entryProcessed;
+        covered.set(row.archive, Math.max(entryProcessed, row.processed));
+      }
+      let residual =
+        activeTotal > 0 ? Math.max(0, activeProcessed - knownActive) : 0;
+      const missingBaseline = baselineRows
+        .filter((row) => !archiveMap[row.archive])
+        .sort(
+          (left, right) =>
+            archiveUpdateRank(left.archive) - archiveUpdateRank(right.archive),
+        );
+      for (const row of missingBaseline) {
+        const take = Math.min(row.total, residual);
+        residual -= take;
+        covered.set(row.archive, Math.max(row.processed, take));
+      }
+      if (!archiveMap[latest.archive] && !covered.has(latest.archive)) {
+        covered.set(
+          latest.archive,
+          Math.max(latest.processed, Math.min(latest.total, residual)),
+        );
+      }
     }
-    if (activeComplete) {
+    const baselineTotal = baselineRows.reduce(
+      (sum, row) => sum + row.total,
+      0,
+    );
+    const baselineProcessed = baselineRows.reduce(
+      (sum, row) =>
+        sum + (covered.has(row.archive) ? covered.get(row.archive) : row.processed),
+      0,
+    );
+    const latestTotal = latest.total;
+    const latestProcessed = covered.has(latest.archive)
+      ? covered.get(latest.archive)
+      : latest.processed;
+    if (coverageOnly) {
+      activeTotal = rows.reduce((sum, row) => sum + row.total, 0);
+      activeProcessed = rows.reduce((sum, row) => sum + row.processed, 0);
+    } else if (activeTotal <= 0) {
+      activeTotal = baselineTotal;
+      activeProcessed = baselineProcessed;
+    }
+    const active = indexMonthAreBlock(activeProcessed, activeTotal);
+    const reuse = indexMonthAreBlock(baselineProcessed, baselineTotal);
+    const embed = indexMonthAreBlock(latestProcessed, latestTotal);
+    group.latest = latest;
+    group.baselineRows = baselineRows;
+    group.activeState = active;
+    group.reuseState = reuse;
+    group.embedState = embed;
+    group.reuseComplete = reuse.complete;
+    group.embedComplete = embed.complete;
+    if (reuse.complete) {
       counts.active += 1;
+      counts.reuseComplete += 1;
+    } else {
+      counts.reuseIncomplete += 1;
     }
+    if (embed.complete) counts.embedComplete += 1;
+    else counts.embedIncomplete += 1;
   }
   const years = [...new Set([...groups.values()].map((item) => item.year))].sort(
     (left, right) => right.localeCompare(left),
@@ -4089,168 +4123,75 @@ function indexMonthGridMarkup(runtime) {
         if (!group) {
           return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
         }
-        const coverageOnly = Boolean(group.coverage_only);
-        const percent = group.total
-          ? `${Math.min(
-              100,
-              Math.round((group.processed / group.total) * 1000) / 10,
-            )}%`
-          : "—";
-        const latestPercent =
-          coverageOnly && group.latestTotal
-            ? `${Math.min(
-                100,
-                Math.round(
-                  (group.latestProcessed / group.latestTotal) * 1000,
-                ) / 10,
-              )}%`
-            : "—";
         const active = group.current && runtime.run_status === "running";
-        const title = coverageOnly
-          ? [
-              `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
-              group.archives.join("、") || "—",
-              `最新 archive ${formatNumber(
-                group.latestProcessed,
-              )} / ${formatNumber(
-                group.latestTotal,
-              )}（${latestPercent}）`,
-              `A／R 基線 ${formatNumber(
-                group.baselineProcessed,
-              )} / ${formatNumber(group.baselineTotal)}`,
-              `E 新 embedding ${formatNumber(
-                group.latestProcessed,
-              )} / ${formatNumber(group.latestTotal)}`,
-              !group.currentComplete ? "待完成：E 新 embedding" : "",
-              group.current
-                ? group.preparing
-                  ? "準備索引"
-                  : active
-                    ? "目前索引"
-                    : "最後索引"
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" · ")
-          : [
-              `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
-              group.archives.join("、") || "—",
-              `新版本 ${formatNumber(group.processed)} / ${formatNumber(
-                group.total,
-              )}（${percent}）`,
-              group.activeTotal > 0
-                ? `active ${formatNumber(
-                    group.activeProcessed,
-                  )} / ${formatNumber(group.activeTotal)}（${(
-                    (100 * group.activeProcessed) /
-                    group.activeTotal
-                  ).toFixed(1)}%）`
-                : "",
-              `重用 ${formatNumber(group.reused)} · 新 embedding ${formatNumber(
-                group.embedded,
-              )}`,
-              !group.currentComplete
-                ? group.kind === "reuse"
-                  ? "待完成：R 既有向量重用"
-                  : "待完成：E 新 embedding"
-                : "",
-              group.current
-                ? `${
-                    active
-                      ? group.preparing
-                        ? "準備索引"
-                        : "目前索引"
-                      : "最後索引"
-                  }${group.jid ? ` · ${group.jid}` : ""}`
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" · ");
-        const activeFill = coverageOnly
-          ? group.baselineTotal > 0
-            ? Math.min(
-                100,
-                (100 * group.baselineProcessed) / group.baselineTotal,
-              )
-            : 0
-          : group.activeTotal > 0
-            ? Math.min(
-                100,
-                (100 * group.activeProcessed) / group.activeTotal,
-              )
-            : 0;
-        const reusedFill =
-          group.total > 0
-            ? Math.min(100, (100 * group.reused) / group.total)
-            : 0;
-        const embeddedFill =
-          group.total > 0
-            ? Math.min(100, (100 * group.embedded) / group.total)
-            : 0;
-        const completionFill =
-          group.total > 0
-            ? Math.min(100, (100 * group.processed) / group.total)
-            : 0;
-        const latestFill =
-          group.latestTotal > 0
-            ? Math.min(
-                100,
-                (100 * group.latestProcessed) / group.latestTotal,
-              )
-            : 0;
-        const reusedKindFill = coverageOnly
-          ? activeFill
-          : group.kind === "reuse"
-            ? group.currentComplete
-              ? 100
-              : Math.max(reusedFill, completionFill)
-            : reusedFill;
-        const embeddedKindFill = coverageOnly
-          ? latestFill
-          : group.kind === "embed"
-            ? group.currentComplete
-              ? 100
-              : Math.max(embeddedFill, completionFill)
-            : embeddedFill;
-        const reuseIncomplete = coverageOnly
-          ? group.baselineTotal > 0 &&
-            group.baselineProcessed < group.baselineTotal
-          : group.kind === "reuse" && !group.currentComplete;
-        const embedIncomplete = coverageOnly
-          ? !group.currentComplete
-          : group.kind === "embed" && !group.currentComplete;
+        const percentText = (state) =>
+          state.percent === null ? "—" : `${state.percent}%`;
+        const stateText = (state) =>
+          state.empty ? "無資料" : state.complete ? "完成" : "未完成";
+        const title = [
+          `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
+          group.archives.join("、") || "—",
+          `A 上一個正式版本 ${formatNumber(
+            group.activeState.processed,
+          )} / ${formatNumber(group.activeState.total)}（${percentText(
+            group.activeState,
+          )}）· ${stateText(group.activeState)}`,
+          `A／R 基線 ${formatNumber(
+            group.reuseState.processed,
+          )} / ${formatNumber(group.reuseState.total)}（${percentText(
+            group.reuseState,
+          )}）· ${stateText(group.reuseState)}`,
+          `E 新 embedding ${formatNumber(
+            group.embedState.processed,
+          )} / ${formatNumber(group.embedState.total)}（${percentText(
+            group.embedState,
+          )}）· ${stateText(group.embedState)}`,
+          !group.reuseComplete ? "待完成：R 既有向量重用" : "",
+          !group.embedComplete ? "待完成：E 新 embedding" : "",
+          group.current
+            ? `${group.preparing ? "準備索引" : active ? "目前索引" : "最後索引"}${
+                group.jid ? ` · ${group.jid}` : ""
+              }`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const blocks = [
+          ["is-active", group.activeState],
+          ["is-reuse", group.reuseState],
+          ["is-embed", group.embedState],
+        ]
+          .map(
+            ([colorClass, state]) =>
+              `<span class="index-month-block ${colorClass} ${state.stateClass}" style="--fill:${state.fill.toFixed(
+                1,
+              )}%"></span>`,
+          )
+          .join("");
         return `<td class="judgment-month index-month index-month-are processing-month is-neutral${
           active ? " is-current" : ""
         }" title="${escapeHtml(title)}"${
           active ? ' aria-current="true"' : ""
-        }><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true"><span class="index-month-block is-active" style="--fill:${activeFill.toFixed(
-          1,
-        )}%"></span><span class="index-month-block is-reuse${
-          reuseIncomplete ? " is-incomplete" : ""
-        }" style="--fill:${reusedKindFill.toFixed(
-          1,
-        )}%"></span><span class="index-month-block is-embed${
-          embedIncomplete ? " is-incomplete" : ""
-        }" style="--fill:${embeddedKindFill.toFixed(1)}%"></span></span></td>`;
+        }><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true">${blocks}</span></td>`;
       }).join("");
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
     .join("");
   return `<div class="judgment-months index-months">
     <div class="index-runtime-summary index-month-are-summary">
-      <span title="A：上一個正式版本既有覆蓋，不列入新版本完成數；以月份計。">A 基線月份 <strong class="mono">${formatNumber(
+      <span title="A：上一個正式版本基線 archive 已完成的月份數；不列入新版本完成數；以月份計。">A 基線月份 <strong class="mono">${formatNumber(
         counts.active,
       )}</strong></span>
-      <span title="R 完成：新版本已完成且該月全部沿用既有向量；以月份計。">R 完成月份 <strong class="mono">${formatNumber(
+      <span title="R 完成：基線 archive 已完成且可沿用的月份數；以月份計。">R 完成月份 <strong class="mono">${formatNumber(
         counts.reuseComplete,
       )}</strong></span>
-      <span title="R 未完成：該月仍需或正在進行既有向量重用；以月份計。">R 未完成月份 <strong class="mono">${formatNumber(
+      <span title="R 未完成：基線 archive 尚未完成的月份數；以月份計。">R 未完成月份 <strong class="mono">${formatNumber(
         counts.reuseIncomplete,
       )}</strong></span>
-      <span title="E 完成：新版本已完成且該月包含新 embedding；以月份計，不是 RAR 檔數。">E 完成月份 <strong class="mono">${formatNumber(
+      <span title="E 完成：latest archive 已完成的月份數，包含無需新 embedding 的未變更月份；以月份計，不是 RAR 檔數。">E 完成月份 <strong class="mono">${formatNumber(
         counts.embedComplete,
       )}</strong></span>
-      <span title="E 未完成：該月仍需或正在進行新 embedding；以月份計，不是 RAR 檔數。內容未變更的更新檔案會沿用既有向量。">E 未完成月份 <strong class="mono">${formatNumber(
+      <span title="E 未完成：latest archive 尚未完成的新 embedding 月份數；以月份計，不是 RAR 檔數。內容未變更的更新檔案會沿用既有向量。">E 未完成月份 <strong class="mono">${formatNumber(
         counts.embedIncomplete,
       )}</strong></span>
       <span>總月份 <strong class="mono">${formatNumber(groups.size)}</strong></span>
@@ -4281,7 +4222,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。尚無本次建置 run 時，A／R 顯示基線 archive 的覆蓋，E 顯示名稱中最新 archive 的新 embedding 進度；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數；同一月份可能有多個 archive，內容未變更的更新檔案會沿用既有向量，不會列為未完成。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看最新 archive、A／R 基線、E 進度與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。建置模式會以 active collection 的 archive 覆蓋補上目前 run 尚未處理但已完成的未變更月份，因此不需要新 embedding 的月份維持實心，不會顯示成 25% 淺色；真正缺少向量的 latest archive 才列為 E 未完成。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數；內容未變更的更新檔案會沿用既有向量，不會列為未完成。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
   </div>`;
 }
 
@@ -7470,6 +7411,14 @@ export async function render(root) {
           workflow.index_runtime?.active_coverage
         ) {
           nextRuntime.active_coverage = workflow.index_runtime.active_coverage;
+        }
+        if (
+          nextRuntime &&
+          !nextRuntime.active_archive_coverage &&
+          workflow.index_runtime?.active_archive_coverage
+        ) {
+          nextRuntime.active_archive_coverage =
+            workflow.index_runtime.active_archive_coverage;
         }
         workflow.index_runtime = nextRuntime;
       }

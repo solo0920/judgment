@@ -537,11 +537,14 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-month-are-summary" in processing_js.text
     assert "A／R／E 階段圖例" in processing_js.text
     assert "目前索引月份（實線）" in processing_js.text
-    assert "reusedKindFill" in processing_js.text
-    assert "embeddedKindFill" in processing_js.text
+    assert "indexMonthAreBlock" in processing_js.text
     assert "archiveUpdateRank" in processing_js.text
     assert "latestProcessed" in processing_js.text
     assert "baselineProcessed" in processing_js.text
+    assert "active_archive_coverage" in processing_js.text
+    assert "is-complete" in processing_js.text
+    assert "is-incomplete" in processing_js.text
+    assert "is-empty" in processing_js.text
     assert "coverage_only" in processing_js.text
     assert "lawIndexTimelinesMarkup" in processing_js.text
     assert "lawIndexTimelinesMarkup(workflow.index_timelines" in processing_js.text

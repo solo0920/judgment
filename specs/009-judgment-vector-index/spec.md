@@ -127,10 +127,16 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 
 有本次建置 run 時：
 
-- Runtime `months[].reused`、`embedded`、`processed`、`total` 來自 `_month_runtime_rows()` 與 run checkpoint。
-- `kind = embed`：E 分格使用該月 `processed / total` 或 `embedded / total`。
-- `kind = reuse`：R 分格使用該月 `processed / total` 或 `reused / total`。
-- `currentComplete = processed >= total`。
+- Runtime `months[].reused`、`embedded`、`processed`、`total` 來自 `_month_runtime_rows()` 與 run checkpoint；同一月份仍以 archive 分組，不得把新舊 archive 的 total／processed 相加。
+- 最新 archive 用於 E；較舊 archive 作為 A／R 基線；只有一個 archive 時 baseline = latest。
+- Build mode MUST 同時使用 active collection 的 archive 覆蓋（`runtime.active_archive_coverage`）與本次 run checkpoint：
+  - 每個 archive 的可沿用進度為 `max(active archive processed, current run processed)`。
+  - 未變更且 active collection 已 100% 覆蓋的 archive，即使本次 run 尚未走到該月份，也 MUST 視為已完成並顯示實心完成色，不得顯示 25% 淺色。
+  - 真正不在 active collection 或 active 尚未完成的 latest archive，才列為 E 未完成。
+  - 缺少 archive-level active 覆蓋時，得以 month-level `active_coverage` 回推：先滿足 baseline archives，再分配給 latest archive。
+  - 沒有 `active_coverage` 時，A／R 使用 baseline archive 的本次進度；不得顯示 0% 卻聲稱完成。
+- A 分格使用 active collection 的月份覆蓋；沒有 active 覆蓋時使用 baseline 進度。R 分格使用 baseline archives；E 分格使用 latest archive。
+- `currentComplete = processed >= total` 只用於本次 run 的月份進度；不得單獨用來判定未變更月份未完成。
 - `_merge_prior_index_runtime()` 會在續跑時恢復相同版本的 R／E counters；不得因 resume 把已完成月份顯示成空白。
 
 ### 5.3 Summary 統計
@@ -138,7 +144,7 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 - A 基線月份：baseline archive 完成的月份數。
 - R 完成月份：baseline archive 完成且可沿用的月份數。
 - R 未完成月份：baseline archive 尚未完成的月份數。
-- E 完成月份：latest archive 已完成的月份數。
+- E 完成月份：latest archive 已完成的月份數；包含無需新 embedding 的未變更月份。
 - E 未完成月份：latest archive 尚未完成的月份數。
 - 總月份：時間表涵蓋的 `YYYYMM` 月份數。
 
@@ -192,9 +198,11 @@ E 未完成 = 最新 archive 尚未完成的「月份數」
 
 - 中性底色，不使用整格綠／紅／灰狀態背景。
 - 三個分格：A（綠）、R（藍）、E（紫）。
+- 每個分格 MUST 明確標記 `is-complete`／`is-incomplete`／`is-empty`，不得只依 `--fill:0%` 的預設背景判定狀態。
 - 完成：100% 實心。
 - 未完成：25% 淺色 + 同色外框。
 - 執行中：完成色進度條，未完成區段 25% 淺色。
+- 無資料：淡色空心，不是 25% 淺色。
 - 目前索引月份：實線 accent 外框，padding 不使用狀態底色，無脈動動畫。
 
 ### 7.2 Summary
@@ -277,6 +285,8 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 
 - [ ] 同一月份多個 archive 時，E 只使用最新 archive，不與舊 archive 相加。
 - [ ] 舊 archive 作為 A／R 基線；已完成時為實心，不是 25% 淺色。
+- [ ] Build mode 下 active collection 已覆蓋的未變更月份為實心，不因本次 run 尚未處理而顯示 25% 淺色。
+- [ ] 每個 A／R／E 分格有明確完成／未完成／無資料狀態，不以 0% fill 的預設色冒充未完成。
 - [ ] 新 RAR 全部 unchanged 時，不會產生新的 E 未完成月份。
 - [ ] Summary 標籤明確標示「月份」，不是 RAR 檔數。
 - [ ] E 未完成月份會在 workflow 側邊清單、workflow 面板與全站「資料處理」導覽顯示更新 badge。
@@ -296,3 +306,4 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 | --- | --- | --- |
 | 1.0 | 2026-11-19 | 建立 Qdrant 判決向量索引版本建置規格：archive 最新版判斷、A／R／E 基線與 E 分離、unchange 判決不更新 source_archive、月份 vs RAR 檔數、coverage-only／build mode 與 UI 契約。 |
 | 1.1 | 2026-11-19 | 新增 E 未完成月份驅動的更新提示：workflow badge、workflow 面板更新按鈕、全站資料處理 sidebar badge、`index_pending_count` 與 snapshot 快取契約。 |
+| 1.2 | 2026-11-19 | 修正 build mode A／R／E：以 active archive 覆蓋補上本次 run 尚未處理的未變更月份，完成分格必為實心；A／R／E 分格加上明確完成／未完成／無資料狀態，不再以 0% fill 顯示 25% 淺色。 |

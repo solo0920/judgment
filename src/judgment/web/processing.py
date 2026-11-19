@@ -1011,17 +1011,42 @@ def _archive_update_rank(name: Any) -> int:
     return int(match.group(1)) if match else 0
 
 
-def _index_month_counts(
-    runtime: Optional[Dict[str, Any]],
-) -> Dict[str, int]:
-    """Count A/R/E month states exactly like the index month timeline.
+def _month_are_state(
+    processed: int, total: int
+) -> Dict[str, Any]:
+    """Return one A/R/E block state without inventing a percentage."""
 
-    Coverage-only months may contain several archive rows for one month.  The
-    newest archive supplies E, while older archives form the A/R baseline; the
-    rows must never be added together.
+    if total <= 0:
+        return {
+            "processed": 0,
+            "total": 0,
+            "percent": None,
+            "complete": False,
+            "empty": True,
+        }
+    return {
+        "processed": int(processed),
+        "total": int(total),
+        "percent": min(100.0, round(100.0 * processed / total, 1)),
+        "complete": processed >= total,
+        "empty": False,
+    }
+
+
+def _index_month_are(
+    runtime: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build archive-aware A/R/E month states and summary counts.
+
+    The newest archive supplies E.  Older archives form the A/R baseline; a
+    single-archive month uses that archive for both.  Build-mode months may
+    already be covered by the active version even though the current run has
+    not reached them yet, so active coverage and current-run progress are
+    combined with ``max`` per archive instead of adding archive rows together.
     """
 
-    months = (runtime or {}).get("months") or []
+    data = runtime or {}
+    months = data.get("months") or []
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for item in months:
         if not isinstance(item, dict):
@@ -1030,6 +1055,9 @@ def _index_month_counts(
         if not re.fullmatch(r"\d{6}", key):
             continue
         groups.setdefault(key, []).append(item)
+    coverage_only = bool(data.get("coverage_only"))
+    active_coverage = data.get("active_coverage") or {}
+    active_archive_coverage = data.get("active_archive_coverage") or {}
     counts = {
         "active": 0,
         "reuse_complete": 0,
@@ -1038,80 +1066,142 @@ def _index_month_counts(
         "embed_incomplete": 0,
         "total_months": len(groups),
     }
-    coverage_only = bool((runtime or {}).get("coverage_only"))
-    active_coverage = (runtime or {}).get("active_coverage") or {}
+    states: List[Dict[str, Any]] = []
     for key, rows in groups.items():
+        ordered = sorted(
+            rows,
+            key=lambda item: _archive_update_rank(item.get("archive")),
+            reverse=True,
+        )
+        latest = ordered[0]
+        baseline_rows = ordered[1:] or [latest]
+        active_month = active_coverage.get(key) or {}
+        active_month_total = (
+            int(active_month.get("total") or 0)
+            if isinstance(active_month, dict)
+            else 0
+        )
+        active_month_processed = (
+            int(active_month.get("processed") or 0)
+            if isinstance(active_month, dict)
+            else 0
+        )
+        archive_map = active_archive_coverage.get(key) or {}
+        if not isinstance(archive_map, dict):
+            archive_map = {}
+        covered: Dict[str, int] = {}
         if coverage_only:
-            ordered = sorted(
-                rows,
+            for item in ordered:
+                covered[str(item.get("archive") or "")] = int(
+                    item.get("processed") or 0
+                )
+        else:
+            known_active = 0
+            for item in ordered:
+                archive = str(item.get("archive") or "")
+                entry = archive_map.get(archive)
+                if not isinstance(entry, dict):
+                    continue
+                entry_processed = int(entry.get("processed") or 0)
+                known_active += entry_processed
+                covered[archive] = max(
+                    entry_processed, int(item.get("processed") or 0)
+                )
+            residual = (
+                max(0, active_month_processed - known_active)
+                if active_month_total > 0
+                else 0
+            )
+            missing_baseline = sorted(
+                [
+                    item
+                    for item in baseline_rows
+                    if str(item.get("archive") or "") not in archive_map
+                ],
                 key=lambda item: _archive_update_rank(item.get("archive")),
-                reverse=True,
             )
-            latest = ordered[0]
-            baseline_rows = ordered[1:] or [latest]
-            baseline_total = sum(
-                int(item.get("total") or 0) for item in baseline_rows
-            )
-            baseline_processed = sum(
-                int(item.get("processed") or 0) for item in baseline_rows
-            )
-            baseline_complete = (
-                baseline_total > 0
-                and baseline_processed >= baseline_total
-            )
-            latest_total = int(latest.get("total") or 0)
-            latest_processed = int(latest.get("processed") or 0)
-            latest_complete = (
-                latest_total > 0 and latest_processed >= latest_total
-            )
-            if baseline_complete:
-                counts["active"] += 1
-                counts["reuse_complete"] += 1
-            else:
-                counts["reuse_incomplete"] += 1
-            if latest_complete:
-                counts["embed_complete"] += 1
-            else:
-                counts["embed_incomplete"] += 1
-            continue
-        total = sum(int(item.get("total") or 0) for item in rows)
-        processed = sum(int(item.get("processed") or 0) for item in rows)
-        reused = sum(int(item.get("reused") or 0) for item in rows)
-        embedded = sum(int(item.get("embedded") or 0) for item in rows)
-        active_item = active_coverage.get(key) or {}
-        active_total = (
-            int(active_item.get("total") or 0)
-            if isinstance(active_item, dict)
-            else 0
+            for item in missing_baseline:
+                total = int(item.get("total") or 0)
+                take = min(total, residual)
+                residual -= take
+                covered[str(item.get("archive") or "")] = max(
+                    int(item.get("processed") or 0), take
+                )
+            latest_archive = str(latest.get("archive") or "")
+            if latest_archive not in archive_map and latest_archive not in covered:
+                total = int(latest.get("total") or 0)
+                covered[latest_archive] = max(
+                    int(latest.get("processed") or 0),
+                    min(total, residual),
+                )
+        baseline_total = sum(
+            int(item.get("total") or 0) for item in baseline_rows
         )
-        active_processed = (
-            int(active_item.get("processed") or 0)
-            if isinstance(active_item, dict)
-            else 0
+        baseline_processed = sum(
+            covered.get(
+                str(item.get("archive") or ""),
+                int(item.get("processed") or 0),
+            )
+            for item in baseline_rows
         )
-        current_complete = total > 0 and processed >= total
-        active_complete = active_total > 0 and active_processed >= active_total
-        kind = (
-            "embed"
-            if embedded > 0
-            else "reuse"
-            if reused > 0
-            else "reuse"
-            if active_complete
-            else "embed"
+        latest_total = int(latest.get("total") or 0)
+        latest_processed = covered.get(
+            str(latest.get("archive") or ""),
+            int(latest.get("processed") or 0),
         )
-        if kind == "reuse":
-            if current_complete:
-                counts["reuse_complete"] += 1
-            else:
-                counts["reuse_incomplete"] += 1
-        elif current_complete:
+        if coverage_only:
+            active_total = sum(
+                int(item.get("total") or 0) for item in ordered
+            )
+            active_processed = sum(
+                int(item.get("processed") or 0) for item in ordered
+            )
+        elif active_month_total > 0:
+            active_total = active_month_total
+            active_processed = active_month_processed
+        else:
+            active_total = baseline_total
+            active_processed = baseline_processed
+        active_state = _month_are_state(active_processed, active_total)
+        reuse_state = _month_are_state(
+            baseline_processed, baseline_total
+        )
+        embed_state = _month_are_state(latest_processed, latest_total)
+        if reuse_state["complete"]:
+            counts["active"] += 1
+            counts["reuse_complete"] += 1
+        else:
+            counts["reuse_incomplete"] += 1
+        if embed_state["complete"]:
             counts["embed_complete"] += 1
         else:
             counts["embed_incomplete"] += 1
-        if active_complete:
-            counts["active"] += 1
-    return counts
+        states.append(
+            {
+                "month": key,
+                "archives": [str(item.get("archive") or "") for item in ordered],
+                "latest_archive": str(latest.get("archive") or ""),
+                "baseline_total": baseline_total,
+                "baseline_processed": baseline_processed,
+                "latest_total": latest_total,
+                "latest_processed": latest_processed,
+                "active": active_state,
+                "reuse": reuse_state,
+                "embed": embed_state,
+                "reuse_complete": bool(reuse_state["complete"]),
+                "embed_complete": bool(embed_state["complete"]),
+            }
+        )
+    states.sort(key=lambda item: item["month"], reverse=True)
+    return {"months": states, "summary": counts}
+
+
+def _index_month_counts(
+    runtime: Optional[Dict[str, Any]],
+) -> Dict[str, int]:
+    """Count A/R/E month states exactly like the index month timeline."""
+
+    return _index_month_are(runtime)["summary"]
 
 
 def _index_month_coverage_runtime(
@@ -1193,12 +1283,36 @@ def _index_month_coverage_runtime(
 
 
 def _coverage_month_map(coverage: Dict[str, Any]) -> Dict[str, Any]:
+    """Aggregate coverage rows by month without dropping newer archives."""
+
     months: Dict[str, Any] = {}
     for item in coverage.get("months") or []:
         key = _timeline_month_key(item.get("month"))
         if not key:
             continue
-        months[key] = {
+        entry = months.setdefault(key, {"processed": 0, "total": 0})
+        entry["processed"] += int(item.get("processed") or 0)
+        entry["total"] += int(item.get("total") or 0)
+    for entry in months.values():
+        total = int(entry.get("total") or 0)
+        entry["percent"] = (
+            round(100.0 * int(entry.get("processed") or 0) / total, 1)
+            if total
+            else None
+        )
+    return months
+
+
+def _coverage_archive_map(coverage: Dict[str, Any]) -> Dict[str, Any]:
+    """Return active coverage keyed by month and source archive."""
+
+    months: Dict[str, Any] = {}
+    for item in coverage.get("months") or []:
+        month = _timeline_month_key(item.get("month"))
+        archive = str(item.get("archive") or "")
+        if not month or not archive:
+            continue
+        months.setdefault(month, {})[archive] = {
             "processed": int(item.get("processed") or 0),
             "total": int(item.get("total") or 0),
             "percent": item.get("percent"),
@@ -4819,14 +4933,21 @@ def build_processing_snapshot(
                 )
                 if coverage is not None:
                     index_runtime = coverage
-            elif not index_runtime.get("active_coverage"):
+            elif not index_runtime.get("active_coverage") or not index_runtime.get(
+                "active_archive_coverage"
+            ):
                 coverage = _index_month_coverage_runtime(
                     settings, session_factory, index
                 )
                 if coverage is not None:
-                    index_runtime["active_coverage"] = _coverage_month_map(
-                        coverage
-                    )
+                    if not index_runtime.get("active_coverage"):
+                        index_runtime["active_coverage"] = _coverage_month_map(
+                            coverage
+                        )
+                    if not index_runtime.get("active_archive_coverage"):
+                        index_runtime[
+                            "active_archive_coverage"
+                        ] = _coverage_archive_map(coverage)
             index_counts = _index_month_counts(index_runtime)
             index_pending_months = int(
                 index_counts.get("embed_incomplete") or 0

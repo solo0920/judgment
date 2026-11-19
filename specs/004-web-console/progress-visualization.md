@@ -264,6 +264,8 @@ DOM 結構固定為：
   - 較舊的 archive 是 A／R 基線，A／R 填充比例使用 baseline `processed / total`；E 填充比例使用最新 archive 的 `processed / total`。
   - MUST NOT 把同月份所有 archive 的 total／processed 相加作為單一分格比例；這會把 delta archive 與基線 archive 重複計算，讓已完成月份看起來仍是淺色。
 - completed 月份仍必須是 100% 實心；只有最新 archive 尚未完成的 E 分格維持 25% 淺色或進度填充。
+- build mode MUST 以 active collection 的 archive 覆蓋補上本次 run 尚未處理的未變更月份；已完成分格必須是實心，不得因 `--fill:0%` 而顯示 25% 淺色。
+- 每個 A／R／E 分格 MUST 明確套用 `is-complete`／`is-incomplete`／`is-empty`；不得只依 `--fill` 數值推導狀態。
 - A／R／E 的完成／未完成統計 MUST 以「月份」為單位，不得標示為 RAR 檔數；同一月份可能有多個 archive，內容未變更的更新檔案會沿用既有向量。
 
 ### 6.4 月份框線
@@ -338,6 +340,7 @@ DOM class：
 - 未完成區段使用 `transparent`、`--surface-3`、`--bg` 或灰色底。
 - 為 RAR／Parquet 使用一套進度邏輯，為 filter／PostgreSQL 使用另一套。
 - 把 `is-incomplete` 畫成透明空心框，但把 `is-pending` 畫成 25% 淺色。
+- 只用 `--fill:0%` 當作未完成訊號；完成分格即使尚未有 run 進度也必須是實心，無資料才使用 `is-empty`。
 - 等待階段沒有 bar，只留灰色 track，讓使用者無法看出階段顏色。
 - 以固定 `42%`、`48%`、`74%` 等淡色填充 running 區段。
 - 不同頁面各自複製一套 progress CSS。
