@@ -65,11 +65,16 @@ def classify(method: str, path: str) -> str:
 def build_policies(existing: dict[str, str], reset: bool) -> dict[str, str]:
     policies: dict[str, str] = {}
     for key in registered_route_keys(app.routes):
-        if not reset and key in existing:
+        if reset:
+            method, path = key.split(" ", 1)
+            policies[key] = classify(method, path)
+            continue
+        if key in existing:
             policies[key] = existing[key]
             continue
-        method, path = key.split(" ", 1)
-        policies[key] = classify(method, path)
+        # New routes are added at the strictest level.  A human must review
+        # and lower them explicitly; the generator never auto-publicizes.
+        policies[key] = "ADMIN_ONLY"
     return policies
 
 

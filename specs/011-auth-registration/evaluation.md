@@ -1,8 +1,8 @@
 # 使用者註冊、角色權限與公開存取評估報告
 
-**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修與 Phase 0 路由盤點骨架已實作，尚未重啟 production）
+**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修、Phase 0 路由政策與 binary 權限強制已實作，尚未重啟 production）
 
-**Version**: 0.4
+**Version**: 0.5
 
 **Last Updated**: 2026-11-19
 
@@ -24,7 +24,7 @@
 實作順序調整為：
 
 1. **Phase 0.1（已完成程式熱修，待重啟生效）**：production 關閉本機 admin bypass，避免 tunnel 遠端被視為 `127.0.0.1`。
-2. **Phase 0**：default-deny 路由分類、啟動時檢查、四角色測試矩陣、tunnel／client IP 規則、SSE topic 權限骨架。
+2. **Phase 0（部分完成）**：default-deny 路由分類、啟動時檢查、binary admin／anonymous 強制、client IP helper 已完成；四角色測試矩陣與 SSE topic 權限待補。
 3. **Phase 1**：`app_users`、角色／狀態、DB session 回查、Google pending 流程。
 4. **Phase 2**：管理員核准、audit、右上角 badge 與使用者管理頁。
 5. **Phase 3**：公開摘要、匿名唯讀、登入後詳細頁、前端 disabled。
@@ -253,8 +253,11 @@ Google OAuth callback
 ### 7.2 落地方式
 
 - 使用 FastAPI router／route 層級的 `Depends` 或 metadata 做分類，比 middleware 內比對 path 字串可靠；middleware 只作 defense-in-depth。
-- 分類表已建立於 `src/judgment/web/route_policies.json`，由 `scripts/generate_route_policies.py` 從 `app.routes` 產生；新路由預設 `ADMIN_ONLY`，人工再把該公開的往下調。
+- 分類表已建立於 `src/judgment/web/route_policies.json`，由 `scripts/generate_route_policies.py` 從 `app.routes` 產生；產生器只新增缺少的條目並預設 `ADMIN_ONLY`，不覆寫人工分類；`--reset` 才重建。
 - 應用啟動時檢查所有已註冊路由（含非 `/api`）都有分類；發現未分類路由 MUST 拒絕啟動，而不是只靠測試。目前已於 lifespan 啟動時驗證，並有測試涵蓋。
+- 路由刪除或改名後，分類表中的孤兒條目 MUST 被偵測；目前啟動驗證會列出 stale keys 並拒絕啟動，產生器會移除它們。
+- 路由列舉涵蓋 `APIRoute`、Starlette `Route`、`Mount`（含子 app 遞迴）與 `WebSocketRoute`；HEAD 正規化為 GET policy，OPTIONS 由 CORS 處理。
+- middleware 已依 policy 做 binary（admin／anonymous）強制；`AUTH_READ`／`ADMIN_ONLY` 等角色細分仍待 Phase 1 的 `app_users`。
 - 測試 MUST 列舉 `app.routes` 全部 method route，任何未分類路由讓測試失敗。
 - `PUBLIC_READ` 不得允許 POST／PATCH／DELETE；`PUBLIC_QUERY` 只允許明確列出的查詢 POST。
 - 本機 bypass 與 forwarded header 規則必須一起測試，避免 tunnel 遠端被當成本機。
@@ -286,11 +289,10 @@ Google OAuth callback
 
 ### 8.1 Client IP 與限流
 
-- 以單一 `client_ip()` helper 取得來源：
-  - 只有當請求來自已信任的 tunnel／loopback，且 origin 沒有對外直接暴露時，才信任 `CF-Connecting-IP`。
-  - 其他情況使用 `request.client.host`；不得直接信任任意 `X-Forwarded-For`。
-  - 若無法保證 origin 只接受 tunnel，MUST 以防火牆阻擋直連，並忽略 forwarded header。
-- Per-IP：每分鐘／每小時請求數、每日上限、併發數；IPv6 MUST 以 `/64` 為計數單位。
+- 以單一 `client_ip()` helper 取得來源。2026-11-19 已確認 production 由 `judgment-web` 以 `proxy_headers=True`、`FORWARDED_ALLOW_IPS=127.0.0.1`、bind `127.0.0.1` 啟動，uvicorn 會把 `request.client.host` 改寫成真實 client IP；因此 helper MUST 直接使用 `request.client.host`，不要再次解析 `CF-Connecting-IP` 或 `X-Forwarded-For`，避免第二個可偽造的信任邊界。
+  - 前提是 origin 只綁 loopback 且只接受 tunnel；若 bind 或 `FORWARDED_ALLOW_IPS` 改變，MUST 重新驗證。
+  - 若無法保證 origin 只接受 tunnel，MUST 以防火牆阻擋直連，並改回只使用 socket IP。
+- Per-IP：每分鐘／每小時請求數、每日上限、併發數；使用 `client_ip_key()` 將 IPv6 正規化為 `/64` bucket，避免逐位址繞過。
 - 已登入者除 IP 外另加 per-user 限制，避免共用出口 IP 誤傷正常使用者。
 - 全站每日 token 預算；匿名與已登入使用不同預算池，匿名池耗盡時登入者仍可使用；pending 共用匿名池或獨立小池。
 - 超限回 429，附 `Retry-After`。

@@ -190,7 +190,7 @@ from .processing import (
     build_processing_snapshot,
 )
 from .quality import build_quality_snapshot
-from .route_policy import validate_route_policies
+from .route_policy import policy_for, validate_route_policies
 from .query import (
     data_suggestions,
     get_judgment_detail,
@@ -308,14 +308,7 @@ def _incoming_request_id(request: Request) -> str:
     return uuid4().hex
 
 
-PUBLIC_API_PATHS = {
-    "/api/health",
-    "/api/home",
-    "/api/auth/me",
-    "/api/auth/logout",
-    "/api/auth/google/start",
-    "/api/auth/google/callback",
-}
+PUBLIC_POLICIES = {"PUBLIC_READ", "PUBLIC_QUERY", "PUBLIC_AUTH"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 SSE_TICKET_TTL_SECONDS = 120
 
@@ -1356,7 +1349,9 @@ def create_app(
                     "detail": "file:// origin 不可修改資料；請使用允許的 http(s) 來源。"
                 },
             )
-        if path in PUBLIC_API_PATHS:
+        policy_method = "GET" if request.method == "HEAD" else request.method
+        policy = policy_for(policy_method, path)
+        if policy in PUBLIC_POLICIES:
             return await call_next(request)
 
         current = app.state.settings

@@ -1,8 +1,8 @@
 # 權限、註冊與公開存取覆核意見執行報告
 
-**Status**: Phase 0 進行中（10 點意見已納入；外部驗證完成；路由盤點與啟動 fail-fast 骨架已實作）
+**Status**: Phase 0 進行中（10 點意見已納入；外部驗證完成；路由政策、binary 權限強制、client IP helper 已實作）
 
-**Version**: 0.2
+**Version**: 0.3
 
 **Last Updated**: 2026-11-19
 
@@ -100,7 +100,7 @@
 - 目前沒有觀察到「管理 API 對全網開放」的漏洞，**不需要緊急重啟**。
 - v7 copy 可以繼續；Phase 0.1 熱修仍待下次重啟生效。
 - 這個驗證不能取代 Phase 0 的 `client_ip()` 與 firewall 檢查；若之後 tunnel 設定改變，仍可能出現 bypass。
-- 因無法實際使用手機行動網路，本次是以公開 DNS＋Cloudflare 路徑驗證；若需要更高保證，應再從外部網路（手機熱點或遠端主機）重測一次。
+- bypass 判斷取決於應用看到的 socket 與 header，與請求從哪個網路發出無關；本次公開 DNS＋Cloudflare 路徑已足夠，不需要特地用手機熱點重測。重啟後應改測偽造 `CF-Connecting-IP`／`X-Forwarded-For` 與寫入方法。
 
 ### 2.7 公開 RAG 現況
 
@@ -111,6 +111,32 @@
 - 不需要在 Phase 4 前緊急加最小版限流。
 - 但「匿名可用 RAG」目前也還沒有真正上線；在 Phase 4 的最小限流、預算與 kill switch 完成前，不應直接把它加入 `PUBLIC_QUERY`。
 - 若產品要求先開放，MUST 先完成最小版 per-IP 限流＋每日預算＋kill switch，不能只靠 Cloudflare rate limit（Cloudflare 只能限請求數，不能限 token）。
+
+### 2.8 為什麼舊版回 401（已查明）
+
+不需要重啟即可從現有設定與 access log 回答：
+
+- `judgment-web` 以 `--host 127.0.0.1 --port 9200` 啟動。
+- `src/judgment/web/app.py` 的 CLI 使用 `uvicorn.run(..., proxy_headers=True, forwarded_allow_ips=args.forwarded_allow_ips)`，預設 `FORWARDED_ALLOW_IPS=127.0.0.1`。
+- `~/.cloudflared/config.yml` 的 ingress 是 `http://127.0.0.1:9200`。
+- `.run/web.log` 顯示 tunnel 請求的 client 是 `223.143.244.45` 或 `2001:b400:...`，本機請求才是 `127.0.0.1`。
+
+因此 cloudflared 雖然從 loopback 連入，uvicorn 已依 trusted proxy 設定把 `request.client.host` 改寫成真實 client IP；舊版 `_is_local_request()` 看到的是真實 IP，不是 loopback，所以回 401。這是**程式行為（uvicorn proxy headers）＋部署綁定 127.0.0.1** 的組合，不是 cloudflared socket 剛好不是 loopback。
+
+2026-11-19 另做偽造 header 實測：
+
+| 測試 | 結果 |
+| --- | --- |
+| `CF-Connecting-IP: 127.0.0.1` | Cloudflare 直接回 403（error code 1000，保護標頭） |
+| 只帶 `X-Forwarded-For: 127.0.0.1` | 應用回 401，access log 仍是真實 client IP |
+| `Forwarded: for=127.0.0.1` | 應用回 401 |
+| 無憑證 POST `/api/processing/stop` | 401 |
+| 無憑證 DELETE `/api/llama-server/hosts/1` | 401 |
+| 未知 `/api/does-not-exist` | 401（不洩漏路由存在與否） |
+
+**設計結論**：`client_ip()` 直接使用 `request.client.host`，不要再次解析 `CF-Connecting-IP` 或 `X-Forwarded-For`；否則會建立第二個可偽造的信任邊界。前提是維持「應用只綁 127.0.0.1」與 `FORWARDED_ALLOW_IPS=127.0.0.1`；任一改變就要重新驗證。已新增 `src/judgment/web/client_ip.py` 與 IPv6 `/64` bucket 測試。
+
+本機 loopback 仍可直接取得管理權（200），這個風險還在；熱修不是不急，而是不必在 copy 中途硬重啟。明確條件：**v7 copy 完成後的第一個維護窗口**重啟，讓 Phase 0.1 熱修生效；若在此之前有安全事件，才提前重啟。
 
 ---
 
@@ -143,20 +169,20 @@
 
 ### 3.3 第 3 點：tunnel 後 per-IP 限流
 
-**判定：接受，但前提是 production 網路拓樸要先確認。**
+**判定：接受；拓樸已從設定與 access log 查明。**
 
-- 新增單一 `client_ip()`：
-  - 只有在「請求來自信任的 tunnel／loopback」且「origin 沒有對外直接暴露」時，才採用 `CF-Connecting-IP`。
-  - 其他情況使用 `request.client.host`。
-  - 不直接信任任意 `X-Forwarded-For`；必要時忽略。
-- 以 IP hash 計數，不長期保存原始 IP。
-- 若 origin 可被直連，MUST 以防火牆／bind localhost 阻擋，否則 header 可被偽造。
-- Per-IP：分鐘／小時／日限制、併發限制；IPv6 MUST 以 `/64` 為計數單位，避免逐位址繞過。
+- 新增單一 `effective_client_ip()`：直接使用 `request.client.host`。
+  - 2026-11-19 已確認 `judgment-web` 使用 `proxy_headers=True`、`FORWARDED_ALLOW_IPS=127.0.0.1`、bind `127.0.0.1`，uvicorn 已把真實 client IP 寫入 `request.client.host`。
+  - 不要再次解析 `CF-Connecting-IP` 或 `X-Forwarded-For`，避免第二個可偽造的信任邊界。
+  - 前提是 origin 只綁 loopback 且只接受 tunnel；若 bind 或 `FORWARDED_ALLOW_IPS` 改變，MUST 重新驗證。
+- 以 IP hash 計數，不長期保存原始 IP；`client_ip_key()` 將 IPv6 正規化為 `/64` bucket。
+- 若 origin 可被直連，MUST 以防火牆／bind localhost 阻擋。
+- Per-IP：分鐘／小時／日限制、併發限制。
 - 已登入者除 IP 外另加 per-user 限制，避免校園／公司共用出口 IP 時誤傷正常使用者。
 - 全站每日 token 預算；匿名與已登入使用**不同預算池**，匿名池耗盡時登入者仍可使用。Pending 應共用匿名池或使用獨立小池，不能因「已登入」取得額外額度。
 - `/api/rag/query` 與 `/stream` 共用同一套限制。
 
-**驗收**：兩個不同 `CF-Connecting-IP` 不共用額度；偽造 `X-Forwarded-For` 不改變計數；IPv6 同一 `/64` 共用額度；直連 origin（若存在）被拒或使用 socket IP；429 含 `Retry-After`。
+**驗收**：偽造 `X-Forwarded-For`／`Forwarded` 不改變計數；`CF-Connecting-IP` 由 Cloudflare 保護；IPv6 同一 `/64` 共用額度；直連 origin（若存在）被拒；429 含 `Retry-After`。
 
 ---
 
@@ -306,19 +332,23 @@
 - `scripts/generate_route_policies.py` 從 `app.routes` 產生分類草稿；新路由預設 `ADMIN_ONLY`。
 - `src/judgment/web/route_policies.json` 已進版控，涵蓋 118 個 route key（114 個 method route＋docs／static）。
 - `src/judgment/web/route_policy.py` 提供載入、查詢、route 列舉與啟動驗證。
-- lifespan 啟動時驗證所有 route；未分類即拒絕啟動。
+- 路由列舉涵蓋 `APIRoute`、Starlette `Route`、`Mount`（含子 app 遞迴）與 `WebSocketRoute`；orphan key 會被偵測。
+- lifespan 啟動時驗證所有 route；未分類或 stale 即拒絕啟動。
 - `/docs/oauth2-redirect` 已納入 admin/session 保護。
 - 測試涵蓋 route policy 完整性、預設拒絕、`/docs/oauth2-redirect` 非公開。
+- **角色強制（二元版）**：middleware 依 route policy 區分 `PUBLIC_*` 與受保護 route；目前所有 Google session 仍視為 admin，anonymous 只能使用 `PUBLIC_READ`／`PUBLIC_AUTH`。
+- 受保護 route 的無憑證 GET／POST／DELETE 與未知 `/api/*` 均回 401；公開端點正常；`HEAD` 正規化為 `GET` policy。
+- `src/judgment/web/client_ip.py`：`effective_client_ip()` 使用 uvicorn 已解析的 `request.client.host`；`client_ip_key()` 提供 IPv6 `/64` bucket。
+- 實測偽造 `CF-Connecting-IP` 被 Cloudflare 403 阻擋；偽造 `X-Forwarded-For`／`Forwarded` 不改變 client IP。
 
 **待完成**：
 
-1. Route 層級政策與 default-deny middleware（目前完成分類與啟動驗證，尚未套用角色強制）。
-2. 四角色 × GET／POST／PATCH／DELETE 測試矩陣。
-3. `client_ip()` 與 tunnel 信任規則。
-4. SSE ticket 綁 role／topic；長連線重驗。
-5. `/api/docs`、`/api/openapi.json` production 關閉或 admin-only 的最終開關。
+1. 四角色（anonymous／pending／user／admin）× GET／POST／PATCH／DELETE 測試矩陣；目前只有 binary admin／anonymous。
+2. SSE ticket 綁 role／topic；長連線重驗。
+3. `/api/docs`、`/api/openapi.json` production 關閉或 admin-only 的最終開關。
+4. 將 `PUBLIC_READ`／`PUBLIC_AUTH` 與實際前端按鈕狀態對齊。
 
-**Gate**：未分類路由會讓啟動與測試失敗；anonymous 無法呼叫任何 admin API；pending 可使用公開頁與 RAG。
+**Gate**：未分類路由會讓啟動與測試失敗；anonymous 無法呼叫任何受保護 API；公開端點維持可用。
 
 ### Phase 1：使用者資料與 session（1.5–2 天）
 
@@ -432,26 +462,27 @@
 4. 若 RAG 已公開，Phase 4 前先做最小版限流；目前實測尚未公開。
 5. v7 copy 完成前不重啟 production；Phase 0.1 熱修待下次重啟生效。
 
-仍需在 Phase 0 執行時確認：
+後續仍需確認：
 
-- cloudflared 後 `request.client.host` 與 `CF-Connecting-IP` 的實際值。
-- origin 是否只能由 tunnel 存取；若可直連，先加 firewall／bind localhost。
-- 是否要在 Phase 0 就建立 `client_ip()` 與 tunnel 信任測試，或留到 Phase 4 前。
-- 匿名／登入預算池比例、per-IP 與 per-user 上限的最終數值。
+- `request.client.host` 與 header 行為已從設定與 access log 查明；重啟後再以偽造 header 做一次回歸。
+- origin 是否只能由 tunnel 存取；目前應用 bind `127.0.0.1`，仍需確認 firewall 沒有其他轉送。
+- 匿名／登入預算池比例、per-IP 與 per-user 上限的最終數值（Phase 4 前）。
 
 ---
 
 ## 9. 本次變更清單
 
 - `src/judgment/config.py`：新增 `allow_local_admin_bypass`。
-- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護；lifespan 啟動時檢查 route policy；`/docs/oauth2-redirect` 納入保護。
+- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護；lifespan 啟動時檢查 route policy；middleware 依 policy 區分公開／受保護 route；`/docs/oauth2-redirect` 納入保護。
 - `.env.example`：新增 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0`。
 - `src/judgment/web/route_policy.py`：route policy 載入、查詢與啟動驗證。
 - `src/judgment/web/route_policies.json`：118 個 route key 的分類表。
+- `src/judgment/web/client_ip.py`：`effective_client_ip()` 與 IPv6 `/64` bucket。
 - `scripts/generate_route_policies.py`：從 `app.routes` 產生／補齊分類草稿。
-- `tests/test_web.py`：新增 bypass 三情境、route policy 完整性、docs helper 保護測試。
+- `tests/test_web.py`：bypass 三情境、route policy 完整性、binary 權限邊界、docs helper 保護測試。
+- `tests/test_client_ip.py`：client IP 與 IPv6 `/64` bucket 測試。
 - `tests/test_processing.py`：測試 fixture 明確開啟 local bypass。
-- `specs/011-auth-registration/evaluation.md`：更新至 v0.3，納入 10 點與七項決策。
+- `specs/011-auth-registration/evaluation.md`：更新至 v0.5，納入 10 點、七項決策與實測結果。
 - `specs/011-auth-registration/execution-report.md`：本報告。
 
-> 本報告已涵蓋熱修、外部驗證與 Phase 0 的路由盤點骨架；角色強制、註冊 UI、公開摘要與公開 RAG 保護尚未實作，將依 Phase 0–5 繼續推進。
+> 本報告已涵蓋熱修、外部驗證、Phase 0 路由分類與 binary 權限強制；四角色、註冊 UI、公開摘要、SSE topic 與公開 RAG 保護尚未完成，將依 Phase 0–5 繼續推進。

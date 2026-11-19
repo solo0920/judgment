@@ -3074,6 +3074,46 @@ def test_local_admin_bypass_is_opt_in_and_ignores_forwarded_requests(
             assert forwarded.status_code == 401, headers
 
 
+def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+        # HEAD is normalized to the GET policy; FastAPI reports 405 for the
+        # unsupported method instead of falling through to auth denial.
+        assert client.head("/api/health").status_code == 405
+        assert client.get("/api/home").status_code == 200
+        assert client.get("/api/auth/me").status_code == 200
+        assert client.post("/api/auth/logout").status_code == 200
+
+        for method, path in (
+            ("GET", "/api/status"),
+            ("GET", "/api/processing"),
+            ("POST", "/api/processing/stop"),
+            ("DELETE", "/api/llama-server/hosts/1"),
+            ("POST", "/api/rag/query"),
+            ("GET", "/api/does-not-exist"),
+        ):
+            assert client.request(method, path).status_code == 401, (method, path)
+        assert client.head("/api/status").status_code == 401
+
+        assert (
+            client.get(
+                "/api/question-bank/stats",
+                headers={"X-Judgment-Admin-Token": "secret-token"},
+            ).status_code
+            == 200
+        )
+
+
 def test_route_policies_cover_every_registered_route(web_client) -> None:
     policies = load_route_policies()
     registered = set(registered_route_keys(web_client.app.routes))
@@ -3090,6 +3130,11 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
         validate_route_policies(
             web_client.app.routes,
             {"GET /api/health": "PUBLIC_READ"},
+        )
+    with pytest.raises(RuntimeError, match="stale route policies"):
+        validate_route_policies(
+            web_client.app.routes,
+            {**policies, "GET /api/removed": "ADMIN_ONLY"},
         )
 
 
