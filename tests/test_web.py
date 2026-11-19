@@ -572,7 +572,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "Time Remaining" in processing_js.text
     assert "停止後重新執行會重新計時" in processing_js.text
     assert "目前索引月份" in processing_js.text
-    assert "padding 不使用底色" in processing_js.text
+    assert "padding 不使用狀態底色" in processing_js.text
     assert "processingTimelineMetricsMarkup" in processing_js.text
     assert "FILE_TIMELINE_STAGE_PROGRESS_KEYS" in processing_js.text
     assert "processingTimelineProgressContext" in processing_js.text

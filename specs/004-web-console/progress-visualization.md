@@ -255,6 +255,9 @@ DOM 結構固定為：
 - 變數：`--block-color`、`--fill`
 - `--fill` 為完成比例；`100%` 時實心，未滿時上方為 25% 同色淺色。
 - `is-incomplete` 使用 25% 同色底 + 同色外框，不得使用與階段色無關的白色或灰色背景。
+- 月份 cell 本身 MUST 使用中性底色（`is-neutral`），不得再以整格綠／紅／灰背景表示完成／未完成；狀態只能由 A／R／E 三個分格與外框表達。
+- 目前索引月份以 `is-current` 實線外框標示，不得使用 padding 底色或脈動動畫。
+- coverage-only snapshot 沒有 per-version `reused`／`embedded` 計數時，MUST 以該月 `processed / total` 作為 active kind 的 R／E 填充比例；completed 月份仍必須是 100% 實心。
 
 ### 6.4 月份框線
 

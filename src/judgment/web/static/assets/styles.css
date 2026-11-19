@@ -18037,6 +18037,10 @@ a.qb-bank-law:hover {
   animation: none;
 }
 
+.index-month-are-summary {
+  padding: 0 0 8px;
+}
+
 .index-month-number {
   display: block;
   margin-bottom: 2px;

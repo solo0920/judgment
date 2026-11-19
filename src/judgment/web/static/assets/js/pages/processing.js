@@ -4015,13 +4015,6 @@ function indexMonthGridMarkup(runtime) {
             : "embed";
     group.kind = kind;
     group.currentComplete = currentComplete;
-    group.status = currentComplete
-      ? "green"
-      : group.processed > 0
-        ? "red"
-        : activeComplete
-          ? "green"
-          : "gray";
     if (kind === "reuse") {
       if (currentComplete) counts.reuseComplete += 1;
       else counts.reuseIncomplete += 1;
@@ -4102,52 +4095,81 @@ function indexMonthGridMarkup(runtime) {
           group.total > 0
             ? Math.min(100, (100 * group.embedded) / group.total)
             : 0;
+        const completionFill =
+          group.total > 0
+            ? Math.min(100, (100 * group.processed) / group.total)
+            : 0;
+        // Coverage-only snapshots have no per-version reused/embedded
+        // counters.  Use the month completion ratio for the active kind so a
+        // completed month still shows a solid R or E block.
+        const reusedKindFill =
+          group.kind === "reuse"
+            ? group.currentComplete
+              ? 100
+              : Math.max(reusedFill, completionFill)
+            : reusedFill;
+        const embeddedKindFill =
+          group.kind === "embed"
+            ? group.currentComplete
+              ? 100
+              : Math.max(embeddedFill, completionFill)
+            : embeddedFill;
         const reuseIncomplete =
           group.kind === "reuse" && !group.currentComplete;
         const embedIncomplete =
           group.kind === "embed" && !group.currentComplete;
-        return `<td class="judgment-month index-month index-month-are is-${
-          group.status
-        }${active ? " is-active" : ""}" title="${escapeHtml(
-          title,
-        )}"${active ? ' aria-current="true"' : ""}><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true"><span class="index-month-block is-active" style="--fill:${activeFill.toFixed(
+        return `<td class="judgment-month index-month index-month-are processing-month is-neutral${
+          active ? " is-current" : ""
+        }" title="${escapeHtml(title)}"${
+          active ? ' aria-current="true"' : ""
+        }><span class="index-month-number">${monthNo}</span><span class="index-month-blocks" aria-hidden="true"><span class="index-month-block is-active" style="--fill:${activeFill.toFixed(
           1,
         )}%"></span><span class="index-month-block is-reuse${
           reuseIncomplete ? " is-incomplete" : ""
-        }" style="--fill:${reusedFill.toFixed(
+        }" style="--fill:${reusedKindFill.toFixed(
           1,
         )}%"></span><span class="index-month-block is-embed${
           embedIncomplete ? " is-incomplete" : ""
-        }" style="--fill:${embeddedFill.toFixed(1)}%"></span></span></td>`;
+        }" style="--fill:${embeddedKindFill.toFixed(1)}%"></span></span></td>`;
       }).join("");
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
     .join("");
   return `<div class="judgment-months index-months">
-    <div class="judgment-months-meta">
-      <span class="badge badge-ok" title="A：上一個正式版本的既有覆蓋，不列入新版本完成數">A 基線 ${formatNumber(
+    <div class="index-runtime-summary index-month-are-summary">
+      <span title="A：上一個正式版本既有覆蓋，不列入新版本完成數">A 基線 <strong class="mono">${formatNumber(
         counts.active,
-      )}</span>
-      <span class="badge badge-reuse" title="R 完成：新版本已完成且該月全部沿用既有向量">R 完成 ${formatNumber(
+      )}</strong></span>
+      <span title="R 完成：新版本已完成且該月全部沿用既有向量">R 完成 <strong class="mono">${formatNumber(
         counts.reuseComplete,
-      )}</span>
-      <span class="badge badge-reuse-outline" title="R 未完成：該月仍需或正在進行既有向量重用">R 未完成 ${formatNumber(
+      )}</strong></span>
+      <span title="R 未完成：該月仍需或正在進行既有向量重用">R 未完成 <strong class="mono">${formatNumber(
         counts.reuseIncomplete,
-      )}</span>
-      <span class="badge badge-embed" title="E 完成：新版本已完成且該月包含新 embedding">E 完成 ${formatNumber(
+      )}</strong></span>
+      <span title="E 完成：新版本已完成且該月包含新 embedding">E 完成 <strong class="mono">${formatNumber(
         counts.embedComplete,
-      )}</span>
-      <span class="badge badge-embed-outline" title="E 未完成：該月仍需或正在進行新 embedding">E 未完成 ${formatNumber(
+      )}</strong></span>
+      <span title="E 未完成：該月仍需或正在進行新 embedding">E 未完成 <strong class="mono">${formatNumber(
         counts.embedIncomplete,
-      )}</span>
-      <span class="muted">共 ${formatNumber(groups.size)} 個月</span>
+      )}</strong></span>
+      <span>總月份 <strong class="mono">${formatNumber(groups.size)}</strong></span>
     </div>
-    <div class="index-month-are-key" aria-label="索引月份方格圖例">
-      <span><i class="is-active"></i>A · 上一個正式版本既有覆蓋，不列入本次新版本完成數</span>
-      <span><i class="is-reuse"></i>R · 本次沿用既有向量，不重新計算 embedding</span>
-      <span><i class="is-embed"></i>E · 本次重新計算 embedding 的新增或變更向量</span>
-      <span><i class="is-outline"></i>25% 淺色 · 該月 R／E 尚未完成</span>
-      <span><i class="is-current"></i>目前索引月份 · 以外框標示，padding 不使用底色</span>
+    <div class="index-month-are-key processing-timeline-legend" aria-label="A／R／E 階段圖例">
+      <span class="processing-timeline-legend-label">階段</span>
+      <span><i class="is-active"></i>A · 上一個正式版本既有覆蓋</span>
+      <span><i class="is-reuse"></i>R · 本次沿用既有向量</span>
+      <span><i class="is-embed"></i>E · 本次重新計算 embedding</span>
+    </div>
+    <div class="index-month-are-key processing-timeline-legend" aria-label="索引月份狀態圖例">
+      <span class="processing-timeline-legend-label">狀態</span>
+      <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
+      <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成（25% 淺色）</span>
+      <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
+      <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
+    </div>
+    <div class="index-month-are-key processing-timeline-legend" aria-label="索引月份框線圖例">
+      <span class="processing-timeline-legend-label">框線</span>
+      <span><i class="processing-timeline-swatch is-current-frame"></i>目前索引月份（實線）</span>
     </div>
     <div class="judgment-months-scroll">
       <table class="judgment-months-table index-months-table">
@@ -4158,7 +4180,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（重用向量）、E（新 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；填滿表示完成，25% 淺色表示該月 R／E 尚未完成。綠色：新版本完成或 active 基線；灰色：尚未開始；目前索引月份以外框標示，padding 不使用底色；空白：沒有該月份資料。滑鼠移到月份可查看新版本與 active 筆數、來源檔案與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看新版本與 active 筆數、來源檔案與目前案號。</p>
   </div>`;
 }
 
