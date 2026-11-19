@@ -249,6 +249,7 @@ Google OAuth callback
 - `/`、`/favicon.svg` 與前端靜態檔可公開，但必須在分類表中明列。
 - SSE `/api/events/stream` 列為 `AUTH_READ`，且 topic 需再授權。
 - Phase 4 完成前，`/api/rag/query` 與 `/api/rag/query/stream` 在 `route_policies.json` 暫列 `ADMIN_ONLY`；完成限流、預算與 kill switch 後才改成 `PUBLIC_QUERY`，避免分類先行造成意外公開。
+- 即使未來改成 `PUBLIC_QUERY`，公開狀態仍 MUST 同時受 `PUBLIC_RAG_ENABLED`（預設 `false`）控制；分類表不是唯一的開關。
 
 ### 7.2 落地方式
 
