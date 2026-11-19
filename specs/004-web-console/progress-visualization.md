@@ -257,7 +257,11 @@ DOM 結構固定為：
 - `is-incomplete` 使用 25% 同色底 + 同色外框，不得使用與階段色無關的白色或灰色背景。
 - 月份 cell 本身 MUST 使用中性底色（`is-neutral`），不得再以整格綠／紅／灰背景表示完成／未完成；狀態只能由 A／R／E 三個分格與外框表達。
 - 目前索引月份以 `is-current` 實線外框標示，不得使用 padding 底色或脈動動畫。
-- coverage-only snapshot 沒有 per-version `reused`／`embedded` 計數時，MUST 以該月 `processed / total` 作為 active kind 的 R／E 填充比例；completed 月份仍必須是 100% 實心。
+- coverage-only snapshot 沒有 per-version `reused`／`embedded` 計數時，MUST 依 archive 區分：
+  - 同一月份可能同時有多個 archive；MUST 以 archive 名稱中的更新日期選出最新 archive，作為 E 的計算來源。
+  - 較舊的 archive 是 A／R 基線，A／R 填充比例使用 baseline `processed / total`；E 填充比例使用最新 archive 的 `processed / total`。
+  - MUST NOT 把同月份所有 archive 的 total／processed 相加作為單一分格比例；這會把 delta archive 與基線 archive 重複計算，讓已完成月份看起來仍是淺色。
+- completed 月份仍必須是 100% 實心；只有最新 archive 尚未完成的 E 分格維持 25% 淺色或進度填充。
 
 ### 6.4 月份框線
 

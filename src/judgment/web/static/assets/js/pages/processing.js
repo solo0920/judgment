@@ -3938,6 +3938,11 @@ function indexRuntimeMonthProgress(runtime) {
   return { completed, total: totals.size };
 }
 
+function archiveUpdateRank(name) {
+  const match = String(name || "").match(/(\d{8})Update/i);
+  return match ? Number(match[1]) : 0;
+}
+
 function indexMonthGridMarkup(runtime) {
   const months = Array.isArray(runtime.months) ? runtime.months : [];
   const current = runtime.current || {};
@@ -3961,6 +3966,7 @@ function indexMonthGridMarkup(runtime) {
         reused: 0,
         embedded: 0,
         archives: [],
+        archiveRows: [],
         current: false,
         preparing: false,
         jid: "",
@@ -3981,6 +3987,11 @@ function indexMonthGridMarkup(runtime) {
     group.reused += Number(item.reused) || 0;
     group.embedded += Number(item.embedded) || 0;
     if (item.archive) group.archives.push(String(item.archive));
+    group.archiveRows.push({
+      archive: String(item.archive || ""),
+      total: Number(item.total) || 0,
+      processed: Number(item.processed) || 0,
+    });
     if (
       current.month === key &&
       (!current.archive || current.archive === item.archive)
@@ -4001,6 +4012,45 @@ function indexMonthGridMarkup(runtime) {
     embedIncomplete: 0,
   };
   for (const group of groups.values()) {
+    if (runtime.coverage_only && group.archiveRows.length) {
+      const rows = [...group.archiveRows].sort(
+        (left, right) =>
+          archiveUpdateRank(right.archive) -
+          archiveUpdateRank(left.archive),
+      );
+      const latest = rows[0];
+      const older = rows.slice(1);
+      const baselineRows = older.length ? older : [latest];
+      const baselineTotal = baselineRows.reduce(
+        (sum, row) => sum + row.total,
+        0,
+      );
+      const baselineProcessed = baselineRows.reduce(
+        (sum, row) => sum + row.processed,
+        0,
+      );
+      const baselineComplete =
+        baselineTotal > 0 && baselineProcessed >= baselineTotal;
+      const latestComplete =
+        latest.total > 0 && latest.processed >= latest.total;
+      group.coverage_only = true;
+      group.latestArchive = latest.archive;
+      group.latestTotal = latest.total;
+      group.latestProcessed = latest.processed;
+      group.baselineTotal = baselineTotal;
+      group.baselineProcessed = baselineProcessed;
+      group.currentComplete = latestComplete;
+      group.kind = older.length ? "embed" : "reuse";
+      if (baselineComplete) {
+        counts.active += 1;
+        counts.reuseComplete += 1;
+      } else {
+        counts.reuseIncomplete += 1;
+      }
+      if (latestComplete) counts.embedComplete += 1;
+      else counts.embedIncomplete += 1;
+      continue;
+    }
     const currentComplete =
       group.total > 0 && group.processed >= group.total;
     const activeComplete =
@@ -4039,49 +4089,91 @@ function indexMonthGridMarkup(runtime) {
         if (!group) {
           return `<td class="judgment-month is-empty"><span>${monthNo}</span></td>`;
         }
+        const coverageOnly = Boolean(group.coverage_only);
         const percent = group.total
           ? `${Math.min(
               100,
               Math.round((group.processed / group.total) * 1000) / 10,
             )}%`
           : "—";
+        const latestPercent =
+          coverageOnly && group.latestTotal
+            ? `${Math.min(
+                100,
+                Math.round(
+                  (group.latestProcessed / group.latestTotal) * 1000,
+                ) / 10,
+              )}%`
+            : "—";
         const active = group.current && runtime.run_status === "running";
-        const title = [
-          `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
-          group.archives.join("、") || "—",
-          `新版本 ${formatNumber(group.processed)} / ${formatNumber(
-            group.total,
-          )}（${percent}）`,
-          group.activeTotal > 0
-            ? `active ${formatNumber(group.activeProcessed)} / ${formatNumber(
-                group.activeTotal,
-              )}（${(
-                (100 * group.activeProcessed) /
-                group.activeTotal
-              ).toFixed(1)}%）`
-            : "",
-          `重用 ${formatNumber(group.reused)} · 新 embedding ${formatNumber(
-            group.embedded,
-          )}`,
-          !group.currentComplete
-            ? group.kind === "reuse"
-              ? "待完成：R 既有向量重用"
-              : "待完成：E 新 embedding"
-            : "",
-          group.current
-            ? `${
-                active
-                  ? group.preparing
-                    ? "準備索引"
-                    : "目前索引"
-                  : "最後索引"
-              }${group.jid ? ` · ${group.jid}` : ""}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        const activeFill =
-          group.activeTotal > 0
+        const title = coverageOnly
+          ? [
+              `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
+              group.archives.join("、") || "—",
+              `最新 archive ${formatNumber(
+                group.latestProcessed,
+              )} / ${formatNumber(
+                group.latestTotal,
+              )}（${latestPercent}）`,
+              `A／R 基線 ${formatNumber(
+                group.baselineProcessed,
+              )} / ${formatNumber(group.baselineTotal)}`,
+              `E 新 embedding ${formatNumber(
+                group.latestProcessed,
+              )} / ${formatNumber(group.latestTotal)}`,
+              !group.currentComplete ? "待完成：E 新 embedding" : "",
+              group.current
+                ? group.preparing
+                  ? "準備索引"
+                  : active
+                    ? "目前索引"
+                    : "最後索引"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : [
+              `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
+              group.archives.join("、") || "—",
+              `新版本 ${formatNumber(group.processed)} / ${formatNumber(
+                group.total,
+              )}（${percent}）`,
+              group.activeTotal > 0
+                ? `active ${formatNumber(
+                    group.activeProcessed,
+                  )} / ${formatNumber(group.activeTotal)}（${(
+                    (100 * group.activeProcessed) /
+                    group.activeTotal
+                  ).toFixed(1)}%）`
+                : "",
+              `重用 ${formatNumber(group.reused)} · 新 embedding ${formatNumber(
+                group.embedded,
+              )}`,
+              !group.currentComplete
+                ? group.kind === "reuse"
+                  ? "待完成：R 既有向量重用"
+                  : "待完成：E 新 embedding"
+                : "",
+              group.current
+                ? `${
+                    active
+                      ? group.preparing
+                        ? "準備索引"
+                        : "目前索引"
+                      : "最後索引"
+                  }${group.jid ? ` · ${group.jid}` : ""}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
+        const activeFill = coverageOnly
+          ? group.baselineTotal > 0
+            ? Math.min(
+                100,
+                (100 * group.baselineProcessed) / group.baselineTotal,
+              )
+            : 0
+          : group.activeTotal > 0
             ? Math.min(
                 100,
                 (100 * group.activeProcessed) / group.activeTotal,
@@ -4099,25 +4191,34 @@ function indexMonthGridMarkup(runtime) {
           group.total > 0
             ? Math.min(100, (100 * group.processed) / group.total)
             : 0;
-        // Coverage-only snapshots have no per-version reused/embedded
-        // counters.  Use the month completion ratio for the active kind so a
-        // completed month still shows a solid R or E block.
-        const reusedKindFill =
-          group.kind === "reuse"
+        const latestFill =
+          group.latestTotal > 0
+            ? Math.min(
+                100,
+                (100 * group.latestProcessed) / group.latestTotal,
+              )
+            : 0;
+        const reusedKindFill = coverageOnly
+          ? activeFill
+          : group.kind === "reuse"
             ? group.currentComplete
               ? 100
               : Math.max(reusedFill, completionFill)
             : reusedFill;
-        const embeddedKindFill =
-          group.kind === "embed"
+        const embeddedKindFill = coverageOnly
+          ? latestFill
+          : group.kind === "embed"
             ? group.currentComplete
               ? 100
               : Math.max(embeddedFill, completionFill)
             : embeddedFill;
-        const reuseIncomplete =
-          group.kind === "reuse" && !group.currentComplete;
-        const embedIncomplete =
-          group.kind === "embed" && !group.currentComplete;
+        const reuseIncomplete = coverageOnly
+          ? group.baselineTotal > 0 &&
+            group.baselineProcessed < group.baselineTotal
+          : group.kind === "reuse" && !group.currentComplete;
+        const embedIncomplete = coverageOnly
+          ? !group.currentComplete
+          : group.kind === "embed" && !group.currentComplete;
         return `<td class="judgment-month index-month index-month-are processing-month is-neutral${
           active ? " is-current" : ""
         }" title="${escapeHtml(title)}"${
@@ -4180,7 +4281,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看新版本與 active 筆數、來源檔案與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。尚無本次建置 run 時，A／R 顯示基線 archive 的覆蓋，E 顯示名稱中最新 archive 的新 embedding 進度；新舊 archive 不會相加。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看最新 archive、A／R 基線、E 進度與目前案號。</p>
   </div>`;
 }
 

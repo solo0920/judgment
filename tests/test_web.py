@@ -533,6 +533,15 @@ def test_static_console_is_served(web_client) -> None:
     assert "金融佔比" in processing_js.text
     assert "index-month-are" in processing_js.text
     assert "index-month-are-key" in processing_js.text
+    assert "index-month-are-summary" in processing_js.text
+    assert "A／R／E 階段圖例" in processing_js.text
+    assert "目前索引月份（實線）" in processing_js.text
+    assert "reusedKindFill" in processing_js.text
+    assert "embeddedKindFill" in processing_js.text
+    assert "archiveUpdateRank" in processing_js.text
+    assert "latestProcessed" in processing_js.text
+    assert "baselineProcessed" in processing_js.text
+    assert "coverage_only" in processing_js.text
     assert "lawIndexTimelinesMarkup" in processing_js.text
     assert "lawIndexTimelinesMarkup(workflow.index_timelines" in processing_js.text
     assert "下載時間表" in processing_js.text
