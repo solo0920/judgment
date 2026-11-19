@@ -2027,23 +2027,15 @@ def build_index_version(
             try:
                 with session_factory() as session:
                     first_pending = session.execute(
-                        select(
-                            JudgmentDocument.issue_month,
-                            JudgmentDocument.source_archive,
-                            JudgmentDocument.jid,
-                            JudgmentDocument.title,
-                            JudgmentDocument.court_normalized,
-                            JudgmentDocument.jdate,
+                        _version_batch_statement(
+                            last_id=last_id,
+                            last_month=last_month,
+                            month_order=month_order,
+                            max_judgment_id=int(
+                                snapshot.get("max_judgment_id") or 0
+                            ),
+                            batch_size=1,
                         )
-                        .where(
-                            JudgmentDocument.id > last_id,
-                            JudgmentDocument.id
-                            <= int(snapshot.get("max_judgment_id") or 0),
-                            JudgmentDocument.full_text != "",
-                            JudgmentDocument.is_current.is_(True),
-                        )
-                        .order_by(JudgmentDocument.id)
-                        .limit(1)
                     ).mappings().first()
                 if first_pending is not None:
                     runtime["current"] = {
@@ -2463,7 +2455,7 @@ def build_index_version(
                 version_id=version_id,
                 indexed_count=indexed,
                 last_indexed_id=last_id,
-                last_indexed_month=last_month,
+                last_indexed_month=last_month if month_order else "",
                 embedding_dimension=dimensions,
             )
             if (
@@ -2619,7 +2611,7 @@ def build_index_version(
             version_id=version_id,
             indexed_count=indexed,
             last_indexed_id=last_id,
-            last_indexed_month=last_month,
+            last_indexed_month=last_month if month_order else "",
             embedding_dimension=dimensions,
         )
         if state is not None and state_run_id is not None:

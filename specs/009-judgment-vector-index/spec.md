@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.13
+**Version**: 1.14
 
 **Last Updated**: 2026-11-19
 
@@ -67,6 +67,7 @@
 - 續跑 MUST 使用 `(last_indexed_month, last_indexed_id)` 作為 cursor；不得只使用 `last_indexed_id`，否則切換月份排序後會漏掉月份。
 - 既有 in-flight 版本若只有 `last_indexed_id`、沒有 `last_indexed_month`，MAY 繼續使用原本的 ID 順序完成該版本；新版本 MUST 使用月份順序。`index_runtime.scan_order` MUST 提供 `issue_month` 或 `id` 讓 UI 說明目前 run 的順序。
 - `index_runtime.current.month` 是目前批次最後一筆判決所屬月份；綠框只表示目前批次所在月份，不代表其他月份已完成。新 run 的綠框會由舊月份往新月份移動。
+- 準備中（copy／probe 尚未進入第一批）時，`current` 預覽 MUST 使用與實際批次相同的掃描順序與 cursor；月份排序 run MUST NOT 用 ID 順序挑第一個 pending 月份，否則會短暫顯示錯誤月份。
 - 索引 summary MUST 顯示掃描順序：`issue_month` 顯示「月份（舊→新）」，舊 in-flight `id` 顯示「ID（舊 run）」，讓使用者知道目前 run 是否已套用新順序。
 - 若未來調整排序，MUST 同步更新 cursor／resume、runtime payload、UI 說明與測試，不得只改 SQL 排序。
 
@@ -392,3 +393,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.11 | 2026-11-19 | 移除索引 runtime 卡片重複的 llama-server 主機 strip；主機／模型只保留執行資訊卡片的 Embedding selector，live probe endpoint 同步移除。 |
 | 1.12 | 2026-11-19 | 明訂索引掃描依 JudgmentDocument.id（匯入順序），不是月份順序；綠框只標示目前批次月份，並在 UI 加上對應提示。 |
 | 1.13 | 2026-11-19 | 新索引版本改為依 issue_month 由舊到新掃描，同月依 id；新增 last_indexed_month cursor 與 runtime.scan_order；舊 in-flight 版本保留原 ID 順序完成。 |
+| 1.14 | 2026-11-19 | 準備中 current 預覽改用與實際批次相同的月份 cursor，修正 v7 copy 期間綠框停在 202601 的預覽錯誤。 |
