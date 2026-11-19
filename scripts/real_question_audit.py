@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -108,12 +109,24 @@ def main() -> int:
     parser.add_argument(
         "--csv-output", default=".run/real_question_audit.csv"
     )
+    parser.add_argument(
+        "--admin-token",
+        default=os.getenv("JUDGMENT_ADMIN_TOKEN", "").strip(),
+        help="管理權杖；本機 bypass 關閉後 RAG API 需要此權杖。",
+    )
     args = parser.parse_args()
+    headers = (
+        {"X-Judgment-Admin-Token": args.admin_token}
+        if args.admin_token
+        else {}
+    )
 
     cases = _load_cases(Path(args.questions))
     results: List[Dict[str, Any]] = []
     with httpx.Client(
-        base_url=args.api_base.rstrip("/"), timeout=args.timeout
+        base_url=args.api_base.rstrip("/"),
+        timeout=args.timeout,
+        headers=headers,
     ) as client:
         for case in cases:
             question = str(case.get("question") or "").strip()

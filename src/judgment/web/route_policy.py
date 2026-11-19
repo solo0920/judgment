@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Sequence
+from typing import Any, Dict, Iterable, Mapping, Pattern, Sequence
 
 from starlette.routing import Mount, WebSocketRoute
 
@@ -71,13 +72,58 @@ def cached_route_policies() -> Dict[str, str]:
     return load_route_policies()
 
 
+def _pattern_matcher(pattern: str) -> Pattern[str]:
+    parts = re.split(r"(\{[^}]+\})", pattern)
+    expression = "".join(
+        "[^/]+" if part.startswith("{") and part.endswith("}") else re.escape(part)
+        for part in parts
+    )
+    return re.compile(f"^{expression}$")
+
+
+def _build_matchers(
+    table: Mapping[str, str],
+) -> Dict[str, list[tuple[str, Pattern[str], str]]]:
+    matchers: Dict[str, list[tuple[str, Pattern[str], str]]] = {}
+    for key, category in table.items():
+        method, _, pattern = key.partition(" ")
+        if method in {"MOUNT", "WS"} or not pattern.startswith("/"):
+            continue
+        matchers.setdefault(method, []).append(
+            (pattern, _pattern_matcher(pattern), category)
+        )
+    for entries in matchers.values():
+        # More specific (longer) patterns win when both match.
+        entries.sort(key=lambda item: len(item[0]), reverse=True)
+    return matchers
+
+
+@lru_cache(maxsize=1)
+def cached_route_matchers() -> Dict[str, list[tuple[str, Pattern[str], str]]]:
+    return _build_matchers(cached_route_policies())
+
+
 def policy_for(
     method: str,
     path: str,
     policies: Mapping[str, str] | None = None,
 ) -> str:
+    normalized_method = str(method or "").upper()
+    if normalized_method == "HEAD":
+        normalized_method = "GET"
     table = policies if policies is not None else cached_route_policies()
-    return table.get(route_key(method, path), DEFAULT_CATEGORY)
+    exact = table.get(route_key(normalized_method, path))
+    if exact is not None:
+        return exact
+    matchers = (
+        _build_matchers(table)
+        if policies is not None
+        else cached_route_matchers()
+    )
+    for _pattern, matcher, category in matchers.get(normalized_method, []):
+        if matcher.match(path):
+            return category
+    return DEFAULT_CATEGORY
 
 
 def registered_route_keys(

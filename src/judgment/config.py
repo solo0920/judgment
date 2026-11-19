@@ -49,6 +49,7 @@ class Settings:
     user_agent: str = "judgment-law-downloader/0.1"
     log_level: str = "INFO"
     auto_create_schema: bool = True
+    disable_background_tasks: bool = False
     database_pool_size: int = 20
     database_max_overflow: int = 20
     database_pool_timeout_seconds: float = 10.0
@@ -66,6 +67,7 @@ class Settings:
     forwarded_allow_ips: str = "127.0.0.1"
     admin_token: str = ""
     allow_local_admin_bypass: bool = False
+    public_rag_enabled: bool = False
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
@@ -201,6 +203,9 @@ class Settings:
             user_agent=os.getenv("USER_AGENT", "judgment-law-downloader/0.1"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             auto_create_schema=_env_bool("AUTO_CREATE_SCHEMA", True),
+            disable_background_tasks=_env_bool(
+                "JUDGMENT_DISABLE_BACKGROUND_TASKS", False
+            ),
             database_pool_size=_env_int("DATABASE_POOL_SIZE", 20),
             database_max_overflow=_env_int("DATABASE_MAX_OVERFLOW", 20),
             database_pool_timeout_seconds=_env_float(
@@ -231,6 +236,7 @@ class Settings:
             allow_local_admin_bypass=_env_bool(
                 "JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS", False
             ),
+            public_rag_enabled=_env_bool("PUBLIC_RAG_ENABLED", False),
             google_oauth_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
             google_oauth_client_secret=os.getenv(
                 "GOOGLE_CLIENT_SECRET", ""

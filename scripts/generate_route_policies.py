@@ -17,9 +17,8 @@ PUBLIC_AUTH = {
     "GET /api/auth/google/callback",
     "POST /api/auth/logout",
 }
-AUTH_ONLY = {
-    "POST /api/auth/sse-ticket",
-}
+AUTH_ONLY: set[str] = set()
+AUTH_READ_ACTIONS = {"POST /api/auth/sse-ticket"}
 # Anonymous RAG stays closed until Phase 4 adds rate limiting, budget and a
 # kill switch.  Change these to PUBLIC_QUERY only when that gate is ready.
 RAG_ADMIN_ONLY = {"POST /api/rag/query", "POST /api/rag/query/stream"}
@@ -31,6 +30,8 @@ def classify(method: str, path: str) -> str:
         return "PUBLIC_READ"
     if key in PUBLIC_AUTH:
         return "PUBLIC_AUTH"
+    if key in AUTH_READ_ACTIONS:
+        return "AUTH_READ"
     if key in AUTH_ONLY:
         return "AUTH_ONLY"
     if key in RAG_ADMIN_ONLY:

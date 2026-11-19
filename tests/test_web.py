@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -3114,6 +3115,97 @@ def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
         )
 
 
+def test_smoke_instance_can_disable_background_tasks(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        disable_background_tasks=True,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+
+
+def test_every_registered_route_keeps_public_or_denied_boundary(web_client) -> None:
+    policies = load_route_policies()
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    public_policies = {"PUBLIC_READ", "PUBLIC_QUERY", "PUBLIC_AUTH"}
+    skip_paths = {"/api/events/stream", "/api/processing/active/stream"}
+    with TestClient(app) as client:
+        for key in registered_route_keys(app.routes):
+            if key.startswith(("MOUNT ", "WS ")):
+                continue
+            method, path = key.split(" ", 1)
+            if method not in {"GET", "POST", "PATCH", "PUT", "DELETE"}:
+                continue
+            if path in skip_paths:
+                continue
+            concrete = re.sub(r"\{[^}]+\}", "1", path)
+            policy = policy_for(method, path, policies)
+            response = client.request(method, concrete)
+            if policy in public_policies:
+                assert response.status_code != 401, (
+                    method,
+                    path,
+                    response.status_code,
+                )
+            else:
+                assert response.status_code == 401, (
+                    method,
+                    path,
+                    response.status_code,
+                )
+
+
+def test_protected_route_variants_do_not_bypass_auth(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    variants = (
+        "/api/status/",
+        "http://testserver//api/status",
+        "/%61pi/status",
+        "/API/status",
+        "/api/llama-server/hosts/1",
+        "/api/question-bank/items/1",
+    )
+    with TestClient(app) as client:
+        for path in variants:
+            response = client.get(path)
+            assert response.status_code == 401, (path, response.status_code)
+        assert client.head("/api/status").status_code == 401
+        preflight = client.options(
+            "/api/status",
+            headers={
+                "Origin": "http://127.0.0.1:9200",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == (
+            "http://127.0.0.1:9200"
+        )
+
+
 def test_route_policies_cover_every_registered_route(web_client) -> None:
     policies = load_route_policies()
     registered = set(registered_route_keys(web_client.app.routes))
@@ -3124,7 +3216,21 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert policy_for("POST", "/api/processing/stop", policies) == "ADMIN_WRITE"
     assert policy_for("POST", "/api/rag/query", policies) == "ADMIN_ONLY"
     assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"
+    assert policy_for("POST", "/api/auth/sse-ticket", policies) == "AUTH_READ"
     assert policy_for("GET", "/api/unknown", policies) == "ADMIN_ONLY"
+    assert (
+        policy_for("GET", "/api/question-bank/items/abc", policies)
+        == "AUTH_READ"
+    )
+    assert (
+        policy_for("PATCH", "/api/question-bank/items/abc", policies)
+        == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for("POST", "/api/processing/workflows/run-1/run", policies)
+        == "ADMIN_WRITE"
+    )
+    assert policy_for("GET", "/api/index-versions/7", policies) == "AUTH_READ"
 
     with pytest.raises(RuntimeError, match="unclassified routes"):
         validate_route_policies(

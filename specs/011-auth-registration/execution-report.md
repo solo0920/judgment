@@ -1,8 +1,8 @@
 # 權限、註冊與公開存取覆核意見執行報告
 
-**Status**: Phase 0 進行中（10 點意見已納入；外部驗證完成；路由政策、binary 權限強制、client IP helper 已實作）
+**Status**: Phase 0 進行中（10 點意見已納入；外部驗證、Principal、policy 矩陣、路徑一致性、啟動安全檢查與 staging smoke test 已完成）
 
-**Version**: 0.3
+**Version**: 0.4
 
 **Last Updated**: 2026-11-19
 
@@ -75,7 +75,7 @@
 ### 2.5 殘留工作
 
 - 確認 production 是否只暴露 tunnel，origin 是否可被直連。
-- 確認 cloudflared 是否穩定送入 `CF-Connecting-IP`；若沒有，`client_ip()` 需退回 socket IP。
+- 已確認 uvicorn 使用 trusted proxy headers 解析真實 client IP；重啟後仍需驗證 header 鏈沒有被 Cloudflare Managed Transform 改變。
 - 若 origin 可被直連，MUST 以防火牆或 bind localhost 阻擋，否則 forwarded header 仍可被偽造。
 
 ### 2.6 外部驗證結果（2026-11-19 12:48 UTC）
@@ -138,6 +138,46 @@
 
 本機 loopback 仍可直接取得管理權（200），這個風險還在；熱修不是不急，而是不必在 copy 中途硬重啟。明確條件：**v7 copy 完成後的第一個維護窗口**重啟，讓 Phase 0.1 熱修生效；若在此之前有安全事件，才提前重啟。
 
+### 2.9 Principal、啟動安全檢查與 staging
+
+已新增 `Principal` 抽象（`src/judgment/web/principal.py`）：
+
+- `kind`：`anonymous`／`pending`／`user`／`admin`／`admin_token`。
+- middleware 每個請求解析一次，放進 `request.state.principal`；route policy 決策只看這個物件。
+- 目前 Google session 沒有 DB role 時仍視為 active admin，維持現行行為；Phase 1 由 `app_users` 提供 role／status。
+- `PUBLIC_QUERY` 另受 `PUBLIC_RAG_ENABLED`（預設 `false`）控制，分類表本身不能開放匿名 RAG。
+
+Policy 決策表已改成資料驅動，測試展開全部 policy × kind：
+
+| Policy | Anonymous | Pending | User | Admin | Admin token |
+| --- | --- | --- | --- | --- | --- |
+| `PUBLIC_READ`／`PUBLIC_AUTH` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `PUBLIC_QUERY`（開關開） | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `PUBLIC_QUERY`（開關關） | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `AUTH_ONLY` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `AUTH_READ`／`AUTH_QUERY`／`SELF_WRITE` | ❌ | ❌ | ✅ | ✅ | ✅ |
+| `ADMIN_ONLY`／`ADMIN_WRITE` | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+路徑一致性：
+
+- middleware 會先 percent-decode、合併重複斜線，再用 policy 查詢；API 前綴判斷不分大小寫。
+- `policy_for()` 現在支援 route pattern（例如 `/api/question-bank/items/{item_id}`），不是只比對完整字串。
+- 未知路徑、尾斜線、大小寫變形、重複斜線一律 default deny。
+- 測試會對全部已註冊 route 產生具體 URL，驗證公開／受保護邊界，並另外測 `//api/status`、`/%61pi/status`、`/API/status`、參數路由等變形。
+
+啟動安全檢查（`src/judgment/web/runtime_security.py`）：
+
+- 非 loopback bind 預設拒絕啟動；只有 `JUDGMENT_ALLOW_PUBLIC_BIND=1` 可例外。
+- `FORWARDED_ALLOW_IPS` 含 `*` 拒絕啟動。
+- local bypass 與非 loopback bind 同時開啟時拒絕啟動。
+- `create_app()` 也會拒絕 `FORWARDED_ALLOW_IPS=*`。
+
+Staging：
+
+- 新增 `scripts/smoke_test_web.sh`，在 9202 起第二個 instance，使用 `JUDGMENT_DISABLE_BACKGROUND_TASKS=1`、`AUTO_CREATE_SCHEMA=0`、`JUDGMENT_POWER_AGENT=0`，不啟動 event socket／warmers／migration。
+- 2026-11-19 已實際跑過：`smoke test passed on http://127.0.0.1:9202`。
+- 重啟步驟、local caller 盤點與 header 驗收見 [`restart-checklist.md`](./restart-checklist.md)。
+
 ---
 
 ## 3. 十點意見逐項可行性
@@ -175,7 +215,7 @@
   - 2026-11-19 已確認 `judgment-web` 使用 `proxy_headers=True`、`FORWARDED_ALLOW_IPS=127.0.0.1`、bind `127.0.0.1`，uvicorn 已把真實 client IP 寫入 `request.client.host`。
   - 不要再次解析 `CF-Connecting-IP` 或 `X-Forwarded-For`，避免第二個可偽造的信任邊界。
   - 前提是 origin 只綁 loopback 且只接受 tunnel；若 bind 或 `FORWARDED_ALLOW_IPS` 改變，MUST 重新驗證。
-- 以 IP hash 計數，不長期保存原始 IP；`client_ip_key()` 將 IPv6 正規化為 `/64` bucket。
+- 以 keyed HMAC 計數，不長期保存原始 IP；`client_ip_key()` 將 IPv6 正規化為 `/64` bucket，`hashed_client_ip_key()` 使用伺服器密鑰。
 - 若 origin 可被直連，MUST 以防火牆／bind localhost 阻擋。
 - Per-IP：分鐘／小時／日限制、併發限制。
 - 已登入者除 IP 外另加 per-user 限制，避免校園／公司共用出口 IP 時誤傷正常使用者。
@@ -336,14 +376,19 @@
 - lifespan 啟動時驗證所有 route；未分類或 stale 即拒絕啟動。
 - `/docs/oauth2-redirect` 已納入 admin/session 保護。
 - 測試涵蓋 route policy 完整性、預設拒絕、`/docs/oauth2-redirect` 非公開。
-- **角色強制（二元版）**：middleware 依 route policy 區分 `PUBLIC_*` 與受保護 route；目前所有 Google session 仍視為 admin，anonymous 只能使用 `PUBLIC_READ`／`PUBLIC_AUTH`。
+- **Principal 抽象**：middleware 每個請求解析一次 `request.state.principal`；目前 Google session 仍視為 admin，Phase 1 由 `app_users` 提供 role／status。
+- **Policy 決策表**：`PUBLIC_*`、`AUTH_ONLY`、`AUTH_READ`／`AUTH_QUERY`／`SELF_WRITE`、`ADMIN_ONLY`／`ADMIN_WRITE` 已用資料表展開全部 principal kind；`PUBLIC_QUERY` 另受 `PUBLIC_RAG_ENABLED` 控制。
+- **路徑一致性**：percent-decode、合併重複斜線、API 前綴不分大小寫；`policy_for()` 支援 route pattern（含 `{param}`），未知／變形路徑 default deny。
 - 受保護 route 的無憑證 GET／POST／DELETE 與未知 `/api/*` 均回 401；公開端點正常；`HEAD` 正規化為 `GET` policy。
-- `src/judgment/web/client_ip.py`：`effective_client_ip()` 使用 uvicorn 已解析的 `request.client.host`；`client_ip_key()` 提供 IPv6 `/64` bucket。
+- 全部 route × method 的公開／拒絕邊界測試已加入；另外測 `//api/status`、`/%61pi/status`、`/API/status`、參數路由與 OPTIONS preflight。
+- `src/judgment/web/client_ip.py`：`effective_client_ip()` 使用 uvicorn 已解析的 `request.client.host`；`client_ip_key()` 提供 IPv6 `/64` bucket 與 IPv4-mapped IPv6 正規化；`hashed_client_ip_key()` 使用 keyed HMAC。
+- `src/judgment/web/runtime_security.py`：非 loopback bind、`FORWARDED_ALLOW_IPS=*`、bypass 與公開 bind 同時開啟時拒絕啟動。
+- `scripts/smoke_test_web.sh` 已在 9202 完成 staging：不啟動 event socket／warmers／migration，公開與 admin 邊界測試通過。
 - 實測偽造 `CF-Connecting-IP` 被 Cloudflare 403 阻擋；偽造 `X-Forwarded-For`／`Forwarded` 不改變 client IP。
 
 **待完成**：
 
-1. 四角色（anonymous／pending／user／admin）× GET／POST／PATCH／DELETE 測試矩陣；目前只有 binary admin／anonymous。
+1. `app_users` 與 Phase 1 session 流程，讓 `pending`／`user` 真正由 DB 解析；目前 policy 表已支援，但 runtime 只會產生 anonymous／admin／admin_token。
 2. SSE ticket 綁 role／topic；長連線重驗。
 3. `/api/docs`、`/api/openapi.json` production 關閉或 admin-only 的最終開關。
 4. 將 `PUBLIC_READ`／`PUBLIC_AUTH` 與實際前端按鈕狀態對齊。
@@ -440,15 +485,16 @@
 
 ## 7. 風險與待確認
 
-1. **Production 網路拓樸仍未完全確認**：外部驗證顯示公開非授權端點回 401、本機 loopback 回 200，沒有觀察到 tunnel bypass；但 cloudflared 後 `request.client.host` 與 `CF-Connecting-IP` 的實際值、origin 是否可被直連，仍要在 Phase 0 確認。
-2. **匿名 RAG 尚未開放**：2026-11-19 實測 `/api/rag/query` 空 body 回 401；repo 的 `PUBLIC_API_PATHS` 也沒有 RAG。這代表目前沒有立即的公開成本風險，但產品要求的匿名 RAG 也還沒真正上線。
-3. **重啟時機**：v7 copy 正在進行；Phase 0.1 程式雖已完成，但重啟要等 copy 完成或另開維護窗口，避免影響索引與監控。
-4. **DB 回查成本**：每次請求回查 `app_users` 會增加 DB 負載；需要用短 TTL cache＋停用時主動失效，不能只靠 cache。
-5. **SSE 長連線重驗**：以狀態版本變更觸發重驗比每 60 秒全量查 DB 好；但停用必須有主動斷線，多 process 需共用通知機制。
-6. **SQLite 併發**：若使用 SQLite 存 counters／users，需確認 WAL 與多 process 寫入；多 instance 時改用共享 DB。
-7. **Admin token 的 break-glass 風險**：token 一旦洩漏即完整管理權；需常數時間比較、audit、定期更換，且不進前端。
-8. **工時**：7–10 天是依目前 100 個 path 與前端 action 的估計；public summary 欄位與 SSE 重構可能再增加。
-9. **參數仍需用實際流量校準**：目前以 301 筆有 usage 的成功記錄估算 P50/P95；上線後要用 429 曲線、預算消耗與實際併發重新調整。
+1. **Proxy header 鏈仍可能被改變**：目前 uvicorn 已解析真實 client IP，但若 Cloudflare 啟用「Remove visitor IP headers」、`FORWARDED_ALLOW_IPS` 改成 `*`、或 bind 改成非 loopback，風險會回來。已加啟動檢查與 `suspicious proxy chain` warning；重啟後仍要用偽造 header 回歸。
+2. **Origin 直連尚未完全排除**：應用已 bind `127.0.0.1`，但仍要確認 firewall／其他轉送沒有開放 9200。
+3. **匿名 RAG 尚未開放**：2026-11-19 實測 `/api/rag/query` 空 body 回 401；route policy 也維持 `ADMIN_ONLY`。這代表目前沒有立即的公開成本風險，但產品要求的匿名 RAG 也還沒真正上線。
+4. **重啟時機**：v7 copy 正在進行；Phase 0.1 程式雖已完成，但重啟要等 copy 完成或另開維護窗口，避免影響索引與監控。
+5. **DB 回查成本**：每次請求回查 `app_users` 會增加 DB 負載；需要用短 TTL cache＋停用時主動失效，不能只靠 cache。
+6. **SSE 長連線重驗**：以狀態版本變更觸發重驗比每 60 秒全量查 DB 好；但停用必須有主動斷線，多 process 需共用通知機制。
+7. **SQLite 併發**：若使用 SQLite 存 counters／users，需確認 WAL 與多 process 寫入；多 instance 時改用共享 DB。
+8. **Admin token 的 break-glass 風險**：token 一旦洩漏即完整管理權；需常數時間比較、audit、定期更換，且不進前端。
+9. **工時**：7–10 天是依目前 100 個 path 與前端 action 的估計；public summary 欄位與 SSE 重構可能再增加。
+10. **參數仍需用實際流量校準**：目前以 301 筆有 usage 的成功記錄估算 P50/P95；上線後要用 429 曲線、預算消耗與實際併發重新調整。
 
 ---
 
@@ -472,17 +518,25 @@
 
 ## 9. 本次變更清單
 
-- `src/judgment/config.py`：新增 `allow_local_admin_bypass`。
-- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護；lifespan 啟動時檢查 route policy；middleware 依 policy 區分公開／受保護 route；`/docs/oauth2-redirect` 納入保護。
-- `.env.example`：新增 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0`。
-- `src/judgment/web/route_policy.py`：route policy 載入、查詢與啟動驗證。
+- `.env.example`：`JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0`、`PUBLIC_RAG_ENABLED=0`、`JUDGMENT_DISABLE_BACKGROUND_TASKS=0` 與 public-bind 例外說明。
+- `src/judgment/config.py`：`allow_local_admin_bypass`、`public_rag_enabled`、`disable_background_tasks`。
+- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護；lifespan 啟動時檢查 route policy；middleware 依 policy 與 `Principal` 區分公開／受保護 route；路徑正規化；`/docs/oauth2-redirect` 納入保護。
+- `src/judgment/web/principal.py`：`Principal`、session role/status 映射、policy × kind 決策表、`PUBLIC_QUERY` kill switch。
+- `src/judgment/web/runtime_security.py`：非 loopback bind、`FORWARDED_ALLOW_IPS=*`、bypass 與公開 bind 的啟動檢查。
+- `src/judgment/web/route_policy.py`：route policy 載入、pattern 查詢、route 列舉（Mount／WebSocket）與啟動驗證。
 - `src/judgment/web/route_policies.json`：118 個 route key 的分類表。
-- `src/judgment/web/client_ip.py`：`effective_client_ip()` 與 IPv6 `/64` bucket。
+- `src/judgment/web/client_ip.py`：`effective_client_ip()`、IPv6 `/64` bucket、IPv4-mapped IPv6、keyed HMAC、broken proxy-chain 偵測。
 - `scripts/generate_route_policies.py`：從 `app.routes` 產生／補齊分類草稿。
-- `tests/test_web.py`：bypass 三情境、route policy 完整性、binary 權限邊界、docs helper 保護測試。
-- `tests/test_client_ip.py`：client IP 與 IPv6 `/64` bucket 測試。
+- `scripts/smoke_test_web.sh`：9202 staging smoke test；不啟動 event socket／warmers／migration。
+- `scripts/rag_query_benchmark.py`、`scripts/real_question_audit.py`：支援 `--admin-token`／`JUDGMENT_ADMIN_TOKEN`。
+- `tests/test_web.py`：bypass、route policy、binary 權限、路徑變形、全 route 邊界、OPTIONS preflight、smoke instance 測試。
+- `tests/test_principal.py`：policy × kind 表格驅動測試。
+- `tests/test_client_ip.py`：client IP、IPv6、HMAC、proxy-chain 測試。
+- `tests/test_runtime_security.py`：bind／forwarded／bypass 啟動檢查。
+- `tests/test_route_policy.py`：Mount／WebSocket 列舉測試。
 - `tests/test_processing.py`：測試 fixture 明確開啟 local bypass。
-- `specs/011-auth-registration/evaluation.md`：更新至 v0.5，納入 10 點、七項決策與實測結果。
+- `specs/011-auth-registration/evaluation.md`：更新至 v0.6，納入 10 點、七項決策與實測結果。
+- `specs/011-auth-registration/restart-checklist.md`：重啟前 local caller 盤點、staging、header 驗收與回滾。
 - `specs/011-auth-registration/execution-report.md`：本報告。
 
-> 本報告已涵蓋熱修、外部驗證、Phase 0 路由分類與 binary 權限強制；四角色、註冊 UI、公開摘要、SSE topic 與公開 RAG 保護尚未完成，將依 Phase 0–5 繼續推進。
+> 本報告已涵蓋熱修、外部驗證、Phase 0 路由分類、Principal 與 binary 權限強制；四角色 runtime、註冊 UI、公開摘要、SSE topic 與公開 RAG 保護尚未完成，將依 Phase 0–5 繼續推進。

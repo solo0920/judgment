@@ -1,8 +1,8 @@
 # 使用者註冊、角色權限與公開存取評估報告
 
-**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修、Phase 0 路由政策與 binary 權限強制已實作，尚未重啟 production）
+**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修、Phase 0 路由政策、Principal 與 binary 權限強制已實作，尚未重啟 production）
 
-**Version**: 0.5
+**Version**: 0.6
 
 **Last Updated**: 2026-11-19
 
@@ -47,7 +47,7 @@
 | Google 白名單 | 現行 `GOOGLE_ALLOWED_EMAILS` | 白名單內帳號全部被視為 admin；email 可能變更，不能當唯一身分 |
 | Session | HttpOnly cookie、`SameSite`、正式環境 `Secure` | session 只驗 env 白名單，沒有 DB 狀態／角色回查 |
 | Admin token | `X-Judgment-Admin-Token`／Bearer，`hmac.compare_digest` | 沒有 audit log、沒有使用紀錄、沒有定期更換流程 |
-| API 保護 | `/api/*` 除 `PUBLIC_API_PATHS` 外，admin token 或任何允許的 Google session 皆可完整使用 | 沒有 read／write／admin 分層；未分類路由預設放行 |
+| API 保護 | `/api/*` 除 route policy 的 `PUBLIC_*` 外，admin token 或任何允許的 Google session 皆可完整使用 | 已加 default-deny 與 binary 權限；pending／user runtime 尚未接入 |
 | 公開 API | repo 目前只公開 `/api/health`、`/api/home`、`/api/auth/*`；2026-11-19 外部實測 RAG 仍回 401 | 匿名 RAG 尚未真正開放，需先完成 Phase 4 最小限流與預算 |
 | 本機 bypass | 已改為 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS`，預設 `0`；forwarded header 存在時不使用 bypass | 程式已熱修，但 production 尚未重啟；外部實測非公開端點 401、本機 loopback 200；重啟後仍要再驗證 |
 | SSE | `/api/auth/sse-ticket` 發 120 秒 bearer ticket；`/api/events/stream` 可用 ticket 訂閱所有 topic | ticket 未綁角色／topic；pending／匿名若取得 ticket 可收到 processing／status；長連線不會因停用即時斷線 |
@@ -241,7 +241,7 @@ Google OAuth callback
 | `AUTH_READ` | 登入後可 GET；pending 不行；包含 SSE 與詳細狀態頁 |
 | `AUTH_QUERY` | 登入後可 POST 的唯讀查詢（例如 `/api/query`） |
 | `SELF_WRITE` | 登入使用者只能改自己的低風險資料（RAG 回饋、client timing） |
-| `AUTH_ONLY` | 只允許已登入 session 的 auth／application／SSE ticket 端點；pending 需另判 |
+| `AUTH_ONLY` | 只允許已登入 session 的 application 狀態端點；pending 也可；SSE ticket 改列 `AUTH_READ`，pending 不可 |
 | `ADMIN_ONLY` | 只有 admin／admin token 可讀或執行（含 API docs） |
 | `ADMIN_WRITE` | 只有 admin／admin token 可寫 |
 
@@ -258,11 +258,13 @@ Google OAuth callback
 - 應用啟動時檢查所有已註冊路由（含非 `/api`）都有分類；發現未分類路由 MUST 拒絕啟動，而不是只靠測試。目前已於 lifespan 啟動時驗證，並有測試涵蓋。
 - 路由刪除或改名後，分類表中的孤兒條目 MUST 被偵測；目前啟動驗證會列出 stale keys 並拒絕啟動，產生器會移除它們。
 - 路由列舉涵蓋 `APIRoute`、Starlette `Route`、`Mount`（含子 app 遞迴）與 `WebSocketRoute`；HEAD 正規化為 GET policy，OPTIONS 由 CORS 處理。
-- middleware 已依 policy 做 binary（admin／anonymous）強制；`AUTH_READ`／`ADMIN_ONLY` 等角色細分仍待 Phase 1 的 `app_users`。
-- 測試 MUST 列舉 `app.routes` 全部 method route，任何未分類路由讓測試失敗。
-- `PUBLIC_READ` 不得允許 POST／PATCH／DELETE；`PUBLIC_QUERY` 只允許明確列出的查詢 POST。
+- middleware 每個請求解析一次 `request.state.principal`；`Principal` 有 `anonymous`／`pending`／`user`／`admin`／`admin_token` 五種 kind。
+- policy × kind 決策表已資料化；目前 runtime 仍只產生 anonymous／admin／admin_token，pending／user 由 Phase 1 的 `app_users` 提供。
+- `policy_for()` 支援 `{param}` route pattern；middleware 先 percent-decode、合併重複斜線，API 前綴不分大小寫。未知、尾斜線、大小寫變形與重複斜線路徑 default deny。
+- 測試 MUST 列舉 `app.routes` 全部 method route，任何未分類路由讓測試失敗；另需測試參數路由與變形路徑。
+- `PUBLIC_READ` 不得允許 POST／PATCH／DELETE；`PUBLIC_QUERY` 只允許明確列出的查詢 POST，且另受 `PUBLIC_RAG_ENABLED` 控制。
 - 本機 bypass 與 forwarded header 規則必須一起測試，避免 tunnel 遠端被當成本機。
-- 未分類路由預設拒絕（403），不得預設放行。
+- 未分類路由預設拒絕；有 admin token 設定時回 401，否則回 403，不得預設放行。
 
 ### 7.3 SSE 權限
 
@@ -293,14 +295,14 @@ Google OAuth callback
 - 以單一 `client_ip()` helper 取得來源。2026-11-19 已確認 production 由 `judgment-web` 以 `proxy_headers=True`、`FORWARDED_ALLOW_IPS=127.0.0.1`、bind `127.0.0.1` 啟動，uvicorn 會把 `request.client.host` 改寫成真實 client IP；因此 helper MUST 直接使用 `request.client.host`，不要再次解析 `CF-Connecting-IP` 或 `X-Forwarded-For`，避免第二個可偽造的信任邊界。
   - 前提是 origin 只綁 loopback 且只接受 tunnel；若 bind 或 `FORWARDED_ALLOW_IPS` 改變，MUST 重新驗證。
   - 若無法保證 origin 只接受 tunnel，MUST 以防火牆阻擋直連，並改回只使用 socket IP。
-- Per-IP：每分鐘／每小時請求數、每日上限、併發數；使用 `client_ip_key()` 將 IPv6 正規化為 `/64` bucket，避免逐位址繞過。
+- Per-IP：每分鐘／每小時請求數、每日上限、併發數；使用 `client_ip_key()` 將 IPv6 正規化為 `/64` bucket，並把 IPv4-mapped IPv6（`::ffff:1.2.3.4`）正規化為 IPv4，避免同一人有兩個桶。
 - 已登入者除 IP 外另加 per-user 限制，避免共用出口 IP 誤傷正常使用者。
 - 全站每日 token 預算；匿名與已登入使用不同預算池，匿名池耗盡時登入者仍可使用；pending 共用匿名池或獨立小池。
 - 超限回 429，附 `Retry-After`。
 - `/api/rag/query` 與 `/api/rag/query/stream` MUST 使用同一套限制；stream 連線建立時就要預扣額度。
 - 問題長度上限、回答 `max_tokens`／`num_predict` 上限、context 上限。
 - Turnstile 建議列為預設防護（尤其匿名 RAG 與申請表單），不再只是可選項。
-- 以 IP hash 計數，不長期保存原始 IP。
+- 以 keyed HMAC（`hashed_client_ip_key()`）計數，不長期保存原始 IP；純雜湊可被 IPv4 枚舉反推，不算匿名化。
 
 ### 8.2 預算扣款與串流
 
@@ -372,6 +374,8 @@ Google OAuth callback
 - Google OAuth 保留 `state` 驗證，加入 PKCE；callback 只接受 signed state cookie。
 - Rejected 冷卻期、每 IP／每日申請數限制；不以全站 pending 總數作唯一上限。
 - CSRF：cookie session 的寫入請求需 Origin／SameSite 檢查；敏感操作可加 CSRF token。
+- 啟動安全檢查：非 loopback bind、`FORWARDED_ALLOW_IPS=*`、local bypass 與公開 bind 同時開啟時 MUST 拒絕啟動。
+- Cloudflare 若移除 visitor IP headers，遠端會變成 loopback effective IP；middleware MUST 記錄 `suspicious proxy chain` warning，限流在該情況下偏嚴但不可靜默。
 - 公開 RAG 不得繞過 admission、rate limit 或 stream 限制。
 - 公開摘要不得包含主機路徑、container、volume、token、內部 IP、API endpoints、日誌位置。
 - 隱私：只保存必要的 Google 顯示資料；提問內容、回饋、audit、rate-limit IP hash 需有保留期限與刪除／匿名化流程；上線前提供簡短隱私說明，涉及台灣個資法部分建議找專業人士審閱。
@@ -392,13 +396,13 @@ Google OAuth callback
 
 ### Phase 0：權限骨架（1–2 個開發日）
 
-1. 盤點 100 個 `/api/*` path 與 114 個 method route，建立分類表（初版已完成，含 `route_policies.json` 與產生腳本）。
-2. 實作 route 層級分類與 default-deny middleware。
-3. 啟動時檢查所有路由；未分類即拒絕啟動（已完成 lifespan 驗證）。
+1. 盤點 100 個 `/api/*` path 與 114 個 method route，建立分類表（已完成，含 `route_policies.json` 與產生腳本）。
+2. 實作 route 層級分類與 default-deny middleware（已完成 binary 版）。
+3. 啟動時檢查所有路由；未分類或 stale 即拒絕啟動（已完成）。
 4. 關閉或限制 `/api/docs`、`/api/openapi.json`（目前已 admin/session 保護）。
-5. 建四角色 × method 測試矩陣。
-6. 確認 tunnel／client IP 規則，定義 `client_ip()`。
-7. SSE ticket 綁角色／topic，加入長連線定期重驗。
+5. 建四角色 × method 測試矩陣（policy 表已完成；runtime pending／user 待 Phase 1）。
+6. 確認 tunnel／client IP 規則，定義 `client_ip()`（已完成並加 staging smoke test）。
+7. SSE ticket 綁角色／topic，加入長連線定期重驗（待做）。
 
 ### Phase 1：使用者資料與 session（1.5–2 個開發日）
 
@@ -496,7 +500,7 @@ Google OAuth callback
 ## 14. 建議下一步
 
 1. 先複核 [`execution-report.md`](./execution-report.md) 與本報告的 10 點回覆、工時與待核定參數。
-2. Phase 0 已獲同意；路由分類表、產生腳本與啟動 fail-fast 已完成初版，下一步補 default-deny middleware、角色矩陣與 `client_ip()`；不先做註冊 UI。
+2. Phase 0 已完成路由分類、default-deny、Principal、policy 矩陣、`client_ip()` 與 9202 staging smoke test；下一步是 `app_users`／Phase 1，讓 pending／user 真正由 DB 解析，再做 SSE ticket 綁 topic；不先做註冊 UI。重啟步驟見 [`restart-checklist.md`](./restart-checklist.md)。
 3. 2026-11-19 外部驗證：公開 `/api/status`、`/api/processing`、`/api/question-bank/stats`、`/api/docs` 在無憑證下皆回 401，未觀察到 tunnel bypass；**不需要緊急重啟**。
 4. Phase 0.1 程式已完成，但 **不要在 v7 索引 copy 期間重啟 production**；下次重啟後再驗證 tunnel。
 5. 2026-11-19 外部驗證也顯示匿名 RAG 尚未開放（`/api/rag/query` 空 body 回 401）；在最小版限流、預算與 kill switch 完成前，不應直接開放。

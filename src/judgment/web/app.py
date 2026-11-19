@@ -18,7 +18,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import uvicorn
@@ -173,12 +173,21 @@ from ..runtime_settings import (
     set_test_mode,
 )
 from .catalog import build_catalog
+from .client_ip import effective_client_ip, suspicious_proxy_chain
 from .home import build_home_summary
 from .judgment_stats import build_judgment_stats
 from .performance import performance_options, query_performance
 from .power_agent import ensure_power_agent
 from .events import build_event_broker
 from .processing_events import ProcessingEventServer
+from .principal import (
+    Principal,
+    admin_token_principal,
+    anonymous_principal,
+    local_admin_principal,
+    principal_allows,
+    principal_from_session,
+)
 from .processing import (
     ProcessingManager,
     active_import_event_stream,
@@ -191,6 +200,10 @@ from .processing import (
 )
 from .quality import build_quality_snapshot
 from .route_policy import policy_for, validate_route_policies
+from .runtime_security import (
+    validate_forwarded_allow_ips,
+    validate_runtime_security,
+)
 from .query import (
     data_suggestions,
     get_judgment_detail,
@@ -323,6 +336,26 @@ def _is_local_request(request: Request) -> bool:
         return False
 
 
+def _canonical_request_path(path: str) -> str:
+    """Normalize path variants before route-policy lookup.
+
+    Middleware and the router must not disagree about whether a request is an
+    API request.  Decode percent escapes and collapse repeated slashes; do not
+    resolve ``..`` segments because collapsing them could turn an API path into
+    a non-API path and skip authentication.
+    """
+
+    value = unquote(str(path or "/"))
+    while "//" in value:
+        value = value.replace("//", "/")
+    return value or "/"
+
+
+def _is_api_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered == "/api" or lowered.startswith("/api/")
+
+
 def _has_forwarded_client_headers(request: Request) -> bool:
     """A local socket is not trusted when a tunnel/proxy supplied forwarding."""
 
@@ -337,6 +370,30 @@ def _has_forwarded_client_headers(request: Request) -> bool:
     )
 
 
+_PROXY_CHAIN_WARNING_AT = 0.0
+
+
+def _warn_suspicious_proxy_chain(client_ip: str) -> None:
+    """Warn when a Cloudflare request arrives with a loopback effective IP.
+
+    This means the trusted proxy header chain was broken (for example a
+    Cloudflare Managed Transform removed visitor IP headers).  Rate-limit the
+    warning so a misconfiguration does not flood the log.
+    """
+
+    global _PROXY_CHAIN_WARNING_AT
+    now = time.monotonic()
+    if now - _PROXY_CHAIN_WARNING_AT < 60.0:
+        return
+    _PROXY_CHAIN_WARNING_AT = now
+    logger.warning(
+        "suspicious proxy chain: Cloudflare request resolved to loopback "
+        "client IP %s; check X-Forwarded-For/CF-Connecting-IP handling and "
+        "FORWARDED_ALLOW_IPS",
+        client_ip,
+    )
+
+
 def _provided_admin_token(request: Request) -> str:
     token = str(request.headers.get("X-Judgment-Admin-Token") or "").strip()
     if token:
@@ -345,6 +402,35 @@ def _provided_admin_token(request: Request) -> str:
     if authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
     return ""
+
+
+def _resolve_principal(
+    request: Request, settings: Settings
+) -> Principal:
+    """Resolve the request principal once, in the same order as the legacy
+    auth middleware: local bypass, admin token, Google session, anonymous.
+    """
+
+    if (
+        settings.allow_local_admin_bypass
+        and _is_local_request(request)
+        and not _has_forwarded_client_headers(request)
+    ):
+        return local_admin_principal()
+
+    admin_expected = str(settings.admin_token or "")
+    provided = _provided_admin_token(request)
+    if (
+        admin_expected
+        and provided
+        and hmac.compare_digest(provided, admin_expected)
+    ):
+        return admin_token_principal()
+
+    session = read_session(request, settings)
+    if session is not None:
+        return principal_from_session(session)
+    return anonymous_principal()
 
 
 def _make_sse_ticket(secret: str) -> str:
@@ -935,6 +1021,7 @@ def create_app(
     data_dir: Optional[Path] = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    validate_forwarded_allow_ips(settings.forwarded_allow_ips)
     resolved_data_dir = Path(data_dir or settings.law_data_dir).expanduser().resolve()
     owns_session_factory = session_factory is None
 
@@ -950,7 +1037,7 @@ def create_app(
                 max_overflow=settings.database_max_overflow,
                 pool_timeout=settings.database_pool_timeout_seconds,
             )
-            if settings.auto_create_schema:
+            if settings.auto_create_schema and not settings.disable_background_tasks:
                 init_db(engine)
             app.state.engine = engine
             app.state.session_factory = build_session_factory(engine)
@@ -958,17 +1045,22 @@ def create_app(
             app.state.benchmark_manager.settings = runtime_settings(
                 app.state.settings, app.state.session_factory
             )
-            try:
-                revalidated = revalidate_items(app.state.session_factory)
-                if revalidated.get("stale"):
-                    logger.info(
-                        "question bank revalidation marked %s stale items",
-                        revalidated["stale"],
+            if not settings.disable_background_tasks:
+                try:
+                    revalidated = revalidate_items(app.state.session_factory)
+                    if revalidated.get("stale"):
+                        logger.info(
+                            "question bank revalidation marked %s stale items",
+                            revalidated["stale"],
+                        )
+                except Exception:
+                    logger.warning(
+                        "question bank startup revalidation failed",
+                        exc_info=True,
                     )
-            except Exception:
-                logger.warning("question bank startup revalidation failed", exc_info=True)
         warm_task: Optional[asyncio.Task] = None
         coverage_task: Optional[asyncio.Task] = None
+        staleness_task: Optional[asyncio.Task] = None
         rerank_task: Optional[asyncio.Task] = None
         rag_executor = ThreadPoolExecutor(
             max_workers=max(
@@ -1159,19 +1251,22 @@ def create_app(
                 await asyncio.sleep(interval)
 
         try:
-            await app.state.processing_event_server.start()
-            coverage_task = None
-            staleness_task = None
-            rerank_task = None
-            warm_task = asyncio.create_task(warm_processing_snapshots())
-            if owns_session_factory and app.state.settings.rag_coverage_warmup_enabled:
-                coverage_task = asyncio.create_task(warm_coverage_cache())
-                staleness_task = asyncio.create_task(warm_staleness_cache())
-            if (
-                app.state.settings.rag_rerank_enabled
-                and app.state.settings.rerank_heartbeat_enabled
-            ):
-                rerank_task = asyncio.create_task(rerank_warmup_loop())
+            if not app.state.settings.disable_background_tasks:
+                await app.state.processing_event_server.start()
+                warm_task = asyncio.create_task(warm_processing_snapshots())
+                if (
+                    owns_session_factory
+                    and app.state.settings.rag_coverage_warmup_enabled
+                ):
+                    coverage_task = asyncio.create_task(warm_coverage_cache())
+                    staleness_task = asyncio.create_task(
+                        warm_staleness_cache()
+                    )
+                if (
+                    app.state.settings.rag_rerank_enabled
+                    and app.state.settings.rerank_heartbeat_enabled
+                ):
+                    rerank_task = asyncio.create_task(rerank_warmup_loop())
             yield
         finally:
             for task in (
@@ -1210,11 +1305,16 @@ def create_app(
     app.state.rerank_heartbeat = None
     app.state.readiness = {
         "ready": (
-            not owns_session_factory
+            bool(settings.disable_background_tasks)
+            or not owns_session_factory
             or not bool(settings.rag_coverage_warmup_enabled)
         ),
         "coverage_warmed": False,
-        "detail": "starting",
+        "detail": (
+            "background_tasks_disabled"
+            if settings.disable_background_tasks
+            else "starting"
+        ),
     }
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
@@ -1334,9 +1434,9 @@ def create_app(
 
     @app.middleware("http")
     async def admin_auth_middleware(request: Request, call_next):
-        path = request.url.path
+        path = _canonical_request_path(request.url.path)
         if request.method == "OPTIONS" or (
-            not path.startswith("/api/") and path != "/docs/oauth2-redirect"
+            not _is_api_path(path) and path != "/docs/oauth2-redirect"
         ):
             return await call_next(request)
         if (
@@ -1349,57 +1449,57 @@ def create_app(
                     "detail": "file:// origin 不可修改資料；請使用允許的 http(s) 來源。"
                 },
             )
+        current = app.state.settings
+        principal = _resolve_principal(request, current)
+        request.state.principal = principal
+        client_ip = effective_client_ip(request)
+        request.state.client_ip = client_ip
+        if suspicious_proxy_chain(request, client_ip):
+            _warn_suspicious_proxy_chain(client_ip)
+
         policy_method = "GET" if request.method == "HEAD" else request.method
         policy = policy_for(policy_method, path)
-        if policy in PUBLIC_POLICIES:
-            return await call_next(request)
-
-        current = app.state.settings
-        if (
-            current.allow_local_admin_bypass
-            and _is_local_request(request)
-            and not _has_forwarded_client_headers(request)
+        is_public = policy in PUBLIC_POLICIES
+        if principal_allows(
+            policy,
+            principal.kind,
+            public_rag_enabled=current.public_rag_enabled,
         ):
-            if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            if not is_public and request.method not in {
+                "GET",
+                "HEAD",
+                "OPTIONS",
+            }:
                 origin = request.headers.get("Origin")
-                sec_fetch_site = request.headers.get("Sec-Fetch-Site")
-                if origin is not None and origin not in cors_origins:
-                    return JSONResponse(
-                        status_code=403,
-                        content={
-                            "detail": "不允許的 Origin 對本機管理 API 寫入。"
-                        },
-                    )
-                if (
-                    sec_fetch_site is not None
-                    and sec_fetch_site not in {"same-origin", "none"}
+                if principal.source == "local_bypass":
+                    sec_fetch_site = request.headers.get("Sec-Fetch-Site")
+                    if origin is not None and origin not in cors_origins:
+                        return JSONResponse(
+                            status_code=403,
+                            content={
+                                "detail": "不允許的 Origin 對本機管理 API 寫入。"
+                            },
+                        )
+                    if (
+                        sec_fetch_site is not None
+                        and sec_fetch_site not in {"same-origin", "none"}
+                    ):
+                        return JSONResponse(
+                            status_code=403,
+                            content={
+                                "detail": "跨站請求不可寫入本機管理 API。"
+                            },
+                        )
+                elif (
+                    principal.source == "google"
+                    and not origin_allowed(request, current, cors_origins)
                 ):
                     return JSONResponse(
                         status_code=403,
                         content={
-                            "detail": "跨站請求不可寫入本機管理 API。"
+                            "detail": "不允許的 Origin 對 Google 登入工作階段寫入。"
                         },
                     )
-            return await call_next(request)
-
-        admin_expected = str(current.admin_token or "")
-        provided = _provided_admin_token(request)
-        if (
-            admin_expected
-            and provided
-            and hmac.compare_digest(provided, admin_expected)
-        ):
-            return await call_next(request)
-
-        session = read_session(request, current)
-        if session is not None:
-            if request.method not in {"GET", "HEAD", "OPTIONS"} and not origin_allowed(
-                request, current, cors_origins
-            ):
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "不允許的 Origin 對 Google 登入工作階段寫入。"},
-                )
             return await call_next(request)
 
         if path == "/api/events/stream":
@@ -1407,6 +1507,7 @@ def create_app(
             if _valid_sse_ticket(ticket, session_secret(current)):
                 return await call_next(request)
 
+        admin_expected = str(current.admin_token or "")
         if not admin_expected:
             return JSONResponse(
                 status_code=403,
@@ -1427,13 +1528,21 @@ def create_app(
     @app.get("/api/auth/me")
     def auth_me(request: Request) -> JSONResponse:
         current = app.state.settings
+        principal = getattr(request.state, "principal", None)
+        if principal is None:
+            principal = _resolve_principal(request, current)
         session = read_session(request, current)
         payload = {
+            # Keep the existing auth/me contract: local bypass and admin
+            # tokens are request credentials, not a browser login session.
             "authenticated": bool(session),
             "email": session.get("email") if session else None,
             "name": session.get("name") if session else None,
             "picture": session.get("picture") if session else None,
-            "admin": bool(session),
+            "admin": bool(session) and principal.is_admin,
+            "kind": principal.kind,
+            "role": principal.role,
+            "status": principal.status,
             "google_enabled": google_login_enabled(current),
         }
         response = JSONResponse(payload)
@@ -3711,9 +3820,17 @@ def main() -> int:
     parser.add_argument(
         "--forwarded-allow-ips",
         default=base_settings.forwarded_allow_ips,
-        help="信任 X-Forwarded-* 的來源 IP（cloudflared 反向代理預設為 *）",
+        help="信任 X-Forwarded-* 的來源 IP（本機 tunnel 請用 127.0.0.1，不可用 *）",
     )
     args = parser.parse_args()
+    try:
+        validate_runtime_security(
+            host=args.host,
+            forwarded_allow_ips=args.forwarded_allow_ips,
+            allow_local_admin_bypass=base_settings.allow_local_admin_bypass,
+        )
+    except RuntimeError as exc:
+        parser.error(str(exc))
 
     if args.database_url:
         os.environ["DATABASE_URL"] = args.database_url
