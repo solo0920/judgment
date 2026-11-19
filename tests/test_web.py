@@ -35,6 +35,7 @@ from judgment.models import (
 )
 from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
+from judgment.web import processing as processing_module
 from judgment.web.app import create_app
 from judgment.web.auth import make_session_token
 
@@ -551,6 +552,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "processing-update-action" in processing_js.text
     assert "data-processing-update-notice" in processing_js.text
     assert "judgment:processing-pending" in processing_js.text
+    assert "index_pending_months" in processing_js.text
+    assert "index_pending:" in processing_js.text
     assert "立即執行" in processing_js.text
     assert "processing-download-active" in processing_js.text
     assert "data-judgment-downloads-list" in processing_js.text
@@ -674,6 +677,8 @@ def test_static_console_is_served(web_client) -> None:
     assert app_js.status_code == 200
     assert 'DEFAULT_ROUTE = "home"' in app_js.text
     assert "judgment:processing-pending" in app_js.text
+    assert "index_pending_count" in app_js.text
+    assert "Qdrant 向量索引待補" in app_js.text
 
     css = web_client.get("/assets/styles.css")
     assert css.status_code == 200
@@ -1286,6 +1291,46 @@ def test_updates_status_and_processing_flags(web_client) -> None:
     assert [
         stage["contribution_percent"] for stage in progress["stages"]
     ] == [50.0, 50.0, 0.0, 0.0]
+
+
+def test_updates_status_includes_index_pending_months(
+    web_client, monkeypatch
+) -> None:
+    coverage = {
+        "available": True,
+        "coverage_only": True,
+        "run_status": "partial",
+        "months": [
+            {
+                "month": "202601",
+                "archive": "202601--(20261116Update).rar",
+                "total": 10,
+                "processed": 4,
+                "status": "pending",
+            },
+            {
+                "month": "202602",
+                "archive": "202602--(20261116Update).rar",
+                "total": 8,
+                "processed": 8,
+                "status": "success",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        processing_module,
+        "_index_month_coverage_runtime",
+        lambda *args, **kwargs: coverage,
+    )
+    processing_module.build_processing_snapshot(
+        settings=web_client.app.state.settings,
+        session_factory=web_client.app.state.session_factory,
+    )
+
+    status = web_client.get("/api/updates/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["index_pending_count"] == 1
 
 
 def test_updates_check_can_filter_sources(web_client, monkeypatch) -> None:
@@ -3409,5 +3454,8 @@ def test_judgment_vector_index_spec_is_canonical() -> None:
         "以月份計，不是 RAR 檔數",
         "coverage-only",
         "A／R／E",
+        "index_pending_count",
+        "Qdrant 向量索引待補",
+        "capabilities.index_pending_months",
     ):
         assert phrase in text

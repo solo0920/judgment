@@ -47,6 +47,7 @@ from judgment.web.processing import (
     _import_stage_progress,
     _merge_import_timeline_stages,
     _index_month_coverage_runtime,
+    _index_month_counts,
     _pipeline_processes_from_ps,
     build_processing_plan,
     build_processing_snapshot,
@@ -1942,6 +1943,108 @@ def test_index_month_coverage_fallback_for_active_version(
     assert months["202601"]["status"] == "success"
     assert months["202602"]["processed"] == 0
     assert months["202602"]["status"] == "pending"
+
+
+def test_index_month_counts_use_latest_archive_for_e() -> None:
+    counts = _index_month_counts(
+        {
+            "coverage_only": True,
+            "months": [
+                {
+                    "month": "202601",
+                    "archive": "202601--(20261016Update).rar",
+                    "total": 100,
+                    "processed": 100,
+                },
+                {
+                    "month": "202601",
+                    "archive": "202601--(20261116Update).rar",
+                    "total": 7,
+                    "processed": 2,
+                },
+                {
+                    "month": "202602",
+                    "archive": "202602.rar",
+                    "total": 10,
+                    "processed": 10,
+                },
+                {
+                    "month": "202603",
+                    "archive": "202603.rar",
+                    "total": 10,
+                    "processed": 0,
+                },
+            ],
+        }
+    )
+
+    assert counts == {
+        "active": 2,
+        "reuse_complete": 2,
+        "reuse_incomplete": 1,
+        "embed_complete": 1,
+        "embed_incomplete": 2,
+        "total_months": 3,
+    }
+
+
+def test_snapshot_surfaces_index_e_incomplete_months_as_updates(
+    tmp_path: Path, monkeypatch, session_factory
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    coverage = {
+        "available": True,
+        "coverage_only": True,
+        "run_id": None,
+        "run_status": "partial",
+        "run_message": "目前 active collection 的索引覆蓋",
+        "months": [
+            {
+                "month": "202601",
+                "archive": "202601--(20261016Update).rar",
+                "total": 100,
+                "processed": 100,
+                "status": "success",
+            },
+            {
+                "month": "202601",
+                "archive": "202601--(20261116Update).rar",
+                "total": 7,
+                "processed": 2,
+                "status": "pending",
+            },
+            {
+                "month": "202602",
+                "archive": "202602--(20261116Update).rar",
+                "total": 9,
+                "processed": 4,
+                "status": "pending",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        processing_module,
+        "_index_month_coverage_runtime",
+        lambda *args, **kwargs: coverage,
+    )
+
+    snapshot = build_processing_snapshot(
+        settings=_settings(tmp_path),
+        session_factory=session_factory,
+    )
+
+    workflow = next(
+        item for item in snapshot["workflows"] if item["id"] == "index_versions"
+    )
+    assert workflow["update_available"] is True
+    assert workflow["update_count"] == 2
+    assert workflow["pending_count"] == 2
+    assert workflow["update_origin"] == "Qdrant／PostgreSQL"
+    assert "E 新 embedding" in workflow["update_mechanism"]
+    assert workflow["update_message"] == "待建立 2 個月份的新 embedding"
+    assert snapshot["capabilities"]["index_pending_months"] == 2
 
 
 def test_import_month_timeline_marks_imported_unimported_and_updates(

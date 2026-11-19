@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.0
+**Version**: 1.1
 
 **Last Updated**: 2026-11-19
 
@@ -223,6 +223,32 @@ Coverage-only 月份 tooltip MUST 顯示：
 - 待完成 E 時顯示「待完成：E 新 embedding」。
 - 目前索引月份顯示「目前索引」或「最後索引」。
 
+### 7.4 更新提示與 badge
+
+E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在時間表顯示而沒有其他入口提示。
+
+後端 `index_versions` workflow entry MUST 提供：
+
+| 欄位 | 值 |
+| --- | --- |
+| `pending_count` | E 未完成月份數 |
+| `update_available` | `E 未完成月份數 > 0` |
+| `update_count` | E 未完成月份數 |
+| `update_origin` | `Qdrant／PostgreSQL` |
+| `update_mechanism` | active collection 與各月份最新 archive 的覆蓋比對；只計算 E 未完成月份 |
+| `update_message` | `待建立 N 個月份的新 embedding` |
+
+`pending_count`、`update_count` 與 badge 數字 MUST 以月份為單位，不得使用 RAR 檔數、Qdrant point 數或 `index_backlog` 筆數。
+
+前端 MUST 在下列位置顯示更新提示：
+
+- 資料處理 workflow 側邊清單的 `index_versions` 按鈕：顯示 refresh icon 與 E 未完成月份數。
+- Qdrant workflow 面板上方：顯示更新提示、偵測機制、月份數與「更新」按鈕；按鈕啟動 `index_versions` workflow。
+- 全站左側「資料處理」導覽：顯示更新 badge。
+- 更新 badge 的 tooltip MUST 說明是「Qdrant 向量索引待補 N 個月」。
+
+後端 snapshot MUST 在 `capabilities.index_pending_months` 提供相同月份數。`/api/updates/status` MUST 從 processing snapshot cache 回傳 `index_pending_count`，讓全站 sidebar 在未開啟資料處理頁時也能顯示 badge；processing 頁載入新 snapshot 時 MUST 以 `judgment:processing-pending` 事件同步 `index_pending`。
+
 ---
 
 ## 8. 快取與 SSE
@@ -231,6 +257,8 @@ Coverage-only 月份 tooltip MUST 顯示：
 - Build mode 由 processing state／SSE 更新；不得以固定前端 polling 取代。
 - 初次載入由 processing topic 推送完整 snapshot；後續以 live payload 更新。
 - A／R／E 的計算必須在後端或同一份 runtime payload 中完成，不得由前端混用不同來源的 total／processed。
+- `capabilities.index_pending_months` 寫入 processing snapshot cache；`/api/updates/status` 的 `index_pending_count` 由該 cache 讀取，避免每次 sidebar badge 更新都查詢 Qdrant／PostgreSQL。
+- 資料處理頁收到新 snapshot 時 MUST 同步 `judgment:processing-pending` 事件的 `index_pending`，讓全站 sidebar badge 立即更新。
 
 ---
 
@@ -251,6 +279,9 @@ Coverage-only 月份 tooltip MUST 顯示：
 - [ ] 舊 archive 作為 A／R 基線；已完成時為實心，不是 25% 淺色。
 - [ ] 新 RAR 全部 unchanged 時，不會產生新的 E 未完成月份。
 - [ ] Summary 標籤明確標示「月份」，不是 RAR 檔數。
+- [ ] E 未完成月份會在 workflow 側邊清單、workflow 面板與全站「資料處理」導覽顯示更新 badge。
+- [ ] Qdrant workflow 面板上方有更新提示與「更新」按鈕。
+- [ ] `/api/updates/status` 回傳 `index_pending_count`，且與 E 未完成月份數一致。
 - [ ] Coverage-only 沒有 run 時仍能顯示正確 A／R／E。
 - [ ] Build mode 續跑能恢復 R／E counters。
 - [ ] 目前索引月份只有實線外框，無脈動動畫。
@@ -264,3 +295,4 @@ Coverage-only 月份 tooltip MUST 顯示：
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.0 | 2026-11-19 | 建立 Qdrant 判決向量索引版本建置規格：archive 最新版判斷、A／R／E 基線與 E 分離、unchange 判決不更新 source_archive、月份 vs RAR 檔數、coverage-only／build mode 與 UI 契約。 |
+| 1.1 | 2026-11-19 | 新增 E 未完成月份驅動的更新提示：workflow badge、workflow 面板更新按鈕、全站資料處理 sidebar badge、`index_pending_count` 與 snapshot 快取契約。 |

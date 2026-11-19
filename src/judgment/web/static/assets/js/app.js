@@ -158,20 +158,33 @@ function initUpdateBadge() {
   }
   let sourceCount = 0;
   let importPending = 0;
+  let indexPending = 0;
   const renderBadge = () => {
-    const count = sourceCount + (importPending > 0 ? 1 : 0);
-    if (count > 0) {
-      badge.textContent = String(
-        importPending > 0 && sourceCount === 0 ? importPending : count,
-      );
-      badge.title =
-        importPending > 0
-          ? `法規／命令／判決有 ${sourceCount} 項更新；判決匯入待處理 ${importPending} 個月`
-          : `法規／命令／判決有 ${sourceCount} 項更新`;
-      badge.hidden = false;
-    } else {
-      badge.hidden = true;
+    const parts = [];
+    if (sourceCount > 0) {
+      parts.push(`法規／命令／判決有 ${sourceCount} 項來源更新`);
     }
+    if (importPending > 0) {
+      parts.push(`判決匯入待處理 ${importPending} 個月`);
+    }
+    if (indexPending > 0) {
+      parts.push(`Qdrant 向量索引待補 ${indexPending} 個月`);
+    }
+    if (!parts.length) {
+      badge.hidden = true;
+      return;
+    }
+    const components =
+      (sourceCount > 0 ? 1 : 0) +
+      (importPending > 0 ? 1 : 0) +
+      (indexPending > 0 ? 1 : 0);
+    badge.textContent = String(
+      components === 1
+        ? sourceCount || importPending || indexPending
+        : components,
+    );
+    badge.title = parts.join("；");
+    badge.hidden = false;
   };
   const refresh = async (data = null) => {
     try {
@@ -182,6 +195,12 @@ function initUpdateBadge() {
         Object.prototype.hasOwnProperty.call(info, "import_pending_count")
       ) {
         importPending = Number(info.import_pending_count) || 0;
+      }
+      if (
+        info &&
+        Object.prototype.hasOwnProperty.call(info, "index_pending_count")
+      ) {
+        indexPending = Number(info.index_pending_count) || 0;
       }
       renderBadge();
     } catch (error) {
@@ -194,6 +213,12 @@ function initUpdateBadge() {
   );
   window.addEventListener("judgment:processing-pending", (event) => {
     importPending = Number(event.detail?.count) || 0;
+    if (
+      event.detail &&
+      Object.prototype.hasOwnProperty.call(event.detail, "index_pending")
+    ) {
+      indexPending = Number(event.detail.index_pending) || 0;
+    }
     renderBadge();
   });
   window.addEventListener("judgment:updates-changed", () => refresh());

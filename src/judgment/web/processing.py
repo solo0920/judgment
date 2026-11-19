@@ -151,6 +151,18 @@ def _cached_import_pending_count() -> Optional[int]:
         return None
 
 
+def _cached_index_pending_count() -> Optional[int]:
+    """Read the last processing snapshot's E-incomplete month count."""
+
+    try:
+        cache_path = _processing_snapshot_cache_path(default_state_path())
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        capabilities = payload.get("capabilities") or {}
+        return _safe_int(capabilities.get("index_pending_months"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def apply_live_judgment_pending(
     update_state: Dict[str, Any], settings: Settings
 ) -> Dict[str, Any]:
@@ -161,43 +173,42 @@ def apply_live_judgment_pending(
     the manifest's backfill count keeps badges current while files finish.
     """
 
+    cached_import_pending = _cached_import_pending_count()
+    cached_index_pending = _cached_index_pending_count()
     try:
         manifest = _judgment_download_manifest(settings)
         backfill = manifest.get("backfill") or {}
         live_pending = _safe_int(backfill.get("pending_count"))
-        if live_pending is None:
-            cached_import_pending = _cached_import_pending_count()
-            if cached_import_pending is not None:
-                update_state["import_pending_count"] = cached_import_pending
-            return update_state
-        sources = update_state.setdefault("sources", {})
-        record = sources.setdefault("judgment", {})
-        details = dict(record.get("details") or {})
-        details["pending_count"] = live_pending
-        resume = str(backfill.get("resume_from_month") or "")
-        if resume:
-            details["resume_from_month"] = resume
-        record["details"] = details
-        record["update_available"] = live_pending > 0
-        record["status"] = (
-            "update_available" if live_pending > 0 else "up_to_date"
-        )
-        record["message"] = (
-            f"判決待補齊 {live_pending} 個月"
-            if live_pending > 0
-            else "判決所有可下載月份皆已是最新"
-        )
-        update_state["update_count"] = sum(
-            1
-            for source in sources.values()
-            if bool((source or {}).get("update_available"))
-        )
-        update_state["any_update"] = int(update_state["update_count"]) > 0
+        if live_pending is not None:
+            sources = update_state.setdefault("sources", {})
+            record = sources.setdefault("judgment", {})
+            details = dict(record.get("details") or {})
+            details["pending_count"] = live_pending
+            resume = str(backfill.get("resume_from_month") or "")
+            if resume:
+                details["resume_from_month"] = resume
+            record["details"] = details
+            record["update_available"] = live_pending > 0
+            record["status"] = (
+                "update_available" if live_pending > 0 else "up_to_date"
+            )
+            record["message"] = (
+                f"判決待補齊 {live_pending} 個月"
+                if live_pending > 0
+                else "判決所有可下載月份皆已是最新"
+            )
+            update_state["update_count"] = sum(
+                1
+                for source in sources.values()
+                if bool((source or {}).get("update_available"))
+            )
+            update_state["any_update"] = int(update_state["update_count"]) > 0
     except Exception:
         logger.warning("無法套用即時判決待補齊數量", exc_info=True)
-    cached_import_pending = _cached_import_pending_count()
     if cached_import_pending is not None:
         update_state["import_pending_count"] = cached_import_pending
+    if cached_index_pending is not None:
+        update_state["index_pending_count"] = cached_index_pending
     return update_state
 
 
@@ -991,6 +1002,116 @@ _INDEX_MONTH_CACHE: Dict[str, Any] = {
     "payload": None,
 }
 _INDEX_MONTH_CACHE_LOCK = threading.Lock()
+
+
+def _archive_update_rank(name: Any) -> int:
+    """Return the YYYYMMDD update rank embedded in an archive name."""
+
+    match = re.search(r"(\d{8})Update", str(name or ""), re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def _index_month_counts(
+    runtime: Optional[Dict[str, Any]],
+) -> Dict[str, int]:
+    """Count A/R/E month states exactly like the index month timeline.
+
+    Coverage-only months may contain several archive rows for one month.  The
+    newest archive supplies E, while older archives form the A/R baseline; the
+    rows must never be added together.
+    """
+
+    months = (runtime or {}).get("months") or []
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for item in months:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("month") or "")
+        if not re.fullmatch(r"\d{6}", key):
+            continue
+        groups.setdefault(key, []).append(item)
+    counts = {
+        "active": 0,
+        "reuse_complete": 0,
+        "reuse_incomplete": 0,
+        "embed_complete": 0,
+        "embed_incomplete": 0,
+        "total_months": len(groups),
+    }
+    coverage_only = bool((runtime or {}).get("coverage_only"))
+    active_coverage = (runtime or {}).get("active_coverage") or {}
+    for key, rows in groups.items():
+        if coverage_only:
+            ordered = sorted(
+                rows,
+                key=lambda item: _archive_update_rank(item.get("archive")),
+                reverse=True,
+            )
+            latest = ordered[0]
+            baseline_rows = ordered[1:] or [latest]
+            baseline_total = sum(
+                int(item.get("total") or 0) for item in baseline_rows
+            )
+            baseline_processed = sum(
+                int(item.get("processed") or 0) for item in baseline_rows
+            )
+            baseline_complete = (
+                baseline_total > 0
+                and baseline_processed >= baseline_total
+            )
+            latest_total = int(latest.get("total") or 0)
+            latest_processed = int(latest.get("processed") or 0)
+            latest_complete = (
+                latest_total > 0 and latest_processed >= latest_total
+            )
+            if baseline_complete:
+                counts["active"] += 1
+                counts["reuse_complete"] += 1
+            else:
+                counts["reuse_incomplete"] += 1
+            if latest_complete:
+                counts["embed_complete"] += 1
+            else:
+                counts["embed_incomplete"] += 1
+            continue
+        total = sum(int(item.get("total") or 0) for item in rows)
+        processed = sum(int(item.get("processed") or 0) for item in rows)
+        reused = sum(int(item.get("reused") or 0) for item in rows)
+        embedded = sum(int(item.get("embedded") or 0) for item in rows)
+        active_item = active_coverage.get(key) or {}
+        active_total = (
+            int(active_item.get("total") or 0)
+            if isinstance(active_item, dict)
+            else 0
+        )
+        active_processed = (
+            int(active_item.get("processed") or 0)
+            if isinstance(active_item, dict)
+            else 0
+        )
+        current_complete = total > 0 and processed >= total
+        active_complete = active_total > 0 and active_processed >= active_total
+        kind = (
+            "embed"
+            if embedded > 0
+            else "reuse"
+            if reused > 0
+            else "reuse"
+            if active_complete
+            else "embed"
+        )
+        if kind == "reuse":
+            if current_complete:
+                counts["reuse_complete"] += 1
+            else:
+                counts["reuse_incomplete"] += 1
+        elif current_complete:
+            counts["embed_complete"] += 1
+        else:
+            counts["embed_incomplete"] += 1
+        if active_complete:
+            counts["active"] += 1
+    return counts
 
 
 def _index_month_coverage_runtime(
@@ -4636,6 +4757,7 @@ def build_processing_snapshot(
         "index_versions": ("judgment", "index"),
     }
     workflow_entries = []
+    index_pending_months = 0
     workflow_runnable = not active_runs and not external_processes
     update_source_map = {
         "law_download": "law",
@@ -4684,6 +4806,7 @@ def build_processing_snapshot(
             else {}
         )
         index_runtime = None
+        index_counts = None
         if definition["id"] == "index_versions":
             index_runtime = _index_runtime_view(progress_run)
             if index_runtime.get("available"):
@@ -4704,6 +4827,10 @@ def build_processing_snapshot(
                     index_runtime["active_coverage"] = _coverage_month_map(
                         coverage
                     )
+            index_counts = _index_month_counts(index_runtime)
+            index_pending_months = int(
+                index_counts.get("embed_incomplete") or 0
+            )
         court_pending = (
             int(database.get("court_pending_count") or 0)
             if definition["id"] == "normalize_courts"
@@ -4714,9 +4841,11 @@ def build_processing_snapshot(
             if definition["id"] == "judgment_import"
             else None
         )
-        workflow_pending_count = (
-            import_pending if import_pending is not None else court_pending
-        )
+        workflow_pending_count = court_pending
+        if import_pending is not None:
+            workflow_pending_count = import_pending
+        elif definition["id"] == "index_versions":
+            workflow_pending_count = index_pending_months
         workflow_update_available = bool(
             update_record.get("update_available")
         )
@@ -4765,6 +4894,17 @@ def build_processing_snapshot(
                 "raw_rar 判決壓縮檔與 PostgreSQL 已匯入月份比對"
             )
             update_message = f"待匯入 {import_pending:,} 個月判決"
+        if definition["id"] == "index_versions" and index_pending_months:
+            workflow_update_available = True
+            update_count = index_pending_months
+            update_origin = "Qdrant／PostgreSQL"
+            update_mechanism = (
+                "active collection 與各月份最新 archive 的覆蓋比對；"
+                "只計算 E 新 embedding 尚未完成的月份"
+            )
+            update_message = (
+                f"待建立 {index_pending_months:,} 個月份的新 embedding"
+            )
         active_run_label = ""
         if active_runs:
             active_run = active_runs[0]
@@ -4822,6 +4962,7 @@ def build_processing_snapshot(
         ),
         "active_update_id": active_update.get("id") if active_update else None,
         "index_backlog": backlog,
+        "index_pending_months": index_pending_months,
         "unprocessed_archives": int(local.get("unprocessed") or 0),
         "external_processes": len(external_processes),
         "external_index_running": external_index is not None,

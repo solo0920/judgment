@@ -7192,6 +7192,8 @@ export async function render(root) {
       new CustomEvent("judgment:processing-pending", {
         detail: {
           count: Number(snapshot.capabilities?.unprocessed_archives) || 0,
+          index_pending:
+            Number(snapshot.capabilities?.index_pending_months) || 0,
         },
       }),
     );
