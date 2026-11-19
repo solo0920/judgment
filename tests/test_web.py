@@ -597,6 +597,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-current-phase" in processing_js.text
     assert "rag-model-buttons" in processing_js.text
     assert "index-host-strip" not in processing_js.text
+    assert "依匯入 ID" in processing_js.text
     assert "normalizeModelLabel" in processing_js.text
     assert "R 完成月份" in processing_js.text
     assert "R 未完成月份" in processing_js.text

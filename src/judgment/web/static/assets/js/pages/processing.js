@@ -4239,7 +4239,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，R／E 可使用 active 覆蓋顯示完成；仍有 E backlog 的月份，R／E 只使用本次 run 的 processed／total，未處理前維持淺色。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，R／E 可使用 active 覆蓋顯示完成；仍有 E backlog 的月份，R／E 只使用本次 run 的 processed／total，未處理前維持淺色。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。索引掃描順序依匯入 ID（JudgmentDocument.id），不是月份順序，因此目前批次月份可能前後跳動；綠框只標示目前批次所在月份。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
   </div>`;
 }
 
@@ -4545,7 +4545,10 @@ function indexRuntimeMarkup(workflow) {
       : "最後處理";
   const currentLine = current.jid
     ? `<div class="index-current-row">
-        <span class="badge badge-info">${icon("activity", 11)}${currentLabel}</span>
+        <span class="badge badge-info" title="索引依 JudgmentDocument.id（匯入順序）掃描；目前批次月份可能前後跳動，不是月份順序。">${icon(
+          "activity",
+          11,
+        )}${currentLabel}</span>
         <strong class="mono">${escapeHtml(
           indexMonthLabel(current.month),
         )}</strong>
