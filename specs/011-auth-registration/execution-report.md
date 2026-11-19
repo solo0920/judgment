@@ -1,0 +1,374 @@
+# 權限、註冊與公開存取覆核意見執行報告
+
+**Status**: 待複核（10 點意見已完成可行性評估；第 1 點熱修已實作）
+
+**Version**: 0.1
+
+**Last Updated**: 2026-11-19
+
+**Related**:
+
+- [`./evaluation.md`](./evaluation.md)
+- [`../008-realtime-event-stream/spec.md`](../008-realtime-event-stream/spec.md)
+- [`../security/security-acceptance-matrix.md`](../security/security-acceptance-matrix.md)
+
+---
+
+## 1. 執行結論
+
+同事提出的 10 點意見 **全部接受**，沒有需要否決的項目。差異只在落地方式與分期：
+
+| 項目 | 結論 |
+| --- | --- |
+| 第 1 點：本機 bypass 熱修 | **已實作**，預設關閉；待 production 重啟後驗證 tunnel |
+| 第 2 點：Pending 權限 ⊇ Anonymous | 接受；權限矩陣與流程已改 |
+| 第 3 點：tunnel 後 per-IP 限流 | 接受；需新增 `client_ip()` 信任規則與 firewall 前提 |
+| 第 4 點：SSE 角色分層 | 接受；ticket 需綁 role／topic，長連線需定期重驗 |
+| 第 5 點：default-deny 範圍與落地 | 接受；改為 route 層級分類＋啟動時 fail-fast |
+| 第 6 點：Google state／PKCE | `state` 已存在並驗證；PKCE 接受，列 Phase 1 |
+| 第 7 點：RAG 回饋污染 | 接受；加 request 歸屬、review_status、長度與 escape |
+| 第 8 點：預算扣款時機 | 接受；先預扣、後結算、斷線釋放 |
+| 第 9 點：待審核上限反向利用 | 接受；改 per-IP／每日與分頁，不用全站總量上限 |
+| 第 10 點：個資與保留期限 | 接受；列 Phase 5，上線前提供隱私說明 |
+
+**工時**：原估 Phase 0+1 為 1–2 天過於樂觀。修正為 Phase 0 單獨 1–2 天，整體 **7–10 個開發日**（不含 Phase 0.1 熱修、Google／Turnstile 設定與人工驗收）。
+
+**目前不應做的事**：
+
+- 不先做註冊 UI。
+- 不在 Phase 4 前把公開 RAG 直接暴露而沒有 rate limit／預算。
+- 不在 v7 索引 copy 期間重啟 production。
+- 不只在整個 `/api/*` middleware 比對 path；必須有 route 分類與啟動檢查。
+
+---
+
+## 2. 第 1 點熱修：本機 bypass（已完成程式）
+
+### 2.1 問題
+
+原本 `admin_auth_middleware` 只要 `_is_local_request(request)` 為真就放行所有 API。若 production 由 cloudflared／反向代理從 localhost 轉送，FastAPI 看到的 client 可能是 `127.0.0.1`，遠端請求就會被當成本機管理員。
+
+### 2.2 已完成的修改
+
+| 檔案 | 修改 |
+| --- | --- |
+| `src/judgment/config.py` | 新增 `allow_local_admin_bypass`，預設 `False`；由 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS` 控制 |
+| `src/judgment/web/app.py` | 新增 `_has_forwarded_client_headers()`；bypass 需同時滿足「設定開啟、socket 為本機、沒有 forwarded header」 |
+| `.env.example` | 新增 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0` 與 production 說明 |
+| `tests/test_web.py` | 新增預設關閉、開發開啟、帶 `X-Forwarded-For` 三種測試 |
+
+### 2.3 行為
+
+| 情境 | 結果 |
+| --- | --- |
+| Production 預設（`0`） | 本機與遠端都不能靠 socket 位置取得 admin；需 token 或 Google session |
+| 直接本機開發（`1`，無 forwarded header） | 可用本機 bypass |
+| `1` 但帶 `CF-Connecting-IP`／`X-Forwarded-For`／`Forwarded`／`X-Real-IP` | 不使用 bypass |
+| 遠端經 tunnel | 不使用 bypass；走 admin token／Google session |
+
+### 2.4 驗證
+
+- `uv run ruff check src/judgment/config.py src/judgment/web/app.py tests/test_web.py` 通過。
+- `uv run pytest -q tests/test_web.py` 通過。
+- 尚未重啟 production；目前 v7 copy 正在進行，重啟會影響 API 監控。下次重啟後 MUST 以真實 tunnel 請求確認 `request.client.host` 與 forwarded headers。
+
+### 2.5 殘留工作
+
+- 確認 production 是否只暴露 tunnel，origin 是否可被直連。
+- 確認 cloudflared 是否穩定送入 `CF-Connecting-IP`；若沒有，`client_ip()` 需退回 socket IP。
+- 若 origin 可被直連，MUST 以防火牆或 bind localhost 阻擋，否則 forwarded header 仍可被偽造。
+
+---
+
+## 3. 十點意見逐項可行性
+
+### 3.1 第 1 點：bypass 應為獨立熱修
+
+**判定：接受，已完成。**
+
+- 不再把 bypass 放在 Phase 0 第 4 步；Phase 0.1 先完成。
+- Phase 0 只保留「tunnel／client IP 驗證」與測試，不重新設計 bypass。
+- Production 完全關閉；只保留 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=1` 給 direct local development。
+
+**驗收**：預設 `0` 時本機管理 API 401；`1` 且無 forwarded header 時可用；任何 forwarded header 存在時不可用。
+
+---
+
+### 3.2 第 2 點：Pending 權限應 ⊇ Anonymous
+
+**判定：接受。**
+
+- Pending 建立受限 session，但可使用所有 `PUBLIC_READ`／`PUBLIC_QUERY`：首頁、公開 RAG、公開摘要、法規目錄。
+- Pending 額外可呼叫 `GET /api/auth/me`、`GET /api/auth/application`、`POST /api/auth/logout`。
+- Pending 不可使用 `AUTH_READ` 詳細頁、`SELF_WRITE`、`ADMIN_WRITE`、SSE。
+- 申請審核中不再被鎖在一個什麼都不能看的頁面。
+
+**驗收**：pending 使用者可完成首頁與 RAG 問答；呼叫 `/api/status`、`/api/processing`、回饋、管理 API 皆被拒絕；申請狀態頁可正常顯示。
+
+---
+
+### 3.3 第 3 點：tunnel 後 per-IP 限流
+
+**判定：接受，但前提是 production 網路拓樸要先確認。**
+
+- 新增單一 `client_ip()`：
+  - 只有在「請求來自信任的 tunnel／loopback」且「origin 沒有對外直接暴露」時，才採用 `CF-Connecting-IP`。
+  - 其他情況使用 `request.client.host`。
+  - 不直接信任任意 `X-Forwarded-For`；必要時忽略。
+- 以 IP hash 計數，不長期保存原始 IP。
+- 若 origin 可被直連，MUST 以防火牆／bind localhost 阻擋，否則 header 可被偽造。
+- Per-IP：分鐘／小時／日限制、併發限制；全站每日 token 預算。
+- `/api/rag/query` 與 `/stream` 共用同一套限制。
+
+**驗收**：兩個不同 `CF-Connecting-IP` 不共用額度；偽造 `X-Forwarded-For` 不改變計數；直連 origin（若存在）被拒或使用 socket IP；429 含 `Retry-After`。
+
+---
+
+### 3.4 第 4 點：SSE 角色分層與長連線撤銷
+
+**判定：接受；這是 10 點中唯一需要新增較多機制的項目。**
+
+- 匿名與 pending 不發 SSE ticket。
+- Ticket 綁 `user_id`、`role`、允許 topic、短 TTL；不再讓任何有效 ticket 訂閱所有 topic。
+- User 只可訂閱唯讀 topic；admin 可全部。
+- SSE 連線每 60 秒回查 DB status；停用／降級時主動關閉連線。
+- `POST /api/auth/sse-ticket` 只允許 active user／admin。
+
+**驗收**：anonymous／pending 取得 ticket 被拒；user 訂閱 admin-only topic 被拒；停用使用者既有 SSE 在一個重驗週期內斷線；admin 可收到 `auth` 通知。
+
+---
+
+### 3.5 第 5 點：default-deny 範圍與落地
+
+**判定：接受，且調整為比原報告更嚴格的實作。**
+
+- 範圍不只 `/api/*`：`/api/docs`、`/api/openapi.json`、SSE、靜態路徑、frontend 入口都要進分類表。
+- `/api/docs`、`/api/openapi.json` production 關閉或 admin-only。
+- 用 FastAPI route／router 層級 `Depends` 或 metadata 分類；middleware 只作 defense-in-depth。
+- 應用啟動時列舉所有 route；未分類即拒絕啟動。
+- 測試列舉 `app.routes` 全部 method route；未分類失敗。
+- `PUBLIC_READ` 不得允許寫入 method；RAG 的 POST 另列 `PUBLIC_QUERY`，只允許查詢語意且必須限流。
+
+**驗收**：新增一條未分類路由時啟動失敗；測試失敗；`/api/docs` 匿名不可讀；`PUBLIC_QUERY` 只限 RAG 查詢路徑；所有 method 都有政策。
+
+---
+
+### 3.6 第 6 點：Google state 與 PKCE
+
+**判定：部分已存在；PKCE 接受。**
+
+- 目前 callback 已產生並驗證 signed `state` cookie，並驗證 `email_verified`；不是完全沒有 CSRF 防護。
+- 補 PKCE：`code_challenge`、`S256`、`code_verifier` 存在 signed state cookie，換 token 時帶入。
+- 繼續使用 Authorization Code flow；不新增前端 ID token 信任路徑。
+- 以 `google_sub` 作身分，email 只作顯示與 bootstrap。
+
+**驗收**：state 不符／缺少時拒絕；PKCE verifier 不符時拒絕；`email_verified=false` 拒絕；同一 email 改 `sub` 不會接管舊帳號。
+
+---
+
+### 3.7 第 7 點：RAG 回饋污染與歸屬
+
+**判定：接受。**
+
+- `rag_feedback` 綁 `user_id` + `request_id`。
+- 後端驗證 request 屬於目前使用者；不能對他人 request 回饋。
+- `review_status`：`new | reviewed | accepted | rejected`；不自動進評估集或訓練資料。
+- comment 長度上限（建議 2,000 字）；輸出 escape，避免儲存型 XSS。
+- Anonymous／pending 不可回饋。
+
+**驗收**：A 使用者不能對 B 的 request 回饋；超長 comment 被拒；HTML／script 內容以文字顯示；未 accepted 的回饋不出現在評估集。
+
+---
+
+### 3.8 第 8 點：預算扣款時機與斷線
+
+**判定：接受。**
+
+- 串流開始先依 `prompt tokens + max_output_tokens` 預扣。
+- 結束後依實際 usage 結算；沒有 usage 時保留保守估計。
+- `finally` 釋放併發與未使用預留；client disconnect 也要釋放。
+- 計數器原子遞增、每日重置、持久化。
+
+**驗收**：提早斷線不鎖死額度；超額請求 429；跨 process／重啟後計數不歸零；每日重置正確。
+
+---
+
+### 3.9 第 9 點：待審核上限被反向利用
+
+**判定：接受。**
+
+- 不以全站 pending 總數作唯一上限。
+- 改用每 IP／每日申請數、同帳號冷卻、rejected 冷卻。
+- badge 只顯示數字；清單分頁。
+- 管理員可拒絕／停用；不因大量申請而無法處理真正申請者。
+
+**驗收**：大量申請不會讓新申請者被永久擋住；badge 數字正確；列表可分頁；重複申請受冷卻限制。
+
+---
+
+### 3.10 第 10 點：個資與保留期限
+
+**判定：接受，列 Phase 5，但 privacy notice 必須在上線前完成。**
+
+- 只保存必要的 Google 顯示資料（email、name、picture）。
+- 提問內容、回饋、audit、IP hash 訂保留期限；到期刪除或匿名化。
+- 提供簡短隱私說明：蒐集目的、保存期限、管理員可見範圍、刪除申請方式。
+- Audit 不可由一般 API 修改；保留期限另訂。
+
+**驗收**：文件可公開取得；保留期限有排程或手動程序；使用者可提出刪除；公開摘要與 log 不含不必要的個資。
+
+---
+
+## 4. 七個待決事項的最終建議
+
+| # | 項目 | 建議 | 狀態 |
+| --- | --- | --- | --- |
+| 1 | 公開摘要範圍 | 只做首頁、法規目錄、聚合統計；各分頁不放即時數據 | 採納 |
+| 2 | User 匯出 | 先移除匯出；題庫唯讀保留 | 採納 |
+| 3 | RAG 預算單位 | 以 token 為主、請求數為輔；先保守值，一週後調整 | 採納 |
+| 4 | Anonymous 回饋 | 不可回饋；回饋需 User 以上 | 採納 |
+| 5 | 核准 UI 位置 | 右上角 badge＋選單入口，完整管理放 `#/status` | 採納 |
+| 6 | Bootstrap 名稱 | `GOOGLE_BOOTSTRAP_ADMIN_EMAILS`，只在 DB 沒有 admin 時生效 | 採納 |
+| 7 | 本機 bypass | Production 完全關閉 | 採納並已熱修 |
+
+---
+
+## 5. 修訂後執行計畫
+
+### Phase 0.1：熱修（已完成程式）
+
+- 關閉 production 本機 bypass。
+- forwarded header 防護。
+- 測試與文件。
+- **待辦**：下次 production 重啟後驗證真實 tunnel；不要在 v7 copy 期間重啟。
+
+### Phase 0：權限骨架（1–2 天）
+
+1. 建立 100 個 API path／114 個 method route 的分類表。
+2. Route 層級政策與 default-deny middleware。
+3. 啟動時 fail-fast；測試列舉全部 route。
+4. `/api/docs`、`/api/openapi.json` 關閉或 admin-only。
+5. `client_ip()` 與 tunnel 信任規則。
+6. SSE ticket 綁 role／topic；長連線重驗。
+7. 四角色 × GET／POST／PATCH／DELETE 測試矩陣。
+
+**Gate**：未分類路由會讓啟動與測試失敗；anonymous 無法呼叫任何 admin API；pending 可使用公開頁與 RAG。
+
+### Phase 1：使用者資料與 session（1.5–2 天）
+
+1. `app_users`、`app_user_audit`、migration。
+2. `GOOGLE_BOOTSTRAP_ADMIN_EMAILS` 一次性 bootstrap。
+3. `read_session` DB 回查 status／role。
+4. Pending／active／rejected／disabled 流程。
+5. Pending session 權限 ⊇ Anonymous。
+6. PKCE。
+
+**Gate**：pending 可看首頁／RAG／申請狀態；active user 可唯讀；停用立即失效。
+
+### Phase 2：核准與通知（1 天）
+
+1. Admin 使用者管理 API。
+2. 最後 admin 保護與 audit。
+3. `/api/auth/me` pending count。
+4. 右上角 badge、帳號選單、`#/status` 使用者管理。
+
+**Gate**：申請→badge→核准→使用者生效；所有操作有 audit。
+
+### Phase 3：公開唯讀與前端鎖定（1.5–2 天）
+
+1. `GET /api/public/summary`。
+2. Anonymous 只載入公開摘要。
+3. User 詳細唯讀、按鈕 disabled。
+4. Auth state／canWrite／isAdmin／isPending。
+5. Pending 申請狀態頁。
+
+**Gate**：未登入看不到主機／處理細節；按鈕 disabled 與 API 拒絕一致。
+
+### Phase 4：公開 RAG 保護（1–1.5 天）
+
+1. Per-IP 限流、每日／全站 token 預算、kill switch。
+2. `/stream` 同步限制、預扣／結算／斷線釋放。
+3. 問題與 token 上限。
+4. 429／預算用盡 UI。
+5. 可選 Turnstile。
+
+**Gate**：偽造 header 不影響限流；斷線不鎖額度；預算到頂可立即停止匿名提問。
+
+### Phase 5：回饋與 hardening（1 天）
+
+1. RAG 回饋與 request 歸屬。
+2. review_status 與 admin 檢視。
+3. CSRF／audit／session 撤銷／最後 admin 競態測試。
+4. 隱私說明與保留期限。
+5. 文件與驗收。
+
+**Gate**：不能對他人 request 回饋；XSS 文字化；隱私文件可取得；完整測試通過。
+
+---
+
+## 6. 驗收清單
+
+### 6.1 後端
+
+- [ ] 所有 route 都有分類；未分類時啟動失敗。
+- [ ] anonymous／pending／user／admin × GET／POST／PATCH／DELETE 矩陣通過。
+- [ ] 本機 bypass 預設關閉；forwarded header 存在時停用。
+- [ ] `client_ip()` 不被任意 `X-Forwarded-For` 影響。
+- [ ] `/api/docs`、`/api/openapi.json` 匿名不可讀。
+- [ ] SSE ticket 綁 role／topic；停用使用者連線會斷。
+- [ ] RAG 串流與一般查詢共用限流與預算。
+- [ ] 回饋 request 歸屬驗證。
+- [ ] 最後一位 admin 不可降級／停用。
+- [ ] 所有管理操作寫 audit。
+
+### 6.2 前端
+
+- [ ] Anonymous：首頁／RAG 可用；其他分頁只有公開摘要；寫入按鈕 disabled。
+- [ ] Pending：首頁／RAG／公開摘要可用；申請狀態可見；詳細頁與寫入 disabled。
+- [ ] User：詳細頁唯讀；管理／處理／匯出 disabled。
+- [ ] Admin：全部功能可用；badge 與使用者管理可見。
+- [ ] 390px 無水平 overflow；console error 0。
+- [ ] disabled 不只靠前端；直接呼叫 API 仍被拒。
+
+### 6.3 Production
+
+- [ ] 重啟後以真實 tunnel 驗證 client host／forwarded headers。
+- [ ] 公開 RAG 若已開放，先有 Cloudflare rate limit 或暫時限制。
+- [ ] v7 索引 copy 完成後才安排重啟／部署。
+- [ ] 部署後檢查 SSE、RAG 串流、admin badge、pending 流程。
+
+---
+
+## 7. 風險與待確認
+
+1. **Production 網路拓樸未實測**：目前不知道 cloudflared 後 `request.client.host` 與 `CF-Connecting-IP` 的實際值，也不知道 origin 是否可被直連。這是 Phase 0 的第一個檢查項。
+2. **公開 RAG 目前狀態未回寫 repo**：repo 的 `PUBLIC_API_PATHS` 沒有 RAG；若 production 手動開放，Phase 0 前就要先確認，否則可能已經在沒有 per-IP 限制的情況下公開。
+3. **重啟時機**：v7 copy 正在進行；Phase 0.1 程式雖已完成，但重啟要等 copy 完成或另開維護窗口，避免影響索引與監控。
+4. **DB 回查成本**：每次請求回查 `app_users` 會增加 DB 負載；需要用短 TTL cache＋停用時主動失效，不能只靠 cache。
+5. **SSE 長連線重驗**：每 60 秒一次 DB 查詢，訂閱者多時需注意成本；可只在使用者狀態版本變更時重驗，但停用必須有主動斷線。
+6. **SQLite 併發**：若使用 SQLite 存 counters／users，需確認 WAL 與多 process 寫入；多 instance 時改用共享 DB。
+7. **Admin token 的 break-glass 風險**：token 一旦洩漏即完整管理權；需常數時間比較、audit、定期更換，且不進前端。
+8. **工時**：7–10 天是依目前 100 個 path 與前端 action 的估計；public summary 欄位與 SSE 重構可能再增加。
+
+---
+
+## 8. 需要複核後才動工的事項
+
+1. 是否核定 Phase 0 先做，且 Phase 0 單獨估 1–2 天。
+2. 是否核定第 13.2 節的參數：每日 token 預算、per-IP 限制、保留期限。
+3. 是否確認 production 的 tunnel／origin 拓樸，以及公開 RAG 目前是否已開放。
+4. 是否同意在 v7 copy 完成前不重啟 production；Phase 0.1 熱修待下次重啟生效。
+5. 是否同意 Phase 4 前若 RAG 已公開，先以 Cloudflare rate limit 或暫時限制匿名提問。
+
+---
+
+## 9. 本次變更清單
+
+- `src/judgment/config.py`：新增 `allow_local_admin_bypass`。
+- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護。
+- `.env.example`：新增 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0`。
+- `tests/test_web.py`：新增 bypass 三情境測試。
+- `specs/011-auth-registration/evaluation.md`：更新至 v0.3，納入 10 點與七項決策。
+- `specs/011-auth-registration/execution-report.md`：本報告。
+
+> 本報告只提出執行方案與已完成的熱修；註冊 UI、角色權限與公開 RAG 保護尚未實作，待複核後再進入 Phase 0。

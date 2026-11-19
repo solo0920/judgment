@@ -91,6 +91,7 @@ def _settings(tmp_path: Path) -> Settings:
         / "documents"
         / "金融法規.md",
         auto_create_schema=False,
+        allow_local_admin_bypass=True,
     )
 
 

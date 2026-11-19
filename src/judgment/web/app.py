@@ -329,6 +329,20 @@ def _is_local_request(request: Request) -> bool:
         return False
 
 
+def _has_forwarded_client_headers(request: Request) -> bool:
+    """A local socket is not trusted when a tunnel/proxy supplied forwarding."""
+
+    return any(
+        str(request.headers.get(name) or "").strip()
+        for name in (
+            "cf-connecting-ip",
+            "x-forwarded-for",
+            "forwarded",
+            "x-real-ip",
+        )
+    )
+
+
 def _provided_admin_token(request: Request) -> str:
     token = str(request.headers.get("X-Judgment-Admin-Token") or "").strip()
     if token:
@@ -1340,7 +1354,12 @@ def create_app(
         if path in PUBLIC_API_PATHS:
             return await call_next(request)
 
-        if _is_local_request(request):
+        current = app.state.settings
+        if (
+            current.allow_local_admin_bypass
+            and _is_local_request(request)
+            and not _has_forwarded_client_headers(request)
+        ):
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 origin = request.headers.get("Origin")
                 sec_fetch_site = request.headers.get("Sec-Fetch-Site")
@@ -1363,7 +1382,6 @@ def create_app(
                     )
             return await call_next(request)
 
-        current = app.state.settings
         admin_expected = str(current.admin_token or "")
         provided = _provided_admin_token(request)
         if (
@@ -1394,8 +1412,8 @@ def create_app(
                 status_code=403,
                 content={
                     "detail": (
-                        "遠端管理 API 尚未設定 JUDGMENT_ADMIN_TOKEN 或 Google 登入；"
-                        "本機 127.0.0.1 可直接使用。"
+                        "管理 API 需要 JUDGMENT_ADMIN_TOKEN 或 Google 登入；"
+                        "本機管理 bypass 未啟用。"
                     )
                 },
             )

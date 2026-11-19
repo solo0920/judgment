@@ -65,6 +65,7 @@ class Settings:
     )
     forwarded_allow_ips: str = "127.0.0.1"
     admin_token: str = ""
+    allow_local_admin_bypass: bool = False
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
@@ -227,6 +228,9 @@ class Settings:
                 or "127.0.0.1"
             ),
             admin_token=os.getenv("JUDGMENT_ADMIN_TOKEN", "").strip(),
+            allow_local_admin_bypass=_env_bool(
+                "JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS", False
+            ),
             google_oauth_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
             google_oauth_client_secret=os.getenv(
                 "GOOGLE_CLIENT_SECRET", ""

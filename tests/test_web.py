@@ -463,6 +463,7 @@ def web_client(tmp_path: Path, monkeypatch):
         judgment_data_dir=tmp_path / "judgments",
         judgment_law_list=Path(__file__).resolve().parents[1] / "documents" / "金融法規.md",
         auto_create_schema=False,
+        allow_local_admin_bypass=True,
         ollama_allowed_hosts=(
             "127.0.0.1:11434",
             "first.test:11434",
@@ -3027,6 +3028,43 @@ def test_google_callback_rejects_unlisted_email(web_client, monkeypatch) -> None
         assert callback.status_code == 302
         assert callback.headers["location"].endswith("/?auth_error=not_allowed")
         assert not client.cookies.get("judgment_session")
+
+
+def test_local_admin_bypass_is_opt_in_and_ignores_forwarded_requests(
+    web_client,
+) -> None:
+    base = replace(
+        web_client.app.state.settings,
+        admin_token="local-secret",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=base,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as local:
+        assert local.get("/api/question-bank/stats").status_code == 401
+
+    enabled = replace(base, allow_local_admin_bypass=True)
+    app = create_app(
+        settings=enabled,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as local:
+        assert local.get("/api/question-bank/stats").status_code == 200
+        for headers in (
+            {"X-Forwarded-For": "203.0.113.9"},
+            {"CF-Connecting-IP": "203.0.113.9"},
+            {"Forwarded": "for=203.0.113.9"},
+            {"X-Real-IP": "203.0.113.9"},
+        ):
+            forwarded = local.get(
+                "/api/question-bank/stats",
+                headers=headers,
+            )
+            assert forwarded.status_code == 401, headers
 
 
 def test_remote_google_session_authorizes_and_rejects_bad_origin(web_client) -> None:
