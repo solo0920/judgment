@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.0
+**Version**: 1.1
 
 **Last Updated**: 2026-11-19
 
@@ -20,7 +20,7 @@
 
 核心原則只有一條：
 
-> **未完成區段永远是該階段顏色的 25% 淺色；進度填充永遠是該階段的完成色；完成就是 100% 實心。**
+> **未完成區段永遠是該階段顏色的 25% 淺色；進度填充永遠是該階段的完成色；完成就是 100% 實心。**
 
 因此同一個階段在 waiting、running、complete 之間只改變「完成色填充的比例」，不改變背景語意，也不使用另一套淡色或灰色進度條。
 
@@ -47,6 +47,14 @@
 - 服務狀態、統計長條圖、靜態架構圖。
 - 「無資料／已取代」的淡色空心外框；此狀態不是未完成，而是沒有可計算的進度。
 - 整體流程的 aggregate progress bar（例如「整體進度 59.9%」），其填色為 aggregate gradient，不是單一階段色。
+
+### 2.3 全站統一使用條款
+
+- 任何新增或修改的進度時間表 MUST 使用本規格的 class、CSS 與資料契約。
+- MUST NOT 為單一頁面、單一階段或單一 workflow 複製另一套進度深淺、外框或動畫邏輯。
+- 新階段只需提供 `--block-color` / `--bar-color` 與 `--stage-progress` / `--fill`，不得新增第二種填充公式。
+- 若需求必須改變視覺規則，MUST 先更新本規格、更新測試，再修改實作。
+- 本規格是 progress timeline 的 canonical source；`pipeline-waterfall.md` 只處理時間軸與展開明細，衝突時以本規格為準。
 
 ---
 
@@ -145,16 +153,94 @@ unfilled    = slotWidth - fillWidth
 
 ## 6. 元件對照
 
-### 6.1 月份方格
+### 6.1 月份方格與分格
 
-- Selector：`.processing-month.index-month .processing-month-stage`
-- 變數：`--block-color`、`--stage-progress`
+DOM 結構固定為：
+
+```html
+<td class="judgment-month index-month index-month-are processing-month is-neutral is-current">
+  <span class="processing-month-number">9</span>
+  <span class="processing-month-stages">
+    <span class="index-month-block processing-month-stage is-extract is-running"
+          style="--stage-progress:37%"></span>
+    <span class="index-month-block processing-month-stage is-raw_parquet is-pending"></span>
+    <button class="index-month-block processing-month-stage is-filter is-pending is-actionable"></button>
+    <button class="index-month-block processing-month-stage is-postgres is-pending is-actionable"></button>
+  </span>
+</td>
+```
+
+分格容器與單一分格：
+
+```css
+.processing-month-stages {
+  display: flex;
+  height: 12px;
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.processing-month-stage {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  background: var(--surface-3);
+  color: inherit;
+  font: inherit;
+  appearance: none;
+}
+```
+
+狀態樣式（四階段完全共用，不可為個別階段覆寫）：
+
+```css
+/* 待更新／未完成：25% 同色淺色 + 58% 同色外框 */
+.processing-month.index-month .processing-month-stage.is-pending,
+.processing-month.index-month .processing-month-stage.is-incomplete {
+  background: color-mix(in srgb, var(--block-color) 25%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--block-color) 58%, transparent);
+}
+
+/* 執行中／部分完成：完成色由下往上填充，未完成區段維持 25% 淺色 */
+.processing-month.index-month .processing-month-stage.is-running,
+.processing-month.index-month .processing-month-stage.is-partial {
+  background: linear-gradient(
+    to top,
+    var(--block-color) var(--stage-progress, 0%),
+    color-mix(in srgb, var(--block-color) 25%, transparent)
+      var(--stage-progress, 0%)
+  );
+  box-shadow: inset 0 0 0 1px var(--block-color);
+}
+
+/* 完成：100% 實心 */
+.processing-month.index-month .processing-month-stage.is-complete {
+  background: var(--block-color);
+  box-shadow: none;
+}
+
+/* 無資料／已取代：淡色空心，不列入進度 */
+.processing-month.index-month .processing-month-stage.is-empty {
+  --block-color: var(--line);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  opacity: 0.4;
+}
+```
+
+- 變數：`--block-color`、`--stage-progress`。
 - 階段色：
   - RAR：`#f59e0b`
   - Parquet：`#ec4899`
   - 金融法規篩選：`#a78bfa`
   - PostgreSQL：`#3b82f6`
 - 不可為 `is-filter`、`is-postgres` 另外設定不同的填充深淺。
+- 不可在 `.processing-month-stage` 或其子元素使用 `animation`、pulse、blink、shimmer 或會改變背景的 transition；進度只能透過 `--stage-progress` 增加。
+- 月份小格進度 MUST 使用 archive-level `current / total`；不得使用 workflow 全域百分比（見 7.3）。
 
 ### 6.2 Workflow／Index waterfall
 
@@ -172,11 +258,35 @@ unfilled    = slotWidth - fillWidth
 
 ### 6.4 月份框線
 
-- 實線框：目前匯入的外框月份（最高已啟動且尚未完成的月份），使用 `var(--accent)`。
-- 虛線框：實際正在處理的月份，使用 `var(--info)`。
-- 兩者皆為 `2px` outline、`outline-offset: -3px`；只有顏色與線型不同，幾何必須一致。
+DOM class：
+
+- `is-current`：目前匯入的外框月份（最高已啟動且尚未完成的月份）。
+- `is-processing-current`：實際正在處理的月份。
+- 兩者同時存在時，只顯示 `is-current` 實線框，不疊加第二套框線。
+
+精確定義：
+
+```css
+.processing-month.index-month.is-current {
+  z-index: 1;
+  border-color: transparent;
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+  /* MUST NOT 設定 animation */
+}
+
+.processing-month.is-processing-current:not(.is-current) {
+  outline: 2px dashed var(--info);
+  outline-offset: -3px;
+  /* MUST NOT 設定 animation */
+}
+```
+
+- 實線框：目前匯入月份，使用 `var(--accent)`。
+- 虛線框：實際處理月份，使用 `var(--info)`。
+- 兩者幾何完全一致：`2px` outline、`outline-offset: -3px`、無 border 疊加。
+- MUST NOT 使用 `judgment-month-pulse`、box-shadow pulse、opacity blink 或任何外框動畫。
 - 當金融法規篩選重新走訪較舊 archive 時，虛線月份可能與實線外框月份不同；此為刻意設計，避免外框在篩選舊月份時往回跳動。
-- 同一個月份同時符合兩者時，只顯示實線外框，不疊加兩套框線。
 - 圖例 MUST 顯示「目前匯入（實線）」與「實際處理（虛線）」。
 
 ### 6.5 圖例
@@ -222,6 +332,10 @@ unfilled    = slotWidth - fillWidth
 - 以固定 `42%`、`48%`、`74%` 等淡色填充 running 區段。
 - 不同頁面各自複製一套 progress CSS。
 - 只靠顏色表達狀態；狀態仍必須有文字、`aria-label` 或 tooltip。
+- 在目前匯入外框或實際處理外框使用 pulse／blink／box-shadow 動畫。
+- 將 importer 事件的全域 `percent` 寫入月份方格的 `import_stage_progress`。
+- 在 `.processing-month-stage` 使用 `animation`、shimmer 或持續變色的 transition。
+- 為 filter／PostgreSQL 另設一套外框、底色或進度填充公式。
 
 ---
 
@@ -269,4 +383,5 @@ unfilled    = slotWidth - fillWidth
 
 | Version | Date | Change |
 | --- | --- | --- |
+| 1.1 | 2026-11-19 | 補入月份小格精確 DOM／CSS：12px 分格容器、1px gap、25% 未完成底、完成色進度填充、100% 實心；明訂實線 `is-current` 與虛線 `is-processing-current` 幾何、禁止外框／分格動畫，並新增 archive-level 進度與全站統一使用條款。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

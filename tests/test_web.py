@@ -711,6 +711,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "var(--ink) 25%, transparent" in css.text
     assert ".processing-timeline-swatch.is-current-frame" in css.text
     assert ".processing-timeline-swatch.is-processing-frame" in css.text
+    assert ".processing-month.is-processing-current:not(.is-current)" in css.text
+    assert "outline: 2px dashed var(--info)" in css.text
+    assert "judgment-month-pulse" not in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text
@@ -3369,5 +3372,10 @@ def test_progress_visualization_spec_is_canonical() -> None:
         "is-complete",
         "SSE",
         "Progress Visualization",
+        "全站統一使用條款",
+        "processing-month-stages",
+        "outline-offset: -3px",
+        "archive-level",
+        "MUST NOT 使用 `judgment-month-pulse`",
     ):
         assert phrase in text
