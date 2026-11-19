@@ -4245,6 +4245,11 @@ function importTimelineMarkup(workflow) {
         <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
         <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
       </div>
+      <div class="index-month-are-key processing-timeline-legend" aria-label="框線圖例">
+        <span class="processing-timeline-legend-label">框線</span>
+        <span><i class="processing-timeline-swatch is-current-frame"></i>目前匯入（實線）</span>
+        <span><i class="processing-timeline-swatch is-processing-frame"></i>實際處理（虛線）</span>
+      </div>
       <div class="judgment-months-scroll">
         <table class="judgment-months-table import-months-table index-months-table processing-months-table">
           <thead><tr><th scope="col">年份</th>${Array.from(
@@ -4254,7 +4259,7 @@ function importTimelineMarkup(workflow) {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的四個階段方格以淺橘／淺紅／淺紫／淺藍表示，完成後轉為實心深色；尚未完成階段以 25% 淺色表示；執行中的方塊以完成色垂直進度條填充，未完成區段維持 25% 淺色；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
+      <p class="judgment-months-hint">每格由左至右：RAR 檢查／解壓縮、原始資料檢查／Parquet 備份、金融法規篩選、PostgreSQL metadata。實心方塊表示完成；有待更新檔案時，尚未重做的四個階段方格以淺橘／淺紅／淺紫／淺藍表示，完成後轉為實心深色；尚未完成階段以 25% 淺色表示；執行中的方塊以完成色垂直進度條填充，未完成區段維持 25% 淺色；淡色空心方塊表示無資料。原始資料階段會先檢查既有 Parquet，可沿用時不重新備份；缺少時會顯示「建立 YYYY-MM 備份」，完成後顯示「已建立備份」。篩選與 PostgreSQL 階段會顯示目前處理的月份與 archive。實線框標示目前匯入月份；若實際處理的是較舊月份，該月另以虛線框標示。滑鼠移到月份可查看四個階段的狀態、本機壓縮檔與已匯入檔名。</p>
     </div>
   </section>`;
 }

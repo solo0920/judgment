@@ -14299,9 +14299,9 @@ button.chip:hover {
    file timeline, while keeping the cell's overall status background. */
 .processing-month.index-month.is-current {
   z-index: 1;
-  border-color: var(--accent);
-  outline: 2px solid var(--info);
-  outline-offset: 1px;
+  border-color: transparent;
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
   animation: judgment-month-pulse 1.6s ease-in-out infinite;
 }
 
@@ -18310,6 +18310,17 @@ a.qb-bank-law:hover {
 
 .processing-timeline-legend .processing-timeline-swatch.is-solid-state {
   background: var(--ink);
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-current-frame {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.processing-timeline-legend .processing-timeline-swatch.is-processing-frame {
+  background: transparent;
+  outline: 2px dashed var(--info);
+  outline-offset: -2px;
 }
 
 .processing-timeline-legend .processing-timeline-swatch.is-pending-state {

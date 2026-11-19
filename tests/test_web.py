@@ -592,6 +592,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "is-pending" in processing_js.text
     assert "待更新（淺色）" in processing_js.text
     assert "monthUpdate.import_stage_progress" in processing_js.text
+    assert "is-current-frame" in processing_js.text
+    assert "is-processing-frame" in processing_js.text
     assert "is-partial" in processing_js.text
     assert "is-partial-state" in processing_js.text
     assert "patchProcessingTimelines" in processing_js.text
@@ -707,6 +709,8 @@ def test_static_console_is_served(web_client) -> None:
         in css.text
     )
     assert "var(--ink) 25%, transparent" in css.text
+    assert ".processing-timeline-swatch.is-current-frame" in css.text
+    assert ".processing-timeline-swatch.is-processing-frame" in css.text
     assert ".judgment-month.is-green" in css.text
     assert "background: #76b900" in css.text
     assert "background: #d32f2f" in css.text
