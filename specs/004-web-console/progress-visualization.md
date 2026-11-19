@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.1
+**Version**: 1.2
 
 **Last Updated**: 2026-11-19
 
@@ -150,6 +150,32 @@ unfilled    = slotWidth - fillWidth
 | 無資料／已取代 | `is-empty` | 淡色空心外框 | 無 | 不適用 |
 
 `is-incomplete` 與 `is-pending` 使用相同的 25% 底色與外框，差別只在資料語意（待更新 vs 未完成），不是視覺深淺。
+
+### 5.1 全站資料語意契約
+
+視覺 class 一致不等於時間表一致；每個分格傳入的資料狀態也 MUST 一致。全站時間表 MUST 遵守：
+
+1. **同一 series 判定完成**：每個分格的 `is-complete` MUST 由該 series 自己的 `processed / total` 判定。不得用另一個 series、另一份覆蓋率或舊版本基線把該分格標成完成。
+2. **基線只能是獨立 series**：舊版本／active collection 的覆蓋率 MUST 顯示為獨立的 A 分格或獨立指標，MUST NOT 拿來填充 R／E 等本次 run series。
+3. **Summary 與 cell 同源**：summary 的完成／未完成月份數 MUST 由畫面上同一批 cell state 聚合；不得另外用一套公式計算，否則會出現 summary 顯示完成、cell 顯示未完成的矛盾。
+4. **Backlog badge 分離**：sidebar／workflow 的待補 badge MAY 使用另一套 coverage backlog 計算，但 MUST 明確標示為「待補」，且 MUST NOT 與時間表 summary 的本次 run 進度混用。
+5. **視覺規則優先**：`is-complete` 只能代表該 series 真的 `processed >= total`；任何 domain-specific 規則都不得讓未完成的 series 使用 `is-complete`。若 domain 規則與本節衝突，MUST 先修正 domain spec 與資料語意，再恢復使用同一組視覺 class。
+6. **例外需雙寫**：任何時間表若真的需要不同資料語意，MUST 同時更新 domain spec 與本規格，並在驗收清單加入對應案例；不得只在程式內實作例外。
+
+A／R／E 的具體映射：
+
+| 分格 | 完成判定來源 | 不得使用 |
+| --- | --- | --- |
+| A | active collection 對該月份的覆蓋 | 本次 run R／E 進度 |
+| R | 本次 run baseline archive 的 `processed / total` | active collection 覆蓋、E 進度 |
+| E | 本次 run latest archive 的 `processed / total` | active collection 覆蓋、R 進度 |
+
+回歸案例（MUST 納入驗收）：
+
+- active 覆蓋 100%、本次 run processed 0：A 可為實心，R／E MUST 為 0% 淺色。
+- 本次 run processed 67%：R／E MUST 顯示 67% 實色 + 33% 淺色，不得整格實心。
+- Summary 的 A 基線月份 MUST 由 A 分格聚合，不得使用 R 完成數。
+- Sidebar E badge 與時間表 E 本次未完成 MAY 不同，但 UI MUST 說明前者是 active 覆蓋 backlog。
 
 ---
 
@@ -363,6 +389,10 @@ DOM class：
 - [ ] 圖例顯示 25% 淺色與完成色進度條。
 - [ ] SSE 更新後進度條立即反映 `percent`，不需要重新載入。
 - [ ] 淺色／深色主題皆可辨識。
+- [ ] 每個 `is-complete` 均由該 series 自己的 `processed / total` 判定，沒有用其他 series／active 覆蓋代替。
+- [ ] Summary 的完成／未完成數由畫面同一批 cell state 聚合，與方塊一致。
+- [ ] active 100% 但本次 run 0% 時，R／E 為 0% 淺色，不得實心。
+- [ ] Sidebar backlog badge 與時間表 summary 分開計算，且 UI 有明確說明。
 - [ ] 390px 無水平溢出。
 
 ---
@@ -397,4 +427,5 @@ DOM class：
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.1 | 2026-11-19 | 補入月份小格精確 DOM／CSS：12px 分格容器、1px gap、25% 未完成底、完成色進度填充、100% 實心；明訂實線 `is-current` 與虛線 `is-processing-current` 幾何、禁止外框／分格動畫，並新增 archive-level 進度與全站統一使用條款。 |
+| 1.2 | 2026-11-19 | 新增全站資料語意契約：完成只能由同一 series 的 processed/total 判定，基線只能是獨立 series，summary 與 cell 同源，backlog badge 分離；補 A／R／E 回歸案例與驗收。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

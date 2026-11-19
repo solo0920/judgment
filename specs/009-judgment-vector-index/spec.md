@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.8
+**Version**: 1.9
 
 **Last Updated**: 2026-11-19
 
@@ -152,6 +152,27 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 - Sidebar 的 E 待補 badge 是另一個 backlog 指標，依 active collection 與各月份 latest archive 的覆蓋比對計算，不受本次 run 尚未處理影響。
 
 **單位 MUST 是月份，不是 RAR 檔數。**
+
+### 5.4 計算責任與一致性
+
+A／R／E 有兩個不同用途，MUST 分開計算，不得互相代替：
+
+| 用途 | 計算來源 | 可使用的資料 | 不得使用 |
+| --- | --- | --- | --- |
+| 時間表方塊與 summary | `processing.js` `indexMonthGridMarkup()` | A：`active_coverage`；R／E：本次 run `months[].processed / total` | active 覆蓋填 R／E |
+| Sidebar／workflow 待補 badge | 後端 `_index_month_are()`／`_index_month_counts()` | active collection 與 latest archive 的覆蓋 backlog | 本次 run 尚未處理造成的暫時未完成 |
+
+- 時間表的 A／R／E summary MUST 由畫面同一批 `activeState`／`reuseState`／`embedState` 聚合；A 數量 MUST 使用 `activeState.complete`，不得使用 `reuseState.complete`。
+- 後端 `_index_month_are()` 是 backlog 計算，MUST NOT 用來渲染時間表方塊；前端亦 MUST NOT 使用 `active_archive_coverage` 把 R／E 補成完成。
+- 若未來把時間表計算移到後端，MUST 同時提供「本次 run 進度」與「active backlog」兩個獨立 payload／函式，不得共用同一份 counts。
+- 任何 A／R／E 顯示變更 MUST 同時更新本規格、`progress-visualization.md` 與對應測試；只改 CSS 或只改其中一個計算來源不算完成。
+
+回歸案例：
+
+- 202608 active 舊 archive 100%、本次 run processed 0 → A 可為實心，R／E MUST 為 0% 淺色。
+- 202607 本次 run processed 68.9% → R MUST 為 68.9% 實色 + 31.1% 淺色。
+- 202609 active 0%、本次 run 0% → A／R／E 均為 0% 淺色，不是實心也不是無資料空心。
+- Summary `A 基線月份` MUST 以 A 完成數計算；不得再出現「A 367、E 待補 42」這種由 R 完成數冒充 A 的矛盾。
 
 ---
 
@@ -359,3 +380,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.6 | 2026-11-19 | 修正 build mode 目前批次 archive 的 R／E 顯示：不得以 active 100% 覆蓋提前標成完成，必須顯示本次 run 的實色進度與 25% 淺色未完成區段。 |
 | 1.7 | 2026-11-19 | 澄清 25% 淺色是未完成區段狀態色，0% 時整格為淺色；A／R／E 可同時淺色，只有 total=0／無 archive 才是無資料空心。 |
 | 1.8 | 2026-11-19 | 將 build mode 的 R／E 統一改為本次 run 進度，不再以 active 覆蓋提前標成完成；A 只使用 active 覆蓋，summary R／E 與方塊一致，sidebar badge 維持 active backlog。 |
+| 1.9 | 2026-11-19 | 新增計算責任與一致性專節：時間表與 backlog badge 分開計算，summary 與 cell 同源，A 不得用 R 完成數；補 202607／202608／202609 回歸案例。 |
