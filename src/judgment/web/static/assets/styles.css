@@ -14161,20 +14161,6 @@ button.chip:hover {
   color: var(--ink);
 }
 
-@keyframes judgment-month-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 2px var(--accent-border),
-      0 0 6px var(--accent-soft);
-  }
-  50% {
-    box-shadow:
-      0 0 0 3px var(--accent-border),
-      0 0 14px var(--accent-soft);
-  }
-}
-
 .judgment-months-hint {
   margin: 10px 0 0;
   color: var(--faint);
@@ -14302,18 +14288,11 @@ button.chip:hover {
   border-color: transparent;
   outline: 2px solid var(--accent);
   outline-offset: -3px;
-  animation: judgment-month-pulse 1.6s ease-in-out infinite;
 }
 
 .processing-month.index-month.is-current .index-month-number {
   color: var(--accent);
   font-weight: 700;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .processing-month.index-month.is-current {
-    animation: none;
-  }
 }
 
 .processing-month.is-processing-current:not(.is-current) {
