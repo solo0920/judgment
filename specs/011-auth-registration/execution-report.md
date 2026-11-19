@@ -1,8 +1,8 @@
 # 權限、註冊與公開存取覆核意見執行報告
 
-**Status**: 待複核（10 點意見已完成可行性評估；第 1 點熱修已實作）
+**Status**: Phase 0 進行中（10 點意見已納入；外部驗證完成；路由盤點與啟動 fail-fast 骨架已實作）
 
-**Version**: 0.1
+**Version**: 0.2
 
 **Last Updated**: 2026-11-19
 
@@ -78,6 +78,40 @@
 - 確認 cloudflared 是否穩定送入 `CF-Connecting-IP`；若沒有，`client_ip()` 需退回 socket IP。
 - 若 origin 可被直連，MUST 以防火牆或 bind localhost 阻擋，否則 forwarded header 仍可被偽造。
 
+### 2.6 外部驗證結果（2026-11-19 12:48 UTC）
+
+從本機對公開網址 `https://api-mbp.ragdemo.win` 發出**不帶任何憑證**的請求；DNS 解析到 Cloudflare，回應標頭為 `server: cloudflare`，確認不是繞過 tunnel 直接打 origin。
+
+| 端點 | 方法 | HTTP | 判定 |
+| --- | --- | --- | --- |
+| `/api/health` | GET | 200 | 公開健康檢查正常 |
+| `/api/status` | GET | 401 | 非公開端點未被 tunnel 繞過 |
+| `/api/processing` | GET | 401 | 非公開端點未被 tunnel 繞過 |
+| `/api/question-bank/stats` | GET | 401 | 非公開端點未被 tunnel 繞過 |
+| `/api/docs` | GET | 401 | 文件未公開 |
+| `/api/rag/query` | POST（空 body） | 401 | RAG 目前不是匿名可用 |
+| `/api/rag/query/stream` | POST（空 body） | 401 | RAG 串流目前不是匿名可用 |
+| `/api/public/summary` | GET | 401 | 尚未實作 |
+
+同時從本機 loopback 直接呼叫 `http://127.0.0.1:9200/api/status` 得到 **200**，證明目前 production 仍是舊版程式、本機 bypass 仍生效；但公開路徑沒有出現 200，代表 cloudflared／tunnel 這條路徑目前沒有被誤判為本機。
+
+**結論**：
+
+- 目前沒有觀察到「管理 API 對全網開放」的漏洞，**不需要緊急重啟**。
+- v7 copy 可以繼續；Phase 0.1 熱修仍待下次重啟生效。
+- 這個驗證不能取代 Phase 0 的 `client_ip()` 與 firewall 檢查；若之後 tunnel 設定改變，仍可能出現 bypass。
+- 因無法實際使用手機行動網路，本次是以公開 DNS＋Cloudflare 路徑驗證；若需要更高保證，應再從外部網路（手機熱點或遠端主機）重測一次。
+
+### 2.7 公開 RAG 現況
+
+外部 POST `/api/rag/query` 與 `/api/rag/query/stream` 在空 body 下都回 **401**，表示目前匿名 RAG **尚未開放**（若已公開，FastAPI 應該先回 422 驗證錯誤，而不是 401）。
+
+因此：
+
+- 不需要在 Phase 4 前緊急加最小版限流。
+- 但「匿名可用 RAG」目前也還沒有真正上線；在 Phase 4 的最小限流、預算與 kill switch 完成前，不應直接把它加入 `PUBLIC_QUERY`。
+- 若產品要求先開放，MUST 先完成最小版 per-IP 限流＋每日預算＋kill switch，不能只靠 Cloudflare rate limit（Cloudflare 只能限請求數，不能限 token）。
+
 ---
 
 ## 3. 十點意見逐項可行性
@@ -117,10 +151,12 @@
   - 不直接信任任意 `X-Forwarded-For`；必要時忽略。
 - 以 IP hash 計數，不長期保存原始 IP。
 - 若 origin 可被直連，MUST 以防火牆／bind localhost 阻擋，否則 header 可被偽造。
-- Per-IP：分鐘／小時／日限制、併發限制；全站每日 token 預算。
+- Per-IP：分鐘／小時／日限制、併發限制；IPv6 MUST 以 `/64` 為計數單位，避免逐位址繞過。
+- 已登入者除 IP 外另加 per-user 限制，避免校園／公司共用出口 IP 時誤傷正常使用者。
+- 全站每日 token 預算；匿名與已登入使用**不同預算池**，匿名池耗盡時登入者仍可使用。Pending 應共用匿名池或使用獨立小池，不能因「已登入」取得額外額度。
 - `/api/rag/query` 與 `/stream` 共用同一套限制。
 
-**驗收**：兩個不同 `CF-Connecting-IP` 不共用額度；偽造 `X-Forwarded-For` 不改變計數；直連 origin（若存在）被拒或使用 socket IP；429 含 `Retry-After`。
+**驗收**：兩個不同 `CF-Connecting-IP` 不共用額度；偽造 `X-Forwarded-For` 不改變計數；IPv6 同一 `/64` 共用額度；直連 origin（若存在）被拒或使用 socket IP；429 含 `Retry-After`。
 
 ---
 
@@ -131,10 +167,11 @@
 - 匿名與 pending 不發 SSE ticket。
 - Ticket 綁 `user_id`、`role`、允許 topic、短 TTL；不再讓任何有效 ticket 訂閱所有 topic。
 - User 只可訂閱唯讀 topic；admin 可全部。
-- SSE 連線每 60 秒回查 DB status；停用／降級時主動關閉連線。
+- SSE 連線以「使用者狀態版本號變更」觸發重驗，不需要每 60 秒全量查 DB；仍需保留最長重驗間隔（建議 60 秒）作為保險。
+- 停用或角色變更 MUST 主動關閉既有連線；單 process 可直接通知，多 process 需共用 pub/sub 或 DB 版本通知。
 - `POST /api/auth/sse-ticket` 只允許 active user／admin。
 
-**驗收**：anonymous／pending 取得 ticket 被拒；user 訂閱 admin-only topic 被拒；停用使用者既有 SSE 在一個重驗週期內斷線；admin 可收到 `auth` 通知。
+**驗收**：anonymous／pending 取得 ticket 被拒；user 訂閱 admin-only topic 被拒；停用使用者既有 SSE 在一個重驗週期內斷線；admin 可收到 `auth` 通知；多 process 下停用也會斷線。
 
 ---
 
@@ -147,7 +184,7 @@
 - 用 FastAPI route／router 層級 `Depends` 或 metadata 分類；middleware 只作 defense-in-depth。
 - 應用啟動時列舉所有 route；未分類即拒絕啟動。
 - 測試列舉 `app.routes` 全部 method route；未分類失敗。
-- `PUBLIC_READ` 不得允許寫入 method；RAG 的 POST 另列 `PUBLIC_QUERY`，只允許查詢語意且必須限流。
+- `PUBLIC_READ` 不得允許寫入 method；RAG 的 POST 目標分類是 `PUBLIC_QUERY`，但 Phase 4 完成前在 `route_policies.json` 暫列 `ADMIN_ONLY`，只允許查詢語意且必須限流。
 
 **驗收**：新增一條未分類路由時啟動失敗；測試失敗；`/api/docs` 匿名不可讀；`PUBLIC_QUERY` 只限 RAG 查詢路徑；所有 method 都有政策。
 
@@ -158,7 +195,8 @@
 **判定：部分已存在；PKCE 接受。**
 
 - 目前 callback 已產生並驗證 signed `state` cookie，並驗證 `email_verified`；不是完全沒有 CSRF 防護。
-- 補 PKCE：`code_challenge`、`S256`、`code_verifier` 存在 signed state cookie，換 token 時帶入。
+- 補 PKCE：`code_challenge`、`S256`、`code_verifier` 存在 state cookie，換 token 時帶入。
+- State cookie 的簽章只保證完整性，不等於加密；`code_verifier` 應放在 HttpOnly、短效、單次使用的 cookie，或改存伺服器端。若放 cookie，建議加密或使用伺服器端 session，避免外洩後被重放。
 - 繼續使用 Authorization Code flow；不新增前端 ID token 信任路徑。
 - 以 `google_sub` 作身分，email 只作顯示與 bootstrap。
 
@@ -188,8 +226,9 @@
 - 結束後依實際 usage 結算；沒有 usage 時保留保守估計。
 - `finally` 釋放併發與未使用預留；client disconnect 也要釋放。
 - 計數器原子遞增、每日重置、持久化。
+- 若模型在本機 GPU 執行，真正瓶頸是延遲與併發，不是雲端費用；`RagAdmission` 與 `LLM admission` 的併發／佇列限制仍是第一道保護，預算機制 MUST NOT 讓兩者互相等待或重複扣款。
 
-**驗收**：提早斷線不鎖死額度；超額請求 429；跨 process／重啟後計數不歸零；每日重置正確。
+**驗收**：提早斷線不鎖死額度；超額請求 429；跨 process／重啟後計數不歸零；每日重置正確；併發與預算同時到頂時回傳一致且可理解的錯誤。
 
 ---
 
@@ -201,6 +240,7 @@
 - 改用每 IP／每日申請數、同帳號冷卻、rejected 冷卻。
 - badge 只顯示數字；清單分頁。
 - 管理員可拒絕／停用；不因大量申請而無法處理真正申請者。
+- Turnstile 從「可選」升級為「建議」，特別是匿名 RAG 與申請表單；可有效降低低成本耗盡預算與灌申請。
 
 **驗收**：大量申請不會讓新申請者被永久擋住；badge 數字正確；列表可分頁；重複申請受冷卻限制。
 
@@ -216,6 +256,23 @@
 - Audit 不可由一般 API 修改；保留期限另訂。
 
 **驗收**：文件可公開取得；保留期限有排程或手動程序；使用者可提出刪除；公開摘要與 log 不含不必要的個資。
+
+### 3.11 實際 token 用量（2026-11-19 量測）
+
+從 production `performance_records.flow` 的 `rag.llm_request` 取出最近 90 天、有 usage 的 301 筆成功 RAG 記錄：
+
+| 指標 | P50 | P95 | 最小值 | 最大值 | 平均 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 每題總 tokens（input + output） | 2,809 | 4,096 | 1,671 | 5,216 | 3,012 |
+| Input tokens | 2,635 | 3,960 | 1,568 | 5,011 | 2,817 |
+| Output tokens | 191 | 300 | 38 | 384 | 194 |
+
+結論：
+
+- 原報告用 5,000 tokens／題是偏保守估計；實際 P50 約 2,809、P95 約 4,096。
+- 每日 2,000,000 tokens 約可容納 P50 約 712 題、P95 約 488 題；若 per-IP 每日 20–30 題，仍需搭配匿名／登入分流與 Turnstile，不能只靠單一預算。
+- 這 301 筆只是有 usage 的成功記錄；串流或舊記錄可能沒有 usage，預算估算仍需保留安全係數。
+- 正式上限應在 Phase 4 前用同一份資料重算，並把 P50／P95 與實際 429 曲線放進 admin 狀態頁。
 
 ---
 
@@ -244,13 +301,22 @@
 
 ### Phase 0：權限骨架（1–2 天）
 
-1. 建立 100 個 API path／114 個 method route 的分類表。
-2. Route 層級政策與 default-deny middleware。
-3. 啟動時 fail-fast；測試列舉全部 route。
-4. `/api/docs`、`/api/openapi.json` 關閉或 admin-only。
-5. `client_ip()` 與 tunnel 信任規則。
-6. SSE ticket 綁 role／topic；長連線重驗。
-7. 四角色 × GET／POST／PATCH／DELETE 測試矩陣。
+**本次已完成（骨架）**：
+
+- `scripts/generate_route_policies.py` 從 `app.routes` 產生分類草稿；新路由預設 `ADMIN_ONLY`。
+- `src/judgment/web/route_policies.json` 已進版控，涵蓋 118 個 route key（114 個 method route＋docs／static）。
+- `src/judgment/web/route_policy.py` 提供載入、查詢、route 列舉與啟動驗證。
+- lifespan 啟動時驗證所有 route；未分類即拒絕啟動。
+- `/docs/oauth2-redirect` 已納入 admin/session 保護。
+- 測試涵蓋 route policy 完整性、預設拒絕、`/docs/oauth2-redirect` 非公開。
+
+**待完成**：
+
+1. Route 層級政策與 default-deny middleware（目前完成分類與啟動驗證，尚未套用角色強制）。
+2. 四角色 × GET／POST／PATCH／DELETE 測試矩陣。
+3. `client_ip()` 與 tunnel 信任規則。
+4. SSE ticket 綁 role／topic；長連線重驗。
+5. `/api/docs`、`/api/openapi.json` production 關閉或 admin-only 的最終開關。
 
 **Gate**：未分類路由會讓啟動與測試失敗；anonymous 無法呼叫任何 admin API；pending 可使用公開頁與 RAG。
 
@@ -286,13 +352,15 @@
 
 ### Phase 4：公開 RAG 保護（1–1.5 天）
 
-1. Per-IP 限流、每日／全站 token 預算、kill switch。
+1. Per-IP 限流（IPv6 `/64`）、per-user 限制、匿名／登入分池、每日 token 預算、kill switch。
 2. `/stream` 同步限制、預扣／結算／斷線釋放。
 3. 問題與 token 上限。
-4. 429／預算用盡 UI。
-5. 可選 Turnstile。
+4. 429／預算用盡 UI 與 admin 監控曲線。
+5. Turnstile 建議預設啟用（至少匿名 RAG 與申請表單）。
 
-**Gate**：偽造 header 不影響限流；斷線不鎖額度；預算到頂可立即停止匿名提問。
+**Gate**：偽造 header 不影響限流；斷線不鎖額度；預算到頂可立即停止匿名提問；429、預算曲線與被擋 IP 數可觀測。
+
+> 目前匿名 RAG 尚未開放（2026-11-19 實測 401）。若產品決定提前開放，MUST 先完成本階段的最小版，不能只靠 Cloudflare rate limit；Cloudflare 只能限請求數，不能限 token。
 
 ### Phase 5：回饋與 hardening（1 天）
 
@@ -333,42 +401,57 @@
 ### 6.3 Production
 
 - [ ] 重啟後以真實 tunnel 驗證 client host／forwarded headers。
-- [ ] 公開 RAG 若已開放，先有 Cloudflare rate limit 或暫時限制。
+- [ ] 匿名 RAG 開放前，先完成最小版限流、每日預算與 kill switch（目前實測尚未開放）。
 - [ ] v7 索引 copy 完成後才安排重啟／部署。
 - [ ] 部署後檢查 SSE、RAG 串流、admin badge、pending 流程。
+- [ ] admin 狀態頁可看到 429、預算曲線與被擋 IP 數。
 
 ---
 
 ## 7. 風險與待確認
 
-1. **Production 網路拓樸未實測**：目前不知道 cloudflared 後 `request.client.host` 與 `CF-Connecting-IP` 的實際值，也不知道 origin 是否可被直連。這是 Phase 0 的第一個檢查項。
-2. **公開 RAG 目前狀態未回寫 repo**：repo 的 `PUBLIC_API_PATHS` 沒有 RAG；若 production 手動開放，Phase 0 前就要先確認，否則可能已經在沒有 per-IP 限制的情況下公開。
+1. **Production 網路拓樸仍未完全確認**：外部驗證顯示公開非授權端點回 401、本機 loopback 回 200，沒有觀察到 tunnel bypass；但 cloudflared 後 `request.client.host` 與 `CF-Connecting-IP` 的實際值、origin 是否可被直連，仍要在 Phase 0 確認。
+2. **匿名 RAG 尚未開放**：2026-11-19 實測 `/api/rag/query` 空 body 回 401；repo 的 `PUBLIC_API_PATHS` 也沒有 RAG。這代表目前沒有立即的公開成本風險，但產品要求的匿名 RAG 也還沒真正上線。
 3. **重啟時機**：v7 copy 正在進行；Phase 0.1 程式雖已完成，但重啟要等 copy 完成或另開維護窗口，避免影響索引與監控。
 4. **DB 回查成本**：每次請求回查 `app_users` 會增加 DB 負載；需要用短 TTL cache＋停用時主動失效，不能只靠 cache。
-5. **SSE 長連線重驗**：每 60 秒一次 DB 查詢，訂閱者多時需注意成本；可只在使用者狀態版本變更時重驗，但停用必須有主動斷線。
+5. **SSE 長連線重驗**：以狀態版本變更觸發重驗比每 60 秒全量查 DB 好；但停用必須有主動斷線，多 process 需共用通知機制。
 6. **SQLite 併發**：若使用 SQLite 存 counters／users，需確認 WAL 與多 process 寫入；多 instance 時改用共享 DB。
 7. **Admin token 的 break-glass 風險**：token 一旦洩漏即完整管理權；需常數時間比較、audit、定期更換，且不進前端。
 8. **工時**：7–10 天是依目前 100 個 path 與前端 action 的估計；public summary 欄位與 SSE 重構可能再增加。
+9. **參數仍需用實際流量校準**：目前以 301 筆有 usage 的成功記錄估算 P50/P95；上線後要用 429 曲線、預算消耗與實際併發重新調整。
 
 ---
 
-## 8. 需要複核後才動工的事項
+## 8. 已核定與待執行
 
-1. 是否核定 Phase 0 先做，且 Phase 0 單獨估 1–2 天。
-2. 是否核定第 13.2 節的參數：每日 token 預算、per-IP 限制、保留期限。
-3. 是否確認 production 的 tunnel／origin 拓樸，以及公開 RAG 目前是否已開放。
-4. 是否同意在 v7 copy 完成前不重啟 production；Phase 0.1 熱修待下次重啟生效。
-5. 是否同意 Phase 4 前若 RAG 已公開，先以 Cloudflare rate limit 或暫時限制匿名提問。
+已由 2026-11-19 覆核確認：
+
+1. Phase 0 先做，單獨估 1–2 天。
+2. 保留期限以 90／365／730／180 天為起點。
+3. Production 目標配置：cloudflared 與應用同機、應用只綁 `127.0.0.1`、防火牆不開放應用埠。
+4. 若 RAG 已公開，Phase 4 前先做最小版限流；目前實測尚未公開。
+5. v7 copy 完成前不重啟 production；Phase 0.1 熱修待下次重啟生效。
+
+仍需在 Phase 0 執行時確認：
+
+- cloudflared 後 `request.client.host` 與 `CF-Connecting-IP` 的實際值。
+- origin 是否只能由 tunnel 存取；若可直連，先加 firewall／bind localhost。
+- 是否要在 Phase 0 就建立 `client_ip()` 與 tunnel 信任測試，或留到 Phase 4 前。
+- 匿名／登入預算池比例、per-IP 與 per-user 上限的最終數值。
 
 ---
 
 ## 9. 本次變更清單
 
 - `src/judgment/config.py`：新增 `allow_local_admin_bypass`。
-- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護。
+- `src/judgment/web/app.py`：bypass 預設關閉、forwarded header 防護；lifespan 啟動時檢查 route policy；`/docs/oauth2-redirect` 納入保護。
 - `.env.example`：新增 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0`。
-- `tests/test_web.py`：新增 bypass 三情境測試。
+- `src/judgment/web/route_policy.py`：route policy 載入、查詢與啟動驗證。
+- `src/judgment/web/route_policies.json`：118 個 route key 的分類表。
+- `scripts/generate_route_policies.py`：從 `app.routes` 產生／補齊分類草稿。
+- `tests/test_web.py`：新增 bypass 三情境、route policy 完整性、docs helper 保護測試。
+- `tests/test_processing.py`：測試 fixture 明確開啟 local bypass。
 - `specs/011-auth-registration/evaluation.md`：更新至 v0.3，納入 10 點與七項決策。
 - `specs/011-auth-registration/execution-report.md`：本報告。
 
-> 本報告只提出執行方案與已完成的熱修；註冊 UI、角色權限與公開 RAG 保護尚未實作，待複核後再進入 Phase 0。
+> 本報告已涵蓋熱修、外部驗證與 Phase 0 的路由盤點骨架；角色強制、註冊 UI、公開摘要與公開 RAG 保護尚未實作，將依 Phase 0–5 繼續推進。

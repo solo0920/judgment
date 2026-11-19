@@ -190,6 +190,7 @@ from .processing import (
     build_processing_snapshot,
 )
 from .quality import build_quality_snapshot
+from .route_policy import validate_route_policies
 from .query import (
     data_suggestions,
     get_judgment_detail,
@@ -946,6 +947,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Fail fast before opening the database or starting background tasks.
+        validate_route_policies(app.routes)
         engine = None
         if app.state.session_factory is None:
             engine = build_engine(
@@ -1339,7 +1342,9 @@ def create_app(
     @app.middleware("http")
     async def admin_auth_middleware(request: Request, call_next):
         path = request.url.path
-        if request.method == "OPTIONS" or not path.startswith("/api/"):
+        if request.method == "OPTIONS" or (
+            not path.startswith("/api/") and path != "/docs/oauth2-redirect"
+        ):
             return await call_next(request)
         if (
             request.method not in {"GET", "HEAD"}

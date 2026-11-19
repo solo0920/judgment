@@ -1,8 +1,8 @@
 # 使用者註冊、角色權限與公開存取評估報告
 
-**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修已實作，尚未重啟 production）
+**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修與 Phase 0 路由盤點骨架已實作，尚未重啟 production）
 
-**Version**: 0.3
+**Version**: 0.4
 
 **Last Updated**: 2026-11-19
 
@@ -35,6 +35,8 @@
 
 目前 FastAPI 共有 **114 個 method route、100 個 `/api/*` path**（不含 `/`、`/favicon.svg`）。Phase 0 的分類成本主要來自逐條判斷「誰可以讀、誰可以寫」，不是張數本身。
 
+**2026-11-19 外部驗證**：從公開 Cloudflare 網址不帶憑證呼叫 `/api/status`、`/api/processing`、`/api/question-bank/stats`、`/api/docs` 均回 401；本機 loopback 的 `/api/status` 回 200。這表示目前沒有觀察到公開 tunnel bypass，不需要緊急重啟；但舊版程式仍在本機 bypass，Phase 0.1 熱修要等下次重啟才生效。同一驗證也顯示匿名 RAG 尚未開放（`/api/rag/query` 空 body 回 401）。
+
 ---
 
 ## 2. 目前程式現況
@@ -46,8 +48,8 @@
 | Session | HttpOnly cookie、`SameSite`、正式環境 `Secure` | session 只驗 env 白名單，沒有 DB 狀態／角色回查 |
 | Admin token | `X-Judgment-Admin-Token`／Bearer，`hmac.compare_digest` | 沒有 audit log、沒有使用紀錄、沒有定期更換流程 |
 | API 保護 | `/api/*` 除 `PUBLIC_API_PATHS` 外，admin token 或任何允許的 Google session 皆可完整使用 | 沒有 read／write／admin 分層；未分類路由預設放行 |
-| 公開 API | repo 目前只公開 `/api/health`、`/api/home`、`/api/auth/*` | production 若由 tunnel 另外開放 RAG，尚未回寫 repo 與測試 |
-| 本機 bypass | 已改為 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS`，預設 `0`；forwarded header 存在時不使用 bypass | 程式已熱修，但 production 尚未重啟；重啟後仍要用真實 tunnel 驗證 |
+| 公開 API | repo 目前只公開 `/api/health`、`/api/home`、`/api/auth/*`；2026-11-19 外部實測 RAG 仍回 401 | 匿名 RAG 尚未真正開放，需先完成 Phase 4 最小限流與預算 |
+| 本機 bypass | 已改為 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS`，預設 `0`；forwarded header 存在時不使用 bypass | 程式已熱修，但 production 尚未重啟；外部實測非公開端點 401、本機 loopback 200；重啟後仍要再驗證 |
 | SSE | `/api/auth/sse-ticket` 發 120 秒 bearer ticket；`/api/events/stream` 可用 ticket 訂閱所有 topic | ticket 未綁角色／topic；pending／匿名若取得 ticket 可收到 processing／status；長連線不會因停用即時斷線 |
 | API docs | `/api/docs`、`/api/openapi.json` 目前受 admin/session 保護 | 未來 default-deny 必須明確列為 admin-only 或 production 關閉，不能因分類漏掉而公開 |
 | RAG 成本控制 | `RagAdmission` 有併發／佇列／ETA 控制 | 沒有 per-IP rate limit、每日 token 預算、公開 kill switch；`/stream` 容易漏掉 |
@@ -235,19 +237,24 @@ Google OAuth callback
 | --- | --- |
 | `PUBLIC_READ` | 可匿名 GET（首頁、公開摘要、法規目錄、公開統計） |
 | `PUBLIC_QUERY` | 可匿名 POST，但只用於查詢、不改共享資料（`/api/rag/query`、`/api/rag/query/stream`）；必須限流與預算控制 |
+| `PUBLIC_AUTH` | 匿名可用的登入流程端點（Google start／callback、logout） |
 | `AUTH_READ` | 登入後可 GET；pending 不行；包含 SSE 與詳細狀態頁 |
-| `SELF_WRITE` | 登入使用者只能改自己的低風險資料（RAG 回饋） |
-| `ADMIN_WRITE` | 只有 admin／admin token |
-| `AUTH_ONLY` | 只允許 auth／application 狀態端點，pending 也可 |
+| `AUTH_QUERY` | 登入後可 POST 的唯讀查詢（例如 `/api/query`） |
+| `SELF_WRITE` | 登入使用者只能改自己的低風險資料（RAG 回饋、client timing） |
+| `AUTH_ONLY` | 只允許已登入 session 的 auth／application／SSE ticket 端點；pending 需另判 |
+| `ADMIN_ONLY` | 只有 admin／admin token 可讀或執行（含 API docs） |
+| `ADMIN_WRITE` | 只有 admin／admin token 可寫 |
 
 - `/api/docs`、`/api/openapi.json` MUST 列為 admin-only 或 production 關閉；OpenAPI 會列出全部路由，不應匿名公開。
 - `/`、`/favicon.svg` 與前端靜態檔可公開，但必須在分類表中明列。
 - SSE `/api/events/stream` 列為 `AUTH_READ`，且 topic 需再授權。
+- Phase 4 完成前，`/api/rag/query` 與 `/api/rag/query/stream` 在 `route_policies.json` 暫列 `ADMIN_ONLY`；完成限流、預算與 kill switch 後才改成 `PUBLIC_QUERY`，避免分類先行造成意外公開。
 
 ### 7.2 落地方式
 
 - 使用 FastAPI router／route 層級的 `Depends` 或 metadata 做分類，比 middleware 內比對 path 字串可靠；middleware 只作 defense-in-depth。
-- 應用啟動時檢查所有已註冊路由（含非 `/api`）都有分類；發現未分類路由 MUST 拒絕啟動，而不是只靠測試。
+- 分類表已建立於 `src/judgment/web/route_policies.json`，由 `scripts/generate_route_policies.py` 從 `app.routes` 產生；新路由預設 `ADMIN_ONLY`，人工再把該公開的往下調。
+- 應用啟動時檢查所有已註冊路由（含非 `/api`）都有分類；發現未分類路由 MUST 拒絕啟動，而不是只靠測試。目前已於 lifespan 啟動時驗證，並有測試涵蓋。
 - 測試 MUST 列舉 `app.routes` 全部 method route，任何未分類路由讓測試失敗。
 - `PUBLIC_READ` 不得允許 POST／PATCH／DELETE；`PUBLIC_QUERY` 只允許明確列出的查詢 POST。
 - 本機 bypass 與 forwarded header 規則必須一起測試，避免 tunnel 遠端被當成本機。
@@ -258,7 +265,8 @@ Google OAuth callback
 - 匿名與 pending MUST NOT 取得 SSE ticket。
 - Ticket MUST 綁定 `user_id`、`role`、允許的 topic 與短 TTL；不得再是「任何有效 ticket 可訂閱所有 topic」。
 - User 只可訂閱唯讀 topic（例如 processing、judgment-download、status、system-usage、ollama、court-check、law-version-check 等）；admin 可訂閱全部。
-- 長連線 MUST 定期（建議 60 秒）回查使用者 status；停用或角色變更時 MUST 主動關閉連線。
+- 長連線以使用者狀態版本號變更觸發重驗，並保留最長 60 秒的重驗間隔；停用或角色變更時 MUST 主動關閉連線。
+- 單 process 可直接通知；多 process 需共用 pub/sub 或 DB 版本通知，不能只依賴單機記憶體。
 - `POST /api/auth/sse-ticket` 只允許 active user／admin；pending 不行。
 
 ### 7.4 敏感資料分層
@@ -282,11 +290,13 @@ Google OAuth callback
   - 只有當請求來自已信任的 tunnel／loopback，且 origin 沒有對外直接暴露時，才信任 `CF-Connecting-IP`。
   - 其他情況使用 `request.client.host`；不得直接信任任意 `X-Forwarded-For`。
   - 若無法保證 origin 只接受 tunnel，MUST 以防火牆阻擋直連，並忽略 forwarded header。
-- Per-IP：每分鐘／每小時請求數、每日上限、併發數。
-- 全站每日 token 預算；超限回 429，附 `Retry-After`。
+- Per-IP：每分鐘／每小時請求數、每日上限、併發數；IPv6 MUST 以 `/64` 為計數單位。
+- 已登入者除 IP 外另加 per-user 限制，避免共用出口 IP 誤傷正常使用者。
+- 全站每日 token 預算；匿名與已登入使用不同預算池，匿名池耗盡時登入者仍可使用；pending 共用匿名池或獨立小池。
+- 超限回 429，附 `Retry-After`。
 - `/api/rag/query` 與 `/api/rag/query/stream` MUST 使用同一套限制；stream 連線建立時就要預扣額度。
 - 問題長度上限、回答 `max_tokens`／`num_predict` 上限、context 上限。
-- 必要時加 Cloudflare Turnstile 或同等的人機驗證。
+- Turnstile 建議列為預設防護（尤其匿名 RAG 與申請表單），不再只是可選項。
 - 以 IP hash 計數，不長期保存原始 IP。
 
 ### 8.2 預算扣款與串流
@@ -361,7 +371,9 @@ Google OAuth callback
 - CSRF：cookie session 的寫入請求需 Origin／SameSite 檢查；敏感操作可加 CSRF token。
 - 公開 RAG 不得繞過 admission、rate limit 或 stream 限制。
 - 公開摘要不得包含主機路徑、container、volume、token、內部 IP、API endpoints、日誌位置。
-- 隱私：只保存必要的 Google 顯示資料；提問內容、回饋、audit、rate-limit IP hash 需有保留期限與刪除／匿名化流程；上線前提供簡短隱私說明。
+- 隱私：只保存必要的 Google 顯示資料；提問內容、回饋、audit、rate-limit IP hash 需有保留期限與刪除／匿名化流程；上線前提供簡短隱私說明，涉及台灣個資法部分建議找專業人士審閱。
+- DB 回查可用短 TTL cache，但停用時 MUST 主動清除該使用者快取，並在文件寫明最長延遲。
+- 監控：429 次數、預算消耗曲線、被擋 IP 數、SSE 訂閱數與重驗延遲 MUST 放進 admin 狀態頁。
 - 測試矩陣：anonymous／pending／user／admin × GET／POST／PATCH／DELETE，任何未分類路由失敗。
 
 ---
@@ -377,10 +389,10 @@ Google OAuth callback
 
 ### Phase 0：權限骨架（1–2 個開發日）
 
-1. 盤點 100 個 `/api/*` path 與 114 個 method route，建立分類表。
+1. 盤點 100 個 `/api/*` path 與 114 個 method route，建立分類表（初版已完成，含 `route_policies.json` 與產生腳本）。
 2. 實作 route 層級分類與 default-deny middleware。
-3. 啟動時檢查所有路由；未分類即拒絕啟動。
-4. 關閉或限制 `/api/docs`、`/api/openapi.json`。
+3. 啟動時檢查所有路由；未分類即拒絕啟動（已完成 lifespan 驗證）。
+4. 關閉或限制 `/api/docs`、`/api/openapi.json`（目前已 admin/session 保護）。
 5. 建四角色 × method 測試矩陣。
 6. 確認 tunnel／client IP 規則，定義 `client_ip()`。
 7. SSE ticket 綁角色／topic，加入長連線定期重驗。
@@ -410,11 +422,11 @@ Google OAuth callback
 
 ### Phase 4：公開 RAG 保護（1–1.5 個開發日）
 
-1. Per-IP rate limit、每日／全站 token 預算、kill switch。
+1. Per-IP rate limit（IPv6 `/64`）、per-user 限制、匿名／登入分池、每日 token 預算、kill switch。
 2. `/stream` 同步限制、預扣／結算／斷線釋放。
 3. 問題長度與 token 上限。
-4. 429／預算用盡 UI。
-5. 可選 Turnstile。
+4. 429／預算用盡 UI 與 admin 監控。
+5. Turnstile 建議預設啟用（至少匿名 RAG 與申請表單）。
 
 ### Phase 5：回饋與 hardening（約 1 個開發日）
 
@@ -468,17 +480,21 @@ Google OAuth callback
 
 ### 13.2 待核定參數
 
-1. 公開 RAG 每日 token 預算初始值（建議先以 2,000,000 tokens／日為上限，約 400 題 × 5,000 tokens，依實際用量調整）。
-2. Per-IP 限制（建議 5 次／分、40 次／小時、100 次／日、同時 2 條串流）。
-3. 保留期限（建議提問／效能紀錄 90 天、回饋 365 天、audit 730 天、已處理申請 180 天）。
-4. Phase 4 完成前，production 公開 RAG 是否先以 Cloudflare rate limit 限制，或暫時要求登入。
-5. `GET /api/public/summary` 的精確欄位清單。
+1. 公開 RAG 每日 token 預算初始值（建議匿名池 2,000,000 tokens／日；以實際 P50 2,809、P95 4,096 估算，約 488–712 題，依一週用量調整）。
+2. Per-IP 限制（建議 5 次／分、40 次／小時、**20–30 次／日**、同時 2 條串流；IPv6 以 `/64` 計）。
+3. 已登入 per-user 限制（建議另訂，不與 IP 額度混用）。
+4. 匿名與登入預算池比例（建議匿名池先占多數，登入池保留基本可用量；pending 不另給池）。
+5. 保留期限（建議提問／效能紀錄 90 天、回饋 365 天、audit 730 天、已處理申請 180 天）。
+6. Phase 4 完成前，production 公開 RAG 是否先以 Cloudflare rate limit 限制，或暫時要求登入。
+7. `GET /api/public/summary` 的精確欄位清單。
 
 ---
 
 ## 14. 建議下一步
 
 1. 先複核 [`execution-report.md`](./execution-report.md) 與本報告的 10 點回覆、工時與待核定參數。
-2. 核定後從 Phase 0 開始；不先做註冊 UI。
-3. Phase 0.1 程式已完成，但 **不要在 v7 索引 copy 期間重啟 production**；下次重啟後再驗證 tunnel。
-4. 若 production 目前已公開 RAG，Phase 4 前先加 Cloudflare rate limit 或暫時限制匿名提問。
+2. Phase 0 已獲同意；路由分類表、產生腳本與啟動 fail-fast 已完成初版，下一步補 default-deny middleware、角色矩陣與 `client_ip()`；不先做註冊 UI。
+3. 2026-11-19 外部驗證：公開 `/api/status`、`/api/processing`、`/api/question-bank/stats`、`/api/docs` 在無憑證下皆回 401，未觀察到 tunnel bypass；**不需要緊急重啟**。
+4. Phase 0.1 程式已完成，但 **不要在 v7 索引 copy 期間重啟 production**；下次重啟後再驗證 tunnel。
+5. 2026-11-19 外部驗證也顯示匿名 RAG 尚未開放（`/api/rag/query` 空 body 回 401）；在最小版限流、預算與 kill switch 完成前，不應直接開放。
+6. 若決定提前開放匿名 RAG，先完成最小版 per-IP 限流＋每日預算＋kill switch；Cloudflare rate limit 只能作過渡。

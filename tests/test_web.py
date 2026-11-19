@@ -38,6 +38,13 @@ from judgment.processing_state import ProcessingStateStore
 from judgment.web import processing as processing_module
 from judgment.web.app import create_app
 from judgment.web.auth import make_session_token
+from judgment.web.route_policy import (
+    VALID_CATEGORIES,
+    load_route_policies,
+    policy_for,
+    registered_route_keys,
+    validate_route_policies,
+)
 
 
 def _seed(session_factory) -> None:
@@ -3065,6 +3072,40 @@ def test_local_admin_bypass_is_opt_in_and_ignores_forwarded_requests(
                 headers=headers,
             )
             assert forwarded.status_code == 401, headers
+
+
+def test_route_policies_cover_every_registered_route(web_client) -> None:
+    policies = load_route_policies()
+    registered = set(registered_route_keys(web_client.app.routes))
+    assert not registered - set(policies)
+    assert all(category in VALID_CATEGORIES for category in policies.values())
+
+    assert policy_for("GET", "/api/status", policies) == "AUTH_READ"
+    assert policy_for("POST", "/api/processing/stop", policies) == "ADMIN_WRITE"
+    assert policy_for("POST", "/api/rag/query", policies) == "ADMIN_ONLY"
+    assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"
+    assert policy_for("GET", "/api/unknown", policies) == "ADMIN_ONLY"
+
+    with pytest.raises(RuntimeError, match="unclassified routes"):
+        validate_route_policies(
+            web_client.app.routes,
+            {"GET /api/health": "PUBLIC_READ"},
+        )
+
+
+def test_oauth_redirect_helper_is_not_public(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app) as client:
+        assert client.get("/docs/oauth2-redirect").status_code == 401
 
 
 def test_remote_google_session_authorizes_and_rejects_bad_origin(web_client) -> None:
