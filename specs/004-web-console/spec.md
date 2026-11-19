@@ -54,6 +54,19 @@
 - 索引 runtime 卡片 MUST NOT 重複顯示第二份主機／模型 strip；llama-server 主機與模型只在 workflow 執行資訊卡片的「Embedding 主機／模型」selector 顯示一次。
 - 全站時間表一致性 MUST 同時包含視覺與資料語意：每個分格的 `is-complete` 只能由該 series 的完成條件判定；active collection 等基線只能是獨立 series。R／E 僅在 latest archive 已完整覆蓋、沒有 E backlog 的未變更月份，才可用 active 覆蓋顯示完成；仍有 E backlog 時 MUST 使用本次 run 進度。summary MUST 與畫面 cell 同源，backlog badge MUST 分開計算。詳見 [`progress-visualization.md`](progress-visualization.md) §5.1。
 
+### 全站月份／archive 處理順序
+
+所有以月份 archive 為輸入的處理流程 MUST 由最舊月份處理到最新月份：
+
+- 主要排序：`issue_month ASC`（或 archive 檔名 `YYYYMM` 升冪）。
+- 同月份多個 archive：依 archive 更新日期／檔名升冪（舊 archive 先、最新 update archive 後）。
+- 同月份同 archive 的多筆資料：再依穩定 ID 升冪。
+- 續跑 cursor MUST 保存月份（與 archive）及 ID；MUST NOT 只用 ID cursor 跨月份排序。
+- 適用流程：判決下載 pending／verification、判決匯入、Qdrant判決向量索引版本建置、完整資料更新、法院名稱正規化（掃描判決時）。
+- 法規／命令下載與法規／命令索引以「目前版本」為輸入，沒有月份 archive 迴圈，不適用本排序；仍 MUST 使用穩定的版本／ID 順序。
+- 任何流程若因舊版 in-flight run 保留舊排序，MUST 在 runtime／UI 明示，不得默默混用。
+- UI 月份表 MAY 維持年份由新到舊顯示；顯示順序與處理順序分開，綠框／目前列 MUST 跟隨實際處理月份。
+
 ### Current Functional Surface（目前網站功能）
 
 | 頁面 | 目前功能 |

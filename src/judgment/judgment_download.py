@@ -1518,7 +1518,7 @@ def _verification_entries(
         entry = latest_by_month.get(key)
         if entry is not None:
             entries.append(entry)
-    entries.sort(key=lambda entry: int(entry["fileset_id"]), reverse=True)
+    entries.sort(key=lambda entry: int(entry["fileset_id"]))
     return entries
 
 
@@ -1861,6 +1861,25 @@ def run_download(
         verification.setdefault("completed_at", "")
         verification.setdefault("last_verified_at", "")
         verification.setdefault("last_error", "")
+        if (
+            verification.get("status") == "in_progress"
+            and verification.get("order") != "oldest_first"
+        ):
+            # Old cycles used newest-first and stored a descending cursor.
+            # Restart from the oldest month instead of applying that cursor
+            # to the new ascending order.
+            verification.update(
+                status="idle",
+                next_fileset_id=None,
+                next_month="",
+                verified_count=0,
+                cycle_started_at="",
+                completed_at="",
+                last_verified_at="",
+                last_error="",
+            )
+            _log("驗證順序改為由最舊月份往最新；重新開始驗證既有月份。")
+        verification["order"] = "oldest_first"
         failures = backfill.get("failures")
         if not isinstance(failures, dict):
             failures = {}
@@ -2323,18 +2342,18 @@ def run_download(
                         last_verified_at="",
                         last_error="",
                     )
-                    _log("開始驗證既有月份（由最新月份往回）。")
+                    _log("開始驗證既有月份（由最舊月份往最新）。")
                 else:
                     cursor = int(cursor)
                     verification["status"] = "in_progress"
                     verification["completed_at"] = ""
                     _log(
-                        f"接續驗證既有月份（從 fileset {cursor} 往回）。"
+                        f"接續驗證既有月份（從 fileset {cursor} 往後）。"
                     )
                 verify_queue = [
                     entry
                     for entry in candidates
-                    if int(entry["fileset_id"]) <= cursor
+                    if int(entry["fileset_id"]) >= cursor
                 ]
                 verification["next_fileset_id"] = cursor
                 verification["next_month"] = (
@@ -2387,13 +2406,13 @@ def run_download(
                             stop_reason = "verification_deadline"
                             break
                         months_cache = refresh_months()
-                        lower = [
+                        higher = [
                             candidate
                             for candidate in candidates
                             if int(candidate["fileset_id"])
-                            < int(entry["fileset_id"])
+                            > int(entry["fileset_id"])
                         ]
-                        next_entry = lower[0] if lower else None
+                        next_entry = higher[0] if higher else None
                         verification["next_fileset_id"] = (
                             int(next_entry["fileset_id"])
                             if next_entry

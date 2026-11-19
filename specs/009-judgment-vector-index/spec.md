@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.12
+**Version**: 1.13
 
 **Last Updated**: 2026-11-19
 
@@ -63,10 +63,11 @@
 
 ### 3.3 掃描順序
 
-- 建置索引時依 `JudgmentDocument.id ASC` 掃描；此順序是匯入／首次寫入順序，不是 `issue_month` 月份順序。
-- `index_runtime.current.month` 是目前批次最後一筆判決所屬月份；同一批次或相鄰批次可能跨月份，因此目前處理列與綠框月份可能前後跳動。
-- 綠框只表示「目前批次所在月份」，不代表索引已按月份由舊到新推進，也不代表該月之前的月份都已完成。
-- 續跑使用 `last_indexed_id` 作為 cursor；若未來改成 `issue_month` 月份順序，MUST 同步新增 month cursor／resume 契約並更新本節與測試，不得只改前端排序。
+- 新建索引版本 MUST 依 `issue_month ASC, JudgmentDocument.id ASC` 掃描，也就是由最舊月份處理到最新月份；同一月份再依匯入 ID。
+- 續跑 MUST 使用 `(last_indexed_month, last_indexed_id)` 作為 cursor；不得只使用 `last_indexed_id`，否則切換月份排序後會漏掉月份。
+- 既有 in-flight 版本若只有 `last_indexed_id`、沒有 `last_indexed_month`，MAY 繼續使用原本的 ID 順序完成該版本；新版本 MUST 使用月份順序。`index_runtime.scan_order` MUST 提供 `issue_month` 或 `id` 讓 UI 說明目前 run 的順序。
+- `index_runtime.current.month` 是目前批次最後一筆判決所屬月份；綠框只表示目前批次所在月份，不代表其他月份已完成。新 run 的綠框會由舊月份往新月份移動。
+- 若未來調整排序，MUST 同步更新 cursor／resume、runtime payload、UI 說明與測試，不得只改 SQL 排序。
 
 ### 3.4 後端函式
 
@@ -365,7 +366,8 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - [ ] A／R／E 同時為 25% 淺色時，tooltip 顯示各自 0/total 與「未完成」，不得顯示「無資料」。
 - [ ] 正在計算新 embedding 時，目前處理列的 E chip 顯示「計算中」。
 - [ ] 索引 runtime 卡片不得出現第二份主機／模型 strip。
-- [ ] 目前處理列與時間表說明標示「依匯入 ID 掃描，不是月份順序」。
+- [ ] 新 run 由最舊月份開始，runtime.scan_order 為 `issue_month`；舊 in-flight run 顯示 ID 順序說明。
+- [ ] 續跑使用 `(last_indexed_month, last_indexed_id)`，不得漏月份。
 - [ ] 390px 無水平溢出。
 - [ ] Tooltip 顯示最新 archive、A／R 基線與 E 進度。
 
@@ -388,3 +390,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.10 | 2026-11-19 | 補回「無 E backlog 的未變更月份可用 active 覆蓋顯示實心」規則；仍有 E backlog 的月份才使用本次 run 進度，避免舊月份被全部畫成淺色。 |
 | 1.11 | 2026-11-19 | 移除索引 runtime 卡片重複的 llama-server 主機 strip；主機／模型只保留執行資訊卡片的 Embedding selector，live probe endpoint 同步移除。 |
 | 1.12 | 2026-11-19 | 明訂索引掃描依 JudgmentDocument.id（匯入順序），不是月份順序；綠框只標示目前批次月份，並在 UI 加上對應提示。 |
+| 1.13 | 2026-11-19 | 新索引版本改為依 issue_month 由舊到新掃描，同月依 id；新增 last_indexed_month cursor 與 runtime.scan_order；舊 in-flight 版本保留原 ID 順序完成。 |

@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import and_, case, func, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 
 from .config import Settings
 from .courts import CANONICAL_COURTS, canonical_court_prefix, normalize_court
@@ -36,6 +36,7 @@ def normalize_judgment_courts(
     unresolved_samples: Counter[str] = Counter()
 
     last_id = 0
+    last_month = ""
     while True:
         if limit is not None:
             remaining = limit - scanned
@@ -46,25 +47,50 @@ def normalize_judgment_courts(
             current_size = batch_size
 
         with session_factory() as session:
+            month_expr = func.coalesce(
+                func.nullif(JudgmentDocument.issue_month, ""), "000000"
+            )
+            if last_month:
+                cursor = or_(
+                    month_expr > last_month,
+                    and_(
+                        month_expr == last_month,
+                        JudgmentDocument.id > last_id,
+                    ),
+                )
+            else:
+                cursor = JudgmentDocument.id > last_id
             statement = select(
-                JudgmentDocument.id, JudgmentDocument.court, JudgmentDocument.jid
-            ).where(JudgmentDocument.id > last_id)
+                JudgmentDocument.id,
+                JudgmentDocument.issue_month,
+                JudgmentDocument.court,
+                JudgmentDocument.jid,
+            ).where(cursor)
             if not all_rows:
                 statement = statement.where(JudgmentDocument.court_normalized == "")
-            statement = statement.order_by(JudgmentDocument.id).limit(current_size)
-            rows: List[Tuple[int, str, str]] = [
-                (int(row[0]), str(row[1] or ""), str(row[2] or ""))
+            statement = statement.order_by(
+                month_expr.asc(),
+                JudgmentDocument.id.asc(),
+            ).limit(current_size)
+            rows: List[Tuple[int, str, str, str]] = [
+                (
+                    int(row[0]),
+                    str(row[1] or ""),
+                    str(row[2] or ""),
+                    str(row[3] or ""),
+                )
                 for row in session.execute(statement).all()
             ]
 
         if not rows:
             break
         last_id = rows[-1][0]
+        last_month = rows[-1][1][:6] if rows[-1][1] else "000000"
         scanned += len(rows)
 
         resolved: List[Tuple[int, str]] = []
         pending: List[Tuple[int, str, str]] = []
-        for row_id, court, jid in rows:
+        for row_id, _month, court, jid in rows:
             value = canonical_court_prefix(court)
             if value:
                 resolved.append((row_id, value))

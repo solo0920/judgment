@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import delete, exists, func, insert, or_, select
+from sqlalchemy import and_, delete, exists, func, insert, or_, select
 
 from .config import Settings
 from .db import build_engine, build_session_factory, init_db
@@ -714,6 +714,19 @@ def index_staleness(
     }
 
 
+def _cursor_month(value: Any) -> str:
+    text = str(value or "").strip()
+    return text[:6] if text else "000000"
+
+
+def _month_order_expression():
+    """Normalize empty issue_month values for the month cursor."""
+
+    return func.coalesce(
+        func.nullif(JudgmentDocument.issue_month, ""), "000000"
+    )
+
+
 def _candidate_statement(
     *,
     collection: str,
@@ -724,6 +737,8 @@ def _candidate_statement(
     jid: Optional[str],
     stride: int,
     last_id: int,
+    last_month: str = "",
+    month_order: bool = True,
     batch_size: int,
 ):
     index_join = JudgmentVectorIndex.jid == JudgmentDocument.jid
@@ -731,6 +746,25 @@ def _candidate_statement(
         index_join = index_join & (
             JudgmentVectorIndex.version_id == int(version_id)
         )
+    if month_order:
+        month_expr = _month_order_expression()
+        if last_month:
+            cursor = or_(
+                month_expr > last_month,
+                and_(
+                    month_expr == last_month,
+                    JudgmentDocument.id > last_id,
+                ),
+            )
+        else:
+            cursor = JudgmentDocument.id > last_id
+        order_by = (
+            month_expr.asc(),
+            JudgmentDocument.id.asc(),
+        )
+    else:
+        cursor = JudgmentDocument.id > last_id
+        order_by = (JudgmentDocument.id.asc(),)
     statement = (
         select(*_COLUMNS)
         .outerjoin(
@@ -738,7 +772,7 @@ def _candidate_statement(
             index_join,
         )
         .where(
-            JudgmentDocument.id > last_id,
+            cursor,
             JudgmentDocument.full_text != "",
             JudgmentDocument.is_current.is_(True),
         )
@@ -758,7 +792,47 @@ def _candidate_statement(
         statement = statement.where(JudgmentDocument.jdate >= since)
     if jid:
         statement = statement.where(JudgmentDocument.jid == jid)
-    return statement.order_by(JudgmentDocument.id).limit(batch_size)
+    return statement.order_by(*order_by).limit(batch_size)
+
+
+def _version_batch_statement(
+    *,
+    last_id: int,
+    last_month: str,
+    month_order: bool,
+    max_judgment_id: int,
+    batch_size: int,
+):
+    if month_order:
+        month_expr = _month_order_expression()
+        if last_month:
+            cursor = or_(
+                month_expr > last_month,
+                and_(
+                    month_expr == last_month,
+                    JudgmentDocument.id > last_id,
+                ),
+            )
+        else:
+            cursor = JudgmentDocument.id > last_id
+        order_by = (
+            month_expr.asc(),
+            JudgmentDocument.id.asc(),
+        )
+    else:
+        cursor = JudgmentDocument.id > last_id
+        order_by = (JudgmentDocument.id.asc(),)
+    return (
+        select(*_COLUMNS)
+        .where(
+            cursor,
+            JudgmentDocument.id <= int(max_judgment_id),
+            JudgmentDocument.full_text != "",
+            JudgmentDocument.is_current.is_(True),
+        )
+        .order_by(*order_by)
+        .limit(batch_size)
+    )
 
 
 def _month_source_totals(session_factory) -> List[Dict[str, Any]]:
@@ -1120,6 +1194,7 @@ def index_judgments(
     points = 0
     dimensions = 0
     last_id = 0
+    last_month = ""
     sample_lengths: List[int] = []
     batch_durations: List[float] = []
     embedding_durations: List[float] = []
@@ -1244,6 +1319,8 @@ def index_judgments(
                         jid=jid,
                         stride=stride,
                         last_id=last_id,
+                        last_month=last_month,
+                        month_order=True,
                         batch_size=current_size,
                     )
                 ).mappings().all()
@@ -1251,6 +1328,7 @@ def index_judgments(
                 break
 
             last_id = int(rows[-1]["id"])
+            last_month = _cursor_month(rows[-1]["issue_month"])
             scanned += len(rows)
             texts = [
                 build_index_text(
@@ -1811,6 +1889,11 @@ def build_index_version(
         initial_indexed=indexed,
     )
     last_id = int(version.get("last_indexed_id") or 0)
+    last_month = str(version.get("last_indexed_month") or "")
+    # Existing in-flight versions created before the month cursor keep their
+    # original id order so resume cannot skip months.  New versions start at
+    # (month, id) and process the oldest month first.
+    month_order = bool(last_month) or last_id == 0
     dimensions = int(version.get("embedding_dimension") or 0)
     reused_count = 0
     embedded_count = 0
@@ -1857,6 +1940,7 @@ def build_index_version(
                 "build_mode": build_mode,
                 "model": model,
                 "batch_size": batch_size,
+                "scan_order": "issue_month" if month_order else "id",
                 "expected_count": expected_count,
                 "embedding": {
                     **host_probe,
@@ -2148,22 +2232,22 @@ def build_index_version(
                     break
             with session_factory() as session:
                 rows = session.execute(
-                    select(*_COLUMNS)
-                    .where(
-                        JudgmentDocument.id > last_id,
-                        JudgmentDocument.id
-                        <= int(snapshot.get("max_judgment_id") or 0),
-                        JudgmentDocument.full_text != "",
-                        JudgmentDocument.is_current.is_(True),
+                    _version_batch_statement(
+                        last_id=last_id,
+                        last_month=last_month,
+                        month_order=month_order,
+                        max_judgment_id=int(
+                            snapshot.get("max_judgment_id") or 0
+                        ),
+                        batch_size=current_limit,
                     )
-                    .order_by(JudgmentDocument.id)
-                    .limit(current_limit)
                 ).mappings().all()
             if not rows:
                 break
 
             scan_started = time.perf_counter()
             last_id = int(rows[-1]["id"])
+            last_month = _cursor_month(rows[-1]["issue_month"])
             scanned += len(rows)
             texts = [
                 build_index_text(
@@ -2379,6 +2463,7 @@ def build_index_version(
                 version_id=version_id,
                 indexed_count=indexed,
                 last_indexed_id=last_id,
+                last_indexed_month=last_month,
                 embedding_dimension=dimensions,
             )
             if (
@@ -2534,6 +2619,7 @@ def build_index_version(
             version_id=version_id,
             indexed_count=indexed,
             last_indexed_id=last_id,
+            last_indexed_month=last_month,
             embedding_dimension=dimensions,
         )
         if state is not None and state_run_id is not None:

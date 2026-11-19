@@ -75,6 +75,14 @@ def _archive_month_label(archive: Path) -> str:
     return archive.stem or archive.name
 
 
+def _archive_order_key(archive: Path) -> tuple[str, str]:
+    """Order archives by month, then archive update filename."""
+
+    match = re.match(r"(\d{4})[-_]?(\d{2})", archive.name)
+    month = f"{match.group(1)}{match.group(2)}" if match else "999999"
+    return month, archive.name
+
+
 def _normalize_for_match(value: str) -> str:
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value))
 
@@ -503,6 +511,10 @@ def import_judgments(
         archive_paths = [Path(item).expanduser().resolve() for item in archives]
     if not archive_paths:
         raise FileNotFoundError(f"在 {source_dir} 找不到 .rar／.7z／.zip 判決檔")
+    archive_paths = sorted(
+        set(archive_paths),
+        key=_archive_order_key,
+    )
     for archive in archive_paths:
         if not archive.is_file():
             raise FileNotFoundError(f"找不到判決壓縮檔：{archive}")

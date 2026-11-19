@@ -13,9 +13,12 @@ from judgment.config import Settings
 from judgment.embeddings import EmbeddingError
 from judgment.index_versions import activate_version, recipe_version, rollback_version
 from judgment.judgment_index import (
+    _candidate_statement,
+    _cursor_month,
     _index_current_view,
     _merge_prior_month_runtime,
     _prior_index_month_runtime,
+    _version_batch_statement,
     build_index_version,
     history_point_id,
     index_staleness,
@@ -236,6 +239,59 @@ def _seed_legacy_version(session_factory, settings):
         session.commit()
 
 
+def test_index_batches_use_month_then_id_order(tmp_path: Path) -> None:
+    session_factory = _session_factory()
+    settings = _settings(tmp_path)
+    _seed_legacy_version(session_factory, settings)
+    with session_factory() as session:
+        docs = session.scalars(
+            select(JudgmentDocument).order_by(JudgmentDocument.id)
+        ).all()
+        # Deliberately assign months in the opposite order from ids.
+        docs[0].issue_month = "202602"
+        docs[1].issue_month = "202410"
+        session.commit()
+        second_id = int(docs[1].id)
+
+        def batch(last_month: str, last_id: int):
+            statement = _candidate_statement(
+                collection=settings.judgment_vector_collection,
+                model=settings.embedding_model,
+                version_id=None,
+                all_rows=True,
+                since=None,
+                jid=None,
+                stride=1,
+                last_id=last_id,
+                last_month=last_month,
+                month_order=True,
+                batch_size=10,
+            )
+            return session.execute(statement).mappings().all()
+
+        rows = batch("", 0)
+        assert [row["issue_month"] for row in rows] == ["202410", "202602"]
+        assert _cursor_month(rows[0]["issue_month"]) == "202410"
+
+        after_first_month = batch("202410", second_id)
+        assert [row["jid"] for row in after_first_month] == ["J-1"]
+        assert _cursor_month("") == "000000"
+
+        version_rows = session.execute(
+            _version_batch_statement(
+                last_id=0,
+                last_month="",
+                month_order=True,
+                max_judgment_id=second_id,
+                batch_size=10,
+            )
+        ).mappings().all()
+        assert [row["issue_month"] for row in version_rows] == [
+            "202410",
+            "202602",
+        ]
+
+
 def test_index_staleness_detects_missing_changed_and_stale(tmp_path: Path) -> None:
     session_factory = _session_factory()
     settings = _settings(tmp_path)
@@ -437,6 +493,7 @@ def test_build_version_records_processing_state_and_month_progress(
     assert run["stages"]["qdrant"]["status"] == "success"
     assert run["stages"]["validate"]["status"] == "success"
     runtime = run["meta"]["index_runtime"]
+    assert runtime["scan_order"] == "issue_month"
     assert runtime["summary"]["indexed"] == 2
     assert runtime["embedding"]["selected"]["model"] == settings.embedding_model
     assert runtime["copy"]["status"] == "success"
@@ -449,6 +506,14 @@ def test_build_version_records_processing_state_and_month_progress(
     ]
     assert sum(item["processed"] for item in runtime["months"]) == 2
     assert runtime["current"]["jid"]
+    with session_factory() as session:
+        version = session.scalars(
+            select(JudgmentIndexVersion).order_by(
+                JudgmentIndexVersion.version_id.desc()
+            )
+        ).first()
+        assert version is not None
+        assert version.last_indexed_month == "202602"
 
 
 def test_build_version_records_failed_ollama_probe(

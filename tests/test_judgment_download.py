@@ -191,6 +191,28 @@ def test_archive_entries_filter_non_judgment_resources() -> None:
     assert entries[1]["format"] == "RAR"
 
 
+def test_verification_entries_are_oldest_first() -> None:
+    entries = judgment_download._archive_entries(_resources())
+    latest_entries = judgment_download._latest_per_month(entries)
+    latest = {
+        judgment_download._month_key(entry["resource_description"]): entry
+        for entry in latest_entries
+    }
+    months = [
+        {
+            "status": "green",
+            "month": month,
+            "filename": entry["filename"],
+            "local_filename": entry["filename"],
+        }
+        for month, entry in latest.items()
+    ]
+
+    verification = judgment_download._verification_entries(months, latest)
+
+    assert [entry["fileset_id"] for entry in verification] == [72010, 72011]
+
+
 def test_cli_exit_codes_distinguish_resumable_partial(
     tmp_path: Path, monkeypatch
 ) -> None:

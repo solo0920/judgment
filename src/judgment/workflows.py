@@ -91,7 +91,7 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     WorkflowDefinition(
         id="judgment_download",
         label="判決下載",
-        description="優先續傳待補齊的裁判書月份，完成後由最新月份往回驗證既有檔案；缺檔下載、舊版以新 fileset 取代，預設非 API 時段也可下載（一次一個），可跨時段續傳。",
+        description="優先續傳待補齊的裁判書月份，完成後由最舊月份往最新月份驗證既有檔案；缺檔下載、舊版以新 fileset 取代，預設非 API 時段也可下載（一次一個），可跨時段續傳。",
         branch="judgment",
         stage="download",
         kind="judgment_download",
@@ -103,7 +103,7 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     WorkflowDefinition(
         id="judgment_import",
         label="判決匯入",
-        description="掃描本機未處理的判決 .rar，必要時建立原始 Parquet 備份，再匯入符合金融法規清單的判決。",
+        description="掃描本機未處理的判決 .rar（由最舊月份到最新月份），必要時建立原始 Parquet 備份，再匯入符合金融法規清單的判決。",
         branch="judgment",
         stage="postgres",
         kind="judgment_import",
@@ -127,7 +127,7 @@ WORKFLOWS: tuple[WorkflowDefinition, ...] = (
     WorkflowDefinition(
         id="index_versions",
         label="Qdrant判決向量索引版本建置",
-        description="先測試 llama-server 主機與 embedding 模型，建立完整的新版本 collection，複製可重用向量、只 embedding 差異資料，驗證後原子切換 alias。",
+        description="先測試 llama-server 主機與 embedding 模型，建立完整的新版本 collection，由最舊月份到最新月份複製可重用向量、只 embedding 差異資料，驗證後原子切換 alias。",
         branch="judgment",
         stage="qdrant",
         kind="index_versions",

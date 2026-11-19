@@ -16,6 +16,7 @@ from judgment import judgment_import as judgment_import_module
 from judgment.config import Settings
 from judgment.db import init_db
 from judgment.judgment_import import (
+    _archive_order_key,
     archive_uncompressed_bytes,
     build_citation_pattern,
     extract_citations,
@@ -573,6 +574,24 @@ def test_dry_run_does_not_create_snapshots_or_versions(
             session.scalar(select(func.count()).select_from(JudgmentDocumentVersion))
             == 0
         )
+
+
+def test_archive_order_key_places_oldest_month_first() -> None:
+    paths = [
+        Path("202607--(20261016Update).rar"),
+        Path("202410--(20261016Update).rar"),
+        Path("202601--(20261116Update).rar"),
+        Path("202601--(20261016Update).rar"),
+    ]
+
+    ordered = sorted(paths, key=_archive_order_key)
+
+    assert [path.name for path in ordered] == [
+        "202410--(20261016Update).rar",
+        "202601--(20261016Update).rar",
+        "202601--(20261116Update).rar",
+        "202607--(20261016Update).rar",
+    ]
 
 
 def test_import_tracks_archive_progress_state(tmp_path: Path, monkeypatch) -> None:

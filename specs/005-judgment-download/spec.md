@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-10
 
-**Updated**: 2026-11-11
+**Updated**: 2026-11-19
 
 **Status**: Implemented
 
@@ -81,7 +81,7 @@
 
 ### User Story 5 - 可追溯的 manifest 與跨日續傳 (Priority: P1)
 
-系統在 `raw_rar/download_manifest.json` 記錄 fileset ID、檔名、大小、Last-Modified、ETag、SHA-256、來源 URL、下載時間、月份狀態、baseline 與 `backfill` 續傳進度。每次執行先處理待補齊月份（缺少或舊版），由舊到新續傳；待補齊清單清空後，才由最新月份往回驗證綠色月份。中斷的下載保留 `.part` 與 validator sidecar，下次以 HTTP Range 續傳。
+系統在 `raw_rar/download_manifest.json` 記錄 fileset ID、檔名、大小、Last-Modified、ETag、SHA-256、來源 URL、下載時間、月份狀態、baseline 與 `backfill` 續傳進度。每次執行先處理待補齊月份（缺少或舊版），由舊到新續傳；待補齊清單清空後，才由最舊月份往最新月份驗證綠色月份。中斷的下載保留 `.part` 與 validator sidecar，下次以 HTTP Range 續傳。
 
 **Independent Test**: 檢查 manifest 內容與實際檔案一致；在流程中途模擬 06:00 停止後重跑，確認只下載剩下月份、不重新下載已完成月份，且待補齊／驗證游標正確更新。讓單一 fileset 下載失敗，確認其他月份仍完成、失敗月份留在待補齊清單。中斷 `.part` 後重跑，確認以 Range 續傳；validator 改變時確認從零重新下載。
 
@@ -89,8 +89,8 @@
 
 1. **Given** 下載或更新成功，**When** 檢查 manifest，**Then** 包含 fileset、檔名、大小、validators、SHA-256 與時間。
 2. **Given** 流程在 06:00 停止且仍有待補齊月份，**When** 下次執行，**Then** manifest 的 `backfill.pending_months`、`resume_from_month`、`resume_from_fileset_id` 指向剩餘月份，流程只處理這些月份，不先重驗綠色月份。
-3. **Given** 待補齊月份已全部完成，**When** 流程仍有時間，**Then** 由最新月份往回驗證綠色月份，並將 `verification.next_fileset_id` 持久化。
-4. **Given** 前一次驗證只完成一部分，**When** 下次執行，**Then** 從保存的驗證游標接續，不從最新月份重來。
+3. **Given** 待補齊月份已全部完成，**When** 流程仍有時間，**Then** 由最舊月份往最新月份驗證綠色月份，並將 `verification.next_fileset_id` 持久化。
+4. **Given** 前一次驗證只完成一部分，**When** 下次執行，**Then** 從保存的驗證游標接續，不從最舊月份重來。
 5. **Given** 當日驗證已完成，**When** 同日再次執行，**Then** 跳過重複驗證，不發出多餘 metadata 請求。
 6. **Given** 某個 fileset metadata 或下載失敗，**When** 流程執行，**Then** 其他月份繼續處理；失敗月份留在 `backfill.pending_months` 與 `backfill.failures`，run 標記為 partial。
 7. **Given** 中斷的 `.part` 與 sidecar validator 仍相符，且伺服器支援 Range，**When** 下次下載，**Then** 以 `Range`／`If-Range` 從已寫入位元組續傳，成功後才原子取代正式檔。
@@ -141,7 +141,7 @@
 - **FR-022**: 處理頁收到後端 SSE 進度推送時必須以區域更新方式維護月份表與進度區，不得因進度或月份狀態變更而重繪整個工作流程面板或重設表格捲動位置。前端 MUST NOT 以 timer 或定期查詢取得下載進度。
 - **FR-023**: 進度狀態必須在流程正常結束或中止後清除；程序已不存在或進度逾時時，狀態 API 不得回傳過期進度。
 - **FR-024**: 下載佇列必須優先處理 pending／gray 月份（依月份由舊到新）；`backfill` 必須記錄 `pending_months`、`pending_count`、`resume_from_month`、`resume_from_fileset_id`、`complete` 與上次停止原因；每次完成或失敗一個月份後立即持久化。
-- **FR-025**: 待補齊月份清空後才可驗證綠色月份，驗證順序由最新 fileset 往回；`backfill.verification` 必須記錄 `status`、`next_fileset_id`、`next_month`、`cycle_started_at`、`verified_count`、`completed_at` 與 `last_error`。部分完成保留游標；同日已完成則跳過。
+- **FR-025**: 待補齊月份清空後才可驗證綠色月份，驗證順序由最舊 fileset 往新；`backfill.verification` 必須記錄 `status`、`order`（`oldest_first`）、`next_fileset_id`、`next_month`、`cycle_started_at`、`verified_count`、`completed_at` 與 `last_error`。部分完成保留游標；同日已完成則跳過。舊 cycle 若沒有 `order` 或使用舊的最新型優先游標，下一次 MUST 由最舊月份重新開始驗證，不得沿用反向游標跳過月份。
 - **FR-026**: 單一 fileset 的 metadata 或下載錯誤必須隔離，最多重試 `2` 次；失敗月份留在 pending 並記錄於 `backfill.failures`（fileset、檔名、嘗試次數、錯誤、時間），其他月份繼續處理，run 標記 partial。
 - **FR-027**: 下載中斷時必須保留 `.part` 與 `<檔名>.part.json` validator sidecar；下次下載若 fileset、`Content-Length`、ETag／Last-Modified 相符，使用 `Range` 與 `If-Range` 續傳。伺服器回 206 時附加並驗證長度；回 200 或 validator 不符時丟棄 `.part` 從零下載；成功後才原子取代正式檔並清除 sidecar。2026-11-11 實測官方端點忽略 Range 並回 200，因此目前實際行為是重新下載。
 - **FR-028**: 狀態 API 必須回傳 `backfill` 摘要（待補齊數量、續傳月份／fileset、驗證狀態、上次停止原因、失敗數），並以即時掃描 `raw_rar` 的結果修正 pending；處理頁必須顯示這些資訊，且收到後端 SSE 推送時只局部更新，不重繪月份表。

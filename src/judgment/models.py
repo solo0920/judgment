@@ -418,6 +418,7 @@ class JudgmentIndexVersion(Base):
         nullable=True,
     )
     last_indexed_id = Column(Integer, nullable=False, default=0)
+    last_indexed_month = Column(String(6), nullable=False, default="")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     validated_at = Column(DateTime(timezone=True), nullable=True)
     activated_at = Column(DateTime(timezone=True), nullable=True)

@@ -82,6 +82,7 @@ def _version_dict(version: Optional[JudgmentIndexVersion]) -> Optional[Dict[str,
         "status": version.status,
         "previous_version_id": version.previous_version_id,
         "last_indexed_id": int(version.last_indexed_id or 0),
+        "last_indexed_month": str(version.last_indexed_month or ""),
         "created_at": _iso(version.created_at),
         "validated_at": _iso(version.validated_at),
         "activated_at": _iso(version.activated_at),
@@ -262,6 +263,7 @@ def create_version(
             status="building",
             previous_version_id=previous_version_id,
             last_indexed_id=0,
+            last_indexed_month="",
         )
         session.add(version)
         session.commit()
@@ -293,6 +295,7 @@ def update_version_progress(
     version_id: int,
     indexed_count: int,
     last_indexed_id: int,
+    last_indexed_month: str = "",
     embedding_dimension: int = 0,
 ) -> None:
     with session_factory() as session:
@@ -301,6 +304,8 @@ def update_version_progress(
             return
         version.indexed_count = int(indexed_count)
         version.last_indexed_id = int(last_indexed_id)
+        if last_indexed_month:
+            version.last_indexed_month = str(last_indexed_month)[:6]
         if embedding_dimension:
             version.embedding_dimension = int(embedding_dimension)
         session.commit()
@@ -679,6 +684,19 @@ def ensure_index_version_schema(engine: Engine) -> None:
         return
     if "judgment_vector_index" not in tables:
         return
+    version_columns = {
+        column["name"]
+        for column in inspector.get_columns("judgment_index_versions")
+    }
+    if "last_indexed_month" not in version_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE judgment_index_versions "
+                    "ADD COLUMN last_indexed_month VARCHAR(6) "
+                    "NOT NULL DEFAULT ''"
+                )
+            )
     columns = {
         column["name"]
         for column in inspector.get_columns("judgment_vector_index")
