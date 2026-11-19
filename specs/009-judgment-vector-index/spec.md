@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.5
+**Version**: 1.6
 
 **Last Updated**: 2026-11-19
 
@@ -205,6 +205,9 @@ E 未完成 = 最新 archive 尚未完成的「月份數」
 - 執行中：完成色進度條，未完成區段 25% 淺色。
 - 無資料：淡色空心，不是 25% 淺色。
 - 目前索引月份：實線 accent 外框，padding 不使用狀態底色，無脈動動畫。
+- Build mode 的 active coverage 只能補「本次 run 尚未輪到」的 archive／月份；非準備中的目前批次 archive（`current.archive`）MUST 使用本次 run 的 `processed / total` 畫 R／E，不得以 active collection 的 100% 覆蓋提前把該格標成完成。
+- 目前 run 進行中的 R／E 分格 MUST 顯示「已完成比例實色 + 其餘 25% 淺色」；即使 active 覆蓋為 100%，也不得整格實心。run 停止／stale 後仍保留該 run 最後的 `processed / total`，不得回退成 active 100% 完成。
+- 綠框只代表目前批次所在月份，不代表該月已完成；目前月份 MUST NOT 因綠框或 active 覆蓋而被算入「已處理月份」。
 
 ### 7.2 Summary
 
@@ -325,6 +328,8 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 - [ ] Build mode 續跑能恢復 R／E counters。
 - [ ] 目前索引月份只有實線外框，無脈動動畫。
 - [ ] 目前處理列顯示本批 R／E chip；全部沿用時只顯示 R，含新 embedding 時顯示 E，混合時兩者都顯示。
+- [ ] 正在處理的 archive 其 R／E 分格使用本次 run 進度，不得被 active 100% 覆蓋提前畫成整格實心。
+- [ ] 正在處理的 R／E 分格為「已完成比例實色 + 其餘 25% 淺色」，停止後保留最後進度。
 - [ ] 正在計算新 embedding 時，目前處理列的 E chip 顯示「計算中」。
 - [ ] llama-server 連線測試以 `rag-model-button` chip 顯示所有主機與模型，不再使用大型 host row。
 - [ ] 選用主機 chip 為實心「使用中」，其他可用主機為淡色「可用」，失敗主機為灰色「無法取得」。
@@ -343,3 +348,4 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 | 1.3 | 2026-11-19 | 目前處理列新增本批 R／E chip（含 embedding 計算中狀態）；llama-server 連線測試改為與 Embedding 主機／模型相同的 compact chip strip。 |
 | 1.4 | 2026-11-19 | 全站可見文字由 Ollama 改為 llama-server；非執行中 run 顯示目前設定的即時主機測試，x570 為 primary、MBP 為 fallback。 |
 | 1.5 | 2026-11-19 | 將 llama-server 執行環境、主機優先順序與全站顯示契約抽出為 spec 010，本規格改為引用該 canonical source。 |
+| 1.6 | 2026-11-19 | 修正 build mode 目前批次 archive 的 R／E 顯示：不得以 active 100% 覆蓋提前標成完成，必須顯示本次 run 的實色進度與 25% 淺色未完成區段。 |

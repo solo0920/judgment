@@ -4094,12 +4094,33 @@ function indexMonthGridMarkup(runtime) {
         if (!entry) continue;
         const entryProcessed = indexMonthCoverageValue(entry.processed);
         knownActive += entryProcessed;
-        covered.set(row.archive, Math.max(entryProcessed, row.processed));
+        // The archive currently being processed must show this run's real
+        // progress.  Active coverage is only a substitute for archives the
+        // run has not reached yet; otherwise a 67% reuse month would be
+        // painted as 100% complete before its batches finish.
+        const isProcessingArchive =
+          group.current &&
+          !group.preparing &&
+          group.currentArchive === row.archive;
+        covered.set(
+          row.archive,
+          isProcessingArchive
+            ? row.processed
+            : Math.max(entryProcessed, row.processed),
+        );
       }
       let residual =
         activeTotal > 0 ? Math.max(0, activeProcessed - knownActive) : 0;
       const missingBaseline = baselineRows
-        .filter((row) => !archiveMap[row.archive])
+        .filter(
+          (row) =>
+            !archiveMap[row.archive] &&
+            !(
+              group.current &&
+              !group.preparing &&
+              group.currentArchive === row.archive
+            ),
+        )
         .sort(
           (left, right) =>
             archiveUpdateRank(left.archive) - archiveUpdateRank(right.archive),
@@ -4109,7 +4130,15 @@ function indexMonthGridMarkup(runtime) {
         residual -= take;
         covered.set(row.archive, Math.max(row.processed, take));
       }
-      if (!archiveMap[latest.archive] && !covered.has(latest.archive)) {
+      if (
+        !archiveMap[latest.archive] &&
+        !covered.has(latest.archive) &&
+        !(
+          group.current &&
+          !group.preparing &&
+          group.currentArchive === latest.archive
+        )
+      ) {
         covered.set(
           latest.archive,
           Math.max(latest.processed, Math.min(latest.total, residual)),
