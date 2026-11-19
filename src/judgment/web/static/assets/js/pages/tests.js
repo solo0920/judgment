@@ -85,18 +85,18 @@ function llmCapabilityMarkup(payload) {
   const counts = payload?.counts || {};
   const failures = Array.isArray(payload?.failures) ? payload.failures : [];
   const summary = payload
-    ? `<span>Ollama <strong>${counts.available ?? models.length}</strong> 個模型</span>
+    ? `<span>llama-server <strong>${counts.available ?? models.length}</strong> 個模型</span>
       <span>支援 chat <strong>${counts.chat ?? 0}</strong></span>
       <span>不支援 <strong>${counts.unsupported ?? 0}</strong></span>
       <span>未測試 <strong>${counts.untested ?? 0}</strong></span>
       <span>本次新測 <strong>${(payload.tested_now || []).length}</strong></span>
       <span class="muted">${escapeHtml(payload.detail || "")}</span>`
-    : `<span>正在讀取 Ollama 模型清單…</span>`;
+    : `<span>正在讀取 llama-server 模型清單…</span>`;
   return {
     summary,
     list: models.length
       ? models.map(llmCapabilityRow).join("")
-      : `<div class="tests-llm-empty">尚無模型資料；請確認 Ollama 已啟動並執行 LLM 服務測試。</div>`,
+      : `<div class="tests-llm-empty">尚無模型資料；請確認 llama-server 已啟動並執行 LLM 服務測試。</div>`,
     failures: failures.length
       ? `<div class="tests-llm-failures">${failures
           .map(
@@ -367,11 +367,11 @@ export async function render(root, ctx, { embedded = false } = {}) {
         <span class="tests-card-icon">${icon("brain", 16)}</span>
         <div>
           <div class="tests-card-title" id="tests-llm-title">LLM 服務測試</div>
-          <div class="tests-card-copy">檢查 Ollama 上每個模型是否支援 chat，並把結果寫入能力清單；已有測試紀錄的模型不會重測。LLM 效能評估只會納入支援 chat 的模型。</div>
+          <div class="tests-card-copy">檢查 llama-server 上每個模型是否支援 chat，並把結果寫入能力清單；已有測試紀錄的模型不會重測。LLM 效能評估只會納入支援 chat 的模型。</div>
         </div>
       </div>
       <div class="tests-llm-head">
-        <div class="tests-llm-summary" id="tests-llm-summary">正在讀取 Ollama 模型清單…</div>
+        <div class="tests-llm-summary" id="tests-llm-summary">正在讀取 llama-server 模型清單…</div>
         <button class="btn btn-primary btn-sm" type="button" id="tests-llm-test">
           ${icon("activity", 14)}<span>執行 LLM 服務測試</span>
         </button>
@@ -671,7 +671,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
       llmCapabilities = null;
       setStatus(
         llmStatus,
-        error.message || "無法讀取 Ollama 模型清單。",
+        error.message || "無法讀取 llama-server 模型清單。",
         "error",
       );
     }
@@ -682,7 +682,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
     if (llmTestBusy) return;
     llmTestBusy = true;
     paintLlmCapabilities();
-    setStatus(llmStatus, "正在檢查 Ollama 模型與 chat 能力…");
+    setStatus(llmStatus, "正在檢查 llama-server 模型與 chat 能力…");
     try {
       const data = await api.testLlmModels();
       if (disposed) return;

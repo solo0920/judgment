@@ -14,6 +14,14 @@ from .llm_backends import OLLAMA_API, is_openai_api
 from .models import OllamaModelCapability
 
 RERANK_HINTS = ("rerank", "reranker")
+EMBEDDING_HINTS = (
+    "embed",
+    "bge-m3",
+    "e5-",
+    "gte-",
+    "nomic-embed",
+    "text-embedding",
+)
 SHOW_TIMEOUT_SECONDS = 15.0
 CHAT_PROBE_TIMEOUT_SECONDS = 30.0
 
@@ -62,6 +70,11 @@ def _is_reranker(name: str) -> bool:
     return any(hint in lowered for hint in RERANK_HINTS)
 
 
+def _is_embedding_model(name: str) -> bool:
+    lowered = name.lower()
+    return any(hint in lowered for hint in EMBEDDING_HINTS)
+
+
 def _chat_probe(base_url: str, model: str) -> Dict[str, Any]:
     """Fallback for older Ollama versions without /api/show capabilities."""
     try:
@@ -86,7 +99,7 @@ def _chat_probe(base_url: str, model: str) -> Dict[str, Any]:
             "ok": True,
             "supports_chat": True,
             "capabilities": [],
-            "detail": "Ollama chat 端點回應成功。",
+            "detail": "llama-server chat 端點回應成功。",
             "method": "chat",
         }
     if "does not support chat" in detail.lower():
@@ -94,7 +107,7 @@ def _chat_probe(base_url: str, model: str) -> Dict[str, Any]:
             "ok": True,
             "supports_chat": False,
             "capabilities": [],
-            "detail": "Ollama chat 端點回報此模型不支援 chat。",
+            "detail": "llama-server chat 端點回報此模型不支援 chat。",
             "method": "chat",
         }
     return {
@@ -121,6 +134,22 @@ def probe_model_capability(
             return {
                 "ok": False,
                 "error": str(detail.get("detail") or "OpenAI 相容端點無法連線"),
+            }
+        if _is_reranker(model):
+            return {
+                "ok": True,
+                "supports_chat": False,
+                "capabilities": ["reranker"],
+                "detail": "llama-server reranker 模型，不列入 chat 評測。",
+                "method": "openai",
+            }
+        if _is_embedding_model(model):
+            return {
+                "ok": True,
+                "supports_chat": False,
+                "capabilities": ["embedding"],
+                "detail": "llama-server embedding 模型，不列入 chat 評測。",
+                "method": "openai",
             }
         return {
             "ok": True,
@@ -157,10 +186,10 @@ def probe_model_capability(
 
     supports_chat = "completion" in capabilities
     if supports_chat:
-        detail = "Ollama 回報具備 completion 能力。"
+        detail = "llama-server 回報具備 completion 能力。"
     else:
         detail = (
-            "Ollama 回報不支援 chat"
+            "llama-server 回報不支援 chat"
             f"（capabilities: {', '.join(capabilities)}）。"
         )
     return {

@@ -132,7 +132,7 @@ function aiResultMarkup(result) {
   const tags = Array.isArray(item.tags) ? item.tags : [];
   return `<section class="report-card qb-card qb-ai-result">
     <div class="side-card-head">
-      <span class="side-card-title">${icon("sparkles", 14)}Ollama 已建立題目 #${item.id}</span>
+      <span class="side-card-title">${icon("sparkles", 14)}llama-server 已建立題目 #${item.id}</span>
       ${statusBadge(item.status)}
     </div>
     <div class="qb-ai-answer">
@@ -140,12 +140,12 @@ function aiResultMarkup(result) {
       <div class="qb-ai-meta">
         ${escapeHtml(TYPE_LABELS[item.question_type] || item.question_type || "")}
         · ${escapeHtml(DIFFICULTY_LABELS[item.difficulty] || item.difficulty || "")}
-        · ${escapeHtml(result?.model || "本機 Ollama")}
+        · ${escapeHtml(result?.model || "本機 llama-server")}
       </div>
       ${labelsMarkup(item)}
       ${
         item.reference_answer
-          ? `<div class="qb-reference"><span class="summary-label">Ollama 參考答案</span><p>${escapeHtml(item.reference_answer)}</p></div>`
+          ? `<div class="qb-reference"><span class="summary-label">llama-server 參考答案</span><p>${escapeHtml(item.reference_answer)}</p></div>`
           : ""
       }
       ${
@@ -172,19 +172,19 @@ function aiCreateFormMarkup(state) {
   return `<section class="report-card qb-card">
     <div class="side-card-head">
       <span class="side-card-title">${icon("sparkles", 14)}AI 題庫新增</span>
-      <span class="badge badge-neutral">本機 Ollama</span>
+      <span class="badge badge-neutral">本機 llama-server</span>
     </div>
     <form class="qb-form qb-ai-form" data-qb-form="ai-create" id="qb-create-form">
       <label class="field qb-wide">
         <span class="field-label">題目 <span class="field-tag">question</span></span>
-        <textarea class="input" name="question" rows="4" required placeholder="輸入問題，Ollama 會回答並自動判斷題型、難度、法規／條文、參考答案與標籤。">${escapeHtml(state.aiQuestion || "")}</textarea>
+        <textarea class="input" name="question" rows="4" required placeholder="輸入問題，llama-server 會回答並自動判斷題型、難度、法規／條文、參考答案與標籤。">${escapeHtml(state.aiQuestion || "")}</textarea>
       </label>
-      <p class="qb-form-hint">送出後由本機 Ollama 回答並自動建立欄位；題目會以「待審」建立，仍需人工覆核後才會成為 benchmark-ready。</p>
+      <p class="qb-form-hint">送出後由本機 llama-server 回答並自動建立欄位；題目會以「待審」建立，仍需人工覆核後才會成為 benchmark-ready。</p>
       <div class="qb-actions">
         <button class="btn btn-primary" type="submit" ${state.aiLoading ? "disabled" : ""}>${
           state.aiLoading
-            ? `<span class="spinner"></span><span>Ollama 產生中…</span>`
-            : `${icon("sparkles", 14)}<span>讓 Ollama 產生並建立</span>`
+            ? `<span class="spinner"></span><span>llama-server 產生中…</span>`
+            : `${icon("sparkles", 14)}<span>讓 llama-server 產生並建立</span>`
         }</button>
         <button class="btn btn-secondary" type="button" data-qb-action="reset-ai" ${state.aiLoading ? "disabled" : ""}>清除</button>
       </div>
@@ -1553,7 +1553,7 @@ export function createQuestionBankController(
       state.aiQuestion = "";
       await loadStats();
       toast(
-        `Ollama 已建立題目 #${result.item.id}，狀態為待審，請人工覆核。`,
+        `llama-server 已建立題目 #${result.item.id}，狀態為待審，請人工覆核。`,
         "ok",
         8000,
       );
@@ -1563,7 +1563,7 @@ export function createQuestionBankController(
         detail?.errors?.join(" · ") ||
         detail?.message ||
         error.message ||
-        "Ollama 產生失敗。";
+        "llama-server 產生失敗。";
       toast(message, "danger", 12000);
     } finally {
       state.aiLoading = false;

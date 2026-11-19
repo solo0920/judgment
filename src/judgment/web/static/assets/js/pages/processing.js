@@ -3238,7 +3238,7 @@ function indexWorkflowProgressMarkup(workflow) {
   const phases = [
     {
       key: "probe",
-      label: "Ollama 主機／模型測試",
+      label: "llama-server 主機／模型測試",
       caption: "主機／模型、連線測試",
       color: "#22c55e",
       status: probe.status || "pending",
@@ -4501,19 +4501,33 @@ function indexRuntimeTiming(runtime, indexed, total, averageRate) {
   };
 }
 
-function indexRuntimeMarkup(workflow) {
+function indexRuntimeMarkup(workflow, hostProbe = null) {
   const runtime = workflow.index_runtime || {};
   if (!runtime.available) {
     return `<section class="report-card processing-card index-runtime-card">
       <div class="side-card-head">
-        <span class="side-card-title">${icon("cloud", 14)}Ollama 連線測試</span>
+        <span class="side-card-title">${icon("cloud", 14)}llama-server 連線測試</span>
         <span class="badge badge-neutral">尚無</span>
       </div>
       <div class="processing-workflow-empty">執行 Qdrant判決向量索引版本建置後，會在這裡顯示測試的主機、模型與選用結果。</div>
     </section>`;
   }
   const coverageOnly = Boolean(runtime.coverage_only);
-  const embedding = runtime.embedding || {};
+  const runtimeEmbedding = runtime.embedding || {};
+  const useLiveProbe = Boolean(
+    hostProbe &&
+      !coverageOnly &&
+      runtime.run_status !== "running" &&
+      Array.isArray(hostProbe.hosts),
+  );
+  const embedding = useLiveProbe
+    ? {
+        ...runtimeEmbedding,
+        ...hostProbe,
+        selected: hostProbe.selected || {},
+        active: hostProbe.active || hostProbe.selected || {},
+      }
+    : runtimeEmbedding;
   const hosts = Array.isArray(embedding.hosts) ? embedding.hosts : [];
   const selected = embedding.selected || {};
   const active = embedding.active || {};
@@ -4618,7 +4632,7 @@ function indexRuntimeMarkup(workflow) {
         <span class="rag-model-strip-title">${icon(
           "cloud",
           13,
-        )} Ollama 連線測試</span>
+        )} llama-server 連線測試</span>
         ${
           selectedUrl
             ? `<span class="rag-model-strip-base mono">${escapeHtml(
@@ -4630,6 +4644,18 @@ function indexRuntimeMarkup(workflow) {
           selectedLabel,
         )}</strong></span>
         ${statusBadge(embedding.status || "idle")}
+        ${
+          useLiveProbe
+            ? '<span class="badge badge-neutral">目前設定</span>'
+            : ""
+        }
+        ${
+          runtime.run_status === "running"
+            ? ""
+            : `<button class="btn btn-ghost btn-sm rag-model-refresh" type="button" data-processing-action="refresh-index-hosts">
+                ${icon("refresh", 12)}<span>重新測試</span>
+              </button>`
+        }
         ${
           activeUrl && activeUrl !== selectedUrl
             ? `<span class="badge badge-warn">目前使用 ${escapeHtml(
@@ -4656,7 +4682,9 @@ function indexRuntimeMarkup(workflow) {
           ? `<div class="rag-model-buttons">${hostChips}</div>`
           : '<p class="rag-model-empty">沒有可顯示的主機測試結果。</p>'
       }
-      <p class="rag-model-hint">依序嘗試主要、備援主機；實心為本次選用，淡色為可用備援，灰色為無法取得。滑鼠移入可查看 URL、可用模型與測試細節。${
+      <p class="rag-model-hint">${
+        useLiveProbe ? "目前設定即時測試；" : "依序嘗試主要、備援主機；"
+      }實心為本次選用，淡色為可用備援，灰色為無法取得。滑鼠移入可查看 URL、可用模型與測試細節。${
         embedding.tested_at
           ? ` 測試時間 ${escapeHtml(formatDateTime(embedding.tested_at))}。`
           : ""
@@ -4689,7 +4717,7 @@ function indexRuntimeMarkup(workflow) {
     ${indexMonthGridMarkup(runtime)}
     ${
       coverageOnly
-        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant判決向量索引版本建置後會顯示本次 Ollama 測試與即時進度。</p>'
+        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant判決向量索引版本建置後會顯示本次 llama-server 測試與即時進度。</p>'
         : ""
     }
   </section>`;
@@ -5277,7 +5305,7 @@ function lawVersionCheckMarkup(context = {}) {
 function ollamaPriorityLoadingMarkup() {
   return `<div class="processing-ollama-loading">
     <span class="spinner" aria-hidden="true"></span>
-    <span>正在檢查 Ollama 主機與模型…</span>
+    <span>正在檢查 llama-server 主機與模型…</span>
   </div>`;
 }
 
@@ -5286,7 +5314,7 @@ function ollamaPriorityMarkup(hostsData, loading, error) {
   if (error && !hosts.length) {
     return `${notice({
       tone: "danger",
-      title: "Ollama 主機讀取失敗",
+      title: "llama-server 主機讀取失敗",
       text: escapeHtml(error.message || "請確認後端服務是否啟動。"),
     })}
     <div class="processing-ollama-empty">
@@ -5298,7 +5326,7 @@ function ollamaPriorityMarkup(hostsData, loading, error) {
   if (!hosts.length) {
     return loading
       ? ollamaPriorityLoadingMarkup()
-      : `<div class="processing-ollama-empty">尚未設定 Ollama 主機；請到「系統狀態 → Model Provider」新增並連接模型。</div>`;
+      : `<div class="processing-ollama-empty">尚未設定 llama-server 主機；請到「系統狀態 → Model Provider」新增並連接模型。</div>`;
   }
   const rows = hosts
     .map((host, index) => {
@@ -5631,7 +5659,9 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
       workflow.id === "judgment_import" ? importTimelineMarkup(workflow) : ""
     }
     ${
-      workflow.id === "index_versions" ? indexRuntimeMarkup(workflow) : ""
+      workflow.id === "index_versions"
+        ? indexRuntimeMarkup(workflow, workflowContext.indexHostProbe)
+        : ""
     }
     ${
       workflow.id === "index_versions" ? indexStorageMarkup(workflowContext) : ""
@@ -5774,6 +5804,9 @@ export async function render(root) {
   let ollamaHosts = null;
   let ollamaHostsLoading = false;
   let ollamaHostsError = null;
+  let indexHostProbe = null;
+  let indexHostProbeLoading = false;
+  let indexHostProbeAt = 0;
   let ollamaDragHostId = 0;
   let ollamaDragChanged = false;
   let ollamaPointerDrag = null;
@@ -5800,6 +5833,8 @@ export async function render(root) {
     lawVersionCheck,
     lawVersionCheckLoading,
     lawVersionCheckError,
+    indexHostProbe,
+    indexHostProbeLoading,
   });
 
   const syncJudgmentProgress = () => {
@@ -6647,7 +6682,7 @@ export async function render(root) {
       if (disposed) return;
       ollamaHostsError = error;
       if (!quiet) {
-        toast(error.message || "無法檢查 Ollama 主機。", "danger", 6000);
+        toast(error.message || "無法檢查 llama-server 主機。", "danger", 6000);
       }
     } finally {
       if (!disposed) {
@@ -6655,6 +6690,46 @@ export async function render(root) {
         if (button) setBusy(button, false);
         syncOllamaDom();
         syncEmbeddingStrip();
+      }
+    }
+  };
+
+  const refreshIndexHostProbe = async ({
+    quiet = false,
+    force = false,
+    button = null,
+  } = {}) => {
+    if (disposed || indexHostProbeLoading) return;
+    if (
+      !force &&
+      indexHostProbe &&
+      Date.now() - indexHostProbeAt < 30000
+    ) {
+      return;
+    }
+    indexHostProbeLoading = true;
+    if (button) setBusy(button, true, "測試中…");
+    try {
+      const data = await api.embeddingHostsProbe();
+      if (disposed) return;
+      indexHostProbe = data;
+      indexHostProbeAt = Date.now();
+    } catch (error) {
+      if (disposed) return;
+      if (!quiet) {
+        toast(
+          error.message || "無法測試 llama-server 主機。",
+          "danger",
+          7000,
+        );
+      }
+    } finally {
+      if (!disposed) {
+        indexHostProbeLoading = false;
+        if (button) setBusy(button, false);
+        if (activeWorkflowId === "index_versions") {
+          repaintFromSnapshot();
+        }
       }
     }
   };
@@ -6690,10 +6765,10 @@ export async function render(root) {
     }
     try {
       await api.reorderOllamaHosts(nextIds);
-      toast("已更新 Ollama 主機優先順序。", "ok", 3500);
+      toast("已更新 llama-server 主機優先順序。", "ok", 3500);
     } catch (error) {
       toast(
-        error.message || "無法更新 Ollama 主機優先順序。",
+        error.message || "無法更新 llama-server 主機優先順序。",
         "danger",
         6000,
       );
@@ -7962,6 +8037,8 @@ export async function render(root) {
       loadOllamaHosts({ quiet: false, button });
     } else if (action === "refresh-embedding-models") {
       loadOllamaHosts({ quiet: false, button });
+    } else if (action === "refresh-index-hosts") {
+      void refreshIndexHostProbe({ button, force: true });
     } else if (action === "select-embedding-model") {
       const hostId = button.dataset.hostId || "";
       const model = button.dataset.model || "";
@@ -8024,6 +8101,12 @@ export async function render(root) {
     }
     if (activeWorkflowId === "index_versions") {
       loadIndexStorage({ quiet: true });
+      const workflow = (lastSnapshot?.workflows || []).find(
+        (item) => item.id === "index_versions",
+      );
+      if (workflow?.index_runtime?.run_status !== "running") {
+        void refreshIndexHostProbe({ quiet: true });
+      }
     }
     if (activeWorkflowId === "normalize_courts") {
       loadCourtCheck({ quiet: true });

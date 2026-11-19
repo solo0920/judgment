@@ -139,14 +139,14 @@ const PROCESS_LABELS = {
   "rag.law_content": "讀取法規／命令條文",
   "rag.qdrant_precheck": "Qdrant collection 檢查",
   "rag.search": "RAG 檢索",
-  "rag.embed_query": "Ollama embedding 查詢向量",
+  "rag.embed_query": "llama-server embedding 查詢向量",
   "rag.qdrant_search": "Qdrant 向量搜尋",
   "rag.fetch_documents": "PostgreSQL 讀取判決",
   "rag.postgres_fetch": "PostgreSQL 判決查詢",
   "rag.build_citations": "整理引用與判決片段",
   "rag.extract_excerpt": "擷取相關片段",
   "rag.llm": "LLM 回答生成",
-  "rag.llm_request": "Ollama LLM 生成",
+  "rag.llm_request": "llama-server LLM 生成",
   "rag.validate_citations": "驗證引用編號",
   "rag.test_mode": "測試模式多模型流程",
   "rag.preview_fallback": "法規預覽降級",
@@ -156,10 +156,10 @@ function processLabel(segment) {
   const name = String(segment?.name || "");
   const params = segment?.params || {};
   const model = String(params.model || params.embedding_model || "").trim();
-  if (name === "rag.llm_request") return `Ollama run ${model || "LLM"}`;
+  if (name === "rag.llm_request") return `llama-server run ${model || "LLM"}`;
   if (name === "rag.llm") return `LLM 回答生成${model ? ` · ${model}` : ""}`;
   if (name === "rag.embed_query") {
-    return `Ollama embedding 查詢向量${model ? ` · ${model}` : ""}`;
+    return `llama-server embedding 查詢向量${model ? ` · ${model}` : ""}`;
   }
   return PROCESS_LABELS[name] || name || "backend step";
 }

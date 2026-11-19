@@ -1323,7 +1323,7 @@ def build_status(
                         {
                             "label": "SSE Broker",
                             "service": "api",
-                            "detail": "processing、status、ollama、test-runs、Last-Event-ID",
+                            "detail": "processing、status、llama-server、test-runs、Last-Event-ID",
                         },
                         {
                             "label": "RAG Endpoint",
@@ -1380,7 +1380,7 @@ def build_status(
                             "detail": "raw、delta、manifest、run state、SQLite journal",
                         },
                         {
-                            "label": "Ollama Hosts",
+                            "label": "llama-server Hosts",
                             "service": "llm",
                             "detail": "x570／本機 fallback",
                         },

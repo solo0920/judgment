@@ -1270,7 +1270,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--alias", default=None, help="alias 名稱")
     parser.add_argument("--prefix", default=None, help="版本 collection 前綴")
     parser.add_argument("--embedding-url", default=None, help="Embedding base URL")
-    parser.add_argument("--embedding-fallback-url", default=None, help="Ollama fallback URL")
+    parser.add_argument("--embedding-fallback-url", default=None, help="llama-server fallback URL")
     parser.add_argument("--embedding-model", default=None, help="Embedding 模型")
     parser.add_argument("--batch-size", type=int, default=None, help="每批條文數")
     parser.add_argument("--max-chars", type=int, default=None, help="每筆 embedding 字數上限")

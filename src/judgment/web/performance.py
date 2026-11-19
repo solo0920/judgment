@@ -417,7 +417,7 @@ def _index_run(record: PerformanceRecord) -> Dict[str, Any]:
     if breakdown_total > 0:
         other_ms = max(0, duration_ms - breakdown_total)
         for key, label, value in (
-            ("embedding", "Ollama Embedding", embedding_ms),
+            ("embedding", "llama-server Embedding", embedding_ms),
             ("qdrant", "Qdrant Upsert", qdrant_ms),
             ("db", "PostgreSQL 索引紀錄", db_write_ms),
             ("other", "其他", other_ms),

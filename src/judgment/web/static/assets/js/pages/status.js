@@ -60,7 +60,7 @@ const STATUS_TABS = [
     icon: "terminal",
   },
   { id: "resources", label: "系統資料使用", hint: "CPU、RAM、Docker、硬碟", icon: "cpu" },
-  { id: "local-model", label: "Model Provider", hint: "Ollama 主機與模型", icon: "server" },
+  { id: "local-model", label: "Model Provider", hint: "llama-server 主機與模型", icon: "server" },
   { id: "architecture", label: "前後端架構", hint: "Client → API → Pipeline → Data", icon: "layers" },
   { id: "data", label: "資料版本", hint: "Parquet 與 PostgreSQL", icon: "database" },
   { id: "api", label: "API 端點", hint: "REST 與 OpenAPI", icon: "terminal" },
@@ -281,7 +281,7 @@ function renderArchitectureFlowSvg() {
     <div class="arch-diagram-scroll">
       <svg class="arch-diagram-svg" viewBox="0 0 1180 740" role="img" aria-labelledby="arch-flow-title arch-flow-desc">
         <title id="arch-flow-title">Judgment RAG Console 前後端流程方向示意圖</title>
-        <desc id="arch-flow-desc">瀏覽器 RAG Console 透過 REST 與 SSE 連線 FastAPI 9200；FastAPI 呼叫 RAG Orchestrator、Processing Runtime、Scheduler 與 Power Agent。RAG 與處理流程讀寫 PostgreSQL、Qdrant、Parquet 與 Ollama Embedding、Reranker、LLM。瀏覽器另以 IndexedDB 保存提問歷史與稽核資料。</desc>
+        <desc id="arch-flow-desc">瀏覽器 RAG Console 透過 REST 與 SSE 連線 FastAPI 9200；FastAPI 呼叫 RAG Orchestrator、Processing Runtime、Scheduler 與 Power Agent。RAG 與處理流程讀寫 PostgreSQL、Qdrant、Parquet 與 llama-server Embedding、Reranker、LLM。瀏覽器另以 IndexedDB 保存提問歷史與稽核資料。</desc>
         <defs>
           <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="var(--faint)"></path>
@@ -359,7 +359,7 @@ function renderArchitectureFlowSvg() {
         <text class="arch-diagram-node-sub" x="872" y="309">download_manifest · state · SQLite journal</text>
 
         <rect class="arch-diagram-node" x="858" y="340" width="286" height="64" rx="9"></rect>
-        <text class="arch-diagram-node-title" x="872" y="364">Ollama Embedding</text>
+        <text class="arch-diagram-node-title" x="872" y="364">llama-server Embedding</text>
         <text class="arch-diagram-node-sub" x="872" y="383">bge-m3 · 1,024 dims · x570／local fallback</text>
 
         <rect class="arch-diagram-node" x="858" y="420" width="286" height="64" rx="9"></rect>
@@ -367,7 +367,7 @@ function renderArchitectureFlowSvg() {
         <text class="arch-diagram-node-sub" x="872" y="463">bge-reranker-v2-m3 · primary／fallback</text>
 
         <rect class="arch-diagram-node" x="858" y="500" width="286" height="64" rx="9"></rect>
-        <text class="arch-diagram-node-title" x="872" y="524">Ollama LLM</text>
+        <text class="arch-diagram-node-title" x="872" y="524">llama-server LLM</text>
         <text class="arch-diagram-node-sub" x="872" y="543">gemma3 · chat · SSE token streaming</text>
 
         <path class="arch-diagram-flow arch-diagram-flow-accent" d="M228 112 H298"></path>
@@ -395,7 +395,7 @@ function renderArchitectureFlowSvg() {
       <span><b>②</b> SSE：processing／status／test-runs 即時事件</span>
       <span><b>③</b> FastAPI 呼叫 RAG Orchestrator</span>
       <span><b>④</b> workflow run：處理流程與版本建置</span>
-      <span><b>⑤</b> RAG 讀寫 PostgreSQL、Qdrant 與 Ollama 模型</span>
+      <span><b>⑤</b> RAG 讀寫 PostgreSQL、Qdrant 與 llama-server 模型</span>
       <span><b>⑥</b> 處理流程讀寫 Parquet、PostgreSQL、Qdrant</span>
       <span><b>⑦</b> Scheduler／CLI 觸發批次工作</span>
       <span><b>⑧</b> 瀏覽器 IndexedDB 本地保存</span>
@@ -612,7 +612,7 @@ function renderRagIndex(status) {
       </div>
     </div>
     <div class="side-card-foot">
-      PostgreSQL 判決文件、Qdrant 向量索引與 Ollama 模型狀態皆為即時檢查；未就緒時會明確降級。
+      PostgreSQL 判決文件、Qdrant 向量索引與 llama-server 模型狀態皆為即時檢查；未就緒時會明確降級。
     </div>
   </section>`;
 }
@@ -2179,8 +2179,8 @@ function renderLocalModel(hosts, loading, error, editingId) {
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">MODEL PROVIDER</div>
-        <div class="report-title">Ollama 主機與模型</div>
-        <div class="report-sub">管理可用的 Ollama 連線、目前使用的主機，以及主機上的聊天／嵌入模型。每次開啟此頁都會重新取得主機與模型列表；embedding 主機的優先順序可到「資料處理」的執行資訊卡片拖移調整。</div>
+        <div class="report-title">llama-server 主機與模型</div>
+        <div class="report-sub">管理可用的 llama-server 連線、目前使用的主機，以及主機上的聊天／嵌入模型。每次開啟此頁都會重新取得主機與模型列表；embedding 主機的優先順序可到「資料處理」的執行資訊卡片拖移調整。</div>
       </div>
       <div class="qb-actions">
         <button class="btn btn-secondary btn-sm" type="button" data-ollama-action="check-capabilities">${icon("shield", 14)}<span>檢查模型能力</span></button>
@@ -2191,13 +2191,13 @@ function renderLocalModel(hosts, loading, error, editingId) {
       <form class="ollama-host-form" data-ollama-form="host">
         <input type="hidden" name="host_id" value="${editingHost ? editingHost.id : ""}" />
         <label class="field"><span class="field-label">名稱 <span class="field-tag">選填</span></span>
-          <input class="input" name="name" value="${escapeHtml(editingHost?.name || "")}" placeholder="例如：x570 Ollama" />
+          <input class="input" name="name" value="${escapeHtml(editingHost?.name || "")}" placeholder="例如：x570 llama-server" />
         </label>
         <label class="field"><span class="field-label">主機網址</span>
           <input class="input" name="url" value="${escapeHtml(editUrl)}" placeholder="http://127.0.0.1" required />
         </label>
         <label class="field"><span class="field-label">Port</span>
-          <input class="input" name="port" type="number" min="1" max="65535" value="${editingHost?.port || 11434}" required />
+          <input class="input" name="port" type="number" min="1" max="65535" value="${editingHost?.port || 11437}" required />
         </label>
         <div class="ollama-host-form-actions">
           <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>${submitLabel}</span></button>
@@ -2206,14 +2206,14 @@ function renderLocalModel(hosts, loading, error, editingId) {
       </form>
       ${
         loading
-          ? `<div class="ollama-loading"><span class="spinner"></span><span>讀取 Ollama 主機與模型…</span></div>`
+          ? `<div class="ollama-loading"><span class="spinner"></span><span>讀取 llama-server 主機與模型…</span></div>`
           : hostList.length
             ? `<div class="ollama-host-list">${hostList
                 .map((host) => renderLocalModelHost(host, editingId))
                 .join("")}</div>`
             : emptyState({
                 iconName: "server",
-                title: "尚未設定 Ollama 主機",
+                title: "尚未設定 llama-server 主機",
                 text: "請在上方輸入網址與 Port 新增，或使用 .env 的預設連線。",
               })
       }
@@ -2241,7 +2241,7 @@ function renderStatusSidebar(status, activeTab, usage) {
       data.version_count,
     )}</span>`,
     tests: `<span class="badge badge-neutral badge-mono">TEST</span>`,
-    "local-model": `<span class="badge badge-neutral badge-mono">OLLAMA</span>`,
+    "local-model": `<span class="badge badge-neutral badge-mono">LLAMA-SERVER</span>`,
     runs: `<span class="badge badge-neutral badge-mono">${formatNumber(
       data.run_count,
     )}</span>`,
@@ -2550,7 +2550,7 @@ export async function render(root, ctx) {
     } catch (error) {
       if (disposed) return;
       ollamaHostsError = error;
-      if (!quiet) toast(error.message || "無法取得 Ollama 主機。", "danger");
+      if (!quiet) toast(error.message || "無法取得 llama-server 主機。", "danger");
     } finally {
       if (!disposed) {
         ollamaHostsLoading = false;
@@ -2677,11 +2677,11 @@ export async function render(root, ctx) {
       return;
     }
     if (action === "delete-host") {
-      if (!window.confirm(`確定刪除 Ollama 主機 #${hostId}？`)) return;
+      if (!window.confirm(`確定刪除 llama-server 主機 #${hostId}？`)) return;
       try {
         await api.deleteOllamaHost(hostId);
         if (Number(ollamaEditingId) === hostId) ollamaEditingId = null;
-        toast("Ollama 主機已刪除。", "info");
+        toast("llama-server 主機已刪除。", "info");
         await reloadOllamaHosts();
       } catch (error) {
         toast(error.message || "刪除主機失敗。", "danger");
@@ -2691,7 +2691,7 @@ export async function render(root, ctx) {
     if (action === "activate-host") {
       try {
         await api.activateOllamaHost(hostId);
-        toast("已切換使用的 Ollama 主機。", "ok");
+        toast("已切換使用的 llama-server 主機。", "ok");
         await reloadOllamaHosts();
       } catch (error) {
         toast(error.message || "切換主機失敗。", "danger");
@@ -2701,7 +2701,7 @@ export async function render(root, ctx) {
     if (action === "deactivate-host") {
       try {
         await api.deactivateOllamaHosts();
-        toast("已停用指定的 Ollama 主機，將沿用 .env 設定。", "info");
+        toast("已停用指定的 llama-server 主機，將沿用 .env 設定。", "info");
         await reloadOllamaHosts();
       } catch (error) {
         toast(error.message || "停用主機失敗。", "danger");
@@ -2756,10 +2756,10 @@ export async function render(root, ctx) {
     try {
       if (hostId) {
         await api.updateOllamaHost(hostId, payload);
-        toast("Ollama 主機已更新。", "ok");
+        toast("llama-server 主機已更新。", "ok");
       } else {
         await api.addOllamaHost(payload);
-        toast("Ollama 主機已新增。", "ok");
+        toast("llama-server 主機已新增。", "ok");
       }
       ollamaEditingId = null;
       await reloadOllamaHosts();

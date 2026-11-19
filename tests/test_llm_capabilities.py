@@ -11,6 +11,7 @@ from judgment.llm_capabilities import (
     probe_model_capability,
     refresh_model_capabilities,
 )
+from judgment.llm_backends import OPENAI_API
 from judgment.models import Base, OllamaModelCapability, utcnow
 from judgment.performance_test import available_test_models
 
@@ -29,6 +30,27 @@ def _settings(**overrides) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+def test_openai_embedding_model_is_not_classified_as_chat(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "judgment.llm_capabilities.provider_models_detail",
+        lambda base_url, api, timeout=2.5: {
+            "status": "operational",
+            "models": ["bge-m3"],
+            "detail": "1 個模型",
+        },
+    )
+
+    result = probe_model_capability(
+        "http://x570:11437", "bge-m3", api=OPENAI_API
+    )
+
+    assert result["ok"] is True
+    assert result["supports_chat"] is False
+    assert result["capabilities"] == ["embedding"]
 
 
 def _session_factory():

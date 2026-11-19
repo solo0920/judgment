@@ -453,7 +453,7 @@ class BenchmarkManager:
                 chat_models = list(models.get("llm") or [])
                 if not chat_models:
                     raise QuestionBankError(
-                        "Ollama 沒有支援 chat 的 LLM 模型。",
+                        "llama-server 沒有支援 chat 的 LLM 模型。",
                         errors=[
                             "請先安裝或啟動支援 chat 的模型，再執行 LLM 服務測試。"
                         ],

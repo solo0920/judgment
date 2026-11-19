@@ -43,7 +43,7 @@ STAGE_CATALOG: Dict[str, Dict[str, str]] = {
         "color": "#14b8a6",
         "unit": "條",
     },
-    "ollama": {"label": "Ollama 連線測試", "color": "#22c55e", "unit": "台"},
+    "ollama": {"label": "llama-server 連線測試", "color": "#22c55e", "unit": "台"},
     "validate": {"label": "索引驗證／切換", "color": "#eab308", "unit": "筆"},
     "download": {
         "label": "線上版本比對／下載更新",

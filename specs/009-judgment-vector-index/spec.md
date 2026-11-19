@@ -271,9 +271,9 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 - chip 的 tooltip MUST 說明動作語意與本批筆數。
 - 目前處理列仍 MUST 保留月份、archive、JID、法院／案由與批次筆數；390px viewport MUST 可換行且無水平溢出。
 
-### 7.6 Ollama 主機測試
+### 7.6 llama-server 主機測試
 
-「Ollama 連線測試」卡片 MUST 與「Embedding 主機／模型」strip 使用相同視覺規格，方便一次看清所有主機與模型：
+「llama-server 連線測試」卡片 MUST 與「Embedding 主機／模型」strip 使用相同視覺規格，方便一次看清所有主機與模型：
 
 - 使用 `rag-model-strip`、`rag-model-strip-head`、`rag-model-buttons`、`rag-model-button` 與 `rag-model-hint`。
 - header MUST 顯示標題、最後選用 URL、目前選用的 `host:port:model`、狀態 badge；使用備援時 MUST 顯示「已切換備援」或目前使用 URL。
@@ -281,6 +281,9 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 - chip 的 tooltip MUST 包含主機角色、URL、狀態、可用模型清單與測試 detail。
 - 測試時間 MUST 顯示在 hint 區，不得另占一個大型 footer。
 - MUST NOT 再使用 `.index-host-row` 的大型逐列卡片；所有主機與模型必須在同一個 compact strip 內看到。
+- 非執行中的索引 run MUST 以目前 `.env`／主機設定的即時測試結果顯示，不得把上次 run 的舊主機清單當成目前狀態；header 顯示「目前設定」，並提供「重新測試」按鈕。
+- 即時測試使用 `GET /api/processing/embedding-hosts`，依 `EMBEDDING_URL`、`EMBEDDING_FALLBACK_URL` 與 failover 順序回傳 `hosts`、`selected`、`active`、`tested_at`。
+- 主要主機優先：x570 llama-server 可用時 MUST 選為 `primary`；MBP llama-server MUST 作為下一個 fallback，不得把舊的 11434 連線當成目前主機。
 
 ---
 
@@ -322,7 +325,7 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 - [ ] 目前索引月份只有實線外框，無脈動動畫。
 - [ ] 目前處理列顯示本批 R／E chip；全部沿用時只顯示 R，含新 embedding 時顯示 E，混合時兩者都顯示。
 - [ ] 正在計算新 embedding 時，目前處理列的 E chip 顯示「計算中」。
-- [ ] Ollama 連線測試以 `rag-model-button` chip 顯示所有主機與模型，不再使用大型 host row。
+- [ ] llama-server 連線測試以 `rag-model-button` chip 顯示所有主機與模型，不再使用大型 host row。
 - [ ] 選用主機 chip 為實心「使用中」，其他可用主機為淡色「可用」，失敗主機為灰色「無法取得」。
 - [ ] 390px 無水平溢出。
 - [ ] Tooltip 顯示最新 archive、A／R 基線與 E 進度。
@@ -336,4 +339,5 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 | 1.0 | 2026-11-19 | 建立 Qdrant 判決向量索引版本建置規格：archive 最新版判斷、A／R／E 基線與 E 分離、unchange 判決不更新 source_archive、月份 vs RAR 檔數、coverage-only／build mode 與 UI 契約。 |
 | 1.1 | 2026-11-19 | 新增 E 未完成月份驅動的更新提示：workflow badge、workflow 面板更新按鈕、全站資料處理 sidebar badge、`index_pending_count` 與 snapshot 快取契約。 |
 | 1.2 | 2026-11-19 | 修正 build mode A／R／E：以 active archive 覆蓋補上本次 run 尚未處理的未變更月份，完成分格必為實心；A／R／E 分格加上明確完成／未完成／無資料狀態，不再以 0% fill 顯示 25% 淺色。 |
-| 1.3 | 2026-11-19 | 目前處理列新增本批 R／E chip（含 embedding 計算中狀態）；Ollama 連線測試改為與 Embedding 主機／模型相同的 compact chip strip。 |
+| 1.3 | 2026-11-19 | 目前處理列新增本批 R／E chip（含 embedding 計算中狀態）；llama-server 連線測試改為與 Embedding 主機／模型相同的 compact chip strip。 |
+| 1.4 | 2026-11-19 | 全站可見文字由 Ollama 改為 llama-server；非執行中 run 顯示目前設定的即時主機測試，x570 為 primary、MBP 為 fallback。 |

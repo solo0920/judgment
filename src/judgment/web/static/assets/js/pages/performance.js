@@ -1466,7 +1466,7 @@ function renderIndexBreakdown(run) {
     }))
     .filter((entry) => entry.ms > 0);
   if (!entries.length) {
-    return `<div class="index-chart-empty">此筆索引紀錄尚未包含階段計時；後續索引會記錄 Ollama Embedding、Qdrant Upsert 與 PostgreSQL 索引紀錄的時間組成。</div>`;
+    return `<div class="index-chart-empty">此筆索引紀錄尚未包含階段計時；後續索引會記錄 llama-server Embedding、Qdrant Upsert 與 PostgreSQL 索引紀錄的時間組成。</div>`;
   }
   return `<div class="index-breakdown-bar">${entries
     .map(

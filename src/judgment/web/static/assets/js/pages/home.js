@@ -887,7 +887,7 @@ function renderInitialMarkup() {
       <div class="home-trust-item">
         <span class="home-trust-icon">${icon("server", 18)}</span>
         <strong>本機模型</strong>
-        <p>透過 Ollama 使用本機或區網模型，模型與主機優先順序都可調整。</p>
+        <p>透過 llama-server 使用本機或區網模型，模型與主機優先順序都可調整。</p>
       </div>
       <div class="home-trust-item">
         <span class="home-trust-icon">${icon("layers", 18)}</span>

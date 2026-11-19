@@ -12,7 +12,8 @@ import httpx
 from sqlalchemy import select
 
 from .config import Settings
-from .llm_backends import OLLAMA_API, is_openai_api, normalize_api
+from .embeddings import provider_models_detail
+from .llm_backends import OPENAI_API, OLLAMA_API, is_openai_api, normalize_api
 from .models import OllamaHost, OllamaModelCapability
 
 MODEL_ROLES = ("chat", "embedding")
@@ -51,10 +52,10 @@ def normalize_host_url(url: str, port: int) -> Tuple[str, int]:
         raw = f"http://{raw}"
     parsed = urlparse(raw)
     if parsed.scheme not in {"http", "https"}:
-        raise OllamaHostError("Ollama 主機網址只支援 http 或 https。")
+        raise OllamaHostError("llama-server 主機網址只支援 http 或 https。")
     hostname = parsed.hostname
     if not hostname:
-        raise OllamaHostError("Ollama 主機網址缺少主機名稱。")
+        raise OllamaHostError("llama-server 主機網址缺少主機名稱。")
     try:
         chosen_port = int(parsed.port or port or 11434)
     except (TypeError, ValueError) as exc:
@@ -132,7 +133,7 @@ def _is_blocked_ip(value: str) -> bool:
 def _ensure_safe_target(base_url: str) -> None:
     hostname, port = _target_parts(base_url)
     if not hostname:
-        raise OllamaHostError("Ollama 主機網址缺少主機名稱。")
+        raise OllamaHostError("llama-server 主機網址缺少主機名稱。")
     try:
         literal = ipaddress.ip_address(hostname)
     except ValueError:
@@ -201,17 +202,39 @@ def _probe_host(base_url: str, timeout: float) -> Dict[str, Any]:
             "status": "blocked",
             "detail": str(exc),
             "models": [],
+            "api": "",
         }
     url = f"{base_url.rstrip('/')}/api/tags"
     try:
         response = httpx.get(url, timeout=timeout)
         response.raise_for_status()
         payload = response.json()
-    except Exception as exc:
+    except Exception:
+        # llama-server exposes the OpenAI-compatible /v1/models and /health
+        # endpoints instead of the native /api/tags endpoint.
+        detail = provider_models_detail(base_url, OPENAI_API, timeout=timeout)
+        if detail.get("status") == "operational":
+            models = [
+                {
+                    "name": str(name),
+                    "size": None,
+                    "modified_at": None,
+                    "details": {},
+                }
+                for name in detail.get("models") or []
+                if str(name).strip()
+            ]
+            return {
+                "status": "operational",
+                "detail": str(detail.get("detail") or "llama-server 可用"),
+                "models": models,
+                "api": OPENAI_API,
+            }
         return {
             "status": "degraded",
-            "detail": f"{exc.__class__.__name__} · {base_url}",
+            "detail": str(detail.get("detail") or f"無法連線 {base_url}"),
             "models": [],
+            "api": OPENAI_API,
         }
     models: List[Dict[str, Any]] = []
     for item in payload.get("models") or []:
@@ -230,6 +253,7 @@ def _probe_host(base_url: str, timeout: float) -> Dict[str, Any]:
         "status": "operational",
         "detail": f"{len(models)} 個模型",
         "models": models,
+        "api": OLLAMA_API,
     }
 
 
@@ -355,7 +379,7 @@ def add_host(
     allowed = _allowed_targets(allowed_hosts)
     if not _host_allowed(base_url, allowed):
         raise OllamaHostError(
-            "Ollama 主機不在允許清單；請將 host:port 加入 OLLAMA_ALLOWED_HOSTS。"
+            "llama-server 主機不在允許清單；請將 host:port 加入 OLLAMA_ALLOWED_HOSTS。"
         )
     _ensure_safe_target(base_url)
     with session_factory() as session:
@@ -367,7 +391,7 @@ def add_host(
         rows = list(session.scalars(select(OllamaHost)).all())
         if len(rows) >= MAX_OLLAMA_HOSTS:
             raise OllamaHostError(
-                f"Ollama 主機數量已達上限（{MAX_OLLAMA_HOSTS}）。"
+                f"llama-server 主機數量已達上限（{MAX_OLLAMA_HOSTS}）。"
             )
         next_priority = (
             max((int(row.priority or 0) for row in rows), default=-10) + 10
@@ -398,13 +422,13 @@ def update_host(
     allowed = _allowed_targets(allowed_hosts)
     if not _host_allowed(base_url, allowed):
         raise OllamaHostError(
-            "Ollama 主機不在允許清單；請將 host:port 加入 OLLAMA_ALLOWED_HOSTS。"
+            "llama-server 主機不在允許清單；請將 host:port 加入 OLLAMA_ALLOWED_HOSTS。"
         )
     _ensure_safe_target(base_url)
     with session_factory() as session:
         host = session.get(OllamaHost, int(host_id))
         if host is None:
-            raise OllamaHostError("找不到 Ollama 主機。")
+            raise OllamaHostError("找不到 llama-server 主機。")
         duplicate = session.scalars(
             select(OllamaHost).where(
                 OllamaHost.base_url == base_url,
@@ -437,7 +461,7 @@ def activate_host(session_factory, host_id: int) -> Dict[str, Any]:
     with session_factory() as session:
         host = session.get(OllamaHost, int(host_id))
         if host is None:
-            raise OllamaHostError("找不到 Ollama 主機。")
+            raise OllamaHostError("找不到 llama-server 主機。")
         rows = list(
             session.scalars(
                 select(OllamaHost).order_by(
@@ -477,7 +501,7 @@ def reorder_hosts(session_factory, host_ids: List[int]) -> Dict[str, Any]:
         rows = list(session.scalars(select(OllamaHost)).all())
         by_id = {row.id: row for row in rows}
         if set(ordered_ids) != set(by_id):
-            raise OllamaHostError("主機順序必須包含目前所有 Ollama 主機。")
+            raise OllamaHostError("主機順序必須包含目前所有 llama-server 主機。")
         for index, host_id in enumerate(ordered_ids):
             row = by_id[host_id]
             row.priority = index * 10
@@ -516,7 +540,7 @@ def select_model(
     with session_factory() as session:
         host = session.get(OllamaHost, int(host_id))
         if host is None:
-            raise OllamaHostError("找不到 Ollama 主機。")
+            raise OllamaHostError("找不到 llama-server 主機。")
         if role == "chat":
             host.chat_model = name[:200]
         else:
@@ -541,7 +565,7 @@ def clear_model(
     with session_factory() as session:
         host = session.get(OllamaHost, int(host_id))
         if host is None:
-            raise OllamaHostError("找不到 Ollama 主機。")
+            raise OllamaHostError("找不到 llama-server 主機。")
         if role == "chat" and host.chat_model == name:
             host.chat_model = ""
         if role == "embedding" and host.embedding_model == name:
@@ -630,7 +654,7 @@ def runtime_settings(settings: Settings, session_factory) -> Settings:
             )
         else:
             # Explicit llama-server / OpenAI-compatible endpoints stay
-            # primary. Ollama hosts are appended as fallbacks so a stopped
+            # primary. llama-server hosts are appended as fallbacks so a stopped
             # x570 degrades to the MBP instead of silently replacing the
             # configured primary.
             fallback_urls: List[str] = []
@@ -683,8 +707,8 @@ def runtime_settings(settings: Settings, session_factory) -> Settings:
             changes["llm_model"] = host.chat_model
             changes["llm_api"] = OLLAMA_API
         elif host.chat_model and openai_llm_primary:
-            # Do not auto-promote an Ollama host to the LLM fallback lane.
-            # Ollama must never be the runtime fallback; an explicit
+            # Do not auto-promote an llama-server host to the LLM fallback lane.
+            # llama-server must never be the runtime fallback; an explicit
             # LLM_FALLBACK_* configuration is required instead.
             pass
         if host.embedding_model and not openai_embedding_primary:
@@ -700,7 +724,7 @@ def runtime_settings(settings: Settings, session_factory) -> Settings:
             changes["llm_url"] = preferred_url
             changes["llm_model"] = preferred_model
             changes["llm_api"] = OLLAMA_API
-        # Do not auto-add an Ollama preference as the fallback for an
+        # Do not auto-add an llama-server preference as the fallback for an
         # OpenAI-compatible primary; explicit LLM_FALLBACK_* is required.
 
     return replace(settings, **changes) if changes else settings

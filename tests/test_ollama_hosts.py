@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -51,6 +52,31 @@ def _settings() -> Settings:
         embedding_model="env-embedding",
         ollama_allowed_hosts=ALLOWED_HOSTS,
     )
+
+
+def test_probe_host_falls_back_to_openai_compatible_llama_server(
+    monkeypatch,
+) -> None:
+    def fail_native(*args, **kwargs):
+        raise httpx.ConnectError("native endpoint unavailable")
+
+    monkeypatch.setattr(ollama_hosts.httpx, "get", fail_native)
+    monkeypatch.setattr(
+        ollama_hosts,
+        "provider_models_detail",
+        lambda base_url, api, timeout=2.5: {
+            "status": "operational",
+            "detail": "1 個模型",
+            "models": ["bge-m3"],
+        },
+    )
+
+    result = ollama_hosts._probe_host("http://x570:11437", 1.0)
+
+    assert result["status"] == "operational"
+    assert result["api"] == "openai"
+    assert result["detail"] == "1 個模型"
+    assert [model["name"] for model in result["models"]] == ["bge-m3"]
 
 
 def test_ollama_host_lifecycle_and_runtime_settings(

@@ -283,7 +283,7 @@ def _ollama_answer(
             return content[:MAX_ANSWER_CHARS]
         last_content = content
     raise QuestionBankError(
-        "Ollama 沒有產生回答。",
+        "llama-server 沒有產生回答。",
         errors=["模型連續兩次回傳空回答。", last_content[:800]],
     )
 
@@ -328,7 +328,7 @@ def _ollama_labels(
             return parsed, []
         last_content = content
     return {}, [
-        "Ollama 未能產生標註 JSON，已用答案自動推斷法規／條文。"
+        "llama-server 未能產生標註 JSON，已用答案自動推斷法規／條文。"
         + (f" 原始回應：{last_content[:200]}" if last_content else "")
     ]
 
@@ -463,7 +463,7 @@ def _draft_payload(
             answer = "目前資料不足以回答此問題。"
         else:
             raise QuestionBankError(
-                "Ollama 沒有產生參考答案。",
+                "llama-server 沒有產生參考答案。",
                 errors=["模型回應缺少 reference_answer。"],
             )
     answer = answer[:MAX_ANSWER_CHARS]
@@ -540,7 +540,7 @@ def _draft_payload(
 
     model_notes = str(parsed.get("notes") or "").strip()
     notes = (
-        f"由本機 Ollama（{model}）自動產生；狀態待審，請人工覆核。"
+        f"由本機 llama-server（{model}）自動產生；狀態待審，請人工覆核。"
         f"{(' ' + model_notes) if model_notes else ''}"
     )[:MAX_NOTES_CHARS]
 
@@ -627,7 +627,7 @@ def create_ai_item(
     warnings = warnings + list(validation["warnings"])
     if not validation["valid"]:
         raise QuestionBankError(
-            "Ollama 產生的題目驗證失敗。",
+            "llama-server 產生的題目驗證失敗。",
             errors=validation["errors"],
             warnings=warnings,
         )
@@ -638,7 +638,7 @@ def create_ai_item(
             existing_id,
             payload,
             actor=actor,
-            change_note="由本機 Ollama 重新產生並還原題目",
+            change_note="由本機 llama-server 重新產生並還原題目",
             restore=True,
         )
     else:

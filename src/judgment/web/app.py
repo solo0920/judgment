@@ -63,6 +63,7 @@ from .auth import (
 )
 from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
+from ..embeddings import probe_embedding_hosts
 from ..law_article_versions import check_law_version_status
 from ..observability import (
     clear_flow,
@@ -252,7 +253,7 @@ class QuestionBankAICreateRequest(BaseModel):
 class OllamaHostRequest(BaseModel):
     name: str = Field(default="", max_length=120)
     url: str = Field(default="http://127.0.0.1", max_length=300)
-    port: int = Field(default=11434, ge=1, le=65535)
+    port: int = Field(default=11437, ge=1, le=65535)
 
 
 class OllamaModelChoiceRequest(BaseModel):
@@ -415,14 +416,14 @@ API_ENDPOINT_LABELS = {
     "/api/processing/events/status": "處理事件指標",
     "/api/docs": "Swagger UI",
     "/api/openapi.json": "OpenAPI schema",
-    "/api/ollama/hosts": "Ollama 主機列表",
-    "/api/ollama/hosts/{host_id}": "Ollama 主機設定",
-    "/api/ollama/hosts/{host_id}/activate": "啟用 Ollama 主機",
-    "/api/ollama/hosts/deactivate": "停用 Ollama 主機",
-    "/api/ollama/hosts/capabilities/test": "檢查模型能力",
-    "/api/ollama/hosts/reorder": "Ollama 主機排序",
-    "/api/ollama/hosts/{host_id}/models/select": "選擇 Ollama 模型",
-    "/api/ollama/hosts/{host_id}/models/clear": "清除 Ollama 模型",
+    "/api/llama-server/hosts": "llama-server 主機列表",
+    "/api/llama-server/hosts/{host_id}": "llama-server 主機設定",
+    "/api/llama-server/hosts/{host_id}/activate": "啟用 llama-server 主機",
+    "/api/llama-server/hosts/deactivate": "停用 llama-server 主機",
+    "/api/llama-server/hosts/capabilities/test": "檢查模型能力",
+    "/api/llama-server/hosts/reorder": "llama-server 主機排序",
+    "/api/llama-server/hosts/{host_id}/models/select": "選擇 llama-server 模型",
+    "/api/llama-server/hosts/{host_id}/models/clear": "清除 llama-server 模型",
     "/api/index-versions": "索引版本列表",
     "/api/index-versions/{version_id}": "索引版本明細",
     "/api/index-versions/{version_id}/validate": "驗證索引版本",
@@ -430,6 +431,7 @@ API_ENDPOINT_LABELS = {
     "/api/index-versions/rollback": "回滾索引 alias",
     "/api/index-alias/reconcile": "Reconcile 索引 alias",
     "/api/processing": "資料處理狀態",
+    "/api/processing/embedding-hosts": "llama-server 主機即時測試",
     "/api/processing/active": "目前處理狀態",
     "/api/processing/active/stream": "目前處理 SSE（legacy）",
     "/api/processing/plan": "資料處理計畫",
@@ -518,6 +520,9 @@ def _api_endpoint_catalog(app: FastAPI) -> List[Dict[str, Any]]:
             continue
         path = str(route.path or "")
         if not path.startswith("/api/"):
+            continue
+        if path.startswith("/api/ollama/"):
+            # Legacy aliases stay available but are not shown in the UI.
             continue
         label = API_ENDPOINT_LABELS.get(
             path,
@@ -1664,11 +1669,13 @@ def create_app(
         ):
             return status_payload()
 
-    @app.get("/api/ollama/hosts")
+    @app.get("/api/llama-server/hosts")
+    @app.get("/api/ollama/hosts", include_in_schema=False)
     def ollama_hosts() -> Dict[str, Any]:
         return _ollama_host_list()
 
-    @app.post("/api/ollama/hosts")
+    @app.post("/api/llama-server/hosts")
+    @app.post("/api/ollama/hosts", include_in_schema=False)
     def ollama_host_create(payload: OllamaHostRequest) -> Dict[str, Any]:
         try:
             host = add_host(
@@ -1683,7 +1690,8 @@ def create_app(
         except OllamaHostError as exc:
             raise _ollama_host_error(exc) from exc
 
-    @app.patch("/api/ollama/hosts/{host_id}")
+    @app.patch("/api/llama-server/hosts/{host_id}")
+    @app.patch("/api/ollama/hosts/{host_id}", include_in_schema=False)
     def ollama_host_update(
         host_id: int, payload: OllamaHostRequest
     ) -> Dict[str, Any]:
@@ -1701,14 +1709,16 @@ def create_app(
         except OllamaHostError as exc:
             raise _ollama_host_error(exc) from exc
 
-    @app.delete("/api/ollama/hosts/{host_id}")
+    @app.delete("/api/llama-server/hosts/{host_id}")
+    @app.delete("/api/ollama/hosts/{host_id}", include_in_schema=False)
     def ollama_host_delete(host_id: int) -> Dict[str, Any]:
         if not delete_host(app.state.session_factory, host_id):
-            raise HTTPException(status_code=404, detail="找不到 Ollama 主機。")
+            raise HTTPException(status_code=404, detail="找不到 llama-server 主機。")
         _sync_runtime_settings()
         return {"status": "deleted", "id": host_id}
 
-    @app.post("/api/ollama/hosts/{host_id}/activate")
+    @app.post("/api/llama-server/hosts/{host_id}/activate")
+    @app.post("/api/ollama/hosts/{host_id}/activate", include_in_schema=False)
     def ollama_host_activate(host_id: int) -> Dict[str, Any]:
         try:
             host = activate_host(app.state.session_factory, host_id)
@@ -1717,13 +1727,15 @@ def create_app(
         except OllamaHostError as exc:
             raise _ollama_host_error(exc) from exc
 
-    @app.post("/api/ollama/hosts/deactivate")
+    @app.post("/api/llama-server/hosts/deactivate")
+    @app.post("/api/ollama/hosts/deactivate", include_in_schema=False)
     def ollama_host_deactivate() -> Dict[str, Any]:
         result = deactivate_hosts(app.state.session_factory)
         _sync_runtime_settings()
         return result
 
-    @app.post("/api/ollama/hosts/capabilities/test")
+    @app.post("/api/llama-server/hosts/capabilities/test")
+    @app.post("/api/ollama/hosts/capabilities/test", include_in_schema=False)
     def ollama_host_capabilities_test() -> Dict[str, Any]:
         refreshed_urls = set()
         for host in _ollama_host_list().get("hosts") or []:
@@ -1736,12 +1748,14 @@ def create_app(
             refresh_model_capabilities(
                 app.state.session_factory,
                 app.state.settings.with_overrides(
-                    llm_url=host_url, llm_api="ollama"
+                    llm_url=host_url,
+                    llm_api=str(host.get("api") or "ollama"),
                 ),
             )
         return _ollama_host_list()
 
-    @app.post("/api/ollama/hosts/reorder")
+    @app.post("/api/llama-server/hosts/reorder")
+    @app.post("/api/ollama/hosts/reorder", include_in_schema=False)
     def ollama_host_reorder(payload: OllamaHostOrderRequest) -> Dict[str, Any]:
         try:
             result = reorder_hosts(
@@ -1752,7 +1766,8 @@ def create_app(
         except OllamaHostError as exc:
             raise _ollama_host_error(exc) from exc
 
-    @app.post("/api/ollama/hosts/{host_id}/models/select")
+    @app.post("/api/llama-server/hosts/{host_id}/models/select")
+    @app.post("/api/ollama/hosts/{host_id}/models/select", include_in_schema=False)
     def ollama_model_select(
         host_id: int, payload: OllamaModelChoiceRequest
     ) -> Dict[str, Any]:
@@ -1768,7 +1783,8 @@ def create_app(
         except OllamaHostError as exc:
             raise _ollama_host_error(exc) from exc
 
-    @app.post("/api/ollama/hosts/{host_id}/models/clear")
+    @app.post("/api/llama-server/hosts/{host_id}/models/clear")
+    @app.post("/api/ollama/hosts/{host_id}/models/clear", include_in_schema=False)
     def ollama_model_clear(
         host_id: int, payload: OllamaModelChoiceRequest
     ) -> Dict[str, Any]:
@@ -1887,6 +1903,33 @@ def create_app(
                 settings=settings,
                 session_factory=app.state.session_factory,
             )
+
+    @app.get("/api/processing/embedding-hosts")
+    def processing_embedding_hosts() -> Dict[str, Any]:
+        effective = runtime_settings(
+            app.state.settings, app.state.session_factory
+        )
+        probe = probe_embedding_hosts(
+            primary_url=effective.embedding_url,
+            fallback_url=effective.embedding_fallback_url,
+            model=effective.embedding_model,
+            timeout=max(
+                2.0,
+                float(effective.embedding_health_timeout_seconds or 2.0),
+            ),
+            fallback_urls=effective.embedding_failover_urls,
+            primary_api=effective.embedding_api,
+            fallback_api=effective.embedding_fallback_api,
+            fallback_apis=effective.embedding_failover_apis,
+        )
+        selected = probe.get("selected") or {}
+        probe["active"] = {
+            **selected,
+            "using_fallback": str(selected.get("role") or "").startswith(
+                "fallback"
+            ),
+        }
+        return probe
 
     @app.get("/api/processing/active")
     def processing_active() -> Dict[str, Any]:
@@ -2697,7 +2740,8 @@ def create_app(
             refresh_model_capabilities(
                 app.state.session_factory,
                 app.state.settings.with_overrides(
-                    llm_url=host_url, llm_api="ollama"
+                    llm_url=host_url,
+                    llm_api=str(host.get("api") or "ollama"),
                 ),
             )
         runtime_url = str(runtime.llm_url or "").rstrip("/")
@@ -2738,7 +2782,7 @@ def create_app(
             )
             if host is None:
                 raise HTTPException(
-                    status_code=404, detail="找不到 Ollama 主機。"
+                    status_code=404, detail="找不到 llama-server 主機。"
                 )
             provider_settings = app.state.settings.with_overrides(
                 llm_url=host["base_url"], llm_api="ollama"

@@ -2897,7 +2897,7 @@ def _print_build_summary(summary: Dict[str, Any]) -> None:
     host = summary.get("embedding_host") or {}
     if host:
         print(
-            f"  Ollama：{host.get('url') or '—'} · {host.get('model') or '—'}"
+            f"  llama-server：{host.get('url') or '—'} · {host.get('model') or '—'}"
             f" · port {host.get('port') or '—'}"
         )
     print(

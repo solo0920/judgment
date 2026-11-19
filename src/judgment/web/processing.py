@@ -775,7 +775,7 @@ def _workflow_failure_resolution(reason: str) -> str:
             "請重新執行此流程。若仍失敗，請查看 .run 目錄中的最新日誌。"
         )
     if "could not connect" in text or "connection refused" in text:
-        return "確認 PostgreSQL、Qdrant 或 Ollama 服務已啟動且網路可達，再重新執行此流程。"
+        return "確認 PostgreSQL、Qdrant 或 llama-server 服務已啟動且網路可達，再重新執行此流程。"
     if "timeout" in text or "timed out" in text:
         return "確認服務負載與網路狀態；必要時提高 timeout 設定後重新執行。"
     if "no space left" in text:

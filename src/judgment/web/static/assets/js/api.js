@@ -520,14 +520,14 @@ export const api = {
   },
 
   ollamaHosts() {
-    return request("/api/ollama/hosts", {
+    return request("/api/llama-server/hosts", {
       timeout: 30000,
       trackClient: false,
     });
   },
 
   addOllamaHost(payload) {
-    return request("/api/ollama/hosts", {
+    return request("/api/llama-server/hosts", {
       method: "POST",
       body: JSON.stringify(payload),
       timeout: 30000,
@@ -536,7 +536,7 @@ export const api = {
   },
 
   updateOllamaHost(hostId, payload) {
-    return request(`/api/ollama/hosts/${encodeURIComponent(hostId)}`, {
+    return request(`/api/llama-server/hosts/${encodeURIComponent(hostId)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
       timeout: 30000,
@@ -545,7 +545,7 @@ export const api = {
   },
 
   deleteOllamaHost(hostId) {
-    return request(`/api/ollama/hosts/${encodeURIComponent(hostId)}`, {
+    return request(`/api/llama-server/hosts/${encodeURIComponent(hostId)}`, {
       method: "DELETE",
       timeout: 30000,
       trackClient: false,
@@ -554,13 +554,13 @@ export const api = {
 
   activateOllamaHost(hostId) {
     return request(
-      `/api/ollama/hosts/${encodeURIComponent(hostId)}/activate`,
+      `/api/llama-server/hosts/${encodeURIComponent(hostId)}/activate`,
       { method: "POST", timeout: 30000, trackClient: false },
     );
   },
 
   deactivateOllamaHosts() {
-    return request("/api/ollama/hosts/deactivate", {
+    return request("/api/llama-server/hosts/deactivate", {
       method: "POST",
       timeout: 30000,
       trackClient: false,
@@ -568,7 +568,7 @@ export const api = {
   },
 
   reorderOllamaHosts(hostIds) {
-    return request("/api/ollama/hosts/reorder", {
+    return request("/api/llama-server/hosts/reorder", {
       method: "POST",
       body: JSON.stringify({ host_ids: hostIds }),
       timeout: 30000,
@@ -577,7 +577,7 @@ export const api = {
   },
 
   checkOllamaCapabilities() {
-    return request("/api/ollama/hosts/capabilities/test", {
+    return request("/api/llama-server/hosts/capabilities/test", {
       method: "POST",
       timeout: 180000,
       trackClient: false,
@@ -586,7 +586,7 @@ export const api = {
 
   selectOllamaModel(hostId, payload) {
     return request(
-      `/api/ollama/hosts/${encodeURIComponent(hostId)}/models/select`,
+      `/api/llama-server/hosts/${encodeURIComponent(hostId)}/models/select`,
       {
         method: "POST",
         body: JSON.stringify(payload),
@@ -598,7 +598,7 @@ export const api = {
 
   clearOllamaModel(hostId, payload) {
     return request(
-      `/api/ollama/hosts/${encodeURIComponent(hostId)}/models/clear`,
+      `/api/llama-server/hosts/${encodeURIComponent(hostId)}/models/clear`,
       {
         method: "POST",
         body: JSON.stringify(payload),
@@ -816,6 +816,13 @@ export const api = {
   processingActive() {
     return request("/api/processing/active", {
       timeout: 3000,
+      trackClient: false,
+    });
+  },
+
+  embeddingHostsProbe() {
+    return request("/api/processing/embedding-hosts", {
+      timeout: 20000,
       trackClient: false,
     });
   },
