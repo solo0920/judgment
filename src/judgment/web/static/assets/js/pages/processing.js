@@ -38,6 +38,12 @@ function formatSpanSeconds(value) {
   return `${days} 天 ${restHours} 小時`;
 }
 
+function normalizeModelLabel(value) {
+  return String(value || "")
+    .trim()
+    .replace(/:latest$/, "");
+}
+
 const STATUS_META = {
   running: { label: "執行中", tone: "info" },
   success: { label: "完成", tone: "ok" },
@@ -6295,7 +6301,7 @@ export async function render(root) {
     const stage = (legal?.stages || []).find(
       (item) => item.key === "legal_qdrant",
     );
-    return String(stage?.model?.label || "");
+    return normalizeModelLabel(stage?.model?.label || "");
   };
 
   const syncEmbeddingStrip = () => {
@@ -6313,9 +6319,11 @@ export async function render(root) {
         options.push({
           hostId: Number(host.id),
           model: model.name,
-          label: `${host.name || host.base_url || `主機 ${host.id}`}:${
-            model.name
-          }`,
+          label: normalizeModelLabel(
+            `${host.name || host.base_url || `主機 ${host.id}`}:${
+              model.name
+            }`,
+          ),
           baseUrl: host.base_url || "",
         });
       }
@@ -6622,7 +6630,9 @@ export async function render(root) {
       syncEmbeddingStrip();
       return;
     }
-    const label = `${host.name || host.base_url || `主機 ${host.id}`}:${model}`;
+    const label = normalizeModelLabel(
+      `${host.name || host.base_url || `主機 ${host.id}`}:${model}`,
+    );
     if (label === currentEmbeddingLabel()) {
       syncEmbeddingStrip();
       return;

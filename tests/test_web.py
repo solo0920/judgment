@@ -600,6 +600,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-host-strip" in processing_js.text
     assert "rag-model-buttons" in processing_js.text
     assert "llama-server 連線測試" in processing_js.text
+    assert "normalizeModelLabel" in processing_js.text
     assert "embeddingHostsProbe" in processing_js.text
     assert "refresh-index-hosts" in processing_js.text
     assert "目前設定即時測試" in processing_js.text

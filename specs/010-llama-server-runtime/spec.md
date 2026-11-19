@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical infrastructure + UI naming spec）
 
-**Version**: 1.0
+**Version**: 1.1
 
 **Last Updated**: 2026-11-19
 
@@ -194,6 +194,7 @@
 ### 5.3 其他頁面
 
 - `#/rag`：模型 strip 使用 `主機:模型`；目前使用中的 chip 實心心；hover 顯示 base URL；不得產生重複的同名主機 chip。
+- Embedding 主機 strip：模型標籤 MUST 先移除結尾的 `:latest` 再比較與顯示（例如 `x570:bge-m3:latest` 與 `x570:bge-m3` 視為同一模型）；不得因 legacy tag 後綴而多出一個重複的 `使用中` chip。
 - `#/tests`：模型清單、測試文案、錯誤訊息使用 llama-server。
 - `#/performance`：索引階段 label 使用 `llama-server Embedding`。
 - `#/quality`／題庫：AI 生成文案與結果使用 llama-server。
@@ -227,6 +228,7 @@
 - [ ] 390px viewport 無水平溢出。
 - [ ] `#/status` Model Provider 表單預設 port 為 11437，標題為 `llama-server 主機與模型`。
 - [ ] `bge-m3` 在模型能力清單中為 `Embedding`，不得為 chat。
+- [ ] Embedding strip 的 `x570:bge-m3:latest` 與 registry 的 `x570:bge-m3` 正規化為同一 chip，不得重複顯示。
 - [ ] 完整 `uv run pytest`、`ruff check`、`node --check` 通過。
 
 ---
@@ -236,3 +238,4 @@
 | 版本 | 日期 | 變更 |
 | --- | --- | --- |
 | 1.0 | 2026-11-19 | 建立全站 llama-server canonical 規格：x570 primary／MBP fallback、OpenAI 相容端點、host registry、live probe、全站命名與 strip 顯示契約。 |
+| 1.1 | 2026-11-19 | Embedding strip 模型標籤正規化移除 `:latest`，避免 `bge-m3:latest` 與 `bge-m3` 重複顯示。 |
