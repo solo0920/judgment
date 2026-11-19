@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.1
+**Version**: 1.5
 
 **Last Updated**: 2026-11-19
 
@@ -14,6 +14,7 @@
 
 - [`../004-web-console/progress-visualization.md`](../004-web-console/progress-visualization.md)（25% 未完成淺色、完成色填充、月份框線）
 - [`../004-web-console/pipeline-waterfall.md`](../004-web-console/pipeline-waterfall.md)（索引 pipeline waterfall）
+- [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)（llama-server 端點、優先順序、全站命名與 host strip）
 
 ---
 
@@ -273,7 +274,7 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 
 ### 7.6 llama-server 主機測試
 
-「llama-server 連線測試」卡片 MUST 與「Embedding 主機／模型」strip 使用相同視覺規格，方便一次看清所有主機與模型：
+「llama-server 連線測試」卡片 MUST 與「Embedding 主機／模型」strip 使用相同視覺規格，方便一次看清所有主機與模型；主機端點、優先順序、命名與 live probe 契約依 [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)：
 
 - 使用 `rag-model-strip`、`rag-model-strip-head`、`rag-model-buttons`、`rag-model-button` 與 `rag-model-hint`。
 - header MUST 顯示標題、最後選用 URL、目前選用的 `host:port:model`、狀態 badge；使用備援時 MUST 顯示「已切換備援」或目前使用 URL。
@@ -341,3 +342,4 @@ E 未完成月份 MUST 被視為此 workflow 的待更新工作，不能只在�
 | 1.2 | 2026-11-19 | 修正 build mode A／R／E：以 active archive 覆蓋補上本次 run 尚未處理的未變更月份，完成分格必為實心；A／R／E 分格加上明確完成／未完成／無資料狀態，不再以 0% fill 顯示 25% 淺色。 |
 | 1.3 | 2026-11-19 | 目前處理列新增本批 R／E chip（含 embedding 計算中狀態）；llama-server 連線測試改為與 Embedding 主機／模型相同的 compact chip strip。 |
 | 1.4 | 2026-11-19 | 全站可見文字由 Ollama 改為 llama-server；非執行中 run 顯示目前設定的即時主機測試，x570 為 primary、MBP 為 fallback。 |
+| 1.5 | 2026-11-19 | 將 llama-server 執行環境、主機優先順序與全站顯示契約抽出為 spec 010，本規格改為引用該 canonical source。 |
