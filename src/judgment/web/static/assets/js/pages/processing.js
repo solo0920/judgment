@@ -4238,19 +4238,19 @@ function indexMonthGridMarkup(runtime) {
     .join("");
   return `<div class="judgment-months index-months">
     <div class="index-runtime-summary index-month-are-summary">
-      <span title="A：上一個正式版本既有覆蓋，不列入新版本完成數">A 基線 <strong class="mono">${formatNumber(
+      <span title="A：上一個正式版本既有覆蓋，不列入新版本完成數；以月份計。">A 基線月份 <strong class="mono">${formatNumber(
         counts.active,
       )}</strong></span>
-      <span title="R 完成：新版本已完成且該月全部沿用既有向量">R 完成 <strong class="mono">${formatNumber(
+      <span title="R 完成：新版本已完成且該月全部沿用既有向量；以月份計。">R 完成月份 <strong class="mono">${formatNumber(
         counts.reuseComplete,
       )}</strong></span>
-      <span title="R 未完成：該月仍需或正在進行既有向量重用">R 未完成 <strong class="mono">${formatNumber(
+      <span title="R 未完成：該月仍需或正在進行既有向量重用；以月份計。">R 未完成月份 <strong class="mono">${formatNumber(
         counts.reuseIncomplete,
       )}</strong></span>
-      <span title="E 完成：新版本已完成且該月包含新 embedding">E 完成 <strong class="mono">${formatNumber(
+      <span title="E 完成：新版本已完成且該月包含新 embedding；以月份計，不是 RAR 檔數。">E 完成月份 <strong class="mono">${formatNumber(
         counts.embedComplete,
       )}</strong></span>
-      <span title="E 未完成：該月仍需或正在進行新 embedding">E 未完成 <strong class="mono">${formatNumber(
+      <span title="E 未完成：該月仍需或正在進行新 embedding；以月份計，不是 RAR 檔數。內容未變更的更新檔案會沿用既有向量。">E 未完成月份 <strong class="mono">${formatNumber(
         counts.embedIncomplete,
       )}</strong></span>
       <span>總月份 <strong class="mono">${formatNumber(groups.size)}</strong></span>
@@ -4281,7 +4281,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。尚無本次建置 run 時，A／R 顯示基線 archive 的覆蓋，E 顯示名稱中最新 archive 的新 embedding 進度；新舊 archive 不會相加。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看最新 archive、A／R 基線、E 進度與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。尚無本次建置 run 時，A／R 顯示基線 archive 的覆蓋，E 顯示名稱中最新 archive 的新 embedding 進度；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數；同一月份可能有多個 archive，內容未變更的更新檔案會沿用既有向量，不會列為未完成。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看最新 archive、A／R 基線、E 進度與目前案號。</p>
   </div>`;
 }
 

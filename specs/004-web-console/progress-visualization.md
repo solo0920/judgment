@@ -262,6 +262,7 @@ DOM 結構固定為：
   - 較舊的 archive 是 A／R 基線，A／R 填充比例使用 baseline `processed / total`；E 填充比例使用最新 archive 的 `processed / total`。
   - MUST NOT 把同月份所有 archive 的 total／processed 相加作為單一分格比例；這會把 delta archive 與基線 archive 重複計算，讓已完成月份看起來仍是淺色。
 - completed 月份仍必須是 100% 實心；只有最新 archive 尚未完成的 E 分格維持 25% 淺色或進度填充。
+- A／R／E 的完成／未完成統計 MUST 以「月份」為單位，不得標示為 RAR 檔數；同一月份可能有多個 archive，內容未變更的更新檔案會沿用既有向量。
 
 ### 6.4 月份框線
 
