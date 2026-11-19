@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical infrastructure + UI naming spec）
 
-**Version**: 1.2
+**Version**: 1.3
 
 **Last Updated**: 2026-11-19
 
@@ -100,29 +100,6 @@
 - 模型能力分類：`bge-m3`／embedding 名稱 MUST 歸為 embedding，不得列為 chat；reranker 名稱 MUST 歸為 reranker；其餘 OpenAI 模型才可標示 chat。
 - Host 數量上限維持 20；allowlist、link-local／metadata／multicast／reserved 封鎖規則不變。
 
-### 3.4 Live probe endpoint
-
-`GET /api/processing/embedding-hosts` MUST 依目前 `runtime_settings()` 即時測試 Embedding primary／fallback／failover，回傳：
-
-```json
-{
-  "status": "operational",
-  "model": "bge-m3",
-  "tested_at": "2026-11-19T06:04:40+00:00",
-  "hosts": [
-    {"url": "http://x570:11437", "role": "primary", "status": "operational"},
-    {"url": "http://127.0.0.1:11437", "role": "fallback", "status": "operational"}
-  ],
-  "selected": {"url": "http://x570:11437", "role": "primary"},
-  "active": {"url": "http://x570:11437", "using_fallback": false},
-  "error": ""
-}
-```
-
-- 選用第一個 `status=operational` 的主機。
-- 選到 fallback 時 `active.using_fallback=true`。
-- 無可用主機時 `status="failed"`、`selected=null`、`active={}`，UI MUST 顯示失敗，不得沿用上一個 run 的成功狀態。
-
 ---
 
 ## 4. 全站命名契約
@@ -154,28 +131,22 @@
 
 ### 5.1 主機／模型 strip
 
-所有 llama-server 主機清單 MUST 使用既有 `rag-model-strip`／`rag-model-buttons`／`rag-model-button` 視覺語言，不得使用大型逐列卡片。
+llama-server 主機／模型 MUST 只在 workflow 執行資訊卡片中的「Embedding 主機／模型」strip 顯示一次，使用既有 `rag-model-strip`／`rag-model-buttons`／`rag-model-button` 視覺語言，不得使用大型逐列卡片。
 
 - Header：
-  - 標題（例：`llama-server 連線測試`）。
+  - 標題：`Embedding 主機／模型`。
   - 最後選用 URL（`rag-model-strip-base`，可省略）。
-  - `目前：host:port:model`。
-  - 狀態 badge（正常／失敗／待命）。
-  - 非執行中 run 顯示「目前設定」badge 與「重新測試」按鈕。
-  - 使用 fallback 時顯示「已切換備援」或「目前使用 …」。
+  - `目前：host:model`（結尾 `:latest` 需正規化）。
+  - 「檢查模型」按鈕。
 - Chips：
-  - 一台主機一個 chip，內含 `host:port:model` 與狀態文字。
-  - 選用主機：實心 `is-active`，文字「使用中」。
-  - 其他可用主機：淡色，文字「可用」。
-  - 無法連線／degraded／缺模型：灰色 `is-unavailable`，文字「無法取得」。
-  - Tooltip MUST 包含角色（主要／備援）、URL、狀態、模型清單與 detail。
+  - 一台主機一個 chip，內含 `host:model`；可點選切換 embedding。
+  - 目前使用：實心 `is-active`，文字「使用中」。
+  - 其他可用主機：淡色，無狀態文字。
+  - 無法連線／degraded／缺模型：不列出，或標示「無法取得」。
+  - Tooltip MUST 包含 host／model 與 base URL。
 - Hint：
-  - 說明 primary／fallback 嘗試順序與 chip 顏色語意。
-  - 測試時間顯示在 hint，不得另占大型 footer。
-- 非執行中 run：
-  - 卡片 MUST 自動呼叫 live probe，以目前 `.env`／registry 顯示，不得把上次 run 的舊主機當成目前狀態。
-  - 顯示「目前設定」與「重新測試」。
-  - 手動重新測試 MUST 更新 chips、status、selected 與測試時間。
+  - 說明切換 embedding、優先順序與重建索引警告。
+- 索引 runtime 卡片 MUST NOT 再顯示另一份 `index-host-strip`／「llama-server 連線測試」主機 strip；避免與上方 Embedding selector 重複。
 - 390px viewport MUST 換行且無水平溢出。
 
 ### 5.2 Model Provider 頁
@@ -236,7 +207,7 @@ Embedding strip 的「目前」標籤有兩個來源，必須先正規化再比�
 | 兩台皆不可用 | 所有 chip 灰色「無法取得」；status 失敗；不得顯示舊的成功資料。 |
 | 模型不存在 | 該主機「無法取得」，detail 顯示缺模型；不得選為 primary。 |
 | Probe timeout | 顯示「無法取得」與 timeout detail；不得偽裝 operational。 |
-| 舊 run 資料 | 只在執行中顯示該 run 的 probe；非執行中一律以 live probe 取代。 |
+| 索引卡片主機資訊 | 不重複顯示 run probe；主機／模型只由 Embedding 主機／模型 selector 顯示。 |
 
 ---
 
@@ -245,14 +216,12 @@ Embedding strip 的「目前」標籤有兩個來源，必須先正規化再比�
 - [ ] 全站八個路由、Model Provider、API 端點目錄與頁尾均無可見 `Ollama`。
 - [ ] `/api/status.endpoints` 包含 `/api/llama-server/hosts`，不包含 `/api/ollama/*`。
 - [ ] `GET /api/llama-server/hosts` 顯示 x570 priority 0 active、MBP priority 10 fallback，兩者 `api="openai"`、`status="operational"`。
-- [ ] `GET /api/processing/embedding-hosts` 選用 `http://x570:11437` primary，MBP 為 fallback。
-- [ ] 索引卡片顯示 x570 實心「使用中」、MBP 淡色「可用」，不再顯示 11434。
-- [ ] 非執行中索引 run 顯示「目前設定」與「重新測試」，按下後即時更新。
 - [ ] x570 停止時自動選 MBP，並顯示「已切換備援」。
 - [ ] 390px viewport 無水平溢出。
 - [ ] `#/status` Model Provider 表單預設 port 為 11437，標題為 `llama-server 主機與模型`。
 - [ ] `bge-m3` 在模型能力清單中為 `Embedding`，不得為 chat。
 - [ ] Embedding strip 的 `x570:bge-m3:latest` 與 registry 的 `x570:bge-m3` 正規化為同一 chip，不得重複顯示。
+- [ ] 索引 runtime 卡片不得再出現第二份主機／模型 strip。
 - [ ] `x570:bge-m3:latest`、`x570:bge-m3`、`mbp:bge-m3` 同時存在時，畫面只有兩個 chip：x570 使用中、MBP 可用。
 - [ ] `gemma3:4b` 等非 `:latest` tag 不會被正規化破壞。
 - [ ] 目前模型不在 registry 時，只出現一個靜態「使用中」chip。
@@ -267,3 +236,4 @@ Embedding strip 的「目前」標籤有兩個來源，必須先正規化再比�
 | 1.0 | 2026-11-19 | 建立全站 llama-server canonical 規格：x570 primary／MBP fallback、OpenAI 相容端點、host registry、live probe、全站命名與 strip 顯示契約。 |
 | 1.1 | 2026-11-19 | Embedding strip 模型標籤正規化移除 `:latest`，避免 `bge-m3:latest` 與 `bge-m3` 重複顯示。 |
 | 1.2 | 2026-11-19 | 新增模型標籤正規化與去重專節：來源、只移除結尾 `:latest`、主機＋模型去重、靜態 chip fallback 與範例。 |
+| 1.3 | 2026-11-19 | 移除索引卡片重複的主機測試 strip 與 live probe endpoint；Embedding 主機／模型 selector 成為全站唯一主機／模型入口。 |

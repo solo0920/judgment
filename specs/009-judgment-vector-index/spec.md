@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.10
+**Version**: 1.11
 
 **Last Updated**: 2026-11-19
 
@@ -302,19 +302,13 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - chip 的 tooltip MUST 說明動作語意與本批筆數。
 - 目前處理列仍 MUST 保留月份、archive、JID、法院／案由與批次筆數；390px viewport MUST 可換行且無水平溢出。
 
-### 7.6 llama-server 主機測試
+### 7.6 llama-server 主機／模型入口
 
-「llama-server 連線測試」卡片 MUST 與「Embedding 主機／模型」strip 使用相同視覺規格，方便一次看清所有主機與模型；主機端點、優先順序、命名與 live probe 契約依 [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)：
+索引卡片 MUST NOT 重複顯示第二份 llama-server 主機 strip。全站唯一的主機／模型入口是 workflow 執行資訊卡片中的「Embedding 主機／模型」selector；端點、優先順序、chip 狀態與命名依 [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)。
 
-- 使用 `rag-model-strip`、`rag-model-strip-head`、`rag-model-buttons`、`rag-model-button` 與 `rag-model-hint`。
-- header MUST 顯示標題、最後選用 URL、目前選用的 `host:port:model`、狀態 badge；使用備援時 MUST 顯示「已切換備援」或目前使用 URL。
-- 每個主機 MUST 以一個 chip 顯示 `host:port:model`；選用主機為實心 `is-active` 並標示「使用中」，其他可用主機為淡色並標示「可用」，無法連線或缺少模型的主機為灰色 `is-unavailable` 並標示「無法取得」。
-- chip 的 tooltip MUST 包含主機角色、URL、狀態、可用模型清單與測試 detail。
-- 測試時間 MUST 顯示在 hint 區，不得另占一個大型 footer。
-- MUST NOT 再使用 `.index-host-row` 的大型逐列卡片；所有主機與模型必須在同一個 compact strip 內看到。
-- 非執行中的索引 run MUST 以目前 `.env`／主機設定的即時測試結果顯示，不得把上次 run 的舊主機清單當成目前狀態；header 顯示「目前設定」，並提供「重新測試」按鈕。
-- 即時測試使用 `GET /api/processing/embedding-hosts`，依 `EMBEDDING_URL`、`EMBEDDING_FALLBACK_URL` 與 failover 順序回傳 `hosts`、`selected`、`active`、`tested_at`。
-- 主要主機優先：x570 llama-server 可用時 MUST 選為 `primary`；MBP llama-server MUST 作為下一個 fallback，不得把舊的 11434 連線當成目前主機。
+- 索引 runtime 卡片只保留索引版本、collection、模式、目前處理列、A／R／E 時間表與 metrics。
+- 索引卡片 MUST NOT 再顯示 `index-host-strip`、「llama-server 連線測試」或另一份主機／模型 chips。
+- 主機／模型異動仍由「Embedding 主機／模型」的「檢查模型」與可點選 chip 完成；不另設 live probe endpoint。
 
 ---
 
@@ -363,8 +357,7 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - [ ] 0% 未完成分格整格為 25% 淺色，不是空心；只有 total=0／無 archive 才是空心。
 - [ ] A／R／E 同時為 25% 淺色時，tooltip 顯示各自 0/total 與「未完成」，不得顯示「無資料」。
 - [ ] 正在計算新 embedding 時，目前處理列的 E chip 顯示「計算中」。
-- [ ] llama-server 連線測試以 `rag-model-button` chip 顯示所有主機與模型，不再使用大型 host row。
-- [ ] 選用主機 chip 為實心「使用中」，其他可用主機為淡色「可用」，失敗主機為灰色「無法取得」。
+- [ ] 索引 runtime 卡片不得出現第二份主機／模型 strip。
 - [ ] 390px 無水平溢出。
 - [ ] Tooltip 顯示最新 archive、A／R 基線與 E 進度。
 
@@ -385,3 +378,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.8 | 2026-11-19 | 將 build mode 的 R／E 統一改為本次 run 進度，不再以 active 覆蓋提前標成完成；A 只使用 active 覆蓋，summary R／E 與方塊一致，sidebar badge 維持 active backlog。 |
 | 1.9 | 2026-11-19 | 新增計算責任與一致性專節：時間表與 backlog badge 分開計算，summary 與 cell 同源，A 不得用 R 完成數；補 202607／202608／202609 回歸案例。 |
 | 1.10 | 2026-11-19 | 補回「無 E backlog 的未變更月份可用 active 覆蓋顯示實心」規則；仍有 E backlog 的月份才使用本次 run 進度，避免舊月份被全部畫成淺色。 |
+| 1.11 | 2026-11-19 | 移除索引 runtime 卡片重複的 llama-server 主機 strip；主機／模型只保留執行資訊卡片的 Embedding selector，live probe endpoint 同步移除。 |

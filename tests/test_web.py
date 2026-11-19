@@ -595,19 +595,13 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-month-block" in processing_js.text
     assert "indexCurrentPhaseMarkup" in processing_js.text
     assert "index-current-phase" in processing_js.text
-    assert "indexEndpointLabel" in processing_js.text
-    assert "indexHostChipMarkup" in processing_js.text
-    assert "index-host-strip" in processing_js.text
     assert "rag-model-buttons" in processing_js.text
-    assert "llama-server 連線測試" in processing_js.text
+    assert "index-host-strip" not in processing_js.text
     assert "normalizeModelLabel" in processing_js.text
     assert "R 完成月份" in processing_js.text
     assert "R 未完成月份" in processing_js.text
     assert "E 完成月份" in processing_js.text
     assert "latestActiveComplete" in processing_js.text
-    assert "embeddingHostsProbe" in processing_js.text
-    assert "refresh-index-hosts" in processing_js.text
-    assert "目前設定即時測試" in processing_js.text
     assert "processing-month-stage" in processing_js.text
     assert "is-download" in processing_js.text
     assert "is-parquet" in processing_js.text
@@ -679,7 +673,6 @@ def test_static_console_is_served(web_client) -> None:
     assert "adminTokenForRequest" in api_js.text
     assert "authMe" in api_js.text
     assert "getAuthApiBase" in api_js.text
-    assert "/api/processing/embedding-hosts" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
     )[1].split("});", 1)[0]
@@ -3089,48 +3082,6 @@ def test_google_logout_clears_session(web_client) -> None:
         assert "Max-Age=0" in set_cookie
         client.cookies.delete("judgment_session")
         assert client.get("/api/auth/me").json()["authenticated"] is False
-
-
-def test_processing_embedding_hosts_returns_live_probe(
-    web_client, monkeypatch
-) -> None:
-    def fake_probe(**kwargs):
-        return {
-            "status": "operational",
-            "model": "bge-m3",
-            "tested_at": "2026-11-19T06:00:00+00:00",
-            "hosts": [
-                {
-                    "url": "http://x570:11437",
-                    "status": "operational",
-                    "model": "bge-m3",
-                },
-                {
-                    "url": "http://127.0.0.1:11437",
-                    "status": "operational",
-                    "model": "bge-m3",
-                },
-            ],
-            "selected": {
-                "url": "http://x570:11437",
-                "status": "operational",
-                "model": "bge-m3",
-                "role": "primary",
-            },
-            "error": "",
-        }
-
-    import importlib
-
-    web_app = importlib.import_module("judgment.web.app")
-    monkeypatch.setattr(web_app, "probe_embedding_hosts", fake_probe)
-    response = web_client.get("/api/processing/embedding-hosts")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["selected"]["url"] == "http://x570:11437"
-    assert payload["active"]["url"] == "http://x570:11437"
-    assert payload["active"]["using_fallback"] is False
 
 
 def test_ollama_host_rejects_unlisted_and_metadata_targets(web_client) -> None:

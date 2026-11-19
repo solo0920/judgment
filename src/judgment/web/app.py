@@ -63,7 +63,6 @@ from .auth import (
 )
 from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
-from ..embeddings import probe_embedding_hosts
 from ..law_article_versions import check_law_version_status
 from ..observability import (
     clear_flow,
@@ -431,7 +430,6 @@ API_ENDPOINT_LABELS = {
     "/api/index-versions/rollback": "回滾索引 alias",
     "/api/index-alias/reconcile": "Reconcile 索引 alias",
     "/api/processing": "資料處理狀態",
-    "/api/processing/embedding-hosts": "llama-server 主機即時測試",
     "/api/processing/active": "目前處理狀態",
     "/api/processing/active/stream": "目前處理 SSE（legacy）",
     "/api/processing/plan": "資料處理計畫",
@@ -1903,33 +1901,6 @@ def create_app(
                 settings=settings,
                 session_factory=app.state.session_factory,
             )
-
-    @app.get("/api/processing/embedding-hosts")
-    def processing_embedding_hosts() -> Dict[str, Any]:
-        effective = runtime_settings(
-            app.state.settings, app.state.session_factory
-        )
-        probe = probe_embedding_hosts(
-            primary_url=effective.embedding_url,
-            fallback_url=effective.embedding_fallback_url,
-            model=effective.embedding_model,
-            timeout=max(
-                2.0,
-                float(effective.embedding_health_timeout_seconds or 2.0),
-            ),
-            fallback_urls=effective.embedding_failover_urls,
-            primary_api=effective.embedding_api,
-            fallback_api=effective.embedding_fallback_api,
-            fallback_apis=effective.embedding_failover_apis,
-        )
-        selected = probe.get("selected") or {}
-        probe["active"] = {
-            **selected,
-            "using_fallback": str(selected.get("role") or "").startswith(
-                "fallback"
-            ),
-        }
-        return probe
 
     @app.get("/api/processing/active")
     def processing_active() -> Dict[str, Any]:

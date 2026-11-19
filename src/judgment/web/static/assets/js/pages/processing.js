@@ -3922,47 +3922,6 @@ function indexCurrentPhaseMarkup(current, running = false) {
   </span>`;
 }
 
-function indexEndpointLabel(endpoint, fallbackModel = "") {
-  const host = String(endpoint?.host || endpoint?.url || "—");
-  const port = endpoint?.port ? `:${endpoint.port}` : "";
-  const model = String(endpoint?.model || fallbackModel || "");
-  return `${host}${port}${model ? `:${model}` : ""}`;
-}
-
-function indexHostRoleLabel(role) {
-  if (role === "primary") return "主要";
-  if (role === "provided") return "外部";
-  if (String(role || "").startsWith("fallback")) return "備援";
-  return role || "主機";
-}
-
-function indexHostChipMarkup(host, selectedUrl, fallbackModel) {
-  const models = Array.isArray(host.models) ? host.models : [];
-  const model = String(host.model || fallbackModel || "");
-  const status = String(host.status || "unavailable");
-  const usable = status === "operational" || status === "provided";
-  const selected = Boolean(
-    usable && host.url && host.url === selectedUrl,
-  );
-  const label = indexEndpointLabel({ ...host, model }, fallbackModel);
-  const statusLabel = selected ? "使用中" : usable ? "可用" : "無法取得";
-  const title = [
-    `${indexHostRoleLabel(host.role)} · ${host.url || "—"}`,
-    `狀態：${statusLabel}`,
-    host.detail || "",
-    models.length ? `模型：${models.join("、")}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return `<span class="rag-model-button is-static${
-    selected ? " is-active" : ""
-  }${usable ? "" : " is-unavailable"}" title="${escapeHtml(title)}">
-    <span class="rag-model-state" aria-hidden="true"></span>
-    <span>${escapeHtml(label)}</span>
-    <span class="rag-model-current">${statusLabel}</span>
-  </span>`;
-}
-
 function indexRuntimeMonthProgress(runtime) {
   const months = Array.isArray(runtime.months) ? runtime.months : [];
   const totals = new Map();
@@ -4524,36 +4483,10 @@ function indexRuntimeTiming(runtime, indexed, total, averageRate) {
   };
 }
 
-function indexRuntimeMarkup(workflow, hostProbe = null) {
+function indexRuntimeMarkup(workflow) {
   const runtime = workflow.index_runtime || {};
-  if (!runtime.available) {
-    return `<section class="report-card processing-card index-runtime-card">
-      <div class="side-card-head">
-        <span class="side-card-title">${icon("cloud", 14)}llama-server 連線測試</span>
-        <span class="badge badge-neutral">尚無</span>
-      </div>
-      <div class="processing-workflow-empty">執行 Qdrant判決向量索引版本建置後，會在這裡顯示測試的主機、模型與選用結果。</div>
-    </section>`;
-  }
+  if (!runtime.available) return "";
   const coverageOnly = Boolean(runtime.coverage_only);
-  const runtimeEmbedding = runtime.embedding || {};
-  const useLiveProbe = Boolean(
-    hostProbe &&
-      !coverageOnly &&
-      runtime.run_status !== "running" &&
-      Array.isArray(hostProbe.hosts),
-  );
-  const embedding = useLiveProbe
-    ? {
-        ...runtimeEmbedding,
-        ...hostProbe,
-        selected: hostProbe.selected || {},
-        active: hostProbe.active || hostProbe.selected || {},
-      }
-    : runtimeEmbedding;
-  const hosts = Array.isArray(embedding.hosts) ? embedding.hosts : [];
-  const selected = embedding.selected || {};
-  const active = embedding.active || {};
   const current = runtime.current || {};
   const summary = runtime.summary || {};
   const indexed = Number(summary.indexed ?? current.indexed ?? 0);
@@ -4604,17 +4537,6 @@ function indexRuntimeMarkup(workflow, hostProbe = null) {
       <strong>${duration("remainingMs")}</strong>
     </span>
   </div>`;
-  const selectedUrl = selected.url || "";
-  const activeUrl = active.url || "";
-  const selectedLabel = selectedUrl
-    ? indexEndpointLabel(selected, embedding.model)
-    : "—";
-  const activeLabel = activeUrl
-    ? indexEndpointLabel(active, embedding.model)
-    : "—";
-  const hostChips = hosts
-    .map((host) => indexHostChipMarkup(host, selectedUrl, embedding.model))
-    .join("");
   const currentLabel =
     runtime.run_status === "running"
       ? current.preparing
@@ -4647,78 +4569,19 @@ function indexRuntimeMarkup(workflow, hostProbe = null) {
         }</span>
       </div>`
     : "";
-  return `<section class="report-card processing-card index-runtime-card"${
-    coverageOnly ? " hidden" : ""
-  }>
-    <div class="index-host-strip rag-model-strip">
-      <div class="rag-model-strip-head">
-        <span class="rag-model-strip-title">${icon(
-          "cloud",
-          13,
-        )} llama-server 連線測試</span>
-        ${
-          selectedUrl
-            ? `<span class="rag-model-strip-base mono">${escapeHtml(
-                selectedUrl,
-              )}</span>`
-            : ""
-        }
-        <span class="rag-model-strip-current">目前：<strong>${escapeHtml(
-          selectedLabel,
-        )}</strong></span>
-        ${statusBadge(embedding.status || "idle")}
-        ${
-          useLiveProbe
-            ? '<span class="badge badge-neutral">目前設定</span>'
-            : ""
-        }
-        ${
-          runtime.run_status === "running"
-            ? ""
-            : `<button class="btn btn-ghost btn-sm rag-model-refresh" type="button" data-processing-action="refresh-index-hosts">
-                ${icon("refresh", 12)}<span>重新測試</span>
-              </button>`
-        }
-        ${
-          activeUrl && activeUrl !== selectedUrl
-            ? `<span class="badge badge-warn">目前使用 ${escapeHtml(
-                activeLabel,
-              )}</span>`
-            : ""
-        }
-        ${
-          active.using_fallback
-            ? '<span class="badge badge-warn">已切換備援</span>'
-            : ""
-        }
-      </div>
-      ${
-        runtime.error
-          ? `<div class="processing-update-notice index-runtime-error">${icon(
-              "alert",
-              13,
-            )}<span>${escapeHtml(runtime.error)}</span></div>`
-          : ""
-      }
-      ${
-        hostChips
-          ? `<div class="rag-model-buttons">${hostChips}</div>`
-          : '<p class="rag-model-empty">沒有可顯示的主機測試結果。</p>'
-      }
-      <p class="rag-model-hint">${
-        useLiveProbe ? "目前設定即時測試；" : "依序嘗試主要、備援主機；"
-      }實心為本次選用，淡色為可用備援，灰色為無法取得。滑鼠移入可查看 URL、可用模型與測試細節。${
-        embedding.tested_at
-          ? ` 測試時間 ${escapeHtml(formatDateTime(embedding.tested_at))}。`
-          : ""
-      }</p>
-    </div>
-  </section>
-  <section class="report-card processing-card index-files-card">
+  return `<section class="report-card processing-card index-files-card">
     <div class="side-card-head index-runtime-head">
       <span class="side-card-title">${icon("table", 14)}索引檔案時間表</span>
       ${metricsMarkup}
     </div>
+    ${
+      runtime.error
+        ? `<div class="processing-update-notice index-runtime-error">${icon(
+            "alert",
+            13,
+          )}<span>${escapeHtml(runtime.error)}</span></div>`
+        : ""
+    }
     <div class="index-runtime-summary">
       <span>版本 <strong class="mono">v${escapeHtml(
         runtime.version_id ?? "—",
@@ -4740,7 +4603,7 @@ function indexRuntimeMarkup(workflow, hostProbe = null) {
     ${indexMonthGridMarkup(runtime)}
     ${
       coverageOnly
-        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant判決向量索引版本建置後會顯示本次 llama-server 測試與即時進度。</p>'
+        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant判決向量索引版本建置後會顯示本次索引進度與 A／R／E 時間表。</p>'
         : ""
     }
   </section>`;
@@ -5683,7 +5546,7 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
     }
     ${
       workflow.id === "index_versions"
-        ? indexRuntimeMarkup(workflow, workflowContext.indexHostProbe)
+        ? indexRuntimeMarkup(workflow)
         : ""
     }
     ${
@@ -5827,9 +5690,6 @@ export async function render(root) {
   let ollamaHosts = null;
   let ollamaHostsLoading = false;
   let ollamaHostsError = null;
-  let indexHostProbe = null;
-  let indexHostProbeLoading = false;
-  let indexHostProbeAt = 0;
   let ollamaDragHostId = 0;
   let ollamaDragChanged = false;
   let ollamaPointerDrag = null;
@@ -5856,8 +5716,6 @@ export async function render(root) {
     lawVersionCheck,
     lawVersionCheckLoading,
     lawVersionCheckError,
-    indexHostProbe,
-    indexHostProbeLoading,
   });
 
   const syncJudgmentProgress = () => {
@@ -6717,46 +6575,6 @@ export async function render(root) {
         if (button) setBusy(button, false);
         syncOllamaDom();
         syncEmbeddingStrip();
-      }
-    }
-  };
-
-  const refreshIndexHostProbe = async ({
-    quiet = false,
-    force = false,
-    button = null,
-  } = {}) => {
-    if (disposed || indexHostProbeLoading) return;
-    if (
-      !force &&
-      indexHostProbe &&
-      Date.now() - indexHostProbeAt < 30000
-    ) {
-      return;
-    }
-    indexHostProbeLoading = true;
-    if (button) setBusy(button, true, "測試中…");
-    try {
-      const data = await api.embeddingHostsProbe();
-      if (disposed) return;
-      indexHostProbe = data;
-      indexHostProbeAt = Date.now();
-    } catch (error) {
-      if (disposed) return;
-      if (!quiet) {
-        toast(
-          error.message || "無法測試 llama-server 主機。",
-          "danger",
-          7000,
-        );
-      }
-    } finally {
-      if (!disposed) {
-        indexHostProbeLoading = false;
-        if (button) setBusy(button, false);
-        if (activeWorkflowId === "index_versions") {
-          repaintFromSnapshot();
-        }
       }
     }
   };
@@ -8064,8 +7882,6 @@ export async function render(root) {
       loadOllamaHosts({ quiet: false, button });
     } else if (action === "refresh-embedding-models") {
       loadOllamaHosts({ quiet: false, button });
-    } else if (action === "refresh-index-hosts") {
-      void refreshIndexHostProbe({ button, force: true });
     } else if (action === "select-embedding-model") {
       const hostId = button.dataset.hostId || "";
       const model = button.dataset.model || "";
@@ -8128,12 +7944,6 @@ export async function render(root) {
     }
     if (activeWorkflowId === "index_versions") {
       loadIndexStorage({ quiet: true });
-      const workflow = (lastSnapshot?.workflows || []).find(
-        (item) => item.id === "index_versions",
-      );
-      if (workflow?.index_runtime?.run_status !== "running") {
-        void refreshIndexHostProbe({ quiet: true });
-      }
     }
     if (activeWorkflowId === "normalize_courts") {
       loadCourtCheck({ quiet: true });

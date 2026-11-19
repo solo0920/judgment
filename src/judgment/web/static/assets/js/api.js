@@ -820,13 +820,6 @@ export const api = {
     });
   },
 
-  embeddingHostsProbe() {
-    return request("/api/processing/embedding-hosts", {
-      timeout: 20000,
-      trackClient: false,
-    });
-  },
-
   judgmentDownloadStatus() {
     return request("/api/judgment-download/status", {
       timeout: 30000,

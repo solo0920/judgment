@@ -14,7 +14,7 @@
 
 **Qdrant 判決向量索引規格**: [`../009-judgment-vector-index/spec.md`](../009-judgment-vector-index/spec.md)（索引版本建置的 archive 選擇、A／R／E 判斷、月份 vs RAR 檔數與 coverage-only 顯示）
 
-**llama-server 執行環境與全站顯示規格**: [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)（全站 llama-server 名稱、端點、優先順序、Model Provider、host strip 與 live probe）
+**llama-server 執行環境與全站顯示規格**: [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)（全站 llama-server 名稱、端點、優先順序、Model Provider 與 host strip）
 
 **Source of Truth**: 目前程式碼（`src/judgment/web/`、`src/judgment/web/static/assets/js/`、`src/judgment/*.py` 與 `scripts/`）為唯一事實來源。若本文件與程式行為不一致，以程式為準，並 MUST 在同一次變更同步更新本規格，不得保留未實作的 MUST 或已移除的 UI／API。
 
@@ -51,7 +51,7 @@
 - Model Provider 與 processing host strip MUST 使用同一套主機狀態：選用實心「使用中」、其他可用淡色「可用」、失敗灰色「無法取得」。
 - Embedding strip 模型標籤 MUST 去除結尾 `:latest` 後再比較與顯示；同一「主機＋模型」只能有一個 chip，不得重複顯示 `bge-m3:latest` 與 `bge-m3`。
 - Canonical host API 為 `/api/llama-server/hosts`；舊 `/api/ollama/*` 只保留為隱藏 alias，MUST NOT 出現在 API 端點目錄。
-- 非執行中的索引 run MUST 以 `GET /api/processing/embedding-hosts` 顯示目前設定的即時測試，不得顯示上次 run 的舊主機清單。
+- 索引 runtime 卡片 MUST NOT 重複顯示第二份主機／模型 strip；llama-server 主機與模型只在 workflow 執行資訊卡片的「Embedding 主機／模型」selector 顯示一次。
 - 全站時間表一致性 MUST 同時包含視覺與資料語意：每個分格的 `is-complete` 只能由該 series 的完成條件判定；active collection 等基線只能是獨立 series。R／E 僅在 latest archive 已完整覆蓋、沒有 E backlog 的未變更月份，才可用 active 覆蓋顯示完成；仍有 E backlog 時 MUST 使用本次 run 進度。summary MUST 與畫面 cell 同源，backlog badge MUST 分開計算。詳見 [`progress-visualization.md`](progress-visualization.md) §5.1。
 
 ### Current Functional Surface（目前網站功能）

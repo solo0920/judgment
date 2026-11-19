@@ -13696,10 +13696,6 @@ button.chip:hover {
   }
 }
 
-.index-host-strip .index-runtime-error {
-  margin: 0 0 8px;
-}
-
 .index-runtime-foot {
   padding: 0 16px 14px;
   color: var(--faint);
