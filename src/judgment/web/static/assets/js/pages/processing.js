@@ -4278,9 +4278,9 @@ function indexMonthGridMarkup(runtime) {
     <div class="index-month-are-key processing-timeline-legend" aria-label="索引月份狀態圖例">
       <span class="processing-timeline-legend-label">狀態</span>
       <span><i class="processing-timeline-swatch is-solid-state"></i>完成</span>
-      <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成（25% 淺色）</span>
+      <span><i class="processing-timeline-swatch is-hollow-state"></i>未完成（未完成區段 25% 淺色）</span>
       <span><i class="processing-timeline-swatch is-progress-state"></i>執行中（進度條）</span>
-      <span><i class="processing-timeline-swatch is-empty"></i>無資料</span>
+      <span><i class="processing-timeline-swatch is-empty"></i>無資料（空心）</span>
     </div>
     <div class="index-month-are-key processing-timeline-legend" aria-label="索引月份框線圖例">
       <span class="processing-timeline-legend-label">框線</span>
@@ -4295,7 +4295,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心，未完成為 25% 淺色，執行中為完成色進度條，無資料為淡色空心。建置模式會以 active collection 的 archive 覆蓋補上目前 run 尚未處理但已完成的未變更月份，因此不需要新 embedding 的月份維持實心，不會顯示成 25% 淺色；真正缺少向量的 latest archive 才列為 E 未完成。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數；內容未變更的更新檔案會沿用既有向量，不會列為未完成。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。建置模式會以 active collection 的 archive 覆蓋補上目前 run 尚未處理但已完成的未變更月份，因此不需要新 embedding 的月份維持實心，不會顯示成 25% 淺色；真正缺少向量的 latest archive 才列為 E 未完成。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數；內容未變更的更新檔案會沿用既有向量，不會列為未完成。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
   </div>`;
 }
 
