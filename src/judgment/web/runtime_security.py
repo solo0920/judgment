@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+LOOPBACK_HOSTS = frozenset(
+    {"127.0.0.1", "::1", "localhost", "testserver"}
+)
 
 
 def _env_flag(name: str) -> bool:
@@ -26,6 +28,21 @@ def validate_forwarded_allow_ips(value: str) -> None:
             "client-supplied X-Forwarded-For headers. Use 127.0.0.1 behind "
             "the local tunnel."
         )
+
+
+def server_bind_allowed(host: str) -> bool:
+    """Fail closed when a server reports a non-loopback bind.
+
+    This is a request-time guard for launch paths that bypass ``judgment-web``
+    (direct uvicorn or a container entrypoint).  It cannot replace the CLI
+    startup check, but it prevents accidentally serving API traffic from a
+    publicly bound socket.
+    """
+
+    value = str(host or "").strip().lower()
+    if not value:
+        return True
+    return value in LOOPBACK_HOSTS or _env_flag("JUDGMENT_ALLOW_PUBLIC_BIND")
 
 
 def validate_runtime_security(

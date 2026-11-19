@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from judgment.web.runtime_security import (
+    server_bind_allowed,
     validate_forwarded_allow_ips,
     validate_runtime_security,
 )
@@ -49,3 +50,26 @@ def test_runtime_security_rejects_public_bind_with_local_bypass(monkeypatch) -> 
             forwarded_allow_ips="127.0.0.1",
             allow_local_admin_bypass=True,
         )
+
+
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("127.0.0.1", True),
+        ("::1", True),
+        ("localhost", True),
+        ("testserver", True),
+        ("0.0.0.0", False),
+        ("::", False),
+        ("192.168.1.20", False),
+        ("", True),
+    ],
+)
+def test_server_bind_guard(host: str, expected: bool, monkeypatch) -> None:
+    monkeypatch.delenv("JUDGMENT_ALLOW_PUBLIC_BIND", raising=False)
+    assert server_bind_allowed(host) is expected
+
+
+def test_server_bind_guard_explicit_override(monkeypatch) -> None:
+    monkeypatch.setenv("JUDGMENT_ALLOW_PUBLIC_BIND", "1")
+    assert server_bind_allowed("0.0.0.0") is True

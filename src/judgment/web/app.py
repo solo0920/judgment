@@ -22,7 +22,7 @@ from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import (
@@ -35,6 +35,7 @@ from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
+from starlette.routing import Match, Mount
 
 from .. import __version__
 from ..admission import RagAdmission, RagBusy
@@ -201,6 +202,7 @@ from .processing import (
 from .quality import build_quality_snapshot
 from .route_policy import policy_for, validate_route_policies
 from .runtime_security import (
+    server_bind_allowed,
     validate_forwarded_allow_ips,
     validate_runtime_security,
 )
@@ -354,6 +356,69 @@ def _canonical_request_path(path: str) -> str:
 def _is_api_path(path: str) -> bool:
     lowered = path.lower()
     return lowered == "/api" or lowered.startswith("/api/")
+
+
+def _match_route(app: FastAPI, scope: dict) -> Any:
+    """Return the route Starlette would dispatch for this scope.
+
+    This intentionally uses the router's own ``matches`` implementation so the
+    middleware cannot disagree with the router about which route a request
+    reaches.  A method mismatch still returns the path's route as PARTIAL.
+    """
+
+    partial = None
+    for route in app.router.routes:
+        match, _child_scope = route.matches(scope)
+        if match == Match.FULL:
+            return route
+        if match == Match.PARTIAL and partial is None:
+            partial = route
+    return partial
+
+
+def _policy_for_matched_route(route: Any, method: str) -> str:
+    if route is None:
+        return "ADMIN_ONLY"
+    if isinstance(route, Mount):
+        return policy_for("MOUNT", str(getattr(route, "path", "") or ""))
+    return policy_for(method, str(getattr(route, "path", "") or ""))
+
+
+def route_policy_guard(request: Request) -> None:
+    """Second line of defense after the auth middleware.
+
+    The middleware intentionally uses the router's own match result. This
+    dependency repeats the policy check after routing, so a middleware bug
+    cannot silently turn a protected route into a public one.
+    """
+
+    route = request.scope.get("route")
+    if route is None:
+        return
+    settings = request.app.state.settings
+    principal = getattr(request.state, "principal", None)
+    if principal is None:
+        principal = _resolve_principal(request, settings)
+        request.state.principal = principal
+    policy = _policy_for_matched_route(route, request.method)
+    if (
+        request.url.path == "/api/events/stream"
+        and _valid_sse_ticket(
+            str(request.query_params.get("ticket") or ""),
+            session_secret(settings),
+        )
+    ):
+        return
+    if principal_allows(
+        policy,
+        principal.kind,
+        public_rag_enabled=settings.public_rag_enabled,
+    ):
+        return
+    raise HTTPException(
+        status_code=401 if settings.admin_token else 403,
+        detail="需要有效的管理權杖或 Google 帳號登入。",
+    )
 
 
 def _has_forwarded_client_headers(request: Request) -> bool:
@@ -1295,6 +1360,7 @@ def create_app(
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",
+        dependencies=[Depends(route_policy_guard)],
         lifespan=lifespan,
     )
     app.state.settings = settings
@@ -1434,6 +1500,17 @@ def create_app(
 
     @app.middleware("http")
     async def admin_auth_middleware(request: Request, call_next):
+        server = request.scope.get("server")
+        if server and not server_bind_allowed(str(server[0])):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "伺服器綁定非 loopback 位址；請使用 judgment-web "
+                        "並綁定 127.0.0.1，或設定明確的開發例外。"
+                    )
+                },
+            )
         path = _canonical_request_path(request.url.path)
         if request.method == "OPTIONS" or (
             not _is_api_path(path) and path != "/docs/oauth2-redirect"
@@ -1457,8 +1534,8 @@ def create_app(
         if suspicious_proxy_chain(request, client_ip):
             _warn_suspicious_proxy_chain(client_ip)
 
-        policy_method = "GET" if request.method == "HEAD" else request.method
-        policy = policy_for(policy_method, path)
+        matched_route = _match_route(app, request.scope)
+        policy = _policy_for_matched_route(matched_route, request.method)
         is_public = policy in PUBLIC_POLICIES
         if principal_allows(
             policy,
@@ -3815,6 +3892,11 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1", help="綁定位址")
     parser.add_argument("--port", type=int, default=9200, help="連接埠")
     parser.add_argument("--reload", action="store_true", help="開發模式自動重載")
+    parser.add_argument(
+        "--check-config",
+        action="store_true",
+        help="只驗證 production 設定與 route policy，不啟動服務",
+    )
     parser.add_argument("--database-url", default=None, help="覆寫 DATABASE_URL")
     parser.add_argument("--data-dir", default=None, help="覆寫 LAW_DATA_DIR")
     parser.add_argument(
@@ -3823,6 +3905,13 @@ def main() -> int:
         help="信任 X-Forwarded-* 的來源 IP（本機 tunnel 請用 127.0.0.1，不可用 *）",
     )
     args = parser.parse_args()
+    if args.database_url:
+        os.environ["DATABASE_URL"] = args.database_url
+    if args.data_dir:
+        os.environ["LAW_DATA_DIR"] = args.data_dir
+    # Keep Settings and uvicorn on the same forwarded-IP value.
+    os.environ["FORWARDED_ALLOW_IPS"] = args.forwarded_allow_ips
+
     try:
         validate_runtime_security(
             host=args.host,
@@ -3830,12 +3919,31 @@ def main() -> int:
             allow_local_admin_bypass=base_settings.allow_local_admin_bypass,
         )
     except RuntimeError as exc:
+        if args.check_config:
+            print(f"config check failed: {exc}", file=sys.stderr)
+            return 1
         parser.error(str(exc))
 
-    if args.database_url:
-        os.environ["DATABASE_URL"] = args.database_url
-    if args.data_dir:
-        os.environ["LAW_DATA_DIR"] = args.data_dir
+    if args.check_config:
+        try:
+            check_settings = Settings.from_env()
+            check_app = create_app(settings=check_settings)
+            validate_route_policies(check_app.routes)
+        except Exception as exc:
+            print(
+                f"config check failed: {exc.__class__.__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            "config check passed: "
+            f"bind={args.host}:{args.port} "
+            f"forwarded_allow_ips={args.forwarded_allow_ips} "
+            f"local_bypass={base_settings.allow_local_admin_bypass} "
+            f"public_rag={check_settings.public_rag_enabled} "
+            f"routes={len(check_app.routes)}"
+        )
+        return 0
 
     power_agent_disabled = os.getenv("JUDGMENT_POWER_AGENT", "1").strip().lower() in {
         "0",

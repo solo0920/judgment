@@ -27,7 +27,17 @@ JUDGMENT_DISABLE_BACKGROUND_TASKS=1 \
 AUTO_CREATE_SCHEMA=0 \
 JUDGMENT_POWER_AGENT=0 \
 JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0 \
-  uv run judgment-web --host 127.0.0.1 --port "${PORT}" >"${LOG}" 2>&1 &
+  uv run judgment-web \
+    --check-config \
+    --host 127.0.0.1 \
+    --port "${PORT}" \
+    --forwarded-allow-ips 127.0.0.1 >>"${LOG}" 2>&1
+
+JUDGMENT_DISABLE_BACKGROUND_TASKS=1 \
+AUTO_CREATE_SCHEMA=0 \
+JUDGMENT_POWER_AGENT=0 \
+JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0 \
+  uv run judgment-web --host 127.0.0.1 --port "${PORT}" >>"${LOG}" 2>&1 &
 PID=$!
 
 ready=0
@@ -66,6 +76,8 @@ check 401 -X POST "${BASE}/api/processing/stop"
 check 401 -X DELETE "${BASE}/api/llama-server/hosts/1"
 check 401 -X POST -H 'Content-Type: application/json' -d '{}' "${BASE}/api/rag/query"
 check 401 "${BASE}/api/does-not-exist"
+# Keep this list explicit: do not loop over every GET route with an admin
+# token because some GETs have side effects or are expensive.
 check 200 -H "X-Judgment-Admin-Token: ${JUDGMENT_ADMIN_TOKEN}" "${BASE}/api/question-bank/stats"
 
 echo "smoke test passed on ${BASE}"

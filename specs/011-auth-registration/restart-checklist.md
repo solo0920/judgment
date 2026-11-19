@@ -28,6 +28,7 @@
 - `FORWARDED_ALLOW_IPS` 含 `*` 拒絕啟動。
 - local bypass 與非 loopback bind 同時開啟時拒絕啟動。
 - route policy 未分類或 stale 時拒絕啟動。
+- 若以 direct uvicorn／容器繞過 CLI，request-time `server_bind_allowed()` 會對非 loopback server 回 503。
 
 若 Cloudflare 啟用 Managed Transform「Remove visitor IP headers」，遠端請求會變成 loopback effective IP；middleware 會記錄 `suspicious proxy chain` warning。限流會偏嚴（所有人共用 loopback bucket），必須查看 warning 並修正 header 鏈。
 
@@ -56,6 +57,17 @@ grep -R "127.0.0.1:9200\|localhost:9200" -n scripts src ~/Library/LaunchAgents
 
 任何直接呼叫非公開 API 的呼叫者都必須改帶 `X-Judgment-Admin-Token`。
 
+手動 curl 不建议把 token 直接放在 `-H` 參數（會進 shell history，也可能出現在 `ps`）。可用臨時 curl config：
+
+```bash
+umask 077
+printf 'header = "X-Judgment-Admin-Token: %s"\n' "$JUDGMENT_ADMIN_TOKEN" > .run/admin.curl
+curl --config .run/admin.curl http://127.0.0.1:9200/api/status
+rm -f .run/admin.curl
+```
+
+Smoke test 只對 `/api/question-bank/stats` 使用 admin token，沒有用 admin token 迴圈呼叫所有 GET；避免誤觸有副作用或高成本的端點。
+
 ---
 
 ## 3. Staging 演練
@@ -68,13 +80,23 @@ JUDGMENT_ADMIN_TOKEN=... ./scripts/smoke_test_web.sh
 
 腳本會：
 
+- 先執行 `judgment-web --check-config`，驗證 bind、forwarded allow list、bypass、route policy。
 - 使用 `JUDGMENT_DISABLE_BACKGROUND_TASKS=1`：不啟動 event socket、processing snapshot warmup、coverage／staleness／rerank warmup。
 - 使用 `AUTO_CREATE_SCHEMA=0`：不執行 migration。
 - 使用 `JUDGMENT_POWER_AGENT=0`：不啟動 9201 電源控制器。
 - 使用 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=0`：以真實 admin token 驗證。
-- 驗證公開端點 200、受保護端點 401、admin token 200。
+- 驗證公開端點 200、受保護端點 401、admin token 200；admin 只打 `/api/question-bank/stats`，不迴圈所有 GET。
 
 結果：`smoke test passed on http://127.0.0.1:9202`。
+
+Production 設定乾跑已通過：
+
+```text
+config check passed: bind=127.0.0.1:9200 forwarded_allow_ips=127.0.0.1
+local_bypass=False public_rag=False routes=118
+```
+
+刻意使用 `--forwarded-allow-ips '*'` 時 exit 1，代表 fail-fast 生效。
 
 限制：
 
@@ -87,10 +109,11 @@ JUDGMENT_ADMIN_TOKEN=... ./scripts/smoke_test_web.sh
 
 1. 確認 v7 copy／index 已完成，且沒有其他索引程序在跑。
 2. 記錄目前 commit 與 `.env`（含 admin token、Google OAuth、CORS、tunnel 設定）。
-3. 再跑一次 `./scripts/smoke_test_web.sh`。
-4. 停止舊 `judgment-web`，以相同 `.env` 啟動新版本。
-5. 確認啟動 log 沒有 route policy／runtime security 錯誤。
-6. 執行第 5 節驗收。
+3. 用 production `.env` 跑 `uv run judgment-web --check-config`；必須 exit 0。
+4. 再跑一次 `./scripts/smoke_test_web.sh`。
+5. 停止舊 `judgment-web`，以相同 `.env` 啟動新版本。
+6. 確認啟動 log 沒有 route policy／runtime security 錯誤。
+7. 執行第 5 節驗收。
 
 回滾：
 

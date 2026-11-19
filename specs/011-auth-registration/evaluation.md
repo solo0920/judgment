@@ -1,8 +1,8 @@
 # 使用者註冊、角色權限與公開存取評估報告
 
-**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修、Phase 0 路由政策、Principal 與 binary 權限強制已實作，尚未重啟 production）
+**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修、Phase 0 路由政策、Principal、router 匹配與 staging 已完成，尚未重啟 production）
 
-**Version**: 0.6
+**Version**: 0.7
 
 **Last Updated**: 2026-11-19
 
@@ -225,6 +225,15 @@ Google OAuth callback
 - 若改用 Google Identity Services ID token，後端 MUST 驗證簽章與 Google JWKS、`aud`、`iss`、`exp`／`iat`、`email_verified`，並以 `sub` 作為身分。
 - 兩種流程只能選一種；不要同時信任前端 ID token 與後端 code flow 而沒有清楚規則。
 
+### 6.2 Phase 1 cutover 設計
+
+- **切換順序**：先 migration → 再 bootstrap admin → 最後才把 session 判斷切到 DB。切換前先確認 bootstrap 已完成且 admin email 正確，否則現有 Google session 會全部失效；恢復路徑是 admin token。
+- **Bootstrap 綁定**：只在 DB 沒有任何 admin 時生效，且在單一 transaction 完成。第一次以 email 比對後，立即把該列的 `google_sub` 綁定；之後一律以 `sub` 為準，email 變更或被他人重用都不會接管帳號。Email 只做 lower-case 正規化，不做 Gmail 點號／加號折疊。
+- **最後一位 admin**：PostgreSQL 使用 `SELECT ... FOR UPDATE` 鎖住 admin 列後再計數，避免兩位 admin 同時降級對方；需要並發測試，不能只測單執行緒。
+- **Admin token audit**：不要每個請求逐筆寫，否則 audit 會被淹沒。記錄首次使用、每小時摘要（來源、次數、路徑類別）；敏感操作才逐筆記錄。
+- **Session 撤銷**：session 內放 `session_version`；停用或降級時遞增，搭配短 TTL 快取與主動失效。文件要寫明最長生效延遲。
+- **HMAC 金鑰管理**：`hashed_client_ip_key` 的金鑰不得進版控；要有輪替策略。若輪替週期比保留期限短，就無法跨期關聯濫用行為，這是隱私與偵測的取捨，必須明確記錄。
+
 ---
 
 ## 7. API 路由分類與 default-deny
@@ -260,8 +269,9 @@ Google OAuth callback
 - 路由列舉涵蓋 `APIRoute`、Starlette `Route`、`Mount`（含子 app 遞迴）與 `WebSocketRoute`；HEAD 正規化為 GET policy，OPTIONS 由 CORS 處理。
 - middleware 每個請求解析一次 `request.state.principal`；`Principal` 有 `anonymous`／`pending`／`user`／`admin`／`admin_token` 五種 kind。
 - policy × kind 決策表已資料化；目前 runtime 仍只產生 anonymous／admin／admin_token，pending／user 由 Phase 1 的 `app_users` 提供。
-- `policy_for()` 支援 `{param}` route pattern；middleware 先 percent-decode、合併重複斜線，API 前綴不分大小寫。未知、尾斜線、大小寫變形與重複斜線路徑 default deny。
-- 測試 MUST 列舉 `app.routes` 全部 method route，任何未分類路由讓測試失敗；另需測試參數路由與變形路徑。
+- middleware 直接用 `route.matches(scope)` 取得 Starlette 實際分派的 route，再查該 route 的 policy；percent-decode／合併斜線只用於判斷 API 前綴。未知、尾斜線、大小寫變形、dot segment、編碼斜線與重複斜線路徑 default deny。
+- `route_policy_guard` 全域 `Depends` 在 routing 後再檢查一次 policy，作為 middleware 漏判的第二道防線。
+- 測試 MUST 列舉 `app.routes` 全部 method route，任何未分類路由讓測試失敗；另需測試參數路由、`{param:path}` 與變形路徑。
 - `PUBLIC_READ` 不得允許 POST／PATCH／DELETE；`PUBLIC_QUERY` 只允許明確列出的查詢 POST，且另受 `PUBLIC_RAG_ENABLED` 控制。
 - 本機 bypass 與 forwarded header 規則必須一起測試，避免 tunnel 遠端被當成本機。
 - 未分類路由預設拒絕；有 admin token 設定時回 401，否則回 403，不得預設放行。
@@ -375,6 +385,7 @@ Google OAuth callback
 - Rejected 冷卻期、每 IP／每日申請數限制；不以全站 pending 總數作唯一上限。
 - CSRF：cookie session 的寫入請求需 Origin／SameSite 檢查；敏感操作可加 CSRF token。
 - 啟動安全檢查：非 loopback bind、`FORWARDED_ALLOW_IPS=*`、local bypass 與公開 bind 同時開啟時 MUST 拒絕啟動。
+- 若以 direct uvicorn／容器繞過 CLI，request-time `server_bind_allowed()` MUST 對非 loopback server 回 503；`judgment-web --check-config` MUST 用 production `.env` 乾跑並在失敗時 exit 1。
 - Cloudflare 若移除 visitor IP headers，遠端會變成 loopback effective IP；middleware MUST 記錄 `suspicious proxy chain` warning，限流在該情況下偏嚴但不可靜默。
 - 公開 RAG 不得繞過 admission、rate limit 或 stream 限制。
 - 公開摘要不得包含主機路徑、container、volume、token、內部 IP、API endpoints、日誌位置。

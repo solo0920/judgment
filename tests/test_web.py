@@ -12,7 +12,9 @@ from urllib.parse import parse_qs, quote, urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -37,8 +39,9 @@ from judgment.models import (
 from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
 from judgment.web import processing as processing_module
-from judgment.web.app import create_app
+from judgment.web.app import create_app, route_policy_guard
 from judgment.web.auth import make_session_token
+from judgment.web.principal import anonymous_principal
 from judgment.web.route_policy import (
     VALID_CATEGORIES,
     load_route_policies,
@@ -3115,6 +3118,34 @@ def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
         )
 
 
+def test_route_policy_guard_denies_anonymous_on_protected_route(web_client) -> None:
+    route = next(
+        route
+        for route in web_client.app.routes
+        if getattr(route, "path", "") == "/api/status"
+    )
+    request = Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "https",
+            "path": "/api/status",
+            "raw_path": b"/api/status",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 443),
+            "app": web_client.app,
+            "route": route,
+        }
+    )
+    request.state.principal = anonymous_principal()
+    with pytest.raises(HTTPException) as exc:
+        route_policy_guard(request)
+    assert exc.value.status_code in {401, 403}
+
+
 def test_smoke_instance_can_disable_background_tasks(web_client) -> None:
     settings = replace(
         web_client.app.state.settings,
@@ -3185,6 +3216,9 @@ def test_protected_route_variants_do_not_bypass_auth(web_client) -> None:
         "http://testserver//api/status",
         "/%61pi/status",
         "/API/status",
+        "/api/home/../status",
+        "/api/home%2f..%2fstatus",
+        "/api/%2e%2e/status",
         "/api/llama-server/hosts/1",
         "/api/question-bank/items/1",
     )

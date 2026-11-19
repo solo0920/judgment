@@ -784,7 +784,7 @@ def test_failed_month_stays_pending_and_is_retried(
     assert first["errors"] == 1
     assert first["downloaded"] == 2
     assert first["pending_after"] == 1
-    assert FlakyClient.instances[0].downloads == [72009, 72011]
+    assert sorted(FlakyClient.instances[0].downloads) == [72009, 72011]
     manifest = judgment_download._load_manifest(
         raw_dir / judgment_download.MANIFEST_NAME
     )

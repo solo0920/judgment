@@ -1,8 +1,8 @@
 # 權限、註冊與公開存取覆核意見執行報告
 
-**Status**: Phase 0 進行中（10 點意見已納入；外部驗證、Principal、policy 矩陣、路徑一致性、啟動安全檢查與 staging smoke test 已完成）
+**Status**: Phase 0 進行中（10 點意見已納入；外部驗證、Principal、policy 矩陣、router 匹配、啟動檢查、production config 乾跑與 staging smoke test 已完成）
 
-**Version**: 0.4
+**Version**: 0.5
 
 **Last Updated**: 2026-11-19
 
@@ -160,10 +160,11 @@ Policy 決策表已改成資料驅動，測試展開全部 policy × kind：
 
 路徑一致性：
 
-- middleware 會先 percent-decode、合併重複斜線，再用 policy 查詢；API 前綴判斷不分大小寫。
-- `policy_for()` 現在支援 route pattern（例如 `/api/question-bank/items/{item_id}`），不是只比對完整字串。
-- 未知路徑、尾斜線、大小寫變形、重複斜線一律 default deny。
-- 測試會對全部已註冊 route 產生具體 URL，驗證公開／受保護邊界，並另外測 `//api/status`、`/%61pi/status`、`/API/status`、參數路由等變形。
+- middleware 不再自己用正規化路徑猜 policy；它直接用 `app.router.routes` 的 `route.matches(scope)` 取得 Starlette 實際會分派的 route，再查該 route 的 policy。
+- percent-decode 與合併重複斜線只用來判斷是否為 API／docs 路徑；真正 policy 來自 router match，避免「middleware 認為公開、router 走到受保護 route」。
+- 未知路徑、尾斜線、大小寫變形、重複斜線、dot segment、編碼斜線一律 default deny。
+- `route_policy_guard` 作為全域 FastAPI dependency，在 routing 後再檢查一次 policy；middleware 漏判時 route 仍會拒絕。
+- 測試會對全部已註冊 route 產生具體 URL，驗證公開／受保護邊界，並另外測 `//api/status`、`/%61pi/status`、`/API/status`、`/api/home/../status`、`/api/home%2f..%2fstatus`、`/api/%2e%2e/status`、參數路由與 `{param:path}`。
 
 啟動安全檢查（`src/judgment/web/runtime_security.py`）：
 
@@ -171,12 +172,15 @@ Policy 決策表已改成資料驅動，測試展開全部 policy × kind：
 - `FORWARDED_ALLOW_IPS` 含 `*` 拒絕啟動。
 - local bypass 與非 loopback bind 同時開啟時拒絕啟動。
 - `create_app()` 也會拒絕 `FORWARDED_ALLOW_IPS=*`。
+- 若直接以 uvicorn／容器啟動而繞過 CLI，request-time `server_bind_allowed()` 會對非 loopback server 回 503；這是 fail-closed 的第二道防線，但仍以 `judgment-web` 啟動為正式路徑。
+- `judgment-web --check-config` 已用 production `.env` 實跑通過：`bind=127.0.0.1:9200 forwarded_allow_ips=127.0.0.1 local_bypass=False public_rag=False routes=118`。`--forwarded-allow-ips '*'` 會回 exit 1。
 
 Staging：
 
 - 新增 `scripts/smoke_test_web.sh`，在 9202 起第二個 instance，使用 `JUDGMENT_DISABLE_BACKGROUND_TASKS=1`、`AUTO_CREATE_SCHEMA=0`、`JUDGMENT_POWER_AGENT=0`，不啟動 event socket／warmers／migration。
 - 2026-11-19 已實際跑過：`smoke test passed on http://127.0.0.1:9202`。
-- 重啟步驟、local caller 盤點與 header 驗收見 [`restart-checklist.md`](./restart-checklist.md)。
+- Smoke test 只對 `/api/question-bank/stats` 使用 admin token，沒有用 token 迴圈呼叫所有 GET。
+- 重啟步驟、local caller 盤點、token 安全用法與 header 驗收見 [`restart-checklist.md`](./restart-checklist.md)。
 
 ---
 
@@ -535,7 +539,8 @@ Staging：
 - `tests/test_runtime_security.py`：bind／forwarded／bypass 啟動檢查。
 - `tests/test_route_policy.py`：Mount／WebSocket 列舉測試。
 - `tests/test_processing.py`：測試 fixture 明確開啟 local bypass。
-- `specs/011-auth-registration/evaluation.md`：更新至 v0.6，納入 10 點、七項決策與實測結果。
+- `tests/test_judgment_download.py`：修正並行下載測試對完成順序的 flaky 假設。
+- `specs/011-auth-registration/evaluation.md`：更新至 v0.7，納入 10 點、七項決策、Phase 1 cutover 與實測結果。
 - `specs/011-auth-registration/restart-checklist.md`：重啟前 local caller 盤點、staging、header 驗收與回滾。
 - `specs/011-auth-registration/execution-report.md`：本報告。
 
