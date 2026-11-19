@@ -3218,6 +3218,35 @@ function indexWorkflowProgressMarkup(workflow) {
   if (terminal && copyStatus === "pending") {
     copyStatus = "stale";
   }
+  const copyElapsedSeconds = Number(copy.duration_ms || 0) / 1000;
+  const copyRate =
+    copyElapsedSeconds > 0 ? copyCopied / copyElapsedSeconds : 0;
+  const copyEtaSeconds =
+    copyStatus === "running" && copyRate > 0 && copyTotal > copyCopied
+      ? (copyTotal - copyCopied) / copyRate
+      : null;
+  const indexAverageRate = indexRuntimeAverage(workflow, runtime, indexed);
+  const indexTiming = indexRuntimeTiming(
+    runtime,
+    indexed,
+    expected,
+    indexAverageRate,
+  );
+  const indexEtaSeconds =
+    indexTiming?.remainingMs && indexTiming.remainingMs > 0
+      ? indexTiming.remainingMs / 1000
+      : null;
+  const indexReady =
+    copyStatus === "success" ||
+    copyStatus === "skipped" ||
+    indexed > 0 ||
+    indexStage.status === "success";
+  const indexStatus =
+    indexStage.status === "success"
+      ? "success"
+      : indexReady
+        ? indexStage.status || "pending"
+        : "pending";
   const validateStatus = String(validate.status || "pending");
   const activated =
     validateStatus === "success" &&
@@ -3309,6 +3338,16 @@ function indexWorkflowProgressMarkup(workflow) {
       extraDetails: [
         ["已複製", `${formatNumber(copyCopied)} points`],
         ["總 points", formatNumber(copyTotal)],
+        [
+          "複製速度",
+          copyRate > 0 ? `${copyRate.toFixed(1)} points/秒` : "—",
+        ],
+        [
+          "預估剩餘",
+          copyEtaSeconds !== null
+            ? formatSpanSeconds(copyEtaSeconds)
+            : "—",
+        ],
       ],
       detail:
         copyTotal > 0
@@ -3324,15 +3363,17 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "index",
       label: "金融判決向量索引",
-      caption: "金融判決向量、批次進度",
+      caption: "準備完成後，分批顯示 R 重用／E 新 embedding",
       color: "#a78bfa",
-      status: indexStage.status || "pending",
+      status: indexStatus,
       percent: indexPercent,
       current: indexed,
       total: expected,
       unit: "筆",
-      duration_ms: indexStage.duration_ms,
-      started_at: indexStage.started_at || runtime.started_at,
+      duration_ms: indexReady ? indexStage.duration_ms : 0,
+      started_at: indexReady
+        ? indexStage.started_at || runtime.started_at
+        : null,
       finished_at: indexStage.finished_at,
       extraDetails: [
         [
@@ -3342,12 +3383,20 @@ function indexWorkflowProgressMarkup(workflow) {
         ["重用", formatNumber(summary.reused)],
         ["新 embedding", formatNumber(summary.embedded)],
         ["目前月份", currentLabel],
+        [
+          "預估剩餘",
+          indexReady && indexEtaSeconds !== null
+            ? formatSpanSeconds(indexEtaSeconds)
+            : "—",
+        ],
       ],
-      detail: `${formatNumber(indexed)} / ${formatNumber(
-        expected,
-      )} 筆 · 重用 ${formatNumber(summary.reused)} · 新 embedding ${formatNumber(
-        summary.embedded,
-      )}`,
+      detail: !indexReady
+        ? "等待版本準備（複製可重用向量）完成"
+        : `${formatNumber(indexed)} / ${formatNumber(
+            expected,
+          )} 筆 · 重用 ${formatNumber(summary.reused)} · 新 embedding ${formatNumber(
+            summary.embedded,
+          )}`,
     },
     {
       key: "validate",

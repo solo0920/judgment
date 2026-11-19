@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.14
+**Version**: 1.15
 
 **Last Updated**: 2026-11-19
 
@@ -320,6 +320,14 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - 索引卡片 MUST NOT 再顯示 `index-host-strip`、「llama-server 連線測試」或另一份主機／模型 chips。
 - 主機／模型異動仍由「Embedding 主機／模型」的「檢查模型」與可點選 chip 完成；不另設 live probe endpoint。
 
+### 7.7 Pipeline 準備階段與 A／R／E
+
+- 「複製可重用向量」是版本準備階段（準備中）；在 copy 完成前，「金融判決向量索引」階段 MUST 顯示為等待，不得同時顯示兩個執行中階段。
+- copy 階段明細 MUST 顯示已複製／總 points、複製速度與預估剩餘時間。
+- 索引階段明細 MUST 顯示本次 run 的 R／E 計數、目前月份與預估剩餘時間。
+- A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成 waterfall 的 sequential 子階段；A 是 active 月份基線，不是「準備中」的一部分。
+- 若 A／R／E 要做成視覺小格，只能放在索引階段內部的並行 sub-progress，不得改變 6 個 sequential 階段的順序與時間軸。
+
 ---
 
 ## 8. 快取與 SSE
@@ -394,3 +402,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.12 | 2026-11-19 | 明訂索引掃描依 JudgmentDocument.id（匯入順序），不是月份順序；綠框只標示目前批次月份，並在 UI 加上對應提示。 |
 | 1.13 | 2026-11-19 | 新索引版本改為依 issue_month 由舊到新掃描，同月依 id；新增 last_indexed_month cursor 與 runtime.scan_order；舊 in-flight 版本保留原 ID 順序完成。 |
 | 1.14 | 2026-11-19 | 準備中 current 預覽改用與實際批次相同的月份 cursor，修正 v7 copy 期間綠框停在 202601 的預覽錯誤。 |
+| 1.15 | 2026-11-19 | 明訂 copy 是版本準備階段，索引階段需等待；新增 copy／index ETA 與 A／R／E 並行子進度規則。 |
