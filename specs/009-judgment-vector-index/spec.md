@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.15
+**Version**: 1.16
 
 **Last Updated**: 2026-11-19
 
@@ -68,6 +68,7 @@
 - 既有 in-flight 版本若只有 `last_indexed_id`、沒有 `last_indexed_month`，MAY 繼續使用原本的 ID 順序完成該版本；新版本 MUST 使用月份順序。`index_runtime.scan_order` MUST 提供 `issue_month` 或 `id` 讓 UI 說明目前 run 的順序。
 - `index_runtime.current.month` 是目前批次最後一筆判決所屬月份；綠框只表示目前批次所在月份，不代表其他月份已完成。新 run 的綠框會由舊月份往新月份移動。
 - 準備中（copy／probe 尚未進入第一批）時，`current` 預覽 MUST 使用與實際批次相同的掃描順序與 cursor；月份排序 run MUST NOT 用 ID 順序挑第一個 pending 月份，否則會短暫顯示錯誤月份。
+- 月份排序 run 在準備中時 MUST NOT 以預覽月份畫目前索引外框；current row MUST 顯示「準備中」與 copy 進度，第一批開始後才顯示實際月份、archive 與 JID。
 - 索引 summary MUST 顯示掃描順序：`issue_month` 顯示「月份（舊→新）」，舊 in-flight `id` 顯示「ID（舊 run）」，讓使用者知道目前 run 是否已套用新順序。
 - 若未來調整排序，MUST 同步更新 cursor／resume、runtime payload、UI 說明與測試，不得只改 SQL 排序。
 
@@ -403,3 +404,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.13 | 2026-11-19 | 新索引版本改為依 issue_month 由舊到新掃描，同月依 id；新增 last_indexed_month cursor 與 runtime.scan_order；舊 in-flight 版本保留原 ID 順序完成。 |
 | 1.14 | 2026-11-19 | 準備中 current 預覽改用與實際批次相同的月份 cursor，修正 v7 copy 期間綠框停在 202601 的預覽錯誤。 |
 | 1.15 | 2026-11-19 | 明訂 copy 是版本準備階段，索引階段需等待；新增 copy／index ETA 與 A／R／E 並行子進度規則。 |
+| 1.16 | 2026-11-19 | 準備中不再顯示預覽月份外框與 JID；current row 顯示準備中與 copy 進度，第一批開始後才顯示實際月份。 |

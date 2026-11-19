@@ -3267,11 +3267,12 @@ function indexWorkflowProgressMarkup(workflow) {
   const hostLabel = hostPort ? `${hostName}:${hostPort}` : String(hostName);
   const model =
     activeHost.model || selected.model || runtime.model || "—";
-  const currentLabel = current.month
-    ? `${indexMonthLabel(current.month)}${current.preparing ? "（準備中）" : ""}`
-    : progress.run_status === "running"
-      ? "準備中"
-      : "—";
+  const currentLabel =
+    indexReady && current.month
+      ? `${indexMonthLabel(current.month)}${current.preparing ? "（準備中）" : ""}`
+      : progress.run_status === "running"
+        ? "準備中"
+        : "—";
   const phases = [
     {
       key: "probe",
@@ -4044,6 +4045,8 @@ function indexMonthGridMarkup(runtime) {
   const coverageOnly = Boolean(runtime.coverage_only);
   const activeCoverage = runtime.active_coverage || {};
   const activeArchiveCoverage = runtime.active_archive_coverage || {};
+  const preparingMonthOrder =
+    Boolean(current.preparing) && runtime.scan_order === "issue_month";
   const groups = new Map();
   for (const item of months) {
     const key = String(item.month || "");
@@ -4072,7 +4075,11 @@ function indexMonthGridMarkup(runtime) {
       processed: indexMonthCoverageValue(item.processed),
     });
     if (archive) group.archives.push(archive);
-    if (current.month === key && (!current.archive || current.archive === archive)) {
+    if (
+      !preparingMonthOrder &&
+      current.month === key &&
+      (!current.archive || current.archive === archive)
+    ) {
       group.current = true;
       group.preparing = Boolean(current.preparing);
       group.currentArchive = String(current.archive || archive || "");
@@ -4601,7 +4608,25 @@ function indexRuntimeMarkup(workflow) {
         ? "準備中"
         : "目前處理"
       : "最後處理";
-  const currentLine = current.jid
+  const preparingMonthOrder =
+    Boolean(current.preparing) && runtime.scan_order === "issue_month";
+  const preparingCopy = runtime.copy || {};
+  const preparingCopyText =
+    Number(preparingCopy.total) > 0
+      ? `複製 ${formatNumber(preparingCopy.copied)} / ${formatNumber(
+          preparingCopy.total,
+        )} points`
+      : "建立新版本 collection";
+  const currentLine = preparingMonthOrder
+    ? `<div class="index-current-row">
+        <span class="badge badge-info" title="${escapeHtml(
+          scanOrderHint,
+        )}">${icon("activity", 11)}準備中</span>
+        <span class="index-current-copy">${escapeHtml(
+          preparingCopyText,
+        )}；版本準備完成後會從最舊月份開始索引，第一批開始前不標示目前月份。</span>
+      </div>`
+    : current.jid
     ? `<div class="index-current-row">
         <span class="badge badge-info" title="${escapeHtml(
           scanOrderHint,

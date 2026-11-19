@@ -601,6 +601,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "掃描順序" in processing_js.text
     assert "月份（舊→新）" in processing_js.text
     assert "等待版本準備（複製可重用向量）完成" in processing_js.text
+    assert "第一批開始前不標示目前月份" in processing_js.text
     assert "預估剩餘" in processing_js.text
     assert "indexScanOrderHint" in processing_js.text
     assert "依匯入 ID" in processing_js.text
