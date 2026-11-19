@@ -4599,6 +4599,11 @@ function indexRuntimeMarkup(workflow) {
       )}</strong></span>
       <span>Collection <code>${escapeHtml(runtime.collection || "—")}</code></span>
       <span>模式 <strong>${escapeHtml(runtime.build_mode || "—")}</strong></span>
+      <span>掃描順序 <strong>${escapeHtml(
+        runtime.scan_order === "issue_month"
+          ? "月份（舊→新）"
+          : "ID（舊 run）",
+      )}</strong></span>
       ${
         coverageOnly
           ? ""

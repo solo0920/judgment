@@ -67,6 +67,7 @@
 - 續跑 MUST 使用 `(last_indexed_month, last_indexed_id)` 作為 cursor；不得只使用 `last_indexed_id`，否則切換月份排序後會漏掉月份。
 - 既有 in-flight 版本若只有 `last_indexed_id`、沒有 `last_indexed_month`，MAY 繼續使用原本的 ID 順序完成該版本；新版本 MUST 使用月份順序。`index_runtime.scan_order` MUST 提供 `issue_month` 或 `id` 讓 UI 說明目前 run 的順序。
 - `index_runtime.current.month` 是目前批次最後一筆判決所屬月份；綠框只表示目前批次所在月份，不代表其他月份已完成。新 run 的綠框會由舊月份往新月份移動。
+- 索引 summary MUST 顯示掃描順序：`issue_month` 顯示「月份（舊→新）」，舊 in-flight `id` 顯示「ID（舊 run）」，讓使用者知道目前 run 是否已套用新順序。
 - 若未來調整排序，MUST 同步更新 cursor／resume、runtime payload、UI 說明與測試，不得只改 SQL 排序。
 
 ### 3.4 後端函式

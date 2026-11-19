@@ -598,6 +598,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "rag-model-buttons" in processing_js.text
     assert "index-host-strip" not in processing_js.text
     assert "scan_order" in processing_js.text
+    assert "掃描順序" in processing_js.text
+    assert "月份（舊→新）" in processing_js.text
     assert "indexScanOrderHint" in processing_js.text
     assert "依匯入 ID" in processing_js.text
     assert "由舊到新" in processing_js.text

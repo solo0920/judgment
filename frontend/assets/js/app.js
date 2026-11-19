@@ -2801,6 +2801,7 @@ LIMIT ${l} OFFSET ${u}`,warnings:m,meta:{store:n,filters:a,client_side:!0}}}asyn
       <span>\u7248\u672C <strong class="mono">v${r(t.version_id??"\u2014")}</strong></span>
       <span>Collection <code>${r(t.collection||"\u2014")}</code></span>
       <span>\u6A21\u5F0F <strong>${r(t.build_mode||"\u2014")}</strong></span>
+      <span>\u6383\u63CF\u9806\u5E8F <strong>${r(t.scan_order==="issue_month"?"\u6708\u4EFD\uFF08\u820A\u2192\u65B0\uFF09":"ID\uFF08\u820A run\uFF09")}</strong></span>
       ${s?"":`<span>\u91CD\u7528 <strong class="mono">${d(i.reused)}</strong></span>
             <span>\u65B0 embedding <strong class="mono">${d(i.embedded)}</strong></span>`}
     </div>
