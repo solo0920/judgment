@@ -1837,6 +1837,9 @@ def test_processing_snapshot_exposes_index_runtime(
             "jid": "TPDV,115,金訴,1,20260801,1",
             "batch_size": 64,
             "indexed": 42,
+            "reused": 52,
+            "embedded": 12,
+            "phase": "mixed",
         },
         "summary": {
             "indexed": 42,
@@ -1861,6 +1864,9 @@ def test_processing_snapshot_exposes_index_runtime(
     assert workflow["index_runtime"]["embedding"]["selected"]["host"] == "x570"
     assert workflow["index_runtime"]["months"][0]["archive"] == "202608.rar"
     assert workflow["index_runtime"]["current"]["jid"].startswith("TPDV")
+    assert workflow["index_runtime"]["current"]["reused"] == 52
+    assert workflow["index_runtime"]["current"]["embedded"] == 12
+    assert workflow["index_runtime"]["current"]["phase"] == "mixed"
     assert [stage["key"] for stage in workflow["progress"]["stages"]] == [
         "ollama",
         "qdrant",

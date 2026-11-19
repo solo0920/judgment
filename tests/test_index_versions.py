@@ -13,6 +13,7 @@ from judgment.config import Settings
 from judgment.embeddings import EmbeddingError
 from judgment.index_versions import activate_version, recipe_version, rollback_version
 from judgment.judgment_index import (
+    _index_current_view,
     _merge_prior_month_runtime,
     _prior_index_month_runtime,
     build_index_version,
@@ -683,3 +684,50 @@ def test_prior_index_month_runtime_uses_best_month_across_runs() -> None:
     prior = _prior_index_month_runtime(FakeState(), version_id=5)
     assert prior[("199601", "199601.rar")]["embedded"] == 136
     assert prior[("200506", "200506.rar")]["embedded"] == 5231
+
+
+@pytest.mark.parametrize(
+    ("reused", "embedded", "phase"),
+    [
+        (64, 0, "reuse"),
+        (0, 3, "embed"),
+        (61, 3, "mixed"),
+    ],
+)
+def test_index_current_view_reports_batch_action(
+    reused: int, embedded: int, phase: str
+) -> None:
+    rows = [
+        {
+            "issue_month": "202605",
+            "source_archive": "202605--(20261016Update).rar",
+            "jid": "TPBA,113,訴,927,20260507,2",
+            "title": "獎金",
+            "court_normalized": "臺北高等行政法院",
+            "jdate": "20260507",
+        },
+        {
+            "issue_month": "202605",
+            "source_archive": "202605--(20261016Update).rar",
+            "jid": "TPBA,113,訴,927,20260508,1",
+            "title": "獎金",
+            "court_normalized": "臺北高等行政法院",
+            "jdate": "20260508",
+        },
+    ]
+
+    view = _index_current_view(
+        rows,
+        scanned=128,
+        indexed=126,
+        reused=reused,
+        embedded=embedded,
+    )
+
+    assert view["phase"] == phase
+    assert view["reused"] == reused
+    assert view["embedded"] == embedded
+    assert view["batch_size"] == 2
+    assert view["jid"] == "TPBA,113,訴,927,20260508,1"
+    assert view["first_jid"] == "TPBA,113,訴,927,20260507,2"
+    assert view["month"] == "202605"

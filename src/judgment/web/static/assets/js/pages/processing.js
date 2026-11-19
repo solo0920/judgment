@@ -3886,35 +3886,73 @@ function indexMonthLabel(month) {
   return text.length === 6 ? `${text.slice(0, 4)}-${text.slice(4)}` : text || "—";
 }
 
-function indexHostMarkup(host, selectedUrl) {
-  const roleLabels = { primary: "主要", fallback: "備援", provided: "外部" };
+function indexCurrentPhaseMarkup(current, running = false) {
+  const reused = Number(current?.reused);
+  const embedded = Number(current?.embedded);
+  if (!Number.isFinite(reused) || !Number.isFinite(embedded)) return "";
+  if (reused <= 0 && embedded <= 0) return "";
+  const chips = [];
+  if (reused > 0) {
+    chips.push(`<span class="index-current-phase is-reuse"
+      title="R · 沿用既有向量，本批 ${formatNumber(reused)} 筆">
+      <strong>R</strong><span>沿用 ${formatNumber(reused)} 筆</span>
+    </span>`);
+  }
+  if (embedded > 0) {
+    const embedLabel =
+      current.phase === "embedding" && running ? "計算中" : "新 embedding";
+    chips.push(`<span class="index-current-phase is-embed"
+      title="E · 本次重新計算 embedding，本批 ${formatNumber(
+        embedded,
+      )} 筆">
+      <strong>E</strong><span>${embedLabel} ${formatNumber(embedded)} 筆</span>
+    </span>`);
+  }
+  return `<span class="index-current-phases" aria-label="本批次 R／E 動作">
+    <span class="index-current-phase-label">本批</span>
+    ${chips.join("")}
+  </span>`;
+}
+
+function indexEndpointLabel(endpoint, fallbackModel = "") {
+  const host = String(endpoint?.host || endpoint?.url || "—");
+  const port = endpoint?.port ? `:${endpoint.port}` : "";
+  const model = String(endpoint?.model || fallbackModel || "");
+  return `${host}${port}${model ? `:${model}` : ""}`;
+}
+
+function indexHostRoleLabel(role) {
+  if (role === "primary") return "主要";
+  if (role === "provided") return "外部";
+  if (String(role || "").startsWith("fallback")) return "備援";
+  return role || "主機";
+}
+
+function indexHostChipMarkup(host, selectedUrl, fallbackModel) {
   const models = Array.isArray(host.models) ? host.models : [];
-  const modelText = models.length ? models.join("、") : "—";
-  return `<div class="index-host-row${
-    host.url && host.url === selectedUrl ? " is-selected" : ""
-  }">
-    <div class="index-host-head">
-      <span class="badge badge-neutral">${escapeHtml(
-        roleLabels[host.role] || host.role || "主機",
-      )}</span>
-      <strong class="mono">${escapeHtml(host.host || "—")}:${escapeHtml(
-        host.port ?? "—",
-      )}</strong>
-      ${statusBadge(host.status || "unavailable")}
-      <span class="index-host-model">${escapeHtml(
-        host.model || "—",
-      )}</span>
-    </div>
-    <div class="index-host-url mono">${escapeHtml(host.url || "—")}</div>
-    <div class="index-host-models" title="${escapeHtml(modelText)}">模型：${escapeHtml(
-      modelText,
-    )}</div>
-    ${
-      host.detail
-        ? `<div class="index-host-detail">${escapeHtml(host.detail)}</div>`
-        : ""
-    }
-  </div>`;
+  const model = String(host.model || fallbackModel || "");
+  const status = String(host.status || "unavailable");
+  const usable = status === "operational" || status === "provided";
+  const selected = Boolean(
+    usable && host.url && host.url === selectedUrl,
+  );
+  const label = indexEndpointLabel({ ...host, model }, fallbackModel);
+  const statusLabel = selected ? "使用中" : usable ? "可用" : "無法取得";
+  const title = [
+    `${indexHostRoleLabel(host.role)} · ${host.url || "—"}`,
+    `狀態：${statusLabel}`,
+    host.detail || "",
+    models.length ? `模型：${models.join("、")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return `<span class="rag-model-button is-static${
+    selected ? " is-active" : ""
+  }${usable ? "" : " is-unavailable"}" title="${escapeHtml(title)}">
+    <span class="rag-model-state" aria-hidden="true"></span>
+    <span>${escapeHtml(label)}</span>
+    <span class="rag-model-current">${statusLabel}</span>
+  </span>`;
 }
 
 function indexRuntimeMonthProgress(runtime) {
@@ -4531,8 +4569,14 @@ function indexRuntimeMarkup(workflow) {
   </div>`;
   const selectedUrl = selected.url || "";
   const activeUrl = active.url || "";
-  const hostRows = hosts
-    .map((host) => indexHostMarkup(host, selectedUrl))
+  const selectedLabel = selectedUrl
+    ? indexEndpointLabel(selected, embedding.model)
+    : "—";
+  const activeLabel = activeUrl
+    ? indexEndpointLabel(active, embedding.model)
+    : "—";
+  const hostChips = hosts
+    .map((host) => indexHostChipMarkup(host, selectedUrl, embedding.model))
     .join("");
   const currentLabel =
     runtime.run_status === "running"
@@ -4547,6 +4591,14 @@ function indexRuntimeMarkup(workflow) {
           indexMonthLabel(current.month),
         )}</strong>
         <span class="mono">${escapeHtml(current.archive || "—")}</span>
+        ${
+          current.preparing
+            ? ""
+            : indexCurrentPhaseMarkup(
+                current,
+                runtime.run_status === "running",
+              )
+        }
         <span class="mono">${escapeHtml(current.jid || "—")}</span>
         <span class="index-current-copy">${escapeHtml(
           [current.court, current.title].filter(Boolean).join(" · ") || "—",
@@ -4561,44 +4613,55 @@ function indexRuntimeMarkup(workflow) {
   return `<section class="report-card processing-card index-runtime-card"${
     coverageOnly ? " hidden" : ""
   }>
-    <div class="side-card-head">
-      <span class="side-card-title">${icon("cloud", 14)}Ollama 連線測試</span>
-      ${statusBadge(embedding.status || "idle")}
-    </div>
-    ${
-      runtime.error
-        ? `<div class="processing-update-notice index-runtime-error">${icon(
-            "alert",
-            13,
-          )}<span>${escapeHtml(runtime.error)}</span></div>`
-        : ""
-    }
-    <div class="index-selected-host">
-      <span class="faint">最後選用</span>
-      <strong class="mono">${escapeHtml(selected.url || "—")}</strong>
-      <span>${escapeHtml(selected.model || embedding.model || "—")}</span>
-      <span class="mono">port ${escapeHtml(selected.port ?? "—")}</span>
+    <div class="index-host-strip rag-model-strip">
+      <div class="rag-model-strip-head">
+        <span class="rag-model-strip-title">${icon(
+          "cloud",
+          13,
+        )} Ollama 連線測試</span>
+        ${
+          selectedUrl
+            ? `<span class="rag-model-strip-base mono">${escapeHtml(
+                selectedUrl,
+              )}</span>`
+            : ""
+        }
+        <span class="rag-model-strip-current">目前：<strong>${escapeHtml(
+          selectedLabel,
+        )}</strong></span>
+        ${statusBadge(embedding.status || "idle")}
+        ${
+          activeUrl && activeUrl !== selectedUrl
+            ? `<span class="badge badge-warn">目前使用 ${escapeHtml(
+                activeLabel,
+              )}</span>`
+            : ""
+        }
+        ${
+          active.using_fallback
+            ? '<span class="badge badge-warn">已切換備援</span>'
+            : ""
+        }
+      </div>
       ${
-        activeUrl && activeUrl !== selectedUrl
-          ? `<span class="badge badge-warn">目前使用 ${escapeHtml(
-              activeUrl,
-            )}</span>`
+        runtime.error
+          ? `<div class="processing-update-notice index-runtime-error">${icon(
+              "alert",
+              13,
+            )}<span>${escapeHtml(runtime.error)}</span></div>`
           : ""
       }
       ${
-        active.using_fallback
-          ? '<span class="badge badge-warn">已切換備援</span>'
-          : ""
+        hostChips
+          ? `<div class="rag-model-buttons">${hostChips}</div>`
+          : '<p class="rag-model-empty">沒有可顯示的主機測試結果。</p>'
       }
+      <p class="rag-model-hint">依序嘗試主要、備援主機；實心為本次選用，淡色為可用備援，灰色為無法取得。滑鼠移入可查看 URL、可用模型與測試細節。${
+        embedding.tested_at
+          ? ` 測試時間 ${escapeHtml(formatDateTime(embedding.tested_at))}。`
+          : ""
+      }</p>
     </div>
-    <div class="index-host-list">${hostRows || '<div class="processing-workflow-empty">沒有可顯示的主機測試結果。</div>'}</div>
-    ${
-      embedding.tested_at
-        ? `<div class="index-runtime-foot">測試時間 ${escapeHtml(
-            formatDateTime(embedding.tested_at),
-          )}</div>`
-        : ""
-    }
   </section>
   <section class="report-card processing-card index-files-card">
     <div class="side-card-head index-runtime-head">

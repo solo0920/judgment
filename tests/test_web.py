@@ -593,6 +593,12 @@ def test_static_console_is_served(web_client) -> None:
     assert "processingTimelineProgressContext" in processing_js.text
     assert "processing-timeline-legend" in processing_js.text
     assert "index-month-block" in processing_js.text
+    assert "indexCurrentPhaseMarkup" in processing_js.text
+    assert "index-current-phase" in processing_js.text
+    assert "indexEndpointLabel" in processing_js.text
+    assert "indexHostChipMarkup" in processing_js.text
+    assert "index-host-strip" in processing_js.text
+    assert "rag-model-buttons" in processing_js.text
     assert "processing-month-stage" in processing_js.text
     assert "is-download" in processing_js.text
     assert "is-parquet" in processing_js.text
@@ -688,6 +694,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "--accent" in css.text
     assert ".index-month-are.is-active" in css.text
     assert ".index-month-are-key i.is-current" in css.text
+    assert ".index-current-phase.is-reuse" in css.text
+    assert ".index-current-phase.is-embed" in css.text
     assert ".index-wf-bar.is-hollow" in css.text
     assert ".workflow-wf-card" in css.text
     assert ".workflow-wf-bar.is-hollow" in css.text

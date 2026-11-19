@@ -13696,82 +13696,8 @@ button.chip:hover {
   }
 }
 
-.index-selected-host {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin: 12px 16px 0;
-  padding: 9px 11px;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-sm, 6px);
-  background: var(--accent-soft);
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.index-selected-host strong {
-  color: var(--ink);
-  font-size: 11px;
-}
-
-.index-host-list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 12px 16px;
-}
-
-.index-host-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm, 6px);
-  background: var(--surface-2, transparent);
-}
-
-.index-host-row.is-selected {
-  border-color: var(--success);
-  box-shadow: 0 0 0 1px var(--success);
-}
-
-.index-host-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px;
-}
-
-.index-host-head strong {
-  color: var(--ink);
-  font-size: 11px;
-}
-
-.index-host-model {
-  margin-left: auto;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-}
-
-.index-host-url {
-  color: var(--ink);
-  font-size: 9.5px;
-  overflow-wrap: anywhere;
-}
-
-.index-host-models {
-  color: var(--muted);
-  font-size: 9.5px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.index-host-detail {
-  color: var(--faint);
-  font-size: 9px;
+.index-host-strip .index-runtime-error {
+  margin: 0 0 8px;
 }
 
 .index-runtime-foot {
@@ -13820,6 +13746,48 @@ button.chip:hover {
   color: var(--ink);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.index-current-phases {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.index-current-phase-label {
+  color: var(--faint);
+  font-size: 8.5px;
+}
+
+.index-current-phase {
+  --block-color: var(--line-strong);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid
+    color-mix(in srgb, var(--block-color) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--block-color) 12%, transparent);
+  color: var(--block-color);
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.index-current-phase strong {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.index-current-phase.is-reuse {
+  --block-color: var(--info);
+}
+
+.index-current-phase.is-embed {
+  --block-color: #a78bfa;
 }
 
 .processing-current-processing {
@@ -13982,9 +13950,6 @@ button.chip:hover {
     margin-top: 5px;
   }
 
-  .index-host-model {
-    margin-left: 0;
-  }
 }
 
 .judgment-months {

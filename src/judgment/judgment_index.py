@@ -1538,6 +1538,42 @@ def index_judgments(
     return summary
 
 
+def _index_current_view(
+    rows: Sequence[Any],
+    *,
+    scanned: int,
+    indexed: int,
+    reused: int,
+    embedded: int,
+) -> Dict[str, Any]:
+    """Describe the current batch so the UI can show R/E at a glance."""
+
+    current_row = rows[-1]
+    phase = (
+        "mixed"
+        if reused and embedded
+        else "embed"
+        if embedded
+        else "reuse"
+    )
+    return {
+        "month": str(current_row["issue_month"] or ""),
+        "archive": str(current_row["source_archive"] or ""),
+        "jid": str(current_row["jid"] or ""),
+        "first_jid": str(rows[0]["jid"] or ""),
+        "last_jid": str(current_row["jid"] or ""),
+        "title": str(current_row["title"] or ""),
+        "court": str(current_row["court_normalized"] or ""),
+        "jdate": str(current_row["jdate"] or ""),
+        "batch_size": len(rows),
+        "scanned": scanned,
+        "indexed": indexed,
+        "reused": reused,
+        "embedded": embedded,
+        "phase": phase,
+    }
+
+
 def build_index_version(
     *,
     session_factory,
@@ -2216,6 +2252,38 @@ def build_index_version(
                 else:
                     reused_flags[index] = True
 
+            batch_reused = len(rows) - len(changed_indices)
+            batch_embedded = len(changed_indices)
+            current_view = _index_current_view(
+                rows,
+                scanned=scanned,
+                indexed=indexed,
+                reused=batch_reused,
+                embedded=batch_embedded,
+            )
+            current_key = (
+                current_view["month"],
+                current_view["archive"],
+            )
+            if (
+                batch_embedded
+                and state is not None
+                and state_run_id is not None
+                and runtime is not None
+            ):
+                # Publish the expensive embedding phase before it starts so the
+                # current-row can show whether this batch is R or E.
+                runtime["current"] = {**current_view, "phase": "embedding"}
+                _publish_index_runtime(
+                    state,
+                    state_run_id,
+                    runtime,
+                    message=(
+                        f"計算新 embedding {batch_embedded:,} 筆 · "
+                        f"{current_key[0] or '—'} {current_key[1] or '—'}"
+                    ),
+                )
+
             if changed_indices and previous:
                 previous_version_id = int(previous["version_id"])
                 old_point_ids = [
@@ -2352,11 +2420,6 @@ def build_index_version(
                         if int(item["total"])
                         else None
                     )
-                current_row = rows[-1]
-                current_key = (
-                    str(current_row["issue_month"] or ""),
-                    str(current_row["source_archive"] or ""),
-                )
                 for key, item in month_runtime.items():
                     if key == current_key:
                         item["status"] = "running"
@@ -2373,19 +2436,9 @@ def build_index_version(
                     key=lambda item: (item["month"], item["archive"]),
                     reverse=True,
                 )
-                runtime["current"] = {
-                    "month": current_key[0],
-                    "archive": current_key[1],
-                    "jid": str(current_row["jid"] or ""),
-                    "first_jid": str(rows[0]["jid"] or ""),
-                    "last_jid": str(current_row["jid"] or ""),
-                    "title": str(current_row["title"] or ""),
-                    "court": str(current_row["court_normalized"] or ""),
-                    "jdate": str(current_row["jdate"] or ""),
-                    "batch_size": len(rows),
-                    "scanned": scanned,
-                    "indexed": indexed,
-                }
+                current_view["scanned"] = scanned
+                current_view["indexed"] = indexed
+                runtime["current"] = current_view
                 runtime["embedding"]["active"] = _active_embedding_view(
                     embedder, model
                 )
@@ -2399,7 +2452,7 @@ def build_index_version(
                 progress_message = (
                     f"索引 {indexed:,}/{expected_count:,} · "
                     f"{current_key[0] or '—'} {current_key[1] or '—'} · "
-                    f"{current_row['jid']}"
+                    f"{current_view['jid']}"
                 )
                 _publish_index_runtime(
                     state,
