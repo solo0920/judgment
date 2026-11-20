@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.5
+**Version**: 1.6
 
 **Last Updated**: 2026-11-19
 
@@ -286,6 +286,7 @@ hollowWidth = slotWidth - fillWidth
 - 準備階段 MAY 在明細顯示速率與預估剩餘時間（例如 copy points/秒、剩餘時間）。
 - 索引階段 MAY 在明細顯示 A／R／E 的並行子進度與預估剩餘時間；A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成多個 sequential waterfall 階段。
 - 「準備中」是版本準備／copy 的全域狀態，不是 A 分格的一部分；A 仍是 active collection 的月份基線覆蓋。
+- copy 是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
 
 ## 8. 間距、尺寸與視覺 token
 
@@ -527,6 +528,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 | --- | --- | --- |
 | 1.4 | 2026-11-19 | 對齊全站進度規格：未完成區段改為階段色 25% 淺色 + 1px 外框；等待軌道使用 25% 階段色。 |
 | 1.5 | 2026-11-19 | 明訂 sequential waterfall 下游階段必須等待上游完成；新增準備階段 ETA 與索引 A／R／E 子進度規則，A／R／E 不得拆成 sequential 階段。 |
+| 1.6 | 2026-11-20 | 明訂 03 copy 是全域 points 準備階段，不得畫成第四個月份分格或填入 R／E；R 是 04 逐月掃描沿用進度。 |
 | 1.3 | 2026-11-16 | 將 `#/home` 即時摘要載入 Pipeline 納入適用範圍；新增 `/api/home` 階段計時、`home-wf-slow` 最慢階段標示與 `HOME_WF_OPEN_STAGES` 參考實作。 |
 | 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
 | 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |

@@ -618,6 +618,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "R 一律使用本次 run 的 processed／total" in processing_js.text
     assert "R 完成：本次 run 已處理完成的月份數" in processing_js.text
     assert "R 未完成：本次 run 尚未完成 R 的月份數" in processing_js.text
+    assert "全域 points；不列入月份 A／R／E" in processing_js.text
+    assert "04 逐月掃描沿用；03 複製為全域 points" in processing_js.text
+    assert "03 複製可重用向量是全域 points 準備階段" in processing_js.text
     assert "月份（舊→新）" in processing_js.text
     assert "等待版本準備（複製可重用向量）完成" in processing_js.text
     assert "第一批開始前不標示目前月份" in processing_js.text

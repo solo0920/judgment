@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.6
+**Version**: 1.7
 
 **Last Updated**: 2026-11-19
 
@@ -172,6 +172,8 @@ A／R／E 的具體映射：
 | E | 無 E backlog：active 覆蓋，文字標示「無 E backlog／不需新 embedding」；有 E backlog：本次 run latest archive 的 `processed / total` | 有 E backlog 時用 active 覆蓋、R 進度；無 E backlog 時把 active 覆蓋說成「本次已 embedding」 |
 
 「E backlog」指該月 latest archive 尚未被 active collection 完整覆蓋。無 E backlog 的未變更月份不需要新 embedding，E 可顯示實心；R 仍是本次 run 的工作，尚未掃到的後續月份 MUST 顯示 25% 淺色。仍有 E backlog 的月份，R／E 都必須顯示本次 run 進度，未處理前維持 25% 淺色。
+
+03「複製可重用向量」是全域 points 準備階段，MUST NOT 畫成第四個月份分格，也不得把 copy 完成填入 R／E。月份方格的 R 只代表 04 索引階段逐月掃描的沿用進度；03 的完成只顯示在 sequential waterfall 的 copy 階段。
 
 **Current window rule**：R 一律使用本次 run 的 `processed / total`，不得用 active 覆蓋把任何尚未掃到的月份畫成完成；目前批次所在月份（`is-current`）只決定外框，不改變 R 的資料來源。E 在無 E backlog 時仍可實心，但 tooltip 必須明示「無 E backlog／不需新 embedding」，不得顯示成「本次 E 已完成」。
 
@@ -440,4 +442,5 @@ DOM class：
 | 1.4 | 2026-11-19 | 釐清適用範圍：categorical 下載／檢查狀態表不套用 25% 進度公式；判決匯入初次載入即標示 `is-processing-current` 虛線框；完成 partial 進度樣式一致性。 |
 | 1.5 | 2026-11-20 | 修正 current window：當前月份或本次 run 已開始時，R 必須使用 run 進度，不得用 active 覆蓋畫成完成；無 E backlog 的 E 實心必須標示「不需新 embedding」。 |
 | 1.6 | 2026-11-20 | 修正 R 的語意：R 一律使用本次 run 進度，所有尚未掃到的後續月份為 25% 淺色；active 覆蓋只保留給 A 與無 E backlog 的 E。 |
+| 1.7 | 2026-11-20 | 明訂 03 copy 是全域準備階段，不得畫成第四個月份分格或填入 R／E；R 只代表 04 逐月掃描沿用進度。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

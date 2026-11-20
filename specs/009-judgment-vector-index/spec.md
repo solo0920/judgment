@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.18
+**Version**: 1.19
 
 **Last Updated**: 2026-11-19
 
@@ -329,6 +329,7 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - copy 階段明細 MUST 顯示已複製／總 points、複製速度與預估剩餘時間。
 - 索引階段明細 MUST 顯示本次 run 的 R／E 計數、目前月份與預估剩餘時間。
 - A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成 waterfall 的 sequential 子階段；A 是 active 月份基線，不是「準備中」的一部分。
+- 「複製可重用向量」是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E。R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
 - 若 A／R／E 要做成視覺小格，只能放在索引階段內部的並行 sub-progress，不得改變 6 個 sequential 階段的順序與時間軸。
 
 ---
@@ -409,3 +410,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.16 | 2026-11-19 | 準備中不再顯示預覽月份外框與 JID；current row 顯示準備中與 copy 進度，第一批開始後才顯示實際月份。 |
 | 1.17 | 2026-11-20 | 修正 current window：current 或本次 run 已開始的月份，R 必須顯示 run 進度，不得用 active 覆蓋畫成完成；無 E backlog 的 E 實心必須標示「不需新 embedding」。 |
 | 1.18 | 2026-11-20 | 修正 R 的語意：R 一律使用本次 run 進度，所有尚未掃到的後續月份為 25% 淺色；active 覆蓋只保留給 A 與無 E backlog 的 E。 |
+| 1.19 | 2026-11-20 | 明訂 03 copy 是全域 points 準備階段，不得畫成第四個月份分格或填入 R／E；R 是 04 逐月掃描沿用進度。 |

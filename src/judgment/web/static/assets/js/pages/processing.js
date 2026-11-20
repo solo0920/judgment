@@ -3345,6 +3345,7 @@ function indexWorkflowProgressMarkup(workflow) {
       extraDetails: [
         ["已複製", `${formatNumber(copyCopied)} points`],
         ["總 points", formatNumber(copyTotal)],
+        ["範圍", "全域 points；不列入月份 A／R／E"],
         [
           "複製速度",
           copyRate > 0 ? `${copyRate.toFixed(1)} points/秒` : "—",
@@ -3397,6 +3398,7 @@ function indexWorkflowProgressMarkup(workflow) {
             current.embedded || 0,
           )}`,
         ],
+        ["R 定義", "04 逐月掃描沿用；03 複製為全域 points"],
         [
           "預估剩餘",
           indexReady && indexEtaSeconds !== null
@@ -4313,7 +4315,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，E 可使用 active 覆蓋顯示完成；R 一律使用本次 run 的 processed／total，尚未掃到的後續月份維持 25% 淺色。仍有 E backlog 的月份，R／E 都使用本次 run 的 processed／total。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，E 可使用 active 覆蓋顯示完成；R 一律使用本次 run 的 processed／total，尚未掃到的後續月份維持 25% 淺色。仍有 E backlog 的月份，R／E 都使用本次 run 的 processed／total。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。03 複製可重用向量是全域 points 準備階段，不會重複畫成月份分格；R 是 04 逐月掃描進度。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
         runtime,
       )}綠框只標示目前批次所在月份。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
   </div>`;
