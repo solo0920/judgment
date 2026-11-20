@@ -10327,6 +10327,18 @@ button.chip:hover {
   white-space: nowrap;
 }
 
+.index-wf-phase {
+  font-weight: 700;
+}
+
+.index-wf-phase.is-reuse {
+  color: var(--info);
+}
+
+.index-wf-phase.is-embedding {
+  color: #a78bfa;
+}
+
 .rag-wf-chevron {
   display: inline-flex;
   color: var(--faint);

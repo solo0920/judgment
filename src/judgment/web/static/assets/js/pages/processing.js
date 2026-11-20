@@ -3374,6 +3374,13 @@ function indexWorkflowProgressMarkup(workflow) {
       caption: "準備完成後，分批顯示 R 重用／E 新 embedding",
       color: "#a78bfa",
       status: indexStatus,
+      phaseKey:
+        currentPhaseLabel === "R 重用"
+          ? "reuse"
+          : currentPhaseLabel === "E 新 embedding"
+            ? "embedding"
+            : "",
+      phaseLabel: indexStatus === "running" ? currentPhaseLabel : "",
       percent: indexPercent,
       current: indexed,
       total: expected,
@@ -3534,6 +3541,11 @@ function indexWorkflowProgressMarkup(workflow) {
         : formatIndexWorkflowDuration(phase.computedDuration);
       const progressSuffix =
         phase.status === "running" ? ` · ${percentText(phase.percent)}` : "";
+      const phaseMarkup = phase.phaseLabel
+        ? `<span class="index-wf-phase is-${escapeHtml(
+            phase.phaseKey || "unknown",
+          )}">${escapeHtml(phase.phaseLabel)}</span>`
+        : "";
       let barMarkup = "";
       if (phase.bar) {
         const left = Math.max(0, Math.min(100, phase.bar.start));
@@ -3617,7 +3629,9 @@ function indexWorkflowProgressMarkup(workflow) {
             </span>
             <span class="rag-wf-stage-meta">${escapeHtml(
               durationLabel,
-            )}${escapeHtml(progressSuffix)} · ${escapeHtml(
+            )}${escapeHtml(progressSuffix)}${
+              phaseMarkup ? ` · ${phaseMarkup}` : ""
+            } · ${escapeHtml(
               statusInfo(phase.status).label,
             )} <span class="rag-wf-chevron">${icon(
               "chevronRight",
