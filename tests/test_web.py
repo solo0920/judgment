@@ -547,7 +547,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-month-are" in processing_js.text
     assert "index-month-are-key" in processing_js.text
     assert "index-month-are-summary" in processing_js.text
-    assert "A／R／E 階段圖例" in processing_js.text
+    assert "R／E 階段圖例" in processing_js.text
     assert "目前索引月份（實線）" in processing_js.text
     assert "indexMonthAreBlock" in processing_js.text
     assert "archiveUpdateRank" in processing_js.text
@@ -618,19 +618,19 @@ def test_static_console_is_served(web_client) -> None:
     assert "R 一律使用本次 run 的 processed／total" in processing_js.text
     assert "R 完成：本次 run 已處理完成的月份數" in processing_js.text
     assert "R 未完成：本次 run 尚未完成 R 的月份數" in processing_js.text
-    assert "全域 points；不列入月份 A／R／E" in processing_js.text
+    assert "全域 points；不列入月份 R／E" in processing_js.text
     assert "04 逐月掃描沿用；03 複製為全域 points" in processing_js.text
     assert "03 複製可重用向量是全域 points 準備階段" in processing_js.text
     assert "index-wf-phase" in processing_js.text
     assert "phaseLabel" in processing_js.text
     assert "03 複製（全域）" in processing_js.text
-    assert "A · 既有版本覆蓋（依月份，非 03 copy）" in processing_js.text
-    assert "A 已覆蓋月份" in processing_js.text
-    assert "A 既有版本" in processing_js.text
-    assert "04 金融判決向量索引 · 月份 A／R／E" in processing_js.text
+    assert "R · 本次沿用既有向量" in processing_js.text
+    assert "A 已覆蓋月份" not in processing_js.text
+    assert "A 既有版本" not in processing_js.text
+    assert "04 金融判決向量索引 · 月份 R／E" in processing_js.text
     assert "index-wf-are-legend" in processing_js.text
     assert "index-wf-are-breakdown" in processing_js.text
-    assert "A／R／E 分流" in processing_js.text
+    assert "R／E 分流" in processing_js.text
     assert "R 本次沿用" in processing_js.text
     assert "E 本次新 embedding" in processing_js.text
     assert "R 藍／E 紫" in processing_js.text
@@ -741,13 +741,13 @@ def test_static_console_is_served(web_client) -> None:
     assert css.status_code == 200
     assert "--accent" in css.text
     assert ".index-month-are.is-active" in css.text
-    assert ".index-month-block.is-active" in css.text
-    assert "--block-color: #f97316" in css.text
+    assert ".index-month-block.is-active" not in css.text
+    assert "--block-color: #f97316" not in css.text
     assert ".index-month-are-key i.is-current" in css.text
     assert ".index-current-phase.is-reuse" in css.text
     assert ".index-current-phase.is-embed" in css.text
     assert ".index-wf-bar.is-hollow" in css.text
-    assert ".index-wf-are-legend i.is-active" in css.text
+    assert ".index-wf-are-legend i.is-active" not in css.text
     assert ".index-wf-are-breakdown" in css.text
     assert ".index-wf-are-row.is-reuse" in css.text
     assert ".index-wf-are-row.is-embed" in css.text
@@ -3789,7 +3789,7 @@ def test_judgment_vector_index_spec_is_canonical() -> None:
         "不是從 `raw_rar` 檔案清單選出",
         "以月份計，不是 RAR 檔數",
         "coverage-only",
-        "A／R／E",
+        "R／E",
         "index_pending_count",
         "Qdrant 向量索引待補",
         "capabilities.index_pending_months",

@@ -2,11 +2,11 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.24
+**Version**: 1.25
 
 **Last Updated**: 2026-11-20
 
-**Applies To**: `#/processing` 的「Qdrant判決向量索引版本建置」workflow、索引檔案時間表（A／R／E）、覆蓋率模式（coverage-only）、建置模式（build mode）與相關 SSE／快取。
+**Applies To**: `#/processing` 的「Qdrant判決向量索引版本建置」workflow、索引檔案時間表（R／E；A 僅內部 baseline）、覆蓋率模式（coverage-only）、建置模式（build mode）與相關 SSE／快取。
 
 **Parent Specification**: [`../004-web-console/spec.md`](../004-web-console/spec.md)
 
@@ -20,9 +20,9 @@
 
 ## 1. 目的
 
-本規格定義 Qdrant 判決向量索引版本建置的資料來源、A／R／E 判斷、coverage-only 顯示、archive 選擇、月份統計與 UI 契約，避免把「RAR 檔數」與「待索引月份數」混為一談。
+本規格定義 Qdrant 判決向量索引版本建置的資料來源、R／E 判斷、coverage-only 顯示、archive 選擇、月份統計與 UI 契約，避免把「RAR 檔數」與「待索引月份數」混為一談。
 
-本規格是此 workflow 的 canonical source；`progress-visualization.md` 只定義通用進度視覺規則，衝突時以本規格對 A／R／E 與 archive 的判斷為準。
+本規格是此 workflow 的 canonical source；`progress-visualization.md` 只定義通用進度視覺規則，衝突時以本規格對 R／E、A 內部 baseline 與 archive 的判斷為準。
 
 ---
 
@@ -36,7 +36,7 @@
 | Active collection | 目前 alias 指向的 Qdrant collection。 |
 | Baseline archive | 同月份中，不是最新 archive 的舊 archive；代表上一個正式版本的既有覆蓋。 |
 | Latest archive | 同月份中，archive 名稱內 `YYYYMMDDUpdate` 日期最大的 archive。 |
-| A | Active baseline：baseline archive 的既有覆蓋。 |
+| A | Active baseline：active collection 對目前 archive 的既有覆蓋；只用於 E 無 backlog 判斷，不顯示為 04 月份分格。 |
 | R | Reuse：本次沿用既有向量、不重新計算 embedding。 |
 | E | Embed：最新 archive 中需要新 embedding 的判決。 |
 | Coverage-only | 沒有本次建置 run，只顯示 active collection 的實際月份覆蓋。 |
@@ -85,7 +85,7 @@
   - `_index_month_coverage_runtime()`：沒有 run 時的 coverage-only payload。
   - `_coverage_month_map()`：active coverage 對照。
 - `src/judgment/web/static/assets/js/pages/processing.js`
-  - `indexMonthGridMarkup()`：A／R／E 月份時間表。
+  - `indexMonthGridMarkup()`：R／E 月份時間表（A 僅內部 baseline，不渲染）。
   - `archiveUpdateRank()`：最新 archive 判斷。
   - `indexRuntimeMarkup()`：索引版本面板與 summary。
 
@@ -107,58 +107,70 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 
 - `baseline archives = 同月份所有 archive - latest archive`。
 - 若沒有較舊 archive，`baseline archive = latest archive`。
-- A／R 的填充比例使用 baseline archives 的 `processed / total`。
+- R 的填充比例使用 baseline archives 的 `processed / total`；A 僅用於 E 無 backlog 判斷。
 - E 的填充比例使用 latest archive 的 `processed / total`。
 
 ### 4.3 不可相加
 
-- MUST NOT 將同月份所有 archive 的 `total`、`processed` 相加後作為 A／R／E 的單一比例。
+- MUST NOT 將同月份所有 archive 的 `total`、`processed` 相加後作為 R／E 的單一比例。
 - 原因：新 archive 可能只包含 delta 判決，舊 archive 可能已被新版本沿用以外的完整基線；相加會重複計算並讓已完成月份看起來仍是淺色。
-- 只有「最新 archive」用於 E；「baseline archives」用於 A／R。
+- 只有「最新 archive」用於 E；「baseline archives」用於 R；A baseline 只用於 E 無 backlog 判斷。
 
 ---
 
-## 5. A／R／E 判斷
+## 5. R／E 判斷與 A 內部 baseline
+
+04 月份時間表只顯示兩個分格：
+
+| 分格 | 意義 |
+| --- | --- |
+| R 沿用 | 本次 run 沿用既有向量、不重新計算 embedding 的進度。 |
+| E 新 embedding | 本次 run 需要新 embedding 的進度。 |
+
+A（active collection 對目前 archive 的覆蓋）仍然存在，但只作為 **E 無 backlog 判斷的內部 baseline**；MUST NOT 顯示成第三個月份分格、summary 項目、legend 項目或獨立 tooltip 行。
 
 ### 5.1 Coverage-only
 
-沒有本次建置 run 時：
+沒有本次建置 run 時，時間表仍只顯示 R／E：
 
 | 分格 | 來源 | 填充比例 |
 | --- | --- | --- |
-| A 既有版本 | baseline archives | `baselineProcessed / baselineTotal` |
-| R 沿用 | baseline archives | 同 A；代表舊版文件沿用既有向量 |
+| R 沿用 | baseline archives | `baselineProcessed / baselineTotal` |
 | E 新 embedding | latest archive | `latestProcessed / latestTotal` |
 
-- `baselineTotal > 0 && baselineProcessed >= baselineTotal`：A／R 完成。
+- `baselineTotal > 0 && baselineProcessed >= baselineTotal`：R 完成。
 - `latestTotal > 0 && latestProcessed >= latestTotal`：E 完成。
-- 沒有 baseline coverage 的月份：A／R 未完成。
-- 沒有 latest archive coverage 的月份：E 未完成。
+- Coverage-only 的數字來自 active collection 覆蓋，頁面 MUST 明確標示「目前沒有本次 run；R／E 時間表為 active collection 覆蓋檢視」，不得讓人誤認為本次建置進度。
+- A 只用於判斷 latest archive 是否已由 active collection 完整覆蓋（E 無 backlog），不得畫成獨立分格。
 
 ### 5.2 Build mode
 
 有本次建置 run 時：
 
 - Runtime `months[].reused`、`embedded`、`processed`、`total` 來自 `_month_runtime_rows()` 與 run checkpoint；同一月份仍以 archive 分組，不得把新舊 archive 的 total／processed 相加。
-- 最新 archive 用於 E；較舊 archive 作為 A／R 基線；只有一個 archive 時 baseline = latest。
+- 最新 archive 用於 E；較舊 archive 作為 R 基線；只有一個 archive 時 baseline = latest。
 - Build mode 先判斷該月 latest archive 是否仍有 E backlog：
   - `latestActiveComplete = active archive processed >= total`（latest archive 已被 active collection 完整覆蓋）。
   - **無 E backlog 的未變更月份**：E MAY 使用 active collection 覆蓋顯示實心，但 tooltip MUST 標示「無 E backlog／不需新 embedding」。R 仍是本次 run 的工作：尚未掃到的後續月份 MUST 使用 0%／25% 淺色，current 或已開始月份使用本次 run baseline `processed / total`。
   - **有 E backlog**：R／E MUST 只使用本次 run checkpoint（`runtime.months[].processed / total`）；本次 run 尚未處理的 archive／月份 MUST 顯示 25% 淺色，不得用 active collection 覆蓋提前標成實心。
   - 只有本次 run 實際 `processed >= total` 時，R／E 才轉為實心完成。
-- A 分格 MUST 使用 active collection 的月份覆蓋；沒有 active 覆蓋時使用 baseline 進度。A 與 R／E 是不同來源，不得互相填入。
-- `runtime.active_archive_coverage` MAY 用於 A、無 E backlog 的 E 與 sidebar backlog 計算，但 MUST NOT 用於 R，也不得用來把仍有 E backlog 且尚未處理的 R／E 標成完成。
+- A 只用於 `latestActiveComplete` 判斷；MUST NOT 填入 R 或 E 的本次 run 進度，也不得渲染成月份分格。
+- `runtime.active_archive_coverage` MAY 用於 E 無 backlog 與 sidebar backlog 計算，但 MUST NOT 用於 R，也不得用來把仍有 E backlog 且尚未處理的 R／E 標成完成。
 - `currentComplete = processed >= total` 用於仍有 E backlog 月份的 R／E 完成判定。
 - `_merge_prior_index_runtime()` 會在續跑時恢復相同版本的 R／E counters；不得因 resume 把已完成月份顯示成空白。
 
 ### 5.3 Summary 統計
 
-- A 已覆蓋月份：既有版本（active collection）在該月已完整建立向量的月份數；依月份統計，不得以 R 完成數或全域 03 copy 代替。
-- R 完成月份：本次 run 已處理完成的月份數；尚未掃到的後續月份不列入完成，即使 active collection 已有完整向量。
+04 時間表 summary 只顯示：
+
+- R 完成月份：本次 run 已處理完成的月份數；尚未掃到的後續月份不列入完成。
 - R 未完成月份：本次 run 尚未完成 R 的月份數；包含尚未掃到的後續月份。
 - E 完成月份：latest archive 已完整覆蓋、無需新 embedding 的月份數；包含未變更月份。
 - E 未完成月份：latest archive 仍有待補新 embedding 的月份數。
 - 總月份：時間表涵蓋的 `YYYYMM` 月份數。
+
+MUST NOT 在 04 summary 再顯示 `A 已覆蓋月份` 或任何 A 分格統計。A 只保留在後端／E backlog 判斷。
+
 - Summary 的 R／E MUST 與時間表方塊使用同一份狀態；不得另外用一套公式計算。
 - Sidebar 的 E 待補 badge 以 E 未完成 backlog 月份計，與 summary 的 E 未完成月份一致；不得使用本次 run 尚未掃到所造成的暫時 0% 當成 backlog。
 
@@ -166,30 +178,28 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 
 ### 5.4 計算責任與一致性
 
-A／R／E 有兩個不同用途，MUST 分開計算，不得互相代替：
+R／E 有兩個不同用途，MUST 分開計算，不得互相代替：
 
 | 用途 | 計算來源 | 可使用的資料 | 不得使用 |
 | --- | --- | --- | --- |
-| 時間表方塊與 summary | `processing.js` `indexMonthGridMarkup()` | A：`active_coverage`；R：一律使用本次 run `months[].processed / total`；E：無 E backlog 用 active 覆蓋，有 E backlog 用本次 run `months[].processed / total` | 用 active 覆蓋填 R；用 active 覆蓋填有 E backlog 的 E |
+| 時間表方塊與 summary | `processing.js` `indexMonthGridMarkup()` | R：一律使用本次 run `months[].processed / total`；E：無 E backlog 用 active 覆蓋，有 E backlog 用本次 run `months[].processed / total` | 用 active 覆蓋填 R；用 active 覆蓋填有 E backlog 的 E；顯示 A 分格 |
 | Sidebar／workflow 待補 badge | 後端 `_index_month_are()`／`_index_month_counts()` | latest archive 仍有新 embedding 的 E backlog 月份 | 本次 run 尚未掃到造成的暫時 0% |
 
-- 時間表的 A／R／E summary MUST 由畫面同一批 `activeState`／`reuseState`／`embedState` 聚合；A 數量 MUST 使用 `activeState.complete`，不得使用 `reuseState.complete`。
-- 後端 `_index_month_are()` 是 backlog 計算，MUST NOT 用來取代時間表方塊的 E backlog 判斷；前端判斷 `latestActiveComplete` 後，才決定 R／E 是否可用 active 覆蓋，且 current／本次 run 已開始的 R MUST 優先使用 run 進度。
+- 時間表的 R／E summary MUST 由畫面同一批 `reuseState`／`embedState` 聚合；A 不參與 summary。
+- 後端 `_index_month_are()` 是 backlog 計算，MUST NOT 用來取代時間表方塊的 E backlog 判斷；前端判斷 `latestActiveComplete` 後，才決定 E 是否可用 active 覆蓋，且 current／本次 run 已開始的 R MUST 優先使用 run 進度。
 - 若未來把時間表計算移到後端，MUST 同時提供「時間表顯示狀態」與「E backlog」兩個獨立 payload／函式，不得共用同一份 counts。
-- 任何 A／R／E 顯示變更 MUST 同時更新本規格、`progress-visualization.md` 與對應測試；只改 CSS 或只改其中一個計算來源不算完成。
+- 任何 R／E 顯示變更 MUST 同時更新本規格、`progress-visualization.md` 與對應測試；只改 CSS 或只改其中一個計算來源不算完成。
 
 回歸案例：
 
-- 201805 只有一個 archive，latest active 19,705 / 19,705 = 100%、本次 run 0%、非 current → 無 E backlog；A／E MAY 實心，但 R MUST 為 0% 淺色，因為本次 run 尚未處理該月 R。
+- 201805 只有一個 archive，latest active 19,705 / 19,705 = 100%、本次 run 0%、非 current → 無 E backlog；E MAY 實心，但 R MUST 為 0% 淺色，因為本次 run 尚未處理該月 R。
 - 200906 只有一個 archive，latest active 15,576 / 15,576 = 100%、本次 run processed 45.1%、current → R MUST 為 45.1% 實色 + 54.9% 淺色；E MAY 實心但 MUST 標示「無 E backlog／不需新 embedding」。
 - 202608 latest archive active 14 / 1,232（1.1%）、本次 run 0% → 有 E backlog，R／E MUST 為 0% 淺色，不得實心。
-- 202512 latest archive 只有 3 筆、active 0 / 3 → 雖 baseline 36,971 / 36,971 已覆蓋，仍有 E backlog，R／E MUST 為 0% 淺色；202512 之前的無 backlog 月份則維持實心。
+- 202512 latest archive 只有 3 筆、active 0 / 3 → 雖 baseline 36,971 / 36,971 已覆蓋，仍有 E backlog，R／E MUST 為 0% 淺色；202512 之前的無 backlog 月份則維持 E 實心、R 依本次 run。
 - 202607 本次 run processed 68.9% → R MUST 為 68.9% 實色 + 31.1% 淺色。
-- 202609 active 0%、本次 run 0% → A／R／E 均為 0% 淺色，不是實心也不是無資料空心。
-- Summary `A 已覆蓋月份` MUST 以 A 完成數計算；不得再出現「A 367、E 待補 42」這種由 R 完成數冒充 A 的矛盾。
-- A 是依月份的既有版本覆蓋，不是全域處理階段；全域 03 copy 只能顯示在 waterfall 或獨立 chip，MUST NOT 填入 A 分格。
-
----
+- 202609 active 0%、本次 run 0% → R／E 均為 0% 淺色，不是實心也不是無資料空心。
+- 04 月份表格、legend、summary、tooltip MUST NOT 出現 A 分格或 `A 已覆蓋月份`。
+- A 是內部 baseline，不是全域處理階段；全域 03 copy 只能顯示在 waterfall 或獨立 chip，MUST NOT 填入 R／E 分格。
 
 ## 6. 更新檔案與未變更判決
 
@@ -235,27 +245,26 @@ E 未完成 = 最新 archive 尚未完成的「月份數」
 
 ### 7.1 月份 cell
 
-- 中性底色，不使用整格綠／紅／灰狀態背景。
-- 三個分格：A（橘）、R（藍）、E（紫）。
+- 每個月份 cell MUST 只包含 **R／E 兩個分格**；不得再顯示 A 分格。
 - 每個分格 MUST 明確標記 `is-complete`／`is-incomplete`／`is-empty`，不得只依 `--fill:0%` 的預設背景判定狀態。
 - 完成：100% 實心。
 - 未完成：未完成區段 25% 淺色 + 同色外框；`25% 淺色` 是狀態色，不是固定 25% 進度。
 - `--fill: 0%` 時整格皆為 25% 淺色；`--fill: N%` 時 0–N% 為完成色實心、N–100% 為同色 25% 淺色。
 - 執行中：完成色進度條，未完成區段 25% 淺色。
 - 無資料：淡色空心，不是 25% 淺色；只有 total=0／沒有 archive 才算無資料。
-- A／R／E 可以同時為 25% 淺色（例如新月份尚無 active baseline，且本次 run 尚未處理）；只要該月 total>0，就屬未完成，不是無資料。
+- R／E 可以同時為 25% 淺色（例如尚未掃到的月份）；只要該月 total>0，就屬未完成，不是無資料。
 - 目前索引月份：實線 accent 外框，padding 不使用狀態底色，無脈動動畫。
 - Build mode 的 R 一律使用本次 run 的 `processed / total`；尚未掃到的後續月份 MUST 維持 25% 淺色，不得以 active 覆蓋提前標成完成。latest archive 若已被 active collection 完整覆蓋（無 E backlog），只有 E MAY 使用 active 覆蓋顯示實心；仍有 E backlog 的月份，E MUST 使用本次 run 的 `processed / total`。
 - 無 E backlog 的 E 分格若使用 active 覆蓋顯示實心，tooltip MUST 標示「無 E backlog／不需新 embedding」。
 - 仍有 E backlog 且尚未處理的月份 MUST 顯示 25% 淺色；目前 run 進行中的 R／E 分格 MUST 顯示「已完成比例實色 + 其餘 25% 淺色」；run 停止／stale 後仍保留該 run 最後的 `processed / total`，不得回退成 active 100% 完成。
 - 綠框只代表目前批次所在月份，不代表該月已完成；目前月份 MUST NOT 因綠框或 active 覆蓋而被算入「已處理月份」。
+- 月份 cell 的 `title` tooltip MUST 只顯示 R／E 進度與目前案號；E 無 backlog 時可說明 active 版本已覆蓋，但 MUST NOT 以 `A` 作為分格名稱。
 
 ### 7.2 Summary
 
 固定顯示：
 
 ```text
-A 已覆蓋月份
 R 完成月份
 R 未完成月份
 E 完成月份
@@ -263,18 +272,19 @@ E 未完成月份
 總月份
 ```
 
+- MUST NOT 顯示 `A 已覆蓋月份` 或任何 A 統計。
 - 標籤與 tooltip MUST 明示「以月份計，不是 RAR 檔數」。
 - 不得使用彩色 badge 作為唯一狀態來源。
 
 ### 7.3 Tooltip
 
-Coverage-only 月份 tooltip MUST 顯示：
+月份 tooltip MUST 顯示：
 
-- 最新 archive 的 `processed / total`。
-- A／R 基線 `processed / total`。
-- E 新 embedding `processed / total`。
-- 待完成 E 時顯示「待完成：E 新 embedding」。
-- 目前索引月份顯示「目前索引」或「最後索引」。
+- R 本次沿用 `processed / total`。
+- E 新 embedding `processed / total`；E 無 backlog 時顯示「無 E backlog／不需新 embedding」。
+- 待完成時顯示「待完成：R 既有向量重用」或「待完成：E 新 embedding」。
+- 目前索引月份顯示「目前索引」或「最後索引」與目前案號。
+- MUST NOT 顯示 `A 既有版本` 或 `A／R 基線` 行。
 
 ### 7.4 更新提示與 badge
 
@@ -320,32 +330,29 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 
 索引卡片 MUST NOT 重複顯示第二份 llama-server 主機 strip。全站唯一的主機／模型入口是 workflow 執行資訊卡片中的「Embedding 主機／模型」selector；端點、優先順序、chip 狀態與命名依 [`../010-llama-server-runtime/spec.md`](../010-llama-server-runtime/spec.md)。
 
-- 索引 runtime 卡片只保留索引版本、collection、模式、目前處理列、A／R／E 時間表與 metrics。
+- 索引 runtime 卡片只保留索引版本、collection、模式、目前處理列、R／E 時間表與 metrics。
 - 索引卡片 MUST NOT 再顯示 `index-host-strip`、「llama-server 連線測試」或另一份主機／模型 chips。
 - 主機／模型異動仍由「Embedding 主機／模型」的「檢查模型」與可點選 chip 完成；不另設 live probe endpoint。
 
-### 7.7 Pipeline 準備階段與 A／R／E
+### 7.7 Pipeline 準備階段與 R／E
 
 - 「複製可重用向量」是版本準備階段（準備中）；在 copy 完成前，「金融判決向量索引」階段 MUST 顯示為等待，不得同時顯示兩個執行中階段。
 - copy 階段明細 MUST 顯示已複製／總 points、複製速度與預估剩餘時間。
 - 索引階段明細 MUST 顯示本次 run 的 R／E 計數、目前月份與預估剩餘時間。
-- A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成 waterfall 的 sequential 子階段；A 是 active 月份基線，不是「準備中」的一部分。
-- 「複製可重用向量」是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E。R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
-- 若 A／R／E 要做成視覺小格，只能放在索引階段內部的並行 sub-progress，不得改變 6 個 sequential 階段的順序與時間軸。
-- 金融判決向量索引（04）的 waterfall bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。此規則只改變 04 的 bar 顏色，不代表把 A／R／E 拆成 sequential 階段。
-- 04 階段明細 MUST 顯示 A／R／E 三條獨立分流 bar：A 橘 `#f97316`、R 藍、E 紫。三條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A 是月份基線，MUST NOT 畫入 04 本次 run 的進度 bar，也不得被標成目前 phase。
-- 04 階段的圖例 MUST 明示「A 另計且不畫入 04 bar；R／E 才是 04 本次 run」，避免把 A 的橘色或階段的紫色誤認為目前 batch。
-- 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示（例如 `R 重用`／`E 新 embedding`）；A 是基線，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 A／R／E 排成三個 sequential waterfall 階段。
-- A MUST NOT 被改名或替換為「03 複製可重用向量」；A 是 active collection 的月份基線，03 copy 是全域 points。03 進度只能顯示在 sequential waterfall 或獨立的「03 複製（全域）」chip，不得填入 A。
-
----
+- R／E 是同一批掃描中的並行分類，MUST NOT 被拆成 waterfall 的 sequential 子階段；A 只作內部 baseline，不顯示為子進度。
+- 「複製可重用向量」是全域 points 準備階段，MUST NOT 被畫成月份分格，也不得把 copy 完成填入 R／E。R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
+- 若 R／E 要做成視覺小格，只能放在索引階段內部的並行 sub-progress，不得改變 6 個 sequential 階段的順序與時間軸。
+- 金融判決向量索引（04）的 waterfall bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。這只改變 04 的 bar 顏色，不代表把 R／E 拆成 sequential 階段。
+- 04 階段明細 MUST 只顯示 R／E 兩條分流 bar：R 藍、E 紫。兩條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A baseline 不得畫成第三條 bar。
+- 04 階段的圖例 MUST 明示「R／E 才是 04 本次 run」，不得再出現 A 圖例。
+- 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示（例如 `R 重用`／`E 新 embedding`）；不得把 R／E 排成 sequential waterfall 階段。
 
 ## 8. 快取與 SSE
 
 - Coverage-only payload 快取 60 秒（`_INDEX_MONTH_CACHE`）。
 - Build mode 由 processing state／SSE 更新；不得以固定前端 polling 取代。
 - 初次載入由 processing topic 推送完整 snapshot；後續以 live payload 更新。
-- A／R／E 的計算必須在後端或同一份 runtime payload 中完成，不得由前端混用不同來源的 total／processed。
+- R／E 的計算必須在後端或同一份 runtime payload 中完成；A baseline 只用於 E no-backlog 判斷，不得由前端混用不同來源的 total／processed。
 - `capabilities.index_pending_months` 寫入 processing snapshot cache；`/api/updates/status` 的 `index_pending_count` 由該 cache 讀取，避免每次 sidebar badge 更新都查詢 Qdrant／PostgreSQL。
 - 資料處理頁收到新 snapshot 時 MUST 同步 `judgment:processing-pending` 事件的 `index_pending`，讓全站 sidebar badge 立即更新。
 
@@ -353,43 +360,43 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 
 ## 9. 邊界條件
 
-- 同月份只有一個 archive：baseline = latest；A／R／E 皆使用該 archive。
+- 同月份只有一個 archive：baseline = latest；R／E 皆使用該 archive；A baseline 只作 E no-backlog 判斷。
 - 同月份有多個舊 archive：baseline 為所有舊 archive 的總和；latest 仍為最新 archive。
 - `total = 0`：該分格視為無資料，不得假設 100%。
 - `processed > total`：clamp 至 100%。
-- 沒有 `active_coverage`：A／R 使用 baseline archive；不得顯示 0% 卻聲稱完成。
-- 沒有 `source_archive` 月份：空白 cell，不列入 A／R／E counts。
+- 沒有 `active_coverage`：R 使用 baseline archive；E 無 backlog 判斷視為未知，不得顯示 0% 卻聲稱完成。
+- 沒有 `source_archive` 月份：空白 cell，不列入 R／E counts。
 
 ---
 
 ## 10. 驗收清單
 
 - [ ] 同一月份多個 archive 時，E 只使用最新 archive，不與舊 archive 相加。
-- [ ] 舊 archive 作為 A／R 基線；已完成時為實心，不是 25% 淺色。
-- [ ] latest archive 無 E backlog 的未變更月份（例如 201805）A／E 可為實心，但本次 run 尚未處理時 R MUST 為 0% 淺色。
+- [ ] 舊 archive 作為 R 基線；已完成時為實心，不是 25% 淺色。
+- [ ] latest archive 無 E backlog 的未變更月份（例如 201805）E 可為實心，但本次 run 尚未處理時 R MUST 為 0% 淺色。
 - [ ] latest archive 仍有 E backlog 的月份（例如 202607／202608）R／E 使用本次 run 進度；尚未處理時為 25% 淺色。
-- [ ] A 已覆蓋月份以 A 分格完成數計算，不得用 R 完成數或全域 03 copy 代替。
+- [ ] 04 月份表格、legend、summary、tooltip MUST NOT 出現 A 分格或 `A 已覆蓋月份`。
 - [ ] Summary 的 R／E 與時間表方塊一致；sidebar E badge 與 summary E 未完成一致。
-- [ ] 每個 A／R／E 分格有明確完成／未完成／無資料狀態，不以 0% fill 的預設色冒充未完成。
+- [ ] 每個 R／E 分格有明確完成／未完成／無資料狀態，不以 0% fill 的預設色冒充未完成。
 - [ ] 新 RAR 全部 unchanged 時，不會產生新的 E 未完成月份。
 - [ ] Summary 標籤明確標示「月份」，不是 RAR 檔數。
 - [ ] E 未完成月份會在 workflow 側邊清單、workflow 面板與全站「資料處理」導覽顯示更新 badge。
 - [ ] Qdrant workflow 面板上方有更新提示與「更新」按鈕。
 - [ ] `/api/updates/status` 回傳 `index_pending_count`，且與 E 未完成月份數一致。
-- [ ] Coverage-only 沒有 run 時仍能顯示正確 A／R／E。
+- [ ] Coverage-only 沒有 run 時仍能顯示正確 R／E，並明確標示沒有本次 run。
 - [ ] Build mode 續跑能恢復 R／E counters。
 - [ ] 目前索引月份只有實線外框，無脈動動畫。
 - [ ] 目前處理列顯示本批 R／E chip；全部沿用時只顯示 R，含新 embedding 時顯示 E，混合時兩者都顯示。
 - [ ] 正在處理的 archive 其 R／E 分格使用本次 run 進度，不得被 active 100% 覆蓋提前畫成整格實心。
 - [ ] 正在處理的 R／E 分格為「已完成比例實色 + 其餘 25% 淺色」，停止後保留最後進度。
 - [ ] 0% 未完成分格整格為 25% 淺色，不是空心；只有 total=0／無 archive 才是空心。
-- [ ] A／R／E 同時為 25% 淺色時，tooltip 顯示各自 0/total 與「未完成」，不得顯示「無資料」。
+- [ ] R／E 同時為 25% 淺色時，tooltip 顯示各自 0/total 與「未完成」，不得顯示「無資料」。
 - [ ] 正在計算新 embedding 時，目前處理列的 E chip 顯示「計算中」。
 - [ ] 索引 runtime 卡片不得出現第二份主機／模型 strip。
 - [ ] 新 run 由最舊月份開始，runtime.scan_order 為 `issue_month`；舊 in-flight run 顯示 ID 順序說明。
 - [ ] 續跑使用 `(last_indexed_month, last_indexed_id)`，不得漏月份。
 - [ ] 390px 無水平溢出。
-- [ ] Tooltip 顯示最新 archive、A／R 基線與 E 進度。
+- [ ] Tooltip 顯示最新 archive、R 本次沿用與 E 新 embedding 進度；不得顯示 A／R 基線行。
 
 ---
 
@@ -422,3 +429,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.22 | 2026-11-20 | 將 A 的顯示名稱改為「既有版本／A 已覆蓋月份」，明訂 A 是依月份的既有版本覆蓋，不是全域處理階段。 |
 | 1.23 | 2026-11-20 | A 分格與圖例改為橘色。 |
 | 1.24 | 2026-11-20 | 04 waterfall bar 顏色跟隨目前 phase（R 藍／E 紫）；明細新增 A／R／E 三條獨立分流 bar，三條不相加，A 不畫入 04 本次 run bar。 |
+| 1.25 | 2026-11-20 | 04 月份時間表移除 A 分格，改為 R／E 兩格；A 只保留為 E no-backlog 的內部 baseline，不再顯示於表格、legend、summary 或 tooltip。 |

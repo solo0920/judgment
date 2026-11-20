@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.10
+**Version**: 1.11
 
 **Last Updated**: 2026-11-20
 
@@ -284,14 +284,14 @@ hollowWidth = slotWidth - fillWidth
 
 - 在 sequential waterfall 中，下游階段 MUST 保持 `pending`／等待，直到上游階段完成；不得同時顯示兩個 `running` 階段。判決向量索引 Pipeline 的「複製可重用向量」是版本準備階段，完成前「金融判決向量索引」MUST 顯示等待。
 - 準備階段 MAY 在明細顯示速率與預估剩餘時間（例如 copy points/秒、剩餘時間）。
-- 索引階段 MAY 在明細顯示 A／R／E 的並行子進度與預估剩餘時間；A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成多個 sequential waterfall 階段。
-- 金融判決向量索引（04）的 bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。這只改變 04 的 bar 顏色，不代表把 A／R／E 拆成 sequential 階段。
-- 04 階段明細 MUST 顯示 A／R／E 三條獨立分流 bar：A 橘 `#f97316`、R 藍、E 紫。三條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A 是月份基線，MUST NOT 畫入 04 本次 run 的進度 bar。
+- 索引階段 MAY 在明細顯示 R／E 的並行子進度與預估剩餘時間；R／E 是同一批掃描中的並行分類，MUST NOT 被拆成多個 sequential waterfall 階段。
+- 金融判決向量索引（04）的 bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。這只改變 04 的 bar 顏色，不代表把 R／E 拆成 sequential 階段。
+- 04 階段明細 MUST 只顯示 R／E 兩條獨立分流 bar：R 藍、E 紫。兩條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A baseline MUST NOT 畫成第三條 bar，也不得畫入 04 本次 run 的進度 bar。
 - 04 階段的圖例 MUST 明示 A 另計且不畫入 04 bar，R／E 才是 04 本次 run；避免把 A 的橘色或階段識別紫色誤認為目前 batch。
-- 「準備中」是版本準備／copy 的全域狀態，不是 A 分格的一部分；A 仍是既有版本（active collection）的月份覆蓋，依月份統計，不是全域 03 copy。
+- 「準備中」是版本準備／copy 的全域狀態，不是 R／E 分格的一部分；A 只作既有版本（active collection）的 E no-backlog 內部 baseline，不是全域 03 copy，也不顯示為月份分格。
 - copy 是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
-- 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示；A 是基線，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 A／R／E 排成三個 sequential waterfall 階段。
-- A MUST NOT 改名或替換為 03 copy；03 進度只顯示在 copy 階段或獨立的「03 複製（全域）」chip。
+- 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示；A 只作內部 baseline，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 R／E 排成 sequential waterfall 階段。
+- 03 進度只顯示在 copy 階段或獨立的「03 複製（全域）」chip，不得填入 R／E。
 
 ## 8. 間距、尺寸與視覺 token
 
@@ -542,3 +542,5 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 | 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
 | 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |
 | 1.0 | 2026-11-15 | 建立 canonical Pipeline Waterfall 規格；納入接續階段、最小可見寬度、部分完成空心 bar、展開狀態保存、響應式與驗收清單。 |
+
+| 1.11 | 2026-11-20 | 04 月份時間表移除 A 分格，只保留 R／E；A 改為 E no-backlog 內部 baseline，waterfall 明細與圖例不再顯示 A。 |

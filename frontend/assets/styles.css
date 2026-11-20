@@ -17780,10 +17780,6 @@ a.qb-bank-law:hover {
   row-gap: 5px;
 }
 
-.index-wf-are-legend i.is-active {
-  background: #f97316;
-}
-
 .index-wf-are-legend i.is-reuse {
   background: #3b82f6;
 }
@@ -17829,10 +17825,6 @@ a.qb-bank-law:hover {
   align-items: center;
   gap: 3px 8px;
   min-width: 0;
-}
-
-.index-wf-are-row.is-active {
-  --are-color: #f97316;
 }
 
 .index-wf-are-row.is-reuse {
@@ -18188,10 +18180,6 @@ a.qb-bank-law:hover {
   opacity: 0.45;
 }
 
-.index-month-block.is-active {
-  --block-color: #f97316;
-}
-
 .index-month-block.is-reuse {
   --block-color: var(--info);
 }
@@ -18336,10 +18324,6 @@ a.qb-bank-law:hover {
   height: 8px;
   border-radius: 2px;
   background: var(--surface-3);
-}
-
-.index-month-are-key i.is-active {
-  background: #f97316;
 }
 
 .index-month-are-key i.is-reuse {

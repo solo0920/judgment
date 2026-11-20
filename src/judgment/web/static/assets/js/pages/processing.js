@@ -3347,7 +3347,7 @@ function indexWorkflowProgressMarkup(workflow) {
       extraDetails: [
         ["已複製", `${formatNumber(copyCopied)} points`],
         ["總 points", formatNumber(copyTotal)],
-        ["範圍", "全域 points；不列入月份 A／R／E"],
+        ["範圍", "全域 points；不列入月份 R／E"],
         [
           "複製速度",
           copyRate > 0 ? `${copyRate.toFixed(1)} points/秒` : "—",
@@ -3373,7 +3373,7 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "index",
       label: "金融判決向量索引",
-      caption: "R 藍／E 紫；A 既有版本另計",
+      caption: "R 藍／E 紫；本次 run 進度",
       color: "#a78bfa",
       barColor:
         currentPhaseLabel === "E 新 embedding"
@@ -3421,7 +3421,7 @@ function indexWorkflowProgressMarkup(workflow) {
             : "—",
         ],
       ],
-      htmlDetails: indexAreBreakdownMarkup(runtime),
+      htmlDetails: indexReBreakdownMarkup(runtime),
       detail: !indexReady
         ? "等待版本準備（複製可重用向量）完成"
         : `${formatNumber(indexed)} / ${formatNumber(
@@ -3680,8 +3680,7 @@ function indexWorkflowProgressMarkup(workflow) {
         <span>0 ms</span>
         <span>${totalDuration > 0 ? escapeHtml(formatIndexWorkflowDuration(totalDuration)) : "—"}</span>
       </div>
-      <div class="rag-wf-legend index-wf-are-legend" aria-label="判決索引 A／R／E 顏色圖例">
-        <span><i class="is-active"></i>A 既有版本（不畫入 04 bar）</span>
+      <div class="rag-wf-legend index-wf-are-legend" aria-label="判決索引 R／E 顏色圖例">
         <span><i class="is-reuse"></i>R 本次沿用（04 藍）</span>
         <span><i class="is-embed"></i>E 新 embedding（04 紫）</span>
         <span><i class="is-hollow"></i>04 未完成（25% 淺色）</span>
@@ -4134,41 +4133,12 @@ function indexMonthGroups(runtime) {
   return groups;
 }
 
-function indexAreBreakdown(runtime) {
+function indexReBreakdown(runtime) {
   const groups = indexMonthGroups(runtime);
-  const activeCoverage = runtime.active_coverage || {};
   const summary = runtime.summary || {};
   const copy = runtime.copy || {};
   const expected = indexMonthCoverageValue(summary.total);
   const copyTotal = indexMonthCoverageValue(copy.total);
-  let activeComplete = 0;
-  for (const group of groups.values()) {
-    const rows = [...group.rows].sort(
-      (left, right) =>
-        archiveUpdateRank(right.archive) - archiveUpdateRank(left.archive),
-    );
-    const latest = rows[0];
-    if (!latest) continue;
-    const baselineRows = rows.length > 1 ? rows.slice(1) : [latest];
-    const baselineTotal = baselineRows.reduce(
-      (sum, row) => sum + row.total,
-      0,
-    );
-    const baselineProcessed = baselineRows.reduce(
-      (sum, row) => sum + row.processed,
-      0,
-    );
-    const activeMonth = activeCoverage[group.key] || {};
-    let activeTotal = indexMonthCoverageValue(activeMonth.total);
-    let activeProcessed = indexMonthCoverageValue(activeMonth.processed);
-    if (activeTotal <= 0) {
-      activeTotal = baselineTotal;
-      activeProcessed = baselineProcessed;
-    }
-    if (activeTotal > 0 && activeProcessed >= activeTotal) {
-      activeComplete += 1;
-    }
-  }
   const totalMonths = groups.size;
   const reusePool = copyTotal > 0
     ? Math.min(copyTotal, expected || copyTotal)
@@ -4180,10 +4150,6 @@ function indexAreBreakdown(runtime) {
   const embedded = indexMonthCoverageValue(summary.embedded);
   return {
     totalMonths,
-    activeComplete,
-    activePercent: totalMonths
-      ? Math.min(100, (100 * activeComplete) / totalMonths)
-      : null,
     reusePool,
     reused,
     reusePercent: reusePool > 0
@@ -4197,8 +4163,8 @@ function indexAreBreakdown(runtime) {
   };
 }
 
-function indexAreBreakdownMarkup(runtime) {
-  const data = indexAreBreakdown(runtime);
+function indexReBreakdownMarkup(runtime) {
+  const data = indexReBreakdown(runtime);
   if (!data.totalMonths) return "";
   const rows = [];
   const addRow = (className, label, value, percent, note) => {
@@ -4217,15 +4183,6 @@ function indexAreBreakdownMarkup(runtime) {
       )}%"></span></span>
     </div>`);
   };
-  addRow(
-    "is-active",
-    "A 既有版本",
-    `${formatNumber(data.activeComplete)} / ${formatNumber(
-      data.totalMonths,
-    )} 月`,
-    data.activePercent,
-    "依月份，非 03 copy",
-  );
   if (data.reusePool > 0 || data.reused > 0) {
     addRow(
       "is-reuse",
@@ -4256,8 +4213,8 @@ function indexAreBreakdownMarkup(runtime) {
       "不需新 embedding",
     );
   }
-  return `<div class="index-wf-are-breakdown" aria-label="A／R／E 分流">
-    <div class="index-wf-are-head"><strong>A／R／E 分流</strong><span>三條 bar 各自以自己的 total 計算，不可相加；A 依月份，R／E 依本次 run。</span></div>
+  return `<div class="index-wf-are-breakdown" aria-label="R／E 分流">
+    <div class="index-wf-are-head"><strong>R／E 分流</strong><span>兩條 bar 各自以自己的 total 計算，不可相加；皆為本次 run。</span></div>
     ${rows.join("")}
   </div>`;
 }
@@ -4265,14 +4222,12 @@ function indexAreBreakdownMarkup(runtime) {
 function indexMonthGridMarkup(runtime) {
   const current = runtime.current || {};
   const coverageOnly = Boolean(runtime.coverage_only);
-  const activeCoverage = runtime.active_coverage || {};
   const activeArchiveCoverage = runtime.active_archive_coverage || {};
   const groups = indexMonthGroups(runtime);
   if (!groups.size) {
     return '<div class="processing-workflow-empty">尚無可顯示的索引月份；開始索引後會依時間列出月份狀態。</div>';
   }
   const counts = {
-    active: 0,
     reuseComplete: 0,
     reuseIncomplete: 0,
     embedComplete: 0,
@@ -4285,10 +4240,7 @@ function indexMonthGridMarkup(runtime) {
     );
     const latest = rows[0];
     const baselineRows = rows.length > 1 ? rows.slice(1) : [latest];
-    const activeMonth = activeCoverage[group.key] || {};
     const archiveMap = activeArchiveCoverage[group.key] || {};
-    let activeTotal = indexMonthCoverageValue(activeMonth.total);
-    let activeProcessed = indexMonthCoverageValue(activeMonth.processed);
     const latestEntry = archiveMap[latest.archive];
     const latestActiveTotal = indexMonthCoverageValue(
       latestEntry?.total,
@@ -4298,8 +4250,7 @@ function indexMonthGridMarkup(runtime) {
     );
     // A month with no E backlog is an unchanged month for E only.  R is
     // still work in the current build: every month that has not been scanned
-    // yet must show 25% light until the run reaches it.  Never borrow active
-    // coverage for R; active coverage belongs to A.
+    // yet must show 25% light until the run reaches it.
     const latestActiveComplete =
       latestActiveTotal > 0 &&
       latestActiveProcessed >= latestActiveTotal;
@@ -4313,14 +4264,6 @@ function indexMonthGridMarkup(runtime) {
     );
     const latestTotal = latest.total;
     const latestProcessed = latest.processed;
-    if (coverageOnly) {
-      activeTotal = rows.reduce((sum, row) => sum + row.total, 0);
-      activeProcessed = rows.reduce((sum, row) => sum + row.processed, 0);
-    } else if (activeTotal <= 0) {
-      activeTotal = baselineTotal;
-      activeProcessed = baselineProcessed;
-    }
-    const active = indexMonthAreBlock(activeProcessed, activeTotal);
     const reuse = indexMonthAreBlock(baselineProcessed, baselineTotal);
     // E is "new embeddings for this run", not "all points scanned".  A
     // month with no E backlog is complete for E even while R is still
@@ -4333,13 +4276,11 @@ function indexMonthGridMarkup(runtime) {
     const embed = indexMonthAreBlock(embedProcessed, embedTotal);
     group.latest = latest;
     group.baselineRows = baselineRows;
-    group.activeState = active;
     group.reuseState = reuse;
     group.embedState = embed;
     group.reuseComplete = reuse.complete;
     group.embedComplete = embed.complete;
     group.embedNoBacklog = embedNoBacklog;
-    if (active.complete) counts.active += 1;
     if (reuse.complete) counts.reuseComplete += 1;
     else counts.reuseIncomplete += 1;
     if (embed.complete) counts.embedComplete += 1;
@@ -4384,18 +4325,13 @@ function indexMonthGridMarkup(runtime) {
         const title = [
           `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
           group.archives.join("、") || "—",
-          `A 既有版本 ${formatNumber(
-            group.activeState.processed,
-          )} / ${formatNumber(group.activeState.total)}（${percentText(
-            group.activeState,
-          )}）· ${stateText(group.activeState)}`,
-          `A／R 基線 ${formatNumber(
+          `R 本次沿用 ${formatNumber(
             group.reuseState.processed,
           )} / ${formatNumber(group.reuseState.total)}（${percentText(
             group.reuseState,
           )}）· ${stateText(group.reuseState)}`,
           group.embedNoBacklog
-            ? `E 無 E backlog（active 已覆蓋 ${formatNumber(
+            ? `E 無 E backlog（latest archive 已由 active 版本覆蓋 ${formatNumber(
                 group.embedState.total,
               )} 筆；不需新 embedding）`
             : `E 新 embedding ${formatNumber(
@@ -4415,7 +4351,6 @@ function indexMonthGridMarkup(runtime) {
           .filter(Boolean)
           .join(" · ");
         const blocks = [
-          ["is-active", group.activeState],
           ["is-reuse", group.reuseState],
           ["is-embed", group.embedState],
         ]
@@ -4448,20 +4383,17 @@ function indexMonthGridMarkup(runtime) {
           : "等待";
   const copyChip =
     !coverageOnly && copyTotal > 0
-      ? `<div class="index-copy-global-chip" title="03 複製可重用向量是全域 points 準備階段，不列入月份 A／R／E；R 是 04 逐月掃描進度。">
+      ? `<div class="index-copy-global-chip" title="03 複製可重用向量是全域 points 準備階段，不列入月份 R／E；R 是 04 逐月掃描進度。">
           <span class="badge badge-neutral">03 複製（全域）</span>
           <span class="mono">${formatNumber(copyCopied)} / ${formatNumber(
             copyTotal,
           )} points</span>
-          <span>· ${escapeHtml(copyStatusLabel)} · 不列入月份 A／R／E</span>
+          <span>· ${escapeHtml(copyStatusLabel)} · 不列入月份 R／E</span>
         </div>`
       : "";
   return `<div class="judgment-months index-months">
     ${copyChip}
     <div class="index-runtime-summary index-month-are-summary">
-      <span title="A：既有版本在該月已完整建立向量的月份數；依月份統計，不是全域 03 copy，也不列入本次 run 完成數。">A 已覆蓋月份 <strong class="mono">${formatNumber(
-        counts.active,
-      )}</strong></span>
       <span title="R 完成：本次 run 已處理完成的月份數；尚未掃到的月份不列入完成；以月份計。">R 完成月份 <strong class="mono">${formatNumber(
         counts.reuseComplete,
       )}</strong></span>
@@ -4476,11 +4408,10 @@ function indexMonthGridMarkup(runtime) {
       )}</strong></span>
       <span>總月份 <strong class="mono">${formatNumber(groups.size)}</strong></span>
     </div>
-    <div class="index-month-are-key processing-timeline-legend" aria-label="A／R／E 階段圖例">
-      <span class="processing-timeline-legend-label">04 月份</span>
-      <span><i class="is-active"></i>A · 既有版本覆蓋（依月份，非 03 copy）</span>
-      <span><i class="is-reuse"></i>R · 04 逐月沿用</span>
-      <span><i class="is-embed"></i>E · 04 逐月新 embedding</span>
+    <div class="index-month-are-key processing-timeline-legend" aria-label="R／E 階段圖例">
+      <span class="processing-timeline-legend-label">04 月份（本次 run）</span>
+      <span><i class="is-reuse"></i>R · 本次沿用既有向量</span>
+      <span><i class="is-embed"></i>E · 本次新 embedding</span>
     </div>
     <div class="index-month-are-key processing-timeline-legend" aria-label="索引月份狀態圖例">
       <span class="processing-timeline-legend-label">狀態</span>
@@ -4502,9 +4433,9 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（既有版本覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 是依月份的既有版本向量覆蓋，不是全域 03 copy，也不列入本次 run 完成數；R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，E 可使用 active 覆蓋顯示完成；R 一律使用本次 run 的 processed／total，尚未掃到的後續月份維持 25% 淺色。仍有 E backlog 的月份，R／E 都使用本次 run 的 processed／total。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。03 複製可重用向量是全域 points 準備階段，不會重複畫成月份分格；R 是 04 逐月掃描進度。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
+    <p class="judgment-months-hint">每格由左至右為 R（本次沿用既有向量）、E（本次重新計算 embedding），兩格都是本次 run 的進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，E 可使用 active 覆蓋顯示完成；R 一律使用本次 run 的 processed／total，尚未掃到的後續月份維持 25% 淺色。仍有 E backlog 的月份，R／E 都使用本次 run 的 processed／total。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。03 複製可重用向量是全域 points 準備階段，不會重複畫成月份分格；R 是 04 逐月掃描進度。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
         runtime,
-      )}綠框只標示目前批次所在月份。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
+      )}綠框只標示目前批次所在月份。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 R／E 進度與目前案號。</p>
   </div>`;
 }
 
@@ -4857,7 +4788,7 @@ function indexRuntimeMarkup(workflow) {
     : "";
   return `<section class="report-card processing-card index-files-card">
     <div class="side-card-head index-runtime-head">
-      <span class="side-card-title">${icon("table", 14)}04 金融判決向量索引 · 月份 A／R／E</span>
+      <span class="side-card-title">${icon("table", 14)}04 金融判決向量索引 · 月份 R／E</span>
       ${metricsMarkup}
     </div>
     ${
@@ -4894,7 +4825,7 @@ function indexRuntimeMarkup(workflow) {
     ${indexMonthGridMarkup(runtime)}
     ${
       coverageOnly
-        ? '<p class="judgment-months-hint index-coverage-note">目前顯示 active collection 的月份索引覆蓋；執行 Qdrant判決向量索引版本建置後會顯示本次索引進度與 A／R／E 時間表。</p>'
+        ? '<p class="judgment-months-hint index-coverage-note">目前沒有本次索引 run；R／E 時間表會在版本建置開始後顯示本次進度。</p>'
         : ""
     }
   </section>`;
