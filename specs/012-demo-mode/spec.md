@@ -2,7 +2,7 @@
 
 **Status**: Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
 
-**Version**: 1.0
+**Version**: 1.1
 
 **Last Updated**: 2026-11-20
 
@@ -124,7 +124,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - 資料：`GET /api/catalog`、`POST /api/query`、`GET /api/data/suggest`、`GET /api/schema/suggest`、`GET /api/law`、`GET /api/judgment`
 - 品質：`GET /api/quality`、`GET /api/question-bank/stats`、`GET /api/question-bank/items`、`GET /api/question-bank/tags`
 - 效能：`GET /api/performance`、`GET /api/performance/options`
-- 處理：`GET /api/processing`
+- 處理：`GET /api/demo/processing`（訪客專用；讀取最近一次 processing snapshot 的摘要，MUST NOT 建置完整 snapshot）
 - 狀態：`GET /api/status`
 - 首頁：`GET /api/home`
 
@@ -145,6 +145,14 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
   - admin email、token、session、ticket
   - 其他訪客的 IP／usage
 - `/api/status`、`/api/processing` 對訪客 MUST 套用 sanitizer；admin 版本不變。
+
+### FR-010a 訪客處理頁效能
+
+- 訪客資料處理頁 MUST 先讀取最近一次 background processing snapshot 的摘要，不得在請求中執行完整 `build_processing_snapshot()`。
+- `GET /api/demo/processing` MUST 只回傳索引 summary／current／copy、active runs、recent runs 與 backlog 數字；MUST NOT 回傳全部 workflows、月份矩陣、archives、host、path 或大型 timeline。
+- 回應 SHOULD 小於 20 KB，讓展示頁在一般網路下快速載入。
+- 背景 warmer 每 30 秒更新 snapshot；訪客頁面可顯示「快照時間」，不得把舊快照冒充即時狀態。
+- 訪客頁面 MUST NOT 列出所有待執行 workflow；只顯示目前執行與最近完成／中止紀錄。
 
 ### FR-011 限流與成本
 
@@ -282,3 +290,5 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] 390px 無水平溢出；console error 0。
 - [ ] 全站 tests、ruff、frontend build 通過。
 - [ ] 不影響 v7 索引；production 重啟等 v7 完成後。
+
+**Revision**: 1.1（2026-11-20）新增訪客處理頁使用 cached snapshot 的 `/api/demo/processing` 摘要端點；不得在訪客請求中建置完整 snapshot。

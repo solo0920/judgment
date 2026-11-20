@@ -272,7 +272,12 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     pages = client.get("/assets/js/demo_pages.js")
     assert pages.status_code == 200
     assert "renderDemoProcessing" in pages.text
+    assert "目前索引進度" in pages.text
+    assert "最近執行紀錄" in pages.text
     assert "renderDemoStatus" in pages.text
+    api_js = client.get("/assets/js/api.js")
+    assert api_js.status_code == 200
+    assert "demoProcessing" in api_js.text
 
     css = client.get("/assets/styles.css")
     assert css.status_code == 200
@@ -304,3 +309,88 @@ def test_api_host_console_assets_revalidate_after_deploy(demo_client) -> None:
     assert "no-cache" in index.headers.get("cache-control", "")
     asset = client.get("/assets/js/pages/admin.js")
     assert "no-cache" in asset.headers.get("cache-control", "")
+
+
+def test_demo_processing_uses_cached_bootstrap(
+    demo_client, monkeypatch
+) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, _app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": {
+                    **{key: False for key in ALL_FEATURES},
+                    "processing": True,
+                },
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    cached = {
+        "status": "operational",
+        "mode": "running",
+        "generated_at": "2026-11-20T15:00:00+00:00",
+        "workflows": [
+            {
+                "id": "index_versions",
+                "label": "Qdrant判決向量索引版本建置",
+                "index_runtime": {
+                    "version_id": 7,
+                    "build_mode": "reuse",
+                    "expected_count": 100,
+                    "summary": {
+                        "indexed": 55,
+                        "total": 100,
+                        "reused": 50,
+                        "embedded": 5,
+                    },
+                    "current": {"month": "201905", "phase": "reuse"},
+                    "copy": {
+                        "status": "success",
+                        "copied": 100,
+                        "total": 100,
+                        "duration_ms": 1000,
+                        "resumed": True,
+                    },
+                },
+            }
+        ],
+        "active_runs": [],
+        "recent_runs": [],
+        "capabilities": {"index_pending_months": 2},
+    }
+    monkeypatch.setattr(
+        app_module, "build_processing_bootstrap", lambda **_kwargs: cached
+    )
+
+    def fail_full_snapshot(**_kwargs):
+        raise AssertionError("visitor request built a full snapshot")
+
+    monkeypatch.setattr(
+        app_module, "build_processing_snapshot", fail_full_snapshot
+    )
+    response = client.get("/api/processing")
+    assert response.status_code == 200
+    assert response.json()["status"] == "operational"
+
+    compact = client.get("/api/demo/processing")
+    assert compact.status_code == 200
+    payload = compact.json()
+    assert payload["status"] == "operational"
+    assert payload["index"]["version_id"] == 7
+    assert payload["index"]["current"]["month"] == "201905"
+    assert payload["index"]["copy"]["resumed"] is True
+    assert payload["capabilities"]["index_pending_months"] == 2
+    assert "workflows" not in payload

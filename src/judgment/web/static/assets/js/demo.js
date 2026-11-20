@@ -59,18 +59,12 @@ export function formatDemoRemaining(expiresAt) {
 }
 
 export async function loadDemoContext() {
-  let me = null;
-  let demo = null;
-  try {
-    me = await api.authMe();
-  } catch (error) {
-    me = null;
-  }
-  try {
-    demo = await api.demoStatus();
-  } catch (error) {
-    demo = null;
-  }
+  const [meResult, demoResult] = await Promise.allSettled([
+    api.authMe(),
+    api.demoStatus(),
+  ]);
+  const me = meResult.status === "fulfilled" ? meResult.value : null;
+  const demo = demoResult.status === "fulfilled" ? demoResult.value : null;
   context.admin = Boolean(me?.admin);
   context.enabled = Boolean(demo?.enabled);
   context.features = demo?.features || {};

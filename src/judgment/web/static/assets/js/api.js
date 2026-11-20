@@ -869,6 +869,13 @@ export const api = {
     });
   },
 
+  demoProcessing() {
+    return request("/api/demo/processing", {
+      timeout: 20000,
+      trackClient: false,
+    });
+  },
+
   processingActive() {
     return request("/api/processing/active", {
       timeout: 3000,

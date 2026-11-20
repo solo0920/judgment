@@ -177,45 +177,139 @@ export async function renderDemoProcessing(root) {
     ${pageHeader({
       kicker: "DATA PIPELINE",
       title: "資料處理",
-      subtitle: "判決、法規與命令的公開處理進度；展示模式不提供啟動、停止或主機管理。",
+      subtitle: "讀取最近一次處理快照，顯示目前索引進度與最近執行紀錄；展示模式不提供啟動、停止或主機管理。",
       badge: "DEMO · PROCESSING",
     })}
-    <div id="demo-processing-body"><div class="report-card"><div class="report-head"><div class="report-title">讀取處理進度…</div></div></div></div>
+    <div id="demo-processing-body"><div class="report-card"><div class="report-head"><div class="report-title">讀取最近一次處理進度…</div></div></div></div>
   </section>`;
   const body = root.querySelector("#demo-processing-body");
+  const monthLabel = (value) => {
+    const text = String(value || "");
+    return /^\d{6}$/.test(text)
+      ? `${text.slice(0, 4)}-${text.slice(4)}`
+      : text || "—";
+  };
+  const statusLabel = (status) => {
+    const value = String(status || "");
+    return {
+      running: "執行中",
+      success: "完成",
+      failed: "失敗",
+      stale: "已中止",
+      interrupted: "中斷",
+      partial: "部分完成",
+      no_change: "無變更",
+      pending: "待執行",
+    }[value] || value || "—";
+  };
+  const phaseLabel = (phase) => {
+    const value = String(phase || "");
+    if (value === "embedding") return "E 新 embedding";
+    if (value === "reuse") return "R 重用";
+    if (value === "mixed") return "R／E 混合";
+    return value || "—";
+  };
   try {
-    const data = await api.processing();
-    const workflows = Array.isArray(data?.workflows) ? data.workflows : [];
+    const data = await api.demoProcessing();
+    const index = data?.index || {};
+    const summary = index.summary || {};
+    const current = index.current || {};
+    const runtime = {
+      version_id: index.version_id,
+      expected_count: index.expected_count,
+      build_mode: index.build_mode,
+      copy: index.copy || {},
+      summary,
+      current,
+    };
+    const indexed = Number(summary.indexed || 0);
+    const expected = Number(summary.total || runtime.expected_count || 0);
+    const percent = expected > 0 ? Math.min(100, (100 * indexed) / expected) : 0;
     const activeRuns = Array.isArray(data?.active_runs) ? data.active_runs : [];
-    const timeline = data?.import_timeline || {};
+    const recentRuns = (Array.isArray(data?.recent_runs)
+      ? data.recent_runs
+      : []
+    ).filter((run) => run.status !== "running");
+    const copy = index.copy || {};
+    const copyLabel =
+      copy.status === "success"
+        ? `${formatNumber(copy.copied || 0)} / ${formatNumber(copy.total || 0)} points 完成`
+        : copy.status === "running"
+          ? `${formatNumber(copy.copied || 0)} / ${formatNumber(copy.total || 0)} points 執行中`
+          : copy.status === "skipped"
+            ? "本次不需複製"
+            : "等待";
+    const copyDetail =
+      copy.status === "success" && copy.duration_ms
+        ? `${copyLabel} · ${formatDuration(copy.duration_ms)}`
+        : copyLabel;
     body.innerHTML = `<div class="report-card">
       <div class="report-head">
         <div class="report-title-group">
-          <div class="report-kicker">PROCESSING · OPENDATA</div>
-          <div class="report-title">處理進度摘要</div>
-          <div class="report-sub">狀態 ${escapeHtml(data?.status || "—")} · ${escapeHtml(data?.mode || "—")}</div>
+          <div class="report-kicker">PROCESSING · LAST SNAPSHOT</div>
+          <div class="report-title">目前索引進度</div>
+          <div class="report-sub">狀態 ${escapeHtml(data?.status || "—")} · ${escapeHtml(
+            data?.mode || "—",
+          )} · 快照 ${escapeHtml(formatDateTime(data?.generated_at))}</div>
         </div>
+        <span class="badge badge-neutral badge-mono">唯讀</span>
       </div>
       <div class="report-section">
         ${statCards([
-          { label: "Workflow", value: formatNumber(workflows.length) },
-          { label: "執行中", value: formatNumber(activeRuns.length) },
-          { label: "目前月份", value: timeline.active_month || "—" },
-          { label: "目前階段", value: timeline.active_phase || "—" },
+          { label: "版本", value: runtime.version_id ? `v${String(runtime.version_id).padStart(3, "0")}` : "—" },
+          { label: "已索引", value: `${formatNumber(indexed)} / ${formatNumber(expected)}` },
+          { label: "目前月份", value: monthLabel(current.month) },
+          { label: "目前階段", value: phaseLabel(current.phase) },
         ])}
-        <div class="demo-list">${workflows
-          .slice(0, 10)
-          .map((workflow) => {
-            const progress = workflow.progress || {};
-            const percent = Number(progress.percent || 0);
-            return `<div class="demo-list-row demo-workflow-row">
-              <span>${escapeHtml(workflow.label || workflow.id || "Workflow")}</span>
-              <strong>${escapeHtml(progress.message || workflow.last_run?.status || "待執行")}</strong>
-              <small>${percent ? `${percent.toFixed(1)}%` : ""}</small>
-              ${progressBar(percent, workflow.label || "")}
-            </div>`;
-          })
+        <div class="demo-index-progress">
+          <div class="demo-index-progress-head"><span>索引進度</span><strong>${percent.toFixed(1)}%</strong></div>
+          ${progressBar(percent, `索引 ${indexed} / ${expected}`)}
+          <div class="demo-index-meta">
+            <span>R 本次沿用 <strong>${formatNumber(summary.reused || 0)}</strong></span>
+            <span>E 新 embedding <strong>${formatNumber(summary.embedded || 0)}</strong></span>
+            <span>03 copy <strong>${escapeHtml(copyDetail)}</strong></span>
+          </div>
+        </div>
+        <div class="demo-list">
+          ${
+            activeRuns.length
+              ? activeRuns
+                  .map(
+                    (run) => `<div class="demo-list-row demo-workflow-row">
+                      <span>${escapeHtml(run.title || "執行中")}</span>
+                      <strong>${escapeHtml(statusLabel(run.status))}</strong>
+                      <small>${escapeHtml(run.current_stage || "—")}</small>
+                      <span class="demo-run-message">${escapeHtml(run.message || "")}</span>
+                    </div>`,
+                  )
+                  .join("")
+              : `<div class="demo-empty">目前沒有執行中的工作。</div>`
+          }
+        </div>
+      </div>
+    </div>
+    <div class="report-card demo-recent-card">
+      <div class="report-head">
+        <div class="report-title-group">
+          <div class="report-kicker">RECENT RUNS</div>
+          <div class="report-title">最近執行紀錄</div>
+          <div class="report-sub">只顯示最近完成或中止的工作，不列出所有待執行 workflow。</div>
+        </div>
+      </div>
+      <div class="report-section">
+        <div class="demo-list">${recentRuns
+          .slice(0, 5)
+          .map(
+            (run) => `<div class="demo-list-row">
+              <span>${escapeHtml(run.title || "工作流程")}</span>
+              <strong>${escapeHtml(statusLabel(run.status))}</strong>
+              <small>${escapeHtml(formatDateTime(run.started_at))} · ${escapeHtml(
+                formatDuration(run.duration_ms || 0),
+              )}</small>
+            </div>`,
+          )
           .join("")}</div>
+        <p class="demo-open-hint">資料來源：最近一次處理 snapshot；背景約每 30 秒更新，訪客頁面不需要等待完整掃描。</p>
       </div>
     </div>`;
   } catch (error) {

@@ -2400,13 +2400,112 @@ def create_app(
             function="processing_snapshot",
             params={},
         ):
-            payload = build_processing_snapshot(
+            if _is_demo_visitor(request):
+                # Visitors get the last cached snapshot immediately.  The
+                # background warmer refreshes it every 30 seconds; admin
+                # requests keep building a fresh full snapshot.
+                payload = build_processing_bootstrap(
+                    settings=settings,
+                    session_factory=app.state.session_factory,
+                )
+                return sanitize_processing_payload(payload)
+            return build_processing_snapshot(
                 settings=settings,
                 session_factory=app.state.session_factory,
             )
-            if _is_demo_visitor(request):
-                return sanitize_processing_payload(payload)
-            return payload
+
+    @app.get("/api/demo/processing")
+    def demo_processing_summary() -> JSONResponse:
+        snapshot = build_processing_bootstrap(
+            settings=settings,
+            session_factory=app.state.session_factory,
+        )
+        workflows = snapshot.get("workflows") or []
+        index_workflow = next(
+            (
+                item
+                for item in workflows
+                if isinstance(item, dict)
+                and item.get("id") == "index_versions"
+            ),
+            {},
+        )
+        runtime = index_workflow.get("index_runtime") or {}
+        current = runtime.get("current") or {}
+        copy = runtime.get("copy") or {}
+        summary = runtime.get("summary") or {}
+        active_runs = []
+        for run in snapshot.get("active_runs") or []:
+            if not isinstance(run, dict):
+                continue
+            active_runs.append(
+                {
+                    "id": run.get("id"),
+                    "title": run.get("title") or "",
+                    "status": run.get("status") or "",
+                    "started_at": run.get("started_at"),
+                    "current_stage": run.get("current_stage") or "",
+                    "message": run.get("message") or "",
+                }
+            )
+        recent_runs = []
+        for run in snapshot.get("recent_runs") or []:
+            if not isinstance(run, dict):
+                continue
+            recent_runs.append(
+                {
+                    "id": run.get("id"),
+                    "title": run.get("title") or "",
+                    "status": run.get("status") or "",
+                    "started_at": run.get("started_at"),
+                    "finished_at": run.get("finished_at"),
+                    "duration_ms": int(run.get("duration_ms") or 0),
+                    "current_stage": run.get("current_stage") or "",
+                }
+            )
+        payload = {
+            "status": snapshot.get("status") or "",
+            "mode": snapshot.get("mode") or "",
+            "generated_at": snapshot.get("generated_at"),
+            "index": {
+                "workflow_id": index_workflow.get("id") or "index_versions",
+                "label": index_workflow.get("label")
+                or "Qdrant判決向量索引版本建置",
+                "version_id": runtime.get("version_id"),
+                "build_mode": runtime.get("build_mode") or "",
+                "expected_count": runtime.get("expected_count") or 0,
+                "summary": {
+                    "indexed": int(summary.get("indexed") or 0),
+                    "total": int(summary.get("total") or 0),
+                    "reused": int(summary.get("reused") or 0),
+                    "embedded": int(summary.get("embedded") or 0),
+                },
+                "current": {
+                    "month": current.get("month") or "",
+                    "phase": current.get("phase") or "",
+                },
+                "copy": {
+                    "status": copy.get("status") or "",
+                    "copied": int(copy.get("copied") or 0),
+                    "total": int(copy.get("total") or 0),
+                    "duration_ms": int(copy.get("duration_ms") or 0),
+                    "resumed": bool(copy.get("resumed")),
+                },
+            },
+            "active_runs": active_runs[:5],
+            "recent_runs": recent_runs[:10],
+            "capabilities": {
+                "index_pending_months": int(
+                    (snapshot.get("capabilities") or {}).get(
+                        "index_pending_months"
+                    )
+                    or 0
+                )
+            },
+        }
+        return JSONResponse(
+            content=payload, headers={"Cache-Control": "no-store"}
+        )
 
     @app.get("/api/processing/active")
     def processing_active() -> Dict[str, Any]:
