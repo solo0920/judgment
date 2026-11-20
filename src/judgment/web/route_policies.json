@@ -23,6 +23,7 @@
     "GET /api/courts/check": "DEMO_READ",
     "GET /api/data/suggest": "DEMO_READ",
     "GET /api/demo/processing": "DEMO_READ",
+    "GET /api/demo/quality": "DEMO_READ",
     "GET /api/demo/status": "PUBLIC_READ",
     "GET /api/docs": "ADMIN_ONLY",
     "GET /api/events/stream": "AUTH_READ",

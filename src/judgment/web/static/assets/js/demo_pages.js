@@ -69,34 +69,45 @@ export async function renderDemoQuality(root) {
   </section>`;
   const body = root.querySelector("#demo-quality-body");
   try {
-    const data = await api.quality();
+    const data = await api.demoQuality();
     const totals = data?.totals || {};
     const checks = Array.isArray(data?.checks) ? data.checks : [];
-    const archives = Array.isArray(data?.archives) ? data.archives : [];
+    const archiveCount =
+      data?.archive_count ??
+      (Array.isArray(data?.archives) ? data.archives.length : 0);
     body.innerHTML = `<div class="report-card">
       <div class="report-head">
         <div class="report-title-group">
           <div class="report-kicker">DUCKDB · OPENDATA</div>
           <div class="report-title">資料品質總覽</div>
-          <div class="report-sub">掃描 ${formatNumber(totals.rows || 0)} 筆 · ${formatDuration(data?.scan_ms || 0)}</div>
+          <div class="report-sub">掃描 ${formatNumber(totals.rows || 0)} 筆 · ${formatDuration(
+            data?.scan_ms || 0,
+          )} · 快照 ${escapeHtml(formatDateTime(data?.generated_at))}</div>
         </div>
       </div>
       <div class="report-section">
         ${statCards([
           { label: "判決筆數", value: formatNumber(totals.rows || 0) },
-          { label: "Archive", value: formatNumber(archives.length) },
+          { label: "Archive", value: formatNumber(archiveCount) },
           { label: "檢查項目", value: formatNumber(checks.length) },
           { label: "掃描耗時", value: formatDuration(data?.scan_ms || 0) },
         ])}
         <div class="demo-list">${checks
           .slice(0, 20)
-          .map(
-            (check) => `<div class="demo-list-row">
+          .map((check) => {
+            const rawValue = check.value ?? check.count;
+            const value =
+              typeof rawValue === "number"
+                ? formatNumber(rawValue)
+                : rawValue ?? "—";
+            return `<div class="demo-list-row">
               <span>${escapeHtml(check.label || check.key || "檢查")}</span>
-              <strong>${escapeHtml(check.value ?? "—")}</strong>
-              <small>${escapeHtml(check.note || check.status || "")}</small>
-            </div>`,
-          )
+              <strong>${escapeHtml(value)}</strong>
+              <small>${escapeHtml(
+                check.note || (check.percent != null ? `${check.percent}%` : ""),
+              )}</small>
+            </div>`;
+          })
           .join("")}</div>
       </div>
     </div>`;

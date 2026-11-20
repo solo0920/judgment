@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -15,6 +18,7 @@ from ..judgment_quality import compute_raw_quality
 from ..judgment_raw_parquet import RAW_SCHEMA_VERSION, latest_raw_manifests
 from ..models import JudgmentDocument
 from ..observability import traced
+from ..processing_state import default_state_path
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +200,7 @@ def _warnings(
     module=__name__,
     params_fn=lambda **_: {},
 )
-def build_quality_snapshot(
+def _build_quality_snapshot(
     *,
     settings: Settings,
     session_factory: Optional[sessionmaker[Session]] = None,
@@ -287,3 +291,53 @@ def build_quality_snapshot(
         "coverage": coverage,
         "warnings": warnings,
     }
+
+
+def _quality_snapshot_cache_path() -> Path:
+    return Path(default_state_path()).with_name("quality_snapshot.json")
+
+
+def _cache_quality_snapshot(snapshot: Dict[str, Any]) -> None:
+    path = _quality_snapshot_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        temporary.write_text(
+            json.dumps(snapshot, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except OSError:
+        logger.warning("無法寫入 quality snapshot cache", exc_info=True)
+
+
+def build_quality_bootstrap(
+    *,
+    settings: Settings,
+    session_factory: Optional[sessionmaker[Session]] = None,
+) -> Dict[str, Any]:
+    """Return the last cached quality snapshot immediately when possible."""
+
+    path = _quality_snapshot_cache_path()
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(cached, dict) and cached.get("available"):
+            return cached
+    except (OSError, ValueError):
+        pass
+    return build_quality_snapshot(
+        settings=settings, session_factory=session_factory
+    )
+
+
+def build_quality_snapshot(
+    *,
+    settings: Settings,
+    session_factory: Optional[sessionmaker[Session]] = None,
+) -> Dict[str, Any]:
+    snapshot = _build_quality_snapshot(
+        settings=settings, session_factory=session_factory
+    )
+    _cache_quality_snapshot(snapshot)
+    return snapshot

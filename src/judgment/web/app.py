@@ -217,7 +217,7 @@ from .processing import (
     build_processing_plan,
     build_processing_snapshot,
 )
-from .quality import build_quality_snapshot
+from .quality import build_quality_bootstrap, build_quality_snapshot
 from .route_policy import (
     DEMO_POLICIES,
     demo_feature_for,
@@ -2868,8 +2868,13 @@ def create_app(
         )
 
     @app.get("/api/quality")
-    def quality_snapshot() -> Dict[str, Any]:
+    def quality_snapshot(request: Request) -> Dict[str, Any]:
         try:
+            if _is_demo_visitor(request):
+                return build_quality_bootstrap(
+                    settings=settings,
+                    session_factory=app.state.session_factory,
+                )
             return build_quality_snapshot(
                 settings=settings,
                 session_factory=app.state.session_factory,
@@ -2905,6 +2910,80 @@ def create_app(
     def _sync_runtime_settings() -> None:
         app.state.benchmark_manager.settings = runtime_settings(
             app.state.settings, app.state.session_factory
+        )
+
+    @app.get("/api/demo/quality")
+    def demo_quality_summary() -> JSONResponse:
+        snapshot = build_quality_bootstrap(
+            settings=settings,
+            session_factory=app.state.session_factory,
+        )
+        totals = snapshot.get("totals") or {}
+        checks = []
+        for check in snapshot.get("checks") or []:
+            if not isinstance(check, dict):
+                continue
+            checks.append(
+                {
+                    key: check.get(key)
+                    for key in (
+                        "key",
+                        "label",
+                        "value",
+                        "count",
+                        "percent",
+                        "severity",
+                        "status",
+                        "note",
+                    )
+                    if check.get(key) is not None
+                }
+            )
+        coverage = snapshot.get("coverage") or {}
+        payload = {
+            "status": snapshot.get("status") or "",
+            "available": bool(snapshot.get("available")),
+            "generated_at": snapshot.get("generated_at"),
+            "scan_ms": int(snapshot.get("scan_ms") or 0),
+            "archive_count": len(snapshot.get("archives") or []),
+            "totals": {
+                key: totals.get(key)
+                for key in (
+                    "rows",
+                    "unique_jids",
+                    "duplicate_jid_rows",
+                    "missing_jid_rows",
+                    "empty_text_rows",
+                    "short_text_rows",
+                    "missing_court_rows",
+                    "missing_normalized_rows",
+                    "missing_date_rows",
+                    "invalid_date_rows",
+                    "missing_title_rows",
+                    "missing_pdf_rows",
+                    "matched_rows",
+                    "match_rate",
+                )
+            },
+            "checks": checks,
+            "coverage": {
+                key: coverage.get(key)
+                for key in (
+                    "status",
+                    "detail",
+                    "postgres_judgments",
+                    "postgres_diff",
+                    "postgres_coverage_pct",
+                    "vector_indexed",
+                    "vector_total",
+                    "vector_remaining",
+                    "vector_coverage_pct",
+                )
+            },
+            "warnings": list(snapshot.get("warnings") or [])[:10],
+        }
+        return JSONResponse(
+            content=payload, headers={"Cache-Control": "no-store"}
         )
 
     @app.get("/api/question-bank/stats")

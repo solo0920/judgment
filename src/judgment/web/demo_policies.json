@@ -4,6 +4,7 @@
     "GET /api/courts/check": "processing",
     "GET /api/data/suggest": "data",
     "GET /api/demo/processing": "processing",
+    "GET /api/demo/quality": "quality",
     "GET /api/home": "home",
     "GET /api/judgment": "data",
     "GET /api/judgment-download/status": "processing",

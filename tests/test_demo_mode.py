@@ -394,3 +394,69 @@ def test_demo_processing_uses_cached_bootstrap(
     assert payload["index"]["copy"]["resumed"] is True
     assert payload["capabilities"]["index_pending_months"] == 2
     assert "workflows" not in payload
+
+
+def test_demo_quality_uses_cached_bootstrap(demo_client, monkeypatch) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, _app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": {
+                    **{key: False for key in ALL_FEATURES},
+                    "quality": True,
+                },
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    cached = {
+        "status": "degraded",
+        "available": True,
+        "generated_at": "2026-11-20T15:00:00+00:00",
+        "scan_ms": 6300,
+        "totals": {"rows": 100, "unique_jids": 99, "missing_pdf_rows": 12},
+        "archives": [{"name": "a.rar"}],
+        "checks": [
+            {
+                "key": "missing_pdf",
+                "label": "缺少 PDF 連結",
+                "count": 12,
+                "percent": 12.0,
+                "severity": "warn",
+            }
+        ],
+        "coverage": {"status": "operational", "postgres_diff": 0},
+        "warnings": ["w1", "w2"],
+    }
+    monkeypatch.setattr(
+        app_module, "build_quality_bootstrap", lambda **_kwargs: cached
+    )
+
+    def fail_full_scan(**_kwargs):
+        raise AssertionError("visitor request built a full quality scan")
+
+    monkeypatch.setattr(app_module, "build_quality_snapshot", fail_full_scan)
+    response = client.get("/api/quality")
+    assert response.status_code == 200
+    assert response.json()["status"] == "degraded"
+
+    compact = client.get("/api/demo/quality")
+    assert compact.status_code == 200
+    payload = compact.json()
+    assert payload["status"] == "degraded"
+    assert payload["totals"]["rows"] == 100
+    assert payload["archive_count"] == 1
+    assert payload["checks"][0]["count"] == 12
+    assert "archives" not in payload

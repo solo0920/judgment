@@ -122,7 +122,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 
 - RAG：`POST /api/rag/query`、`POST /api/rag/query/stream`
 - 資料：`GET /api/catalog`、`POST /api/query`、`GET /api/data/suggest`、`GET /api/schema/suggest`、`GET /api/law`、`GET /api/judgment`
-- 品質：`GET /api/quality`、`GET /api/question-bank/stats`、`GET /api/question-bank/items`、`GET /api/question-bank/tags`
+- 品質：`GET /api/quality`（訪客使用最近一次快取掃描）、`GET /api/demo/quality`（訪客專用摘要）、`GET /api/question-bank/stats`、`GET /api/question-bank/items`、`GET /api/question-bank/tags`
 - 效能：`GET /api/performance`、`GET /api/performance/options`
 - 處理：`GET /api/demo/processing`（訪客專用；讀取最近一次 processing snapshot 的摘要，MUST NOT 建置完整 snapshot）
 - 狀態：`GET /api/status`
@@ -153,6 +153,13 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - 回應 SHOULD 小於 20 KB，讓展示頁在一般網路下快速載入。
 - 背景 warmer 每 30 秒更新 snapshot；訪客頁面可顯示「快照時間」，不得把舊快照冒充即時狀態。
 - 訪客頁面 MUST NOT 列出所有待執行 workflow；只顯示目前執行與最近完成／中止紀錄。
+
+### FR-010b 訪客品質頁效能
+
+- 訪客呼叫 `GET /api/quality` MUST 先回傳最近一次快取的品質掃描，不得在請求中執行完整 DuckDB 掃描。
+- `GET /api/demo/quality` MUST 只回傳 totals、checks、coverage、archive 數量與快照時間；MUST NOT 回傳 archives 明細、host、path 或大型 distributions。
+- 品質掃描快取 MUST 以原子寫入更新，權限 0600；admin 請求仍可建置最新掃描並更新快取。
+- 回應 SHOULD 小於 20 KB；頁面 MUST 顯示快照時間，不得把舊掃描冒充即時結果。
 
 ### FR-011 限流與成本
 
