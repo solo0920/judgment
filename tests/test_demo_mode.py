@@ -296,3 +296,11 @@ def test_admin_demo_put_cors_preflight_is_allowed(demo_client) -> None:
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:9200"
     assert "PUT" in response.headers["access-control-allow-methods"]
+
+
+def test_api_host_console_assets_revalidate_after_deploy(demo_client) -> None:
+    client, _app = demo_client
+    index = client.get("/")
+    assert "no-cache" in index.headers.get("cache-control", "")
+    asset = client.get("/assets/js/pages/admin.js")
+    assert "no-cache" in asset.headers.get("cache-control", "")

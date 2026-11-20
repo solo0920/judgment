@@ -1708,7 +1708,14 @@ def create_app(
         if request.method == "OPTIONS" or (
             not _is_api_path(path) and path != "/docs/oauth2-redirect"
         ):
-            return await call_next(request)
+            response = await call_next(request)
+            # The API host also serves the source console as a fallback.  Its
+            # index and ES modules have no hashed filenames, so browsers must
+            # revalidate them after a deploy instead of keeping an old UI for
+            # hours.  The standalone Pages build keeps its own cache-busting.
+            if path == "/" or path.startswith("/assets/"):
+                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            return response
         if (
             request.method not in {"GET", "HEAD"}
             and request.headers.get("Origin") == "null"

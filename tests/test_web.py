@@ -3795,3 +3795,27 @@ def test_judgment_vector_index_spec_is_canonical() -> None:
         "capabilities.index_pending_months",
     ):
         assert phrase in text
+
+
+def test_google_start_uses_loopback_callback_for_local_console(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        google_oauth_client_id="client-id.apps.googleusercontent.com",
+        google_oauth_client_secret="client-secret",
+        google_oauth_redirect_uri=(
+            "https://api-mbp.ragdemo.win/api/auth/google/callback"
+        ),
+        admin_token="test-secret",
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app, base_url="http://localhost:9200") as client:
+        response = client.get("/api/auth/google/start", follow_redirects=False)
+    assert response.status_code == 302
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == [
+        "http://localhost:9200/api/auth/google/callback"
+    ]

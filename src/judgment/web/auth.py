@@ -229,6 +229,11 @@ def clear_oauth_state_cookie(response: Response) -> None:
 
 def google_redirect_uri(request: Request, settings: Settings) -> str:
     configured = str(settings.google_oauth_redirect_uri or "").strip()
+    # Local development must keep the OAuth state cookie and callback on the
+    # same origin.  Using the production api-mbp callback from localhost makes
+    # the state cookie invisible and bounces the browser to api-mbp after login.
+    if is_loopback_request(request):
+        return str(request.url_for("google_callback"))
     if configured:
         return configured
     return str(request.url_for("google_callback"))
