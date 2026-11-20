@@ -175,6 +175,19 @@ local_bypass=False public_rag=False routes=123
 - [ ] `JUDGMENT_DEMO_HARD_DISABLE=1` 時訪客 API 403，管理頁顯示原因
 - [ ] 390px 無水平 overflow；console error 0
 
+### 5.6 前端部署
+
+展示模式前端必須和後端重啟在同一個維護窗口部署；只重啟後端而保留舊前端，訪客會看到 API 403 錯誤頁。
+
+```bash
+uv run python scripts/build_frontend.py --api-base https://api-mbp.ragdemo.win
+npx wrangler pages deploy frontend --project-name judgment --branch main
+```
+
+- [ ] 前端 bundle 含 `demo.js`、`demo_pages.js`、`pages/admin.js`
+- [ ] 展示關閉時訪客首頁顯示靜態「展示目前未開放」
+- [ ] 管理者帳號選單有「管理設定」
+
 ---
 
 ## 6. 重啟後才做的程式工作
