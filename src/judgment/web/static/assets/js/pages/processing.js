@@ -3352,6 +3352,12 @@ function indexWorkflowProgressMarkup(workflow) {
           "複製速度",
           copyRate > 0 ? `${copyRate.toFixed(1)} points/秒` : "—",
         ],
+        copy.resumed
+          ? [
+              "來源",
+              `續跑前完成${copy.resumed_from_run_id ? `（${copy.resumed_from_run_id}）` : ""}`,
+            ]
+          : null,
         [
           "預估剩餘",
           copyEtaSeconds !== null
@@ -3363,7 +3369,9 @@ function indexWorkflowProgressMarkup(workflow) {
         copyTotal > 0
           ? `${formatNumber(copyCopied)} / ${formatNumber(
               copyTotal,
-            )} points · 舊 collection 向量`
+            )} points · 舊 collection 向量${
+              copy.resumed ? " · 續跑前完成" : ""
+            }`
           : copyStatus === "skipped"
             ? "本次不需複製舊向量"
             : copyStatus === "stale"
@@ -3604,7 +3612,9 @@ function indexWorkflowProgressMarkup(workflow) {
       );
       addDetail("耗時", durationLabel);
       addDetail("進度", percentText(phase.percent));
-      for (const [label, value] of phase.extraDetails || []) {
+      for (const entry of phase.extraDetails || []) {
+        if (!entry) continue;
+        const [label, value] = entry;
         addDetail(label, value);
       }
       addDetail("說明", phase.detail);

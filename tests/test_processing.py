@@ -3749,3 +3749,41 @@ def test_build_processing_live_merges_prior_index_month_counters(
     month = workflow["index_runtime"]["months"][0]
     assert month["embedded"] == 136
     assert workflow["index_runtime"]["summary"]["embedded"] == 136
+
+
+def test_merge_prior_index_runtime_restores_completed_copy_stage() -> None:
+    runtime = {
+        "version_id": 7,
+        "build_mode": "reuse",
+        "run_id": "resume-run",
+        "copy": {"status": "skipped", "copied": 0, "total": 0},
+        "months": [],
+        "summary": {"indexed": 0, "total": 0, "reused": 0, "embedded": 0},
+    }
+    runs = [
+        {
+            "id": "prior-copy-run",
+            "started_at": "2026-11-19T08:55:07+00:00",
+            "meta": {
+                "index_runtime": {
+                    "version_id": 7,
+                    "copy": {
+                        "status": "success",
+                        "copied": 4681502,
+                        "total": 4681502,
+                        "percent": 100.0,
+                        "duration_ms": 27178879,
+                        "started_at": "2026-11-19T08:55:07+00:00",
+                        "finished_at": "2026-11-19T16:28:06+00:00",
+                    },
+                }
+            },
+        }
+    ]
+
+    merged = processing_module._merge_prior_index_runtime(runtime, runs)
+    assert merged["copy"]["status"] == "success"
+    assert merged["copy"]["copied"] == 4681502
+    assert merged["copy"]["duration_ms"] == 27178879
+    assert merged["copy"]["resumed"] is True
+    assert merged["copy"]["resumed_from_run_id"] == "prior-copy-run"

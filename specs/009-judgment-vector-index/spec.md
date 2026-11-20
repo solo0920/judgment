@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.25
+**Version**: 1.26
 
 **Last Updated**: 2026-11-20
 
@@ -158,6 +158,7 @@ A（active collection 對目前 archive 的覆蓋）仍然存在，但只作為 
 - `runtime.active_archive_coverage` MAY 用於 E 無 backlog 與 sidebar backlog 計算，但 MUST NOT 用於 R，也不得用來把仍有 E backlog 且尚未處理的 R／E 標成完成。
 - `currentComplete = processed >= total` 用於仍有 E backlog 月份的 R／E 完成判定。
 - `_merge_prior_index_runtime()` 會在續跑時恢復相同版本的 R／E counters；不得因 resume 把已完成月份顯示成空白。
+- 同一版本續跑時，若本次 run 的 `copy.status` 為 `skipped`／`pending` 且 `copied=0`，但先前 run 已成功完成 copy，`_merge_prior_index_runtime()` MUST 將先前 copy 的 `status=success`、`copied`／`total`、`duration_ms` 合併到 `runtime.copy`，並標記 `resumed=true` 與來源 run id。waterfall 的「複製可重用向量」階段 MUST 顯示該時長與完成狀態，文案標示「續跑前完成」，不得因本次 run 跳過 copy 而顯示無時間紀錄。
 
 ### 5.3 Summary 統計
 
@@ -430,3 +431,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.23 | 2026-11-20 | A 分格與圖例改為橘色。 |
 | 1.24 | 2026-11-20 | 04 waterfall bar 顏色跟隨目前 phase（R 藍／E 紫）；明細新增 A／R／E 三條獨立分流 bar，三條不相加，A 不畫入 04 本次 run bar。 |
 | 1.25 | 2026-11-20 | 04 月份時間表移除 A 分格，改為 R／E 兩格；A 只保留為 E no-backlog 的內部 baseline，不再顯示於表格、legend、summary 或 tooltip。 |
+| 1.26 | 2026-11-20 | 續跑時合併同一版本先前 run 已完成的 copy metadata；waterfall 的 03 複製階段需顯示先前 copy 時長與「續跑前完成」。 |

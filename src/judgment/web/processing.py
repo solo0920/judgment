@@ -923,6 +923,9 @@ def _merge_prior_index_runtime(
     current_run_id = str(runtime.get("run_id") or "")
     best: Dict[tuple[str, str], Dict[str, Any]] = {}
     best_scores: Dict[tuple[str, str], tuple[int, int, str]] = {}
+    best_copy: Optional[Dict[str, Any]] = None
+    best_copy_score: tuple[int, int, str] = (-1, -1, "")
+    best_copy_run_id = ""
     for run in runs or []:
         if current_run_id and str(run.get("id") or "") == current_run_id:
             continue
@@ -938,6 +941,25 @@ def _merge_prior_index_runtime(
         updated_at = str(
             prior.get("updated_at") or run.get("started_at") or ""
         )
+        prior_copy = prior.get("copy")
+        if isinstance(prior_copy, dict):
+            prior_copy_status = str(prior_copy.get("status") or "")
+            prior_copy_duration = int(prior_copy.get("duration_ms") or 0)
+            prior_copy_copied = int(prior_copy.get("copied") or 0)
+            if (
+                prior_copy_status == "success"
+                and prior_copy_duration > 0
+                and prior_copy_copied > 0
+            ):
+                score = (
+                    prior_copy_duration,
+                    prior_copy_copied,
+                    updated_at,
+                )
+                if score > best_copy_score:
+                    best_copy_score = score
+                    best_copy = prior_copy
+                    best_copy_run_id = str(run.get("id") or "")
         for item in prior.get("months") or []:
             if not isinstance(item, dict):
                 continue
@@ -954,6 +976,25 @@ def _merge_prior_index_runtime(
                 continue
             best_scores[key] = score
             best[key] = item
+    current_copy = runtime.get("copy")
+    current_copy_status = (
+        str(current_copy.get("status") or "")
+        if isinstance(current_copy, dict)
+        else ""
+    )
+    current_copy_copied = (
+        int(current_copy.get("copied") or 0)
+        if isinstance(current_copy, dict)
+        else 0
+    )
+    if best_copy is not None and (
+        current_copy_status in {"skipped", "pending"}
+        or current_copy_copied <= 0
+    ):
+        merged_copy = deepcopy(best_copy)
+        merged_copy["resumed"] = True
+        merged_copy["resumed_from_run_id"] = best_copy_run_id
+        runtime["copy"] = merged_copy
     if not best:
         return runtime
     for item in runtime.get("months") or []:

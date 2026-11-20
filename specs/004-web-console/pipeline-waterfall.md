@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.11
+**Version**: 1.12
 
 **Last Updated**: 2026-11-20
 
@@ -287,9 +287,10 @@ hollowWidth = slotWidth - fillWidth
 - 索引階段 MAY 在明細顯示 R／E 的並行子進度與預估剩餘時間；R／E 是同一批掃描中的並行分類，MUST NOT 被拆成多個 sequential waterfall 階段。
 - 金融判決向量索引（04）的 bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。這只改變 04 的 bar 顏色，不代表把 R／E 拆成 sequential 階段。
 - 04 階段明細 MUST 只顯示 R／E 兩條獨立分流 bar：R 藍、E 紫。兩條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A baseline MUST NOT 畫成第三條 bar，也不得畫入 04 本次 run 的進度 bar。
-- 04 階段的圖例 MUST 明示 A 另計且不畫入 04 bar，R／E 才是 04 本次 run；避免把 A 的橘色或階段識別紫色誤認為目前 batch。
+- 04 階段的圖例 MUST 明示 R／E 才是 04 本次 run，不得再出現 A 圖例。
 - 「準備中」是版本準備／copy 的全域狀態，不是 R／E 分格的一部分；A 只作既有版本（active collection）的 E no-backlog 內部 baseline，不是全域 03 copy，也不顯示為月份分格。
-- copy 是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
+- copy 是全域 points 準備階段，MUST NOT 被畫成月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
+- 同一版本續跑時，若 copy 已在先前 run 完成，waterfall MUST 顯示先前 copy 的完成狀態與時長，並標示「續跑前完成」及來源 run id；不得因本次 run 跳過 copy 而讓 03 階段沒有時間紀錄。
 - 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示；A 只作內部 baseline，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 R／E 排成 sequential waterfall 階段。
 - 03 進度只顯示在 copy 階段或獨立的「03 複製（全域）」chip，不得填入 R／E。
 
@@ -544,3 +545,5 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 | 1.0 | 2026-11-15 | 建立 canonical Pipeline Waterfall 規格；納入接續階段、最小可見寬度、部分完成空心 bar、展開狀態保存、響應式與驗收清單。 |
 
 | 1.11 | 2026-11-20 | 04 月份時間表移除 A 分格，只保留 R／E；A 改為 E no-backlog 內部 baseline，waterfall 明細與圖例不再顯示 A。 |
+
+| 1.12 | 2026-11-20 | 續跑時 waterfall 的 03 copy 階段沿用先前 run 已完成 copy 的時長並標示「續跑前完成」。 |
