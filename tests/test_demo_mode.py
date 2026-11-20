@@ -276,3 +276,18 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert ".demo-banner" in css.text
     assert ".demo-switch" in css.text
     assert "body.is-demo-visitor" in css.text
+
+
+def test_admin_demo_put_cors_preflight_is_allowed(demo_client) -> None:
+    client, _app = demo_client
+    response = client.options(
+        "/api/admin/demo",
+        headers={
+            "Origin": "http://127.0.0.1:9200",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:9200"
+    assert "PUT" in response.headers["access-control-allow-methods"]
