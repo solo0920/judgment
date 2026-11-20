@@ -21,7 +21,7 @@ function toggleRow(feature, enabled) {
       <small>${enabled ? "訪客可使用此功能的唯讀／公開部分" : "目前未開放給訪客"}</small>
     </span>
     <span class="demo-switch">
-      <input type="checkbox" id="demo-feature-${feature}" data-demo-feature="${feature}" ${enabled ? "checked" : ""} />
+      <input type="checkbox" id="demo-feature-${feature}" data-demo-feature="${feature}" aria-label="${escapeHtml(FEATURE_LABELS[feature] || feature)}" ${enabled ? "checked" : ""} />
       <span aria-hidden="true"></span>
     </span>
   </label>`;
@@ -144,11 +144,11 @@ export async function render(root) {
 
         <div class="demo-master-row">
           <div>
-            <strong>總開關</strong>
-            <small>關閉時只保留首頁靜態頁與管理者登入；訪客 API 全部拒絕。</small>
+            <strong>總開關（儲存後生效）</strong>
+            <small>關閉時只保留首頁靜態頁與管理者登入；訪客 API 全部拒絕。功能旗標仍可先設定並儲存。</small>
           </div>
           <span class="demo-switch demo-switch-lg">
-            <input type="checkbox" id="demo-enabled" ${stored.enabled ? "checked" : ""} />
+            <input type="checkbox" id="demo-enabled" aria-label="展示模式總開關" ${stored.enabled ? "checked" : ""} />
             <span aria-hidden="true"></span>
           </span>
         </div>
@@ -164,13 +164,19 @@ export async function render(root) {
               (item) => `<option value="${item.hours}">${item.label}</option>`,
             ).join("")}
           </select>
-          <button class="btn btn-primary" type="button" id="demo-apply">
-            ${icon("check", 15)}<span>套用並開啟</span>
+          <button class="btn btn-secondary" type="button" id="demo-save">
+            ${icon("check", 15)}<span>儲存設定</span>
+          </button>
+          <button class="btn btn-success" type="button" id="demo-open">
+            ${icon("play", 15)}<span>開啟展示</span>
           </button>
           <button class="btn btn-danger" type="button" id="demo-close">
             ${icon("x", 15)}<span>立即關閉展示</span>
           </button>
         </div>
+        <p class="demo-open-hint">
+          「儲存設定」只保存功能旗標與期限，不會改變目前開關；「開啟展示」會依上方旗標立即對訪客開放。
+        </p>
 
         <div class="demo-admin-section">
           <div class="report-section-head"><span class="report-section-title">最近切換紀錄</span></div>
@@ -181,23 +187,20 @@ export async function render(root) {
 
     const master = panel.querySelector("#demo-enabled");
     const featureInputs = [...panel.querySelectorAll("[data-demo-feature]")];
-    const syncFeatureState = () => {
-      const enabled = Boolean(master?.checked);
-      featureInputs.forEach((input) => {
-        input.disabled = !enabled;
-      });
-    };
-    master?.addEventListener("change", syncFeatureState);
-    syncFeatureState();
-
-    panel.querySelector("#demo-apply")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      const enabled = Boolean(master?.checked);
-      const duration = Number(panel.querySelector("#demo-duration")?.value || 2);
-      const selected = Object.fromEntries(
+    const selectedFeatures = () =>
+      Object.fromEntries(
         featureInputs.map((input) => [input.dataset.demoFeature, input.checked]),
       );
+
+    const applySettings = async (button, { enabled, label }) => {
+      button.disabled = true;
+      const duration = Number(panel.querySelector("#demo-duration")?.value || 2);
+      const selected = selectedFeatures();
+      if (enabled && !Object.values(selected).some(Boolean)) {
+        toast("請至少開啟一個功能，才能開啟展示。", "warn", 5200);
+        button.disabled = false;
+        return;
+      }
       try {
         data = await api.updateDemo({
           enabled,
@@ -205,13 +208,29 @@ export async function render(root) {
           features: selected,
           version: data?.stored?.version,
         });
-        toast(enabled ? "展示模式已開啟。" : "展示設定已更新。", "ok", 3200);
+        toast(label, "ok", 3200);
         paint();
       } catch (error) {
         toast(error.message || "無法更新展示設定。", "danger", 6000);
       } finally {
         button.disabled = false;
       }
+    };
+
+    panel.querySelector("#demo-save")?.addEventListener("click", (event) => {
+      applySettings(event.currentTarget, {
+        enabled: Boolean(master?.checked),
+        label: master?.checked
+          ? "展示設定已儲存，展示仍維持開啟。"
+          : "展示設定已儲存，展示仍維持關閉。",
+      });
+    });
+
+    panel.querySelector("#demo-open")?.addEventListener("click", (event) => {
+      applySettings(event.currentTarget, {
+        enabled: true,
+        label: "展示模式已開啟。",
+      });
     });
 
     panel.querySelector("#demo-close")?.addEventListener("click", async (event) => {

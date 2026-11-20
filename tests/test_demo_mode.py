@@ -264,7 +264,10 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     admin = client.get("/assets/js/pages/admin.js")
     assert admin.status_code == 200
     assert "管理設定" in admin.text
+    assert "儲存設定" in admin.text
+    assert "開啟展示" in admin.text
     assert "立即關閉展示" in admin.text
+    assert "不會改變目前開關" in admin.text
 
     pages = client.get("/assets/js/demo_pages.js")
     assert pages.status_code == 200
@@ -275,6 +278,8 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert css.status_code == 200
     assert ".demo-banner" in css.text
     assert ".demo-switch" in css.text
+    assert ".demo-switch input:checked + span" in css.text
+    assert ".btn-success" in css.text
     assert "body.is-demo-visitor" in css.text
 
 
