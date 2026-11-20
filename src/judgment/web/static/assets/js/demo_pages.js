@@ -92,23 +92,28 @@ export async function renderDemoQuality(root) {
           { label: "檢查項目", value: formatNumber(checks.length) },
           { label: "掃描耗時", value: formatDuration(data?.scan_ms || 0) },
         ])}
-        <div class="demo-list">${checks
-          .slice(0, 20)
-          .map((check) => {
-            const rawValue = check.value ?? check.count;
-            const value =
-              typeof rawValue === "number"
-                ? formatNumber(rawValue)
-                : rawValue ?? "—";
-            return `<div class="demo-list-row">
-              <span>${escapeHtml(check.label || check.key || "檢查")}</span>
-              <strong>${escapeHtml(value)}</strong>
-              <small>${escapeHtml(
-                check.note || (check.percent != null ? `${check.percent}%` : ""),
-              )}</small>
-            </div>`;
-          })
-          .join("")}</div>
+        ${
+          data?.available === false
+            ? `<div class="demo-empty">品質快照尚未產生，請稍後重新整理；展示模式不會即時啟動掃描。</div>`
+            : `<div class="demo-list">${checks
+                .slice(0, 20)
+                .map((check) => {
+                  const rawValue = check.value ?? check.count;
+                  const value =
+                    typeof rawValue === "number"
+                      ? formatNumber(rawValue)
+                      : rawValue ?? "—";
+                  return `<div class="demo-list-row">
+                    <span>${escapeHtml(check.label || check.key || "檢查")}</span>
+                    <strong>${escapeHtml(value)}</strong>
+                    <small>${escapeHtml(
+                      check.note ||
+                        (check.percent != null ? `${check.percent}%` : ""),
+                    )}</small>
+                  </div>`;
+                })
+                .join("")}</div>`
+        }
       </div>
     </div>`;
   } catch (error) {

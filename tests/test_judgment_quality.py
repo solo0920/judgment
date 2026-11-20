@@ -10,7 +10,8 @@ import pyarrow.parquet as pq
 from judgment.config import Settings
 from judgment.judgment_quality import compute_raw_quality
 from judgment.judgment_raw_parquet import RAW_JUDGMENT_SCHEMA
-from judgment.web.quality import build_quality_snapshot
+from judgment.web import quality as quality_module
+from judgment.web.quality import build_quality_bootstrap, build_quality_snapshot
 
 
 def _row(
@@ -240,7 +241,14 @@ def test_compute_raw_quality_empty_manifests() -> None:
     assert result["distributions"]["laws"] == []
 
 
-def test_build_quality_snapshot_without_raw_parquet(tmp_path: Path) -> None:
+def test_build_quality_snapshot_without_raw_parquet(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        quality_module,
+        "_quality_snapshot_cache_path",
+        lambda: tmp_path / "quality_snapshot.json",
+    )
     settings = Settings(
         database_url="sqlite+pysqlite:///:memory:",
         law_data_dir=tmp_path / "laws",
@@ -259,3 +267,42 @@ def test_build_quality_snapshot_without_raw_parquet(tmp_path: Path) -> None:
     assert result["totals"]["rows"] == 0
     assert result["coverage"]["status"] == "unavailable"
     assert result["warnings"]
+
+
+def test_quality_bootstrap_never_scans_on_cache_miss(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        quality_module,
+        "_quality_snapshot_cache_path",
+        lambda: tmp_path / "quality_snapshot.json",
+    )
+
+    def fail_scan(**_kwargs):
+        raise AssertionError("bootstrap started a full quality scan")
+
+    monkeypatch.setattr(quality_module, "_build_quality_snapshot", fail_scan)
+    result = build_quality_bootstrap(settings=Settings.from_env())
+    assert result["status"] == "warming"
+    assert result["available"] is False
+    assert result["warnings"]
+
+
+def test_quality_snapshot_uses_cache_when_scan_is_running(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "quality_snapshot.json"
+    cache_path.write_text(
+        json.dumps({"available": True, "status": "operational", "rows": 1}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        quality_module, "_quality_snapshot_cache_path", lambda: cache_path
+    )
+    assert quality_module._QUALITY_SCAN_LOCK.acquire(blocking=False)
+    try:
+        result = build_quality_snapshot(settings=Settings.from_env())
+    finally:
+        quality_module._QUALITY_SCAN_LOCK.release()
+    assert result["refreshing"] is True
+    assert result["status"] == "operational"

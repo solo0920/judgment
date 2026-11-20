@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -312,23 +313,49 @@ def _cache_quality_snapshot(snapshot: Dict[str, Any]) -> None:
         logger.warning("無法寫入 quality snapshot cache", exc_info=True)
 
 
+_QUALITY_SCAN_LOCK = threading.Lock()
+
+
+def _read_cached_quality_snapshot() -> Optional[Dict[str, Any]]:
+    path = _quality_snapshot_cache_path()
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(cached, dict) and cached.get("available"):
+        return cached
+    return None
+
+
+def _warming_quality_snapshot() -> Dict[str, Any]:
+    return {
+        "status": "warming",
+        "available": False,
+        "generated_at": None,
+        "duration_ms": 0,
+        "scan_ms": 0,
+        "source": {"engine": "duckdb", "raw_files": 0},
+        "totals": _empty_totals(),
+        "archives": [],
+        "checks": [],
+        "summary": {},
+        "distributions": {},
+        "coverage": {"status": "warming"},
+        "warnings": ["品質快照尚未產生；展示模式不會即時啟動掃描。"],
+    }
+
+
 def build_quality_bootstrap(
     *,
     settings: Settings,
     session_factory: Optional[sessionmaker[Session]] = None,
 ) -> Dict[str, Any]:
-    """Return the last cached quality snapshot immediately when possible."""
+    """Return only a cached quality snapshot; never start a visitor scan."""
 
-    path = _quality_snapshot_cache_path()
-    try:
-        cached = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(cached, dict) and cached.get("available"):
-            return cached
-    except (OSError, ValueError):
-        pass
-    return build_quality_snapshot(
-        settings=settings, session_factory=session_factory
-    )
+    cached = _read_cached_quality_snapshot()
+    if cached is not None:
+        return cached
+    return _warming_quality_snapshot()
 
 
 def build_quality_snapshot(
@@ -336,8 +363,21 @@ def build_quality_snapshot(
     settings: Settings,
     session_factory: Optional[sessionmaker[Session]] = None,
 ) -> Dict[str, Any]:
-    snapshot = _build_quality_snapshot(
-        settings=settings, session_factory=session_factory
-    )
-    _cache_quality_snapshot(snapshot)
-    return snapshot
+    # A DuckDB scan over ~23M rows can take minutes while the vector index is
+    # building.  Serialize scans so repeated requests cannot pile up and
+    # starve the web process; concurrent callers get the last cached result.
+    if not _QUALITY_SCAN_LOCK.acquire(blocking=False):
+        cached = _read_cached_quality_snapshot()
+        if cached is not None:
+            cached = dict(cached)
+            cached["refreshing"] = True
+            return cached
+        raise RuntimeError("quality scan already running")
+    try:
+        snapshot = _build_quality_snapshot(
+            settings=settings, session_factory=session_factory
+        )
+        _cache_quality_snapshot(snapshot)
+        return snapshot
+    finally:
+        _QUALITY_SCAN_LOCK.release()

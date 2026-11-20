@@ -717,11 +717,11 @@
       </div>
       <div class="report-section">
         ${Oa([{label:"\u5224\u6C7A\u7B46\u6578",value:d(a.rows||0)},{label:"Archive",value:d(i)},{label:"\u6AA2\u67E5\u9805\u76EE",value:d(n.length)},{label:"\u6383\u63CF\u8017\u6642",value:ce(s?.scan_ms||0)}])}
-        <div class="demo-list">${n.slice(0,20).map(o=>{let l=o.value??o.count,p=typeof l=="number"?d(l):l??"\u2014";return`<div class="demo-list-row">
-              <span>${r(o.label||o.key||"\u6AA2\u67E5")}</span>
-              <strong>${r(p)}</strong>
-              <small>${r(o.note||(o.percent!=null?`${o.percent}%`:""))}</small>
-            </div>`}).join("")}</div>
+        ${s?.available===!1?'<div class="demo-empty">\u54C1\u8CEA\u5FEB\u7167\u5C1A\u672A\u7522\u751F\uFF0C\u8ACB\u7A0D\u5F8C\u91CD\u65B0\u6574\u7406\uFF1B\u5C55\u793A\u6A21\u5F0F\u4E0D\u6703\u5373\u6642\u555F\u52D5\u6383\u63CF\u3002</div>':`<div class="demo-list">${n.slice(0,20).map(o=>{let l=o.value??o.count,p=typeof l=="number"?d(l):l??"\u2014";return`<div class="demo-list-row">
+                    <span>${r(o.label||o.key||"\u6AA2\u67E5")}</span>
+                    <strong>${r(p)}</strong>
+                    <small>${r(o.note||(o.percent!=null?`${o.percent}%`:""))}</small>
+                  </div>`}).join("")}</div>`}
       </div>
     </div>`}catch(s){t.innerHTML=Fa(s,"\u8CC7\u6599\u54C1\u8CEA\u8B80\u53D6\u5931\u6557")}}async function Ri(e){e.innerHTML=`<section class="page data-page performance-page">
     ${Ba({kicker:"PERFORMANCE",title:"\u6548\u80FD\u5831\u8868",subtitle:"\u5DF2\u7522\u751F\u7684 RAG\u3001\u7D22\u5F15\u8207 API \u57F7\u884C\u7D00\u9304\uFF1B\u5C55\u793A\u6A21\u5F0F\u4E0D\u63D0\u4F9B\u91CD\u65B0\u8A08\u7B97\u6216\u532F\u51FA\u3002",badge:"DEMO \xB7 PERFORMANCE"})}

@@ -156,9 +156,10 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 
 ### FR-010b 訪客品質頁效能
 
-- 訪客呼叫 `GET /api/quality` MUST 先回傳最近一次快取的品質掃描，不得在請求中執行完整 DuckDB 掃描。
+- 訪客呼叫 `GET /api/quality` MUST 只回傳最近一次快取的品質掃描；cache miss 時 MUST 回傳 `warming` 狀態，不得在請求中執行完整 DuckDB 掃描。
 - `GET /api/demo/quality` MUST 只回傳 totals、checks、coverage、archive 數量與快照時間；MUST NOT 回傳 archives 明細、host、path 或大型 distributions。
 - 品質掃描快取 MUST 以原子寫入更新，權限 0600；admin 請求仍可建置最新掃描並更新快取。
+- 同一時間 MUST 只允許一個品質掃描；已有掃描執行時，其他請求 MUST 回傳最近快取並標記 `refreshing`，不得排隊堆疊掃描。
 - 回應 SHOULD 小於 20 KB；頁面 MUST 顯示快照時間，不得把舊掃描冒充即時結果。
 
 ### FR-011 限流與成本
