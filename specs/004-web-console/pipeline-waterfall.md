@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.12
+**Version**: 1.13
 
 **Last Updated**: 2026-11-20
 
@@ -291,6 +291,7 @@ hollowWidth = slotWidth - fillWidth
 - 「準備中」是版本準備／copy 的全域狀態，不是 R／E 分格的一部分；A 只作既有版本（active collection）的 E no-backlog 內部 baseline，不是全域 03 copy，也不顯示為月份分格。
 - copy 是全域 points 準備階段，MUST NOT 被畫成月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
 - 同一版本續跑時，若 copy 已在先前 run 完成，waterfall MUST 顯示先前 copy 的完成狀態與時長，並標示「續跑前完成」及來源 run id；不得因本次 run 跳過 copy 而讓 03 階段沒有時間紀錄。
+- 同一版本續跑時，04 索引階段的時間 MUST 包含先前 run 的 index-only 執行時間與本次 run 時間；明細 MUST 分開顯示「前次執行」與「本次執行」，階段 meta 顯示合計。
 - 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示；A 只作內部 baseline，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 R／E 排成 sequential waterfall 階段。
 - 03 進度只顯示在 copy 階段或獨立的「03 複製（全域）」chip，不得填入 R／E。
 
@@ -547,3 +548,5 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 | 1.11 | 2026-11-20 | 04 月份時間表移除 A 分格，只保留 R／E；A 改為 E no-backlog 內部 baseline，waterfall 明細與圖例不再顯示 A。 |
 
 | 1.12 | 2026-11-20 | 續跑時 waterfall 的 03 copy 階段沿用先前 run 已完成 copy 的時長並標示「續跑前完成」。 |
+
+| 1.13 | 2026-11-20 | 續跑時 04 索引階段顯示前次 index-only 執行時間與本次執行時間合計。 |

@@ -926,6 +926,7 @@ def _merge_prior_index_runtime(
     best_copy: Optional[Dict[str, Any]] = None
     best_copy_score: tuple[int, int, str] = (-1, -1, "")
     best_copy_run_id = ""
+    prior_index_duration_ms = 0
     for run in runs or []:
         if current_run_id and str(run.get("id") or "") == current_run_id:
             continue
@@ -942,10 +943,13 @@ def _merge_prior_index_runtime(
             prior.get("updated_at") or run.get("started_at") or ""
         )
         prior_copy = prior.get("copy")
+        prior_copy_duration = 0
+        prior_copy_finished_at = ""
         if isinstance(prior_copy, dict):
             prior_copy_status = str(prior_copy.get("status") or "")
             prior_copy_duration = int(prior_copy.get("duration_ms") or 0)
             prior_copy_copied = int(prior_copy.get("copied") or 0)
+            prior_copy_finished_at = str(prior_copy.get("finished_at") or "")
             if (
                 prior_copy_status == "success"
                 and prior_copy_duration > 0
@@ -960,6 +964,33 @@ def _merge_prior_index_runtime(
                     best_copy_score = score
                     best_copy = prior_copy
                     best_copy_run_id = str(run.get("id") or "")
+        qdrant_stage = (run.get("stages") or {}).get("qdrant")
+        if isinstance(qdrant_stage, dict):
+            qdrant_duration = int(qdrant_stage.get("duration_ms") or 0)
+            if qdrant_duration > 0:
+                qdrant_started = parse_iso(qdrant_stage.get("started_at"))
+                copy_finished = parse_iso(prior_copy_finished_at)
+                if (
+                    prior_copy_duration > 0
+                    and copy_finished is None
+                    and qdrant_started is not None
+                ):
+                    run_started = parse_iso(run.get("started_at"))
+                    if run_started is not None:
+                        copy_finished = run_started + timedelta(
+                            milliseconds=prior_copy_duration
+                        )
+                included_copy = bool(
+                    prior_copy_duration > 0
+                    and qdrant_started is not None
+                    and copy_finished is not None
+                    and qdrant_started <= copy_finished
+                )
+                prior_index_duration_ms += max(
+                    0,
+                    qdrant_duration
+                    - (prior_copy_duration if included_copy else 0),
+                )
         for item in prior.get("months") or []:
             if not isinstance(item, dict):
                 continue
@@ -995,6 +1026,8 @@ def _merge_prior_index_runtime(
         merged_copy["resumed"] = True
         merged_copy["resumed_from_run_id"] = best_copy_run_id
         runtime["copy"] = merged_copy
+    if prior_index_duration_ms > 0:
+        runtime["index_prior_duration_ms"] = prior_index_duration_ms
     if not best:
         return runtime
     for item in runtime.get("months") or []:

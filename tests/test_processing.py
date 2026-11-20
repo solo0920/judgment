@@ -3764,6 +3764,14 @@ def test_merge_prior_index_runtime_restores_completed_copy_stage() -> None:
         {
             "id": "prior-copy-run",
             "started_at": "2026-11-19T08:55:07+00:00",
+            "stages": {
+                "qdrant": {
+                    "status": "stale",
+                    "started_at": "2026-11-19T08:55:09+00:00",
+                    "finished_at": "2026-11-20T13:40:54+00:00",
+                    "duration_ms": 103545112,
+                }
+            },
             "meta": {
                 "index_runtime": {
                     "version_id": 7,
@@ -3774,7 +3782,6 @@ def test_merge_prior_index_runtime_restores_completed_copy_stage() -> None:
                         "percent": 100.0,
                         "duration_ms": 27178879,
                         "started_at": "2026-11-19T08:55:07+00:00",
-                        "finished_at": "2026-11-19T16:28:06+00:00",
                     },
                 }
             },
@@ -3787,3 +3794,4 @@ def test_merge_prior_index_runtime_restores_completed_copy_stage() -> None:
     assert merged["copy"]["duration_ms"] == 27178879
     assert merged["copy"]["resumed"] is True
     assert merged["copy"]["resumed_from_run_id"] == "prior-copy-run"
+    assert merged["index_prior_duration_ms"] == 103545112 - 27178879

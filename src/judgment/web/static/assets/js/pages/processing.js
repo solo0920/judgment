@@ -3185,6 +3185,9 @@ function indexWorkflowProgressMarkup(workflow) {
   const runtime = workflow.index_runtime || {};
   const summary = runtime.summary || {};
   const copy = runtime.copy || {};
+  const priorIndexDurationMs = Number(
+    runtime.index_prior_duration_ms || 0,
+  );
   const current = runtime.current || {};
   const embedding = runtime.embedding || {};
   const selected = embedding.selected || {};
@@ -3281,6 +3284,21 @@ function indexWorkflowProgressMarkup(workflow) {
       : String(current.phase || "") === "reuse"
         ? "R 重用"
         : "—";
+  const indexCurrentDurationMs = (() => {
+    const raw = Number(indexStage.duration_ms) || 0;
+    const startedMs = Date.parse(indexStage.started_at || "");
+    if (
+      indexStage.status === "running" &&
+      Number.isFinite(startedMs)
+    ) {
+      return Math.max(raw, Date.now() - startedMs);
+    }
+    if (raw > 0) return raw;
+    const finishedMs = Date.parse(indexStage.finished_at || "");
+    return Number.isFinite(startedMs) && Number.isFinite(finishedMs)
+      ? Math.max(0, finishedMs - startedMs)
+      : 0;
+  })();
   const phases = [
     {
       key: "probe",
@@ -3402,6 +3420,7 @@ function indexWorkflowProgressMarkup(workflow) {
       total: expected,
       unit: "筆",
       duration_ms: indexReady ? indexStage.duration_ms : 0,
+      extraDurationMs: priorIndexDurationMs,
       started_at: indexReady
         ? indexStage.started_at || runtime.started_at
         : null,
@@ -3411,6 +3430,18 @@ function indexWorkflowProgressMarkup(workflow) {
           "已索引",
           `${formatNumber(indexed)} / ${formatNumber(expected)} 筆`,
         ],
+        priorIndexDurationMs > 0
+          ? [
+              "前次執行",
+              formatIndexWorkflowDuration(priorIndexDurationMs),
+            ]
+          : null,
+        priorIndexDurationMs > 0
+          ? [
+              "本次執行",
+              formatIndexWorkflowDuration(indexCurrentDurationMs),
+            ]
+          : null,
         ["重用", formatNumber(summary.reused)],
         ["新 embedding", formatNumber(summary.embedded)],
         ["目前月份", currentLabel],
@@ -3489,16 +3520,20 @@ function indexWorkflowProgressMarkup(workflow) {
   const overallLabel = percentText(overall);
   const nowMs = Date.now();
   const durationOf = (phase) => {
+    const extra = Number(phase.extraDurationMs) || 0;
     const raw = Number(phase.duration_ms) || 0;
     const startMs = Date.parse(phase.started_at || "");
     if (phase.status === "running" && Number.isFinite(startMs)) {
-      return Math.max(raw, nowMs - startMs);
+      return extra + Math.max(raw, nowMs - startMs);
     }
-    if (raw > 0) return raw;
+    if (raw > 0) return extra + raw;
     const endMs = Date.parse(phase.finished_at || "");
-    return Number.isFinite(startMs) && Number.isFinite(endMs)
-      ? Math.max(0, endMs - startMs)
-      : 0;
+    return (
+      extra +
+      (Number.isFinite(startMs) && Number.isFinite(endMs)
+        ? Math.max(0, endMs - startMs)
+        : 0)
+    );
   };
   const timedPhases = phases.map((phase) => {
     const duration = durationOf(phase);
