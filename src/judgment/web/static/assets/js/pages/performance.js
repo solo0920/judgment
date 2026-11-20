@@ -1,4 +1,6 @@
 import { api, subscribeRefresh } from "../api.js";
+import { isDemoVisitor } from "../demo.js";
+import { renderDemoPerformance } from "../demo_pages.js";
 import { createBenchmarkPanel } from "./benchmark_page.js";
 import {
   copyText,
@@ -2534,6 +2536,7 @@ function renderPerformanceReport(result) {
 }
 
 export async function render(root, ctx) {
+  if (isDemoVisitor()) return renderDemoPerformance(root);
   let disposed = false;
   let filters = defaultFilters();
   let options = { processes: [], modules: [], statuses: [], methods: [], models: [] };

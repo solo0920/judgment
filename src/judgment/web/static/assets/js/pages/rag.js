@@ -1,4 +1,5 @@
 import { api, subscribeRefresh } from "../api.js";
+import { isDemoVisitor } from "../demo.js";
 import {
   addHistory,
   clearHistory,
@@ -2032,6 +2033,14 @@ export async function render(root) {
   const paintModeNotice = () => {
     const heroNotice = root.querySelector("#rag-mode-notice");
     if (!heroNotice) return;
+    if (isDemoVisitor()) {
+      heroNotice.innerHTML = notice({
+        tone: "info",
+        title: "展示模式",
+        text: "可直接輸入法律問題；回答會標示可回溯的法規與判決引用。",
+      });
+      return;
+    }
     const modelSummary = Array.isArray(modeStatus?.model_summary)
       ? modeStatus.model_summary
       : [];
@@ -2082,6 +2091,12 @@ export async function render(root) {
   };
 
   const loadModeNotice = async () => {
+    if (isDemoVisitor()) {
+      modeStatus = null;
+      modeError = null;
+      paintModeNotice();
+      return;
+    }
     try {
       const status = await api.status();
       if (disposed) return;
@@ -2131,6 +2146,11 @@ export async function render(root) {
   };
 
   const loadTestMode = async () => {
+    if (isDemoVisitor()) {
+      testMode = false;
+      paintTestMode();
+      return;
+    }
     try {
       const state = await api.testMode();
       if (disposed) return;

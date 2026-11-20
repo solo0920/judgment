@@ -1,4 +1,6 @@
 import { api, apiUrl, subscribeRefresh } from "../api.js";
+import { isDemoVisitor } from "../demo.js";
+import { renderDemoProcessing } from "../demo_pages.js";
 import { judgmentStatsCardsMarkup } from "../judgment-stats.js";
 import {
   escapeHtml,
@@ -5903,6 +5905,7 @@ function panelMarkup(
 }
 
 export async function render(root) {
+  if (isDemoVisitor()) return renderDemoProcessing(root);
   root.innerHTML = `<section class="page processing-page">
     <div class="page-header">
       <div class="processing-page-heading">

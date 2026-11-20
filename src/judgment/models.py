@@ -4,12 +4,16 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -886,4 +890,51 @@ class BenchmarkCaseResult(Base):
             name="uq_benchmark_case_result",
         ),
         Index("ix_benchmark_case_results_run_status", "run_id", "status"),
+    )
+
+
+class DemoSettings(Base):
+    __tablename__ = "demo_settings"
+
+    id = Column(SmallInteger, primary_key=True, default=1)
+    enabled = Column(Boolean, nullable=False, default=False)
+    allow_rag = Column(Boolean, nullable=False, default=False)
+    allow_data = Column(Boolean, nullable=False, default=False)
+    allow_quality = Column(Boolean, nullable=False, default=False)
+    allow_performance = Column(Boolean, nullable=False, default=False)
+    allow_processing = Column(Boolean, nullable=False, default=False)
+    allow_status = Column(Boolean, nullable=False, default=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    updated_by = Column(String(320), nullable=False, default="")
+    version = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_demo_settings_singleton"),
+    )
+
+
+class DemoModeAudit(Base):
+    __tablename__ = "demo_mode_audit"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    actor_email = Column(String(320), nullable=False, default="")
+    action = Column(String(32), nullable=False)
+    before = Column(JSON, nullable=True)
+    after = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+
+class DemoUsageDaily(Base):
+    __tablename__ = "demo_usage_daily"
+
+    usage_date = Column(Date, primary_key=True)
+    requests = Column(Integer, nullable=False, default=0)
+    tokens = Column(BigInteger, nullable=False, default=0)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )

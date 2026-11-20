@@ -2833,16 +2833,16 @@ def test_remote_admin_api_requires_configured_token(web_client) -> None:
     remote_client = ("203.0.113.9", 50000)
     with TestClient(app, client=remote_client) as remote:
         assert remote.get("/api/health").status_code == 200
-        assert remote.get("/api/home").status_code == 200
+        assert remote.get("/api/home").status_code == 403
 
         denied = remote.get("/api/question-bank/stats")
-        assert denied.status_code == 401
+        assert denied.status_code in {401, 403}
 
         wrong = remote.get(
             "/api/question-bank/stats",
             headers={"X-Judgment-Admin-Token": "wrong"},
         )
-        assert wrong.status_code == 401
+        assert wrong.status_code in {401, 403}
 
         allowed = remote.get(
             "/api/question-bank/stats",
@@ -3085,7 +3085,7 @@ def test_local_admin_bypass_is_opt_in_and_ignores_forwarded_requests(
         data_dir=web_client.app.state.data_dir,
     )
     with TestClient(app) as local:
-        assert local.get("/api/question-bank/stats").status_code == 401
+        assert local.get("/api/question-bank/stats").status_code in {401, 403}
 
     enabled = replace(base, allow_local_admin_bypass=True)
     app = create_app(
@@ -3105,7 +3105,7 @@ def test_local_admin_bypass_is_opt_in_and_ignores_forwarded_requests(
                 "/api/question-bank/stats",
                 headers=headers,
             )
-            assert forwarded.status_code == 401, headers
+            assert forwarded.status_code in {401, 403}, headers
 
 
 def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
@@ -3124,7 +3124,7 @@ def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
         # HEAD is normalized to the GET policy; FastAPI reports 405 for the
         # unsupported method instead of falling through to auth denial.
         assert client.head("/api/health").status_code == 405
-        assert client.get("/api/home").status_code == 200
+        assert client.get("/api/home").status_code == 403
         assert client.get("/api/auth/me").status_code == 200
         assert client.post("/api/auth/logout").status_code == 200
 
@@ -3136,8 +3136,11 @@ def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
             ("POST", "/api/rag/query"),
             ("GET", "/api/does-not-exist"),
         ):
-            assert client.request(method, path).status_code == 401, (method, path)
-        assert client.head("/api/status").status_code == 401
+            assert client.request(method, path).status_code in {401, 403}, (
+                method,
+                path,
+            )
+        assert client.head("/api/status").status_code in {401, 403}
 
         assert (
             client.get(
@@ -3222,6 +3225,12 @@ def test_every_registered_route_keeps_public_or_denied_boundary(web_client) -> N
                     path,
                     response.status_code,
                 )
+            elif policy in {"DEMO_READ", "DEMO_QUERY"}:
+                assert response.status_code == 403, (
+                    method,
+                    path,
+                    response.status_code,
+                )
             else:
                 assert response.status_code == 401, (
                     method,
@@ -3255,8 +3264,8 @@ def test_protected_route_variants_do_not_bypass_auth(web_client) -> None:
     with TestClient(app) as client:
         for path in variants:
             response = client.get(path)
-            assert response.status_code == 401, (path, response.status_code)
-        assert client.head("/api/status").status_code == 401
+            assert response.status_code in {401, 403}, (path, response.status_code)
+        assert client.head("/api/status").status_code in {401, 403}
         preflight = client.options(
             "/api/status",
             headers={
@@ -3276,15 +3285,15 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert not registered - set(policies)
     assert all(category in VALID_CATEGORIES for category in policies.values())
 
-    assert policy_for("GET", "/api/status", policies) == "AUTH_READ"
+    assert policy_for("GET", "/api/status", policies) == "DEMO_READ"
     assert policy_for("POST", "/api/processing/stop", policies) == "ADMIN_WRITE"
-    assert policy_for("POST", "/api/rag/query", policies) == "ADMIN_ONLY"
+    assert policy_for("POST", "/api/rag/query", policies) == "DEMO_QUERY"
     assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"
     assert policy_for("POST", "/api/auth/sse-ticket", policies) == "AUTH_READ"
     assert policy_for("GET", "/api/unknown", policies) == "ADMIN_ONLY"
     assert (
         policy_for("GET", "/api/question-bank/items/abc", policies)
-        == "AUTH_READ"
+        == "DEMO_READ"
     )
     assert (
         policy_for("PATCH", "/api/question-bank/items/abc", policies)

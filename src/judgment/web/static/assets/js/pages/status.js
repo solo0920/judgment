@@ -5,6 +5,8 @@ import {
   getApiBaseSource,
   subscribeRefresh,
 } from "../api.js";
+import { isDemoVisitor } from "../demo.js";
+import { renderDemoStatus } from "../demo_pages.js";
 import {
   emptyState,
   escapeHtml,
@@ -2350,6 +2352,7 @@ function renderError(error) {
 }
 
 export async function render(root, ctx) {
+  if (isDemoVisitor()) return renderDemoStatus(root);
   let disposed = false;
   let autoStream = null;
   let latest = null;

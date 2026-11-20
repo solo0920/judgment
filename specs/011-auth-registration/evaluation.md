@@ -4,7 +4,7 @@
 
 **Version**: 0.7
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-20
 
 **Applies To**: `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`、Google OAuth、SSE、所有 `/api/*` 路由與前端 action 按鈕。
 
@@ -14,6 +14,7 @@
 - [`../security/security-acceptance-matrix.md`](../security/security-acceptance-matrix.md)
 - [`../008-realtime-event-stream/spec.md`](../008-realtime-event-stream/spec.md)
 - [`./execution-report.md`](./execution-report.md)
+- [`./demo-mode-evaluation.md`](./demo-mode-evaluation.md)（2026-11-20 全站展示模式評估：單一管理者、匿名訪客、一鍵關閉）
 
 ---
 

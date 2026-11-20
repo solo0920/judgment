@@ -81,7 +81,7 @@ function renderLoggedOut(state = {}) {
 function renderLoggedIn(user) {
   const name = displayName(user);
   const email = String(user?.email || "");
-  const role = user?.admin ? "管理員" : "已登入";
+  const role = user?.admin ? "管理員" : "使用者";
   slot.innerHTML = `
     <div class="auth-user">
       <button type="button"
@@ -107,6 +107,11 @@ function renderLoggedIn(user) {
           <span class="auth-menu-name">${escapeHtml(name)}</span>
           <span class="auth-menu-email">${escapeHtml(email)}</span>
         </div>
+        ${
+          user?.admin
+            ? `<a class="auth-menu-item" id="auth-admin-settings" href="#/admin" role="menuitem">管理設定</a>`
+            : ""
+        }
         <button type="button" class="auth-menu-item" id="auth-logout" role="menuitem">
           登出
         </button>
@@ -122,6 +127,10 @@ function renderLoggedIn(user) {
     trigger.setAttribute("aria-expanded", opening ? "true" : "false");
   });
 
+  slot.querySelector("#auth-admin-settings")?.addEventListener("click", () => {
+    closeMenu();
+  });
+
   slot.querySelector("#auth-logout")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
@@ -130,6 +139,7 @@ function renderLoggedIn(user) {
       await api.authLogout();
       toast("已登出。", "ok", 2400);
       await refreshAuth();
+      window.dispatchEvent(new CustomEvent("judgment:auth-changed"));
     } catch (error) {
       button.disabled = false;
       button.textContent = "登出";

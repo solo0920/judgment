@@ -68,6 +68,21 @@ class Settings:
     admin_token: str = ""
     allow_local_admin_bypass: bool = False
     public_rag_enabled: bool = False
+    demo_hard_disable: bool = False
+    demo_rag_daily_token_budget: int = 1_000_000
+    demo_rag_daily_request_limit: int = 400
+    demo_rag_rate_per_minute: int = 10
+    demo_rag_rate_per_hour: int = 60
+    demo_rag_rate_per_day: int = 200
+    demo_query_rate_per_minute: int = 20
+    demo_query_rate_per_hour: int = 200
+    demo_query_rate_per_day: int = 500
+    demo_poll_rate_per_minute: int = 120
+    demo_poll_rate_per_hour: int = 3000
+    demo_poll_rate_per_day: int = 20000
+    demo_query_timeout_seconds: float = 10.0
+    demo_query_max_page_size: int = 50
+    demo_query_max_total: int = 100
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
@@ -237,6 +252,51 @@ class Settings:
                 "JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS", False
             ),
             public_rag_enabled=_env_bool("PUBLIC_RAG_ENABLED", False),
+            demo_hard_disable=_env_bool(
+                "JUDGMENT_DEMO_HARD_DISABLE", False
+            ),
+            demo_rag_daily_token_budget=_env_int(
+                "JUDGMENT_DEMO_RAG_DAILY_TOKEN_BUDGET", 1_000_000
+            ),
+            demo_rag_daily_request_limit=_env_int(
+                "JUDGMENT_DEMO_RAG_DAILY_REQUEST_LIMIT", 400
+            ),
+            demo_rag_rate_per_minute=_env_int(
+                "JUDGMENT_DEMO_RAG_RATE_PER_MINUTE", 10
+            ),
+            demo_rag_rate_per_hour=_env_int(
+                "JUDGMENT_DEMO_RAG_RATE_PER_HOUR", 60
+            ),
+            demo_rag_rate_per_day=_env_int(
+                "JUDGMENT_DEMO_RAG_RATE_PER_DAY", 200
+            ),
+            demo_query_rate_per_minute=_env_int(
+                "JUDGMENT_DEMO_QUERY_RATE_PER_MINUTE", 20
+            ),
+            demo_query_rate_per_hour=_env_int(
+                "JUDGMENT_DEMO_QUERY_RATE_PER_HOUR", 200
+            ),
+            demo_query_rate_per_day=_env_int(
+                "JUDGMENT_DEMO_QUERY_RATE_PER_DAY", 500
+            ),
+            demo_poll_rate_per_minute=_env_int(
+                "JUDGMENT_DEMO_POLL_RATE_PER_MINUTE", 120
+            ),
+            demo_poll_rate_per_hour=_env_int(
+                "JUDGMENT_DEMO_POLL_RATE_PER_HOUR", 3000
+            ),
+            demo_poll_rate_per_day=_env_int(
+                "JUDGMENT_DEMO_POLL_RATE_PER_DAY", 20000
+            ),
+            demo_query_timeout_seconds=_env_float(
+                "JUDGMENT_DEMO_QUERY_TIMEOUT_SECONDS", 10.0
+            ),
+            demo_query_max_page_size=_env_int(
+                "JUDGMENT_DEMO_QUERY_MAX_PAGE_SIZE", 50
+            ),
+            demo_query_max_total=_env_int(
+                "JUDGMENT_DEMO_QUERY_MAX_TOTAL", 100
+            ),
             google_oauth_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
             google_oauth_client_secret=os.getenv(
                 "GOOGLE_CLIENT_SECRET", ""

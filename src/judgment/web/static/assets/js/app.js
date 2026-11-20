@@ -1,7 +1,18 @@
 import { api, needsApiConfiguration, subscribeRefresh } from "./api.js";
 import { initAuth } from "./auth.js";
 import { initSettings, refreshSettings } from "./settings.js";
+import {
+  applyDemoShell,
+  demoActive,
+  demoAdminGuardMarkup,
+  demoFeature,
+  isAdmin,
+  loadDemoContext,
+  renderDemoClosed,
+  renderDemoLocked,
+} from "./demo.js";
 import { escapeHtml, icon, toast } from "./utils.js";
+import * as adminPage from "./pages/admin.js";
 import * as homePage from "./pages/home.js";
 import * as ragPage from "./pages/rag.js";
 import * as dataPage from "./pages/data.js";
@@ -21,6 +32,7 @@ const ROUTES = {
   processing: { page: processingPage, title: "資料處理 · Judgment RAG Console" },
   status: { page: statusPage, title: "系統狀態 · Judgment RAG Console" },
   tests: { page: testsPage, title: "系統測試 · Judgment RAG Console" },
+  admin: { page: adminPage, title: "管理設定 · Judgment RAG Console" },
 };
 
 const main = document.getElementById("app-main");
@@ -86,6 +98,30 @@ async function renderRoute() {
       /* page cleanup should never block navigation */
     }
     cleanup = null;
+  }
+
+  applyDemoShell();
+  if (!isAdmin()) {
+    if (route === "admin") {
+      document.title = "管理設定 · Judgment RAG Console";
+      main.innerHTML = demoAdminGuardMarkup();
+      return;
+    }
+    if (route === "tests") {
+      document.title = "展示模式 · Judgment RAG Console";
+      renderDemoLocked(main, route);
+      return;
+    }
+    if (!demoActive()) {
+      document.title = "展示目前未開放 · Judgment RAG Console";
+      renderDemoClosed(main);
+      return;
+    }
+    if (!demoFeature(route)) {
+      document.title = "展示模式 · Judgment RAG Console";
+      renderDemoLocked(main, route);
+      return;
+    }
   }
 
   document.title = ROUTES[route].title;
@@ -224,17 +260,31 @@ function initUpdateBadge() {
   window.addEventListener("judgment:updates-changed", () => refresh());
 }
 
-function boot() {
+async function boot() {
+  await loadDemoContext();
   initAuth();
   initSettings();
   initGlobalShortcuts();
-  initUpdateBadge();
+  if (isAdmin()) initUpdateBadge();
   window.addEventListener("hashchange", renderRoute);
+  window.addEventListener("judgment:auth-changed", async () => {
+    await loadDemoContext();
+    applyDemoShell();
+    renderRoute();
+  });
+  window.addEventListener("judgment:demo-denied", async () => {
+    await loadDemoContext();
+    applyDemoShell();
+    renderRoute();
+  });
   renderRoute();
 
   if (needsApiConfiguration()) {
     window.setTimeout(() => {
-      if (parseRoute() === "rag") window.location.hash = "#/tests";
+      const route = parseRoute();
+      if (route === "rag" || route === "admin") {
+        window.location.hash = isAdmin() ? "#/tests" : "#/home";
+      }
     }, 700);
   }
 }

@@ -200,6 +200,9 @@ export function subscribeRefresh(
   onRefresh,
   { onError = null, onProgress = null } = {},
 ) {
+  if (document.body.classList.contains("is-demo-visitor")) {
+    return () => {};
+  }
   const list = (Array.isArray(topics) ? topics : [topics])
     .map((topic) => String(topic || "").trim())
     .filter(Boolean);
@@ -363,6 +366,18 @@ async function request(path, options = {}) {
   }
 
   if (!response.ok) {
+    if (
+      response.status === 403 &&
+      payload &&
+      typeof payload === "object" &&
+      ["demo_closed", "demo_hard_disabled"].includes(
+        payload.code,
+      )
+    ) {
+      window.dispatchEvent(
+        new CustomEvent("judgment:demo-denied", { detail: payload }),
+      );
+    }
     const detail =
       payload && typeof payload === "object" ? payload.detail || payload.message : payload;
     const message =
@@ -387,6 +402,7 @@ function newRequestId() {
 }
 
 function reportClientTiming(payload) {
+  if (document.body.classList.contains("is-demo-visitor")) return;
   try {
     fetch(apiUrl("/api/performance/client", getApiBase()), {
       method: "POST",
@@ -511,6 +527,46 @@ export const api = {
     return request("/api/auth/logout", {
       method: "POST",
       base: getAuthApiBase(),
+      trackClient: false,
+    });
+  },
+
+  demoStatus() {
+    return request("/api/demo/status", {
+      timeout: 15000,
+      trackClient: false,
+    });
+  },
+
+  adminDemo() {
+    return request("/api/admin/demo", {
+      timeout: 15000,
+      trackClient: false,
+    });
+  },
+
+  updateDemo(payload) {
+    return request("/api/admin/demo", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  closeDemo() {
+    return request("/api/admin/demo/close", {
+      method: "POST",
+      body: JSON.stringify({}),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  demoAudit(limit = 20) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return request(`/api/admin/demo/audit?${params.toString()}`, {
+      timeout: 15000,
       trackClient: false,
     });
   },

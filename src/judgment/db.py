@@ -251,6 +251,39 @@ def _ensure_law_version_code(engine: Engine) -> None:
         )
 
 
+def _ensure_demo_settings(engine: Engine) -> None:
+    """Seed the singleton demo-mode row without enabling it.
+
+    New installs get all six feature flags persisted as enabled but the master
+    switch stays off.  A missing row is treated as fully closed by the runtime.
+    """
+
+    inspector = inspect(engine)
+    if "demo_settings" not in inspector.get_table_names():
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO demo_settings ("
+                "id, enabled, allow_rag, allow_data, allow_quality, "
+                "allow_performance, allow_processing, allow_status, "
+                "expires_at, updated_at, updated_by, version"
+                ") SELECT 1, :enabled, :rag, :data, :quality, :performance, "
+                ":processing, :status, NULL, CURRENT_TIMESTAMP, '', 1 "
+                "WHERE NOT EXISTS (SELECT 1 FROM demo_settings WHERE id = 1)"
+            ),
+            {
+                "enabled": False,
+                "rag": True,
+                "data": True,
+                "quality": True,
+                "performance": True,
+                "processing": True,
+                "status": True,
+            },
+        )
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_judgment_court_normalized(engine)
@@ -259,6 +292,7 @@ def init_db(engine: Engine) -> None:
     _ensure_performance_flow(engine)
     _ensure_performance_test_columns(engine)
     _ensure_ollama_host_priority(engine)
+    _ensure_demo_settings(engine)
     from .index_versions import ensure_index_version_schema
 
     ensure_index_version_schema(engine)

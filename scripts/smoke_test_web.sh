@@ -67,14 +67,18 @@ check() {
   fi
 }
 
+# Demo mode must be closed for this boundary check. If it is open, close it
+# from the admin page or set demo_settings.enabled=false before running.
 check 200 "${BASE}/api/health"
 check 200 "${BASE}/"
 check 200 "${BASE}/api/auth/me"
-check 401 "${BASE}/api/status"
-check 401 "${BASE}/api/processing"
+check 200 "${BASE}/api/demo/status"
+check 403 "${BASE}/api/home"
+check 403 "${BASE}/api/status"
+check 403 "${BASE}/api/processing"
 check 401 -X POST "${BASE}/api/processing/stop"
 check 401 -X DELETE "${BASE}/api/llama-server/hosts/1"
-check 401 -X POST -H 'Content-Type: application/json' -d '{}' "${BASE}/api/rag/query"
+check 403 -X POST -H 'Content-Type: application/json' -d '{}' "${BASE}/api/rag/query"
 check 401 "${BASE}/api/does-not-exist"
 # Keep this list explicit: do not loop over every GET route with an admin
 # token because some GETs have side effects or are expensive.

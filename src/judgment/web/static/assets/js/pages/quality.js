@@ -1,4 +1,6 @@
 import { api } from "../api.js";
+import { isDemoVisitor } from "../demo.js";
+import { renderDemoQuality } from "../demo_pages.js";
 import { createQuestionBankController } from "./question_bank.js";
 import {
   downloadText,
@@ -296,6 +298,7 @@ function renderQualityReport(data) {
 }
 
 export async function render(root) {
+  if (isDemoVisitor()) return renderDemoQuality(root);
   root.innerHTML = `<section class="page data-page quality-page">
     <div class="page-header">
       <div class="data-page-heading">

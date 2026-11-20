@@ -175,6 +175,24 @@ from ..runtime_settings import (
 )
 from .catalog import build_catalog
 from .client_ip import effective_client_ip, suspicious_proxy_chain
+from .demo_mode import (
+    DemoConflict,
+    DemoRateLimiter,
+    DemoValidationError,
+    add_demo_usage,
+    admin_demo_payload,
+    close_demo_settings,
+    estimate_rag_tokens,
+    list_demo_audit,
+    load_demo_state,
+    load_demo_usage,
+    public_demo_payload,
+    sanitize_infrastructure,
+    sanitize_processing_payload,
+    sanitize_rag_result,
+    sanitize_status_payload,
+    update_demo_settings,
+)
 from .home import build_home_summary
 from .judgment_stats import build_judgment_stats
 from .performance import performance_options, query_performance
@@ -200,7 +218,12 @@ from .processing import (
     build_processing_snapshot,
 )
 from .quality import build_quality_snapshot
-from .route_policy import policy_for, validate_route_policies
+from .route_policy import (
+    DEMO_POLICIES,
+    demo_feature_for,
+    policy_for,
+    validate_route_policies,
+)
 from .runtime_security import (
     server_bind_allowed,
     validate_forwarded_allow_ips,
@@ -229,6 +252,9 @@ STATIC_DIR = Path(__file__).parent / "static"
 # the official server; the batch workflow is already sequential.
 _JUDGMENT_DOWNLOAD_LOCK = threading.Lock()
 _UPDATE_CHECK_LOCK = threading.Lock()
+_DEMO_QUERY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="demo-query"
+)
 
 
 class QueryRequest(BaseModel):
@@ -240,6 +266,22 @@ class QueryRequest(BaseModel):
 
 class RagRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+
+
+class DemoFeaturesRequest(BaseModel):
+    rag: bool = False
+    data: bool = False
+    quality: bool = False
+    performance: bool = False
+    processing: bool = False
+    status: bool = False
+
+
+class DemoUpdateRequest(BaseModel):
+    enabled: bool
+    duration_hours: Optional[int] = None
+    features: DemoFeaturesRequest
+    version: Optional[int] = None
 
 
 class ClientTimingRequest(BaseModel):
@@ -384,6 +426,104 @@ def _policy_for_matched_route(route: Any, method: str) -> str:
     return policy_for(method, str(getattr(route, "path", "") or ""))
 
 
+def _demo_check(
+    request: Request,
+    policy: str,
+    *,
+    enforce_limits: bool,
+) -> Optional[JSONResponse]:
+    """Validate demo access for a non-admin principal.
+
+    Returns a JSONResponse when the request must be rejected. The caller still
+    applies the normal Origin checks for non-GET requests after this returns
+    ``None``.
+    """
+
+    principal = getattr(request.state, "principal", None)
+    if principal is not None and principal.is_admin:
+        request.state.is_demo_visitor = False
+        return None
+    settings = request.app.state.settings
+    feature = demo_feature_for(request.method, request.url.path)
+    state = load_demo_state(request.app.state.session_factory, settings)
+    request.state.demo_state = state
+    request.state.is_demo_visitor = True
+    if not state.active:
+        return _demo_error(
+            403,
+            "展示目前未開放。",
+            code="demo_closed",
+        )
+    if not feature:
+        return _demo_error(
+            403,
+            "這個展示功能尚未分類。",
+            code="demo_unmapped",
+        )
+    if feature != "home" and not state.features.get(feature, False):
+        return _demo_error(
+            403,
+            f"「{feature}」目前未開放展示。",
+            code="demo_feature_disabled",
+            feature=feature,
+        )
+    if not enforce_limits:
+        return None
+
+    client_ip = str(
+        getattr(request.state, "client_ip", "") or effective_client_ip(request)
+    )
+    if policy == "DEMO_QUERY":
+        if feature == "rag":
+            usage = load_demo_usage(request.app.state.session_factory)
+            if (
+                settings.demo_rag_daily_token_budget > 0
+                and usage["tokens"] >= settings.demo_rag_daily_token_budget
+            ) or (
+                settings.demo_rag_daily_request_limit > 0
+                and usage["requests"] >= settings.demo_rag_daily_request_limit
+            ):
+                return _demo_error(
+                    429,
+                    "今日展示額度已用完，請明天再試。",
+                    code="demo_budget_exhausted",
+                    feature=feature,
+                    retry_after=3600,
+                )
+            retry_after = request.app.state.demo_limiter.check(
+                client_ip,
+                "rag",
+                per_minute=settings.demo_rag_rate_per_minute,
+                per_hour=settings.demo_rag_rate_per_hour,
+                per_day=settings.demo_rag_rate_per_day,
+            )
+        else:
+            retry_after = request.app.state.demo_limiter.check(
+                client_ip,
+                "query",
+                per_minute=settings.demo_query_rate_per_minute,
+                per_hour=settings.demo_query_rate_per_hour,
+                per_day=settings.demo_query_rate_per_day,
+            )
+    else:
+        retry_after = request.app.state.demo_limiter.check(
+            client_ip,
+            "poll",
+            per_minute=settings.demo_poll_rate_per_minute,
+            per_hour=settings.demo_poll_rate_per_hour,
+            per_day=settings.demo_poll_rate_per_day,
+        )
+    if retry_after is not None:
+        return _demo_error(
+            429,
+            "展示請求過於頻繁，請稍後再試。",
+            code="demo_rate_limited",
+            feature=feature,
+            retry_after=retry_after,
+        )
+    return None
+
+
 def route_policy_guard(request: Request) -> None:
     """Second line of defense after the auth middleware.
 
@@ -408,6 +548,23 @@ def route_policy_guard(request: Request) -> None:
             session_secret(settings),
         )
     ):
+        return
+    if policy in DEMO_POLICIES:
+        if principal.is_admin:
+            return
+        state = getattr(request.state, "demo_state", None)
+        if state is None:
+            state = load_demo_state(request.app.state.session_factory, settings)
+        feature = demo_feature_for(request.method, request.url.path)
+        if (
+            not state.active
+            or not feature
+            or (feature != "home" and not state.features.get(feature, False))
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="展示模式未開放這個功能。",
+            )
         return
     if principal_allows(
         policy,
@@ -467,6 +624,41 @@ def _provided_admin_token(request: Request) -> str:
     if authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
     return ""
+
+
+def _is_demo_visitor(request: Request) -> bool:
+    return bool(getattr(request.state, "is_demo_visitor", False))
+
+
+def _demo_actor(request: Request) -> str:
+    principal = getattr(request.state, "principal", None)
+    if principal is not None and getattr(principal, "email", ""):
+        return str(principal.email)
+    if principal is not None and getattr(principal, "source", "") == "admin_token":
+        return "admin_token"
+    return "admin"
+
+
+def _demo_error(
+    status_code: int,
+    detail: str,
+    *,
+    code: str,
+    feature: str = "",
+    retry_after: Optional[int] = None,
+) -> JSONResponse:
+    headers = {"Cache-Control": "no-store"}
+    if retry_after:
+        headers["Retry-After"] = str(max(1, int(retry_after)))
+    return JSONResponse(
+        status_code=status_code,
+        headers=headers,
+        content={
+            "detail": detail,
+            "code": code,
+            "feature": feature,
+        },
+    )
 
 
 def _resolve_principal(
@@ -1382,6 +1574,7 @@ def create_app(
             else "starting"
         ),
     }
+    app.state.demo_limiter = DemoRateLimiter()
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
         max_queue=settings.rag_admission_max_queue,
@@ -1537,11 +1730,24 @@ def create_app(
         matched_route = _match_route(app, request.scope)
         policy = _policy_for_matched_route(matched_route, request.method)
         is_public = policy in PUBLIC_POLICIES
-        if principal_allows(
-            policy,
-            principal.kind,
-            public_rag_enabled=current.public_rag_enabled,
-        ):
+        if policy in DEMO_POLICIES:
+            if principal.is_admin:
+                request.state.is_demo_visitor = False
+                allowed = True
+            else:
+                denied = _demo_check(
+                    request, policy, enforce_limits=True
+                )
+                if denied is not None:
+                    return denied
+                allowed = True
+        else:
+            allowed = principal_allows(
+                policy,
+                principal.kind,
+                public_rag_enabled=current.public_rag_enabled,
+            )
+        if allowed:
             if not is_public and request.method not in {
                 "GET",
                 "HEAD",
@@ -1568,13 +1774,13 @@ def create_app(
                             },
                         )
                 elif (
-                    principal.source == "google"
+                    principal.source in {"google", "anonymous"}
                     and not origin_allowed(request, current, cors_origins)
                 ):
                     return JSONResponse(
                         status_code=403,
                         content={
-                            "detail": "不允許的 Origin 對 Google 登入工作階段寫入。"
+                            "detail": "不允許的 Origin 對展示或登入工作階段寫入。"
                         },
                     )
             return await call_next(request)
@@ -1621,12 +1827,92 @@ def create_app(
             "role": principal.role,
             "status": principal.status,
             "google_enabled": google_login_enabled(current),
+            "demo": public_demo_payload(
+                load_demo_state(app.state.session_factory, current)
+            ),
         }
         response = JSONResponse(payload)
         if request.cookies.get(SESSION_COOKIE) and session is None:
             clear_session_cookie(response)
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.get("/api/demo/status")
+    def demo_status() -> JSONResponse:
+        state = load_demo_state(app.state.session_factory, app.state.settings)
+        return JSONResponse(
+            content=public_demo_payload(state),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/admin/demo")
+    def admin_demo_read() -> JSONResponse:
+        state = load_demo_state(app.state.session_factory, app.state.settings)
+        usage = load_demo_usage(app.state.session_factory)
+        payload = admin_demo_payload(state, usage)
+        payload["audit"] = list_demo_audit(
+            app.state.session_factory, limit=10
+        )
+        return JSONResponse(
+            content=payload, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.put("/api/admin/demo")
+    def admin_demo_update(
+        payload: DemoUpdateRequest, request: Request
+    ) -> JSONResponse:
+        try:
+            state = update_demo_settings(
+                app.state.session_factory,
+                app.state.settings,
+                enabled=payload.enabled,
+                features=payload.features.model_dump(),
+                duration_hours=payload.duration_hours,
+                actor_email=_demo_actor(request),
+                version=payload.version,
+            )
+        except DemoValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except DemoConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        usage = load_demo_usage(app.state.session_factory)
+        response = admin_demo_payload(state, usage)
+        response["audit"] = list_demo_audit(
+            app.state.session_factory, limit=10
+        )
+        return JSONResponse(
+            content=response, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.post("/api/admin/demo/close")
+    def admin_demo_close(request: Request) -> JSONResponse:
+        try:
+            state = close_demo_settings(
+                app.state.session_factory,
+                app.state.settings,
+                actor_email=_demo_actor(request),
+            )
+        except DemoValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        usage = load_demo_usage(app.state.session_factory)
+        response = admin_demo_payload(state, usage)
+        response["audit"] = list_demo_audit(
+            app.state.session_factory, limit=10
+        )
+        return JSONResponse(
+            content=response, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.get("/api/admin/demo/audit")
+    def admin_demo_audit(limit: int = 20) -> JSONResponse:
+        return JSONResponse(
+            content={
+                "items": list_demo_audit(
+                    app.state.session_factory, limit=limit
+                )
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/auth/google/start", name="google_start")
     def google_start(request: Request) -> RedirectResponse:
@@ -1847,29 +2133,35 @@ def create_app(
         return payload
 
     @app.get("/api/home")
-    def home_summary() -> Dict[str, Any]:
+    def home_summary(request: Request) -> Dict[str, Any]:
         with trace_segment(
             "api.endpoint",
             module=__name__,
             function="home_summary",
             params={},
         ):
-            return build_home_summary(
+            payload = build_home_summary(
                 settings=runtime_settings(
                     app.state.settings, app.state.session_factory
                 ),
                 session_factory=app.state.session_factory,
             )
+            if _is_demo_visitor(request):
+                return sanitize_infrastructure(payload)
+            return payload
 
     @app.get("/api/status")
-    def status() -> Dict[str, Any]:
+    def status(request: Request) -> Dict[str, Any]:
         with trace_segment(
             "api.endpoint",
             module=__name__,
             function="status",
             params={},
         ):
-            return status_payload()
+            payload = status_payload()
+            if _is_demo_visitor(request):
+                return sanitize_status_payload(payload)
+            return payload
 
     @app.get("/api/llama-server/hosts")
     @app.get("/api/ollama/hosts", include_in_schema=False)
@@ -2094,17 +2386,20 @@ def create_app(
             )
 
     @app.get("/api/processing")
-    def processing_snapshot() -> Dict[str, Any]:
+    def processing_snapshot(request: Request) -> Dict[str, Any]:
         with trace_segment(
             "api.endpoint",
             module=__name__,
             function="processing_snapshot",
             params={},
         ):
-            return build_processing_snapshot(
+            payload = build_processing_snapshot(
                 settings=settings,
                 session_factory=app.state.session_factory,
             )
+            if _is_demo_visitor(request):
+                return sanitize_processing_payload(payload)
+            return payload
 
     @app.get("/api/processing/active")
     def processing_active() -> Dict[str, Any]:
@@ -3024,7 +3319,30 @@ def create_app(
         return {"run": run}
 
     @app.post("/api/query")
-    def query(request: QueryRequest) -> Dict[str, Any]:
+    def query(request: QueryRequest, http_request: Request) -> Dict[str, Any]:
+        demo_visitor = _is_demo_visitor(http_request)
+        page = max(1, int(request.page))
+        page_size = max(1, int(request.page_size))
+        if demo_visitor:
+            page_size = min(page_size, settings.demo_query_max_page_size)
+            max_pages = max(
+                1, settings.demo_query_max_total // max(1, page_size)
+            )
+            page = min(page, max_pages)
+
+        def run() -> Dict[str, Any]:
+            return run_query(
+                database=request.database,
+                filters=request.filters,
+                page=page,
+                page_size=page_size,
+                session_factory=app.state.session_factory,
+                data_dir=app.state.data_dir,
+                settings=runtime_settings(
+                    app.state.settings, app.state.session_factory
+                ),
+            )
+
         try:
             with trace_segment(
                 "api.endpoint",
@@ -3032,22 +3350,28 @@ def create_app(
                 function="query",
                 params={
                     "database": request.database,
-                    "page": request.page,
-                    "page_size": request.page_size,
+                    "page": page,
+                    "page_size": page_size,
                     "filter_keys": sorted(request.filters),
                 },
             ):
-                return run_query(
-                    database=request.database,
-                    filters=request.filters,
-                    page=request.page,
-                    page_size=request.page_size,
-                    session_factory=app.state.session_factory,
-                    data_dir=app.state.data_dir,
-                    settings=runtime_settings(
-                        app.state.settings, app.state.session_factory
-                    ),
-                )
+                if demo_visitor:
+                    future = _DEMO_QUERY_EXECUTOR.submit(run)
+                    try:
+                        return future.result(
+                            timeout=max(
+                                1.0,
+                                float(settings.demo_query_timeout_seconds),
+                            )
+                        )
+                    except TimeoutError as exc:
+                        raise HTTPException(
+                            status_code=504,
+                            detail="展示查詢超過 10 秒，已取消。",
+                        ) from exc
+                return run()
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -3196,6 +3520,7 @@ def create_app(
 
     @app.get("/api/performance")
     def performance_records(
+        request: Request,
         process: str = "",
         module: str = "",
         status: str = "",
@@ -3209,6 +3534,18 @@ def create_app(
         page_size: int = 25,
         sort: str = "started_at:desc",
     ) -> Dict[str, Any]:
+        demo_visitor = _is_demo_visitor(request)
+        safe_page = max(1, int(page))
+        safe_page_size = max(1, int(page_size))
+        if demo_visitor:
+            safe_page_size = min(
+                safe_page_size, settings.demo_query_max_page_size
+            )
+            max_pages = max(
+                1,
+                settings.demo_query_max_total // max(1, safe_page_size),
+            )
+            safe_page = min(safe_page, max_pages)
         filters = {
             "process": process,
             "module": module,
@@ -3221,13 +3558,36 @@ def create_app(
             "min_duration": min_duration,
             "sort": sort,
         }
-        try:
+        def fetch() -> Dict[str, Any]:
             return query_performance(
                 session_factory=app.state.session_factory,
                 filters=filters,
-                page=page,
-                page_size=page_size,
+                page=safe_page,
+                page_size=safe_page_size,
             )
+
+        try:
+            if demo_visitor:
+                future = _DEMO_QUERY_EXECUTOR.submit(fetch)
+                try:
+                    payload = future.result(
+                        timeout=max(
+                            1.0,
+                            float(settings.demo_query_timeout_seconds),
+                        )
+                    )
+                except TimeoutError as exc:
+                    raise HTTPException(
+                        status_code=504,
+                        detail="展示效能查詢超過 10 秒，已取消。",
+                    ) from exc
+            else:
+                payload = fetch()
+            if demo_visitor:
+                return sanitize_infrastructure(payload)
+            return payload
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
@@ -3235,7 +3595,8 @@ def create_app(
             ) from exc
 
     @app.post("/api/rag/query")
-    def rag_query(request: RagRequest) -> Dict[str, Any]:
+    def rag_query(request: RagRequest, http_request: Request) -> Dict[str, Any]:
+        demo_visitor = _is_demo_visitor(http_request)
         try:
             with trace_segment(
                 "api.endpoint",
@@ -3272,6 +3633,13 @@ def create_app(
                     result["pipeline_flow"] = _rag_pipeline_snapshot(
                         flow, app.state.session_factory
                     )
+                if demo_visitor:
+                    add_demo_usage(
+                        app.state.session_factory,
+                        requests=1,
+                        tokens=estimate_rag_tokens(request.question, result),
+                    )
+                    return sanitize_rag_result(result)
                 return result
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -3292,12 +3660,31 @@ def create_app(
         client_started_at_ms = _client_started_ms(http_request)
         handler_started_perf = time.perf_counter()
         asgi_started_perf = _ASGI_STARTED.get()
+        demo_visitor = _is_demo_visitor(http_request)
+
+        def demo_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+            if not demo_visitor:
+                return payload
+            cleaned = sanitize_infrastructure(payload)
+            return cleaned if isinstance(cleaned, dict) else payload
 
         def listener(event: Dict[str, Any]) -> None:
-            loop.call_soon_threadsafe(queue.put_nowait, ("step", event))
+            loop.call_soon_threadsafe(queue.put_nowait, ("step", demo_event(event)))
 
         def emit_partial(payload: Dict[str, Any]) -> None:
-            loop.call_soon_threadsafe(queue.put_nowait, ("partial", payload))
+            loop.call_soon_threadsafe(
+                queue.put_nowait, ("partial", demo_event(payload))
+            )
+
+        def demo_result(result: Dict[str, Any]) -> Dict[str, Any]:
+            if not demo_visitor:
+                return result
+            add_demo_usage(
+                app.state.session_factory,
+                requests=1,
+                tokens=estimate_rag_tokens(request.question, result),
+            )
+            return sanitize_rag_result(result)
 
         def emit_token(text: str) -> None:
             loop.call_soon_threadsafe(
@@ -3377,6 +3764,7 @@ def create_app(
                     result["pipeline_flow"] = _rag_pipeline_snapshot(
                         flow, app.state.session_factory
                     )
+                    result = demo_result(result)
                     loop.call_soon_threadsafe(queue.put_nowait, ("result", result))
                 else:
                     loop.call_soon_threadsafe(
@@ -3783,6 +4171,7 @@ def create_app(
                     result["pipeline_flow"] = _rag_pipeline_snapshot(
                         flow, app.state.session_factory
                     )
+                    result = demo_result(result)
                     queue.put_nowait(("result", result))
                 else:
                     queue.put_nowait(

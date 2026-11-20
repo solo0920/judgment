@@ -1,0 +1,30 @@
+{
+  "routes": {
+    "GET /api/catalog": "data",
+    "GET /api/courts/check": "processing",
+    "GET /api/data/suggest": "data",
+    "GET /api/home": "home",
+    "GET /api/judgment": "data",
+    "GET /api/judgment-download/status": "processing",
+    "GET /api/law": "data",
+    "GET /api/law-versions/check": "processing",
+    "GET /api/performance": "performance",
+    "GET /api/performance/options": "performance",
+    "GET /api/processing": "processing",
+    "GET /api/processing/active": "processing",
+    "GET /api/processing/plan": "processing",
+    "GET /api/quality": "quality",
+    "GET /api/question-bank/benchmark-ready": "quality",
+    "GET /api/question-bank/items": "quality",
+    "GET /api/question-bank/items/{item_id}": "quality",
+    "GET /api/question-bank/stats": "quality",
+    "GET /api/question-bank/tags": "quality",
+    "GET /api/schema/suggest": "data",
+    "GET /api/status": "status",
+    "GET /api/updates/status": "processing",
+    "POST /api/query": "data",
+    "POST /api/rag/query": "rag",
+    "POST /api/rag/query/stream": "rag"
+  },
+  "version": 1
+}

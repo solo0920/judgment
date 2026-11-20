@@ -2,7 +2,7 @@
 
 **Status**: Ready（程式與 staging 演練已完成；production 尚未重啟）
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-20
 
 **Related**:
 
@@ -93,7 +93,7 @@ Production 設定乾跑已通過：
 
 ```text
 config check passed: bind=127.0.0.1:9200 forwarded_allow_ips=127.0.0.1
-local_bypass=False public_rag=False routes=118
+local_bypass=False public_rag=False routes=123
 ```
 
 刻意使用 `--forwarded-allow-ips '*'` 時 exit 1，代表 fail-fast 生效。
@@ -127,14 +127,15 @@ local_bypass=False public_rag=False routes=118
 ### 5.1 匿名邊界
 
 - [ ] `GET /api/health` → 200
-- [ ] `GET /api/home` → 200
+- [ ] `GET /api/demo/status` → 200，且 `enabled=false`（預設關閉）
+- [ ] `GET /api/home` → 403（展示關閉時首頁只顯示靜態頁）
 - [ ] `GET /api/auth/me` → 200（`authenticated=false`）
 - [ ] `POST /api/auth/logout` → 200
-- [ ] `GET /api/status` → 401
-- [ ] `GET /api/processing` → 401
+- [ ] `GET /api/status` → 403
+- [ ] `GET /api/processing` → 403
 - [ ] `POST /api/processing/stop` → 401
 - [ ] `DELETE /api/llama-server/hosts/1` → 401
-- [ ] `POST /api/rag/query`（空 body）→ 401
+- [ ] `POST /api/rag/query`（空 body）→ 403
 - [ ] 未知 `/api/does-not-exist` → 401
 - [ ] `/docs/oauth2-redirect` → 401
 - [ ] `/api/docs`、`/api/openapi.json` → 401
@@ -142,7 +143,9 @@ local_bypass=False public_rag=False routes=118
 ### 5.2 Admin
 
 - [ ] `GET /api/question-bank/stats` 帶 admin token → 200
+- [ ] `GET /api/home` 帶 admin token → 200
 - [ ] `GET /api/status` 帶 admin token → 200
+- [ ] `GET /api/admin/demo` 帶 admin token → 200
 - [ ] Google admin 登入 → `/api/auth/me` 顯示 `authenticated=true`、`admin=true`
 - [ ] Google 登出 → session 清除
 
@@ -156,9 +159,20 @@ local_bypass=False public_rag=False routes=118
 
 ### 5.4 功能
 
-- [ ] 首頁、RAG、資料、品質、處理、狀態頁正常
+- [ ] 管理者登入後首頁、RAG、資料、品質、處理、狀態頁正常
 - [ ] SSE 訂閱正常；admin ticket 可用
 - [ ] v7 copy／index 進度與 waterfall 正常
+- [ ] 390px 無水平 overflow；console error 0
+
+### 5.5 展示模式
+
+- [ ] `/api/demo/status` 預設 `enabled=false`，六個 features 全 false
+- [ ] 右上角帳號選單只有管理者看到「管理設定」
+- [ ] 管理頁可開 2h／24h／7d，六個旗標可切換
+- [ ] 開啟後訪客首頁與已開放功能可用；未開放功能顯示鎖定頁
+- [ ] 訪客不能匯出、啟動 workflow、管理主機或切換 index
+- [ ] 「立即關閉展示」下一個請求生效，六個旗標保留
+- [ ] `JUDGMENT_DEMO_HARD_DISABLE=1` 時訪客 API 403，管理頁顯示原因
 - [ ] 390px 無水平 overflow；console error 0
 
 ---
@@ -168,3 +182,47 @@ local_bypass=False public_rag=False routes=118
 - `app_users`、pending／user 角色與 Phase 1 session 流程。
 - SSE ticket 綁 role／topic 與長連線重驗。
 - 公開摘要、前端 disabled 狀態、Phase 4 公開 RAG 限流。
+
+---
+
+## 7. 展示模式關閉（面試後，Planned）
+
+> 本節對應 [`./demo-mode-evaluation.md`](./demo-mode-evaluation.md)。展示模式程式尚未實作；實作後面試結束 MUST 完成以下兩層關閉。
+
+### 7.1 第一層：應用層
+
+1. 管理者登入 `https://judgment.ragdemo.win`。
+2. 右上角帳號選單 →「管理設定」→「展示模式」。
+3. 按「立即關閉展示」。
+4. 確認 `GET https://api-mbp.ragdemo.win/api/demo/status` 回 `enabled=false`。
+5. 確認訪客首頁顯示「展示目前未開放」。
+
+### 7.2 第二層：Cloudflare tunnel
+
+目前 tunnel 由 LaunchAgent `com.cloudflare.cloudflared` 管理：
+
+```bash
+# 關閉
+launchctl bootout gui/$(id -u)/com.cloudflare.cloudflared
+
+# 確認後端已無法從公開網址連線
+curl -I --max-time 5 https://api-mbp.ragdemo.win/api/health
+```
+
+預期：連線失敗或非 200。前端 `judgment.ragdemo.win` 仍由 Cloudflare Pages 提供，會顯示靜態「展示目前未開放」。
+
+恢復 tunnel：
+
+```bash
+launchctl bootstrap gui/$(id -u) \
+  "$HOME/Library/LaunchAgents/com.cloudflare.cloudflared.plist"
+```
+
+### 7.3 面試後檢查
+
+- [ ] 應用層已關閉，`/api/demo/status` 回 `enabled=false`。
+- [ ] 六個功能旗標保留上次設定（關閉總開關不重設）。
+- [ ] `GET /api/admin/demo` 顯示 `effective.enabled=false`；若 `JUDGMENT_DEMO_HARD_DISABLE=1`，`reason` 標示 hard-disable。
+- [ ] audit 有「立即關閉」紀錄。
+- [ ] cloudflared 已停止，`api-mbp.ragdemo.win` 無法連線。
+- [ ] 隔天檢查 `demo_usage_daily`，沒有異常 token 用量。
