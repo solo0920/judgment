@@ -1861,6 +1861,7 @@ def test_processing_snapshot_exposes_index_runtime(
     workflow = next(
         item for item in snapshot["workflows"] if item["id"] == "index_versions"
     )
+    assert workflow["active_run"]["id"] == run_id
     assert workflow["index_runtime"]["available"] is True
     assert workflow["index_runtime"]["embedding"]["selected"]["host"] == "x570"
     assert workflow["index_runtime"]["months"][0]["archive"] == "202608.rar"

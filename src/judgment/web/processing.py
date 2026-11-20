@@ -5118,7 +5118,7 @@ def build_processing_snapshot(
         workflow_entries.append(
             {
                 **definition,
-                "active_run": _public_run(workflow_active),
+                "active_run": _public_run(service_active or workflow_active),
                 "last_run": _public_run(workflow_latest),
                 "recent_runs": [_public_run(run) for run in history_runs],
                 "progress": _workflow_progress(progress_run),
@@ -5396,7 +5396,7 @@ def _live_workflow_entries(
         entries.append(
             {
                 "id": definition["id"],
-                "active_run": _public_run(workflow_active),
+                "active_run": _public_run(service_active or workflow_active),
                 "last_run": _public_run(workflow_latest),
                 "recent_runs": [_public_run(run) for run in history_runs],
                 "progress": _workflow_progress(progress_run),
