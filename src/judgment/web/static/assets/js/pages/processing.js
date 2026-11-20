@@ -1,6 +1,5 @@
 import { api, apiUrl, subscribeRefresh } from "../api.js";
-import { isDemoVisitor } from "../demo.js";
-import { renderDemoProcessing } from "../demo_pages.js";
+import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import { judgmentStatsCardsMarkup } from "../judgment-stats.js";
 import {
   escapeHtml,
@@ -5881,7 +5880,7 @@ function panelMarkup(
 }
 
 export async function render(root) {
-  if (isDemoVisitor()) return renderDemoProcessing(root);
+  const demoReadOnly = isDemoVisitor();
   root.innerHTML = `<section class="page processing-page">
     <div class="page-header">
       <div class="processing-page-heading">
@@ -5892,6 +5891,7 @@ export async function render(root) {
         </div>
       </div>
       <div class="page-actions processing-actions">
+        ${demoReadOnly ? `<span class="badge badge-neutral badge-mono">展示模式 · 唯讀</span>` : ""}
         <button class="btn btn-secondary btn-sm processing-stop" type="button" data-processing-action="stop" id="processing-stop" hidden>
           ${icon("x", 14)}<span>停止更新</span>
         </button>
@@ -5966,6 +5966,7 @@ export async function render(root) {
   let hoveredStageKey = "";
   const expandedStages = new Set();
   let refreshStream = null;
+  let demoTimer = null;
   let lastActiveImport = null;
   let lastActiveImportStamp = -1;
   let lastProgressRunId = "";
@@ -6665,6 +6666,12 @@ export async function render(root) {
 
   const connectRefreshStream = () => {
     if (disposed || refreshStream) return;
+    if (demoReadOnly) {
+      demoTimer = window.setInterval(() => {
+        if (!disposed) void refresh({ silent: true });
+      }, 30000);
+      return;
+    }
     refreshStream = subscribeRefresh(
       [
         "processing",
@@ -6820,6 +6827,15 @@ export async function render(root) {
     payload = null,
   } = {}) => {
     if (disposed || ollamaHostsLoading) return;
+    if (demoReadOnly) {
+      ollamaHostsLoading = false;
+      ollamaHostsError = new Error(
+        "展示模式不提供 llama-server 主機與模型設定。",
+      );
+      syncOllamaDom();
+      syncEmbeddingStrip();
+      return;
+    }
     ollamaHostsLoading = true;
     ollamaHostsError = null;
     if (!ollamaHosts) {
@@ -7057,6 +7073,14 @@ export async function render(root) {
     payload = null,
   } = {}) => {
     if (indexStorageLoading) return;
+    if (demoReadOnly) {
+      indexStorageLoading = false;
+      indexStorageError = new Error(
+        "展示模式不提供 Qdrant 容器、volume 與主機儲存資訊。",
+      );
+      if (activeWorkflowId === "index_versions") repaintFromSnapshot();
+      return;
+    }
     if (
       !force &&
       indexStorage &&
@@ -7324,6 +7348,34 @@ export async function render(root) {
     if (stopButton) setBusy(stopButton, false);
   };
 
+  const DEMO_ALLOWED_ACTIONS = new Set([
+    "refresh",
+    "open-stage",
+    "refresh-judgment-months",
+    "refresh-court-check",
+    "refresh-law-version-check",
+  ]);
+
+  const lockDemoActions = () => {
+    if (!demoReadOnly) return;
+    page.querySelectorAll("[data-processing-action]").forEach((button) => {
+      if (DEMO_ALLOWED_ACTIONS.has(button.dataset.processingAction || "")) {
+        return;
+      }
+      button.disabled = true;
+      button.classList.add("is-demo-locked");
+      button.setAttribute("aria-disabled", "true");
+      button.title = "展示模式僅供檢視，執行與設定由管理者操作";
+    });
+    page
+      .querySelectorAll("[data-ollama-action], [data-processing-embedding-select]")
+      .forEach((control) => {
+        control.disabled = true;
+        control.classList.add("is-demo-locked");
+        control.title = "展示模式僅供檢視";
+      });
+  };
+
   const syncControls = (snapshot) => {
     const capabilities = snapshot.capabilities || {};
     if (stopRequested && !hasActiveProcessingRun(snapshot)) {
@@ -7334,6 +7386,7 @@ export async function render(root) {
       stopButton.hidden = !capabilities.can_stop_update;
     }
     if (stopRequested) lockStopButtons();
+    lockDemoActions();
   };
 
   const repaintFromSnapshot = () => {
@@ -7352,6 +7405,7 @@ export async function render(root) {
     syncOllamaDom();
     syncEmbeddingStrip();
     applySnapshotActiveImport(lastSnapshot);
+    lockDemoActions();
   };
 
   const applySnapshot = (snapshot, { silent = false } = {}) => {
@@ -7448,7 +7502,7 @@ export async function render(root) {
       syncControls(snapshot);
       syncEmbeddingStrip();
       applySnapshotActiveImport(snapshot);
-      if (!ollamaHosts && !ollamaHostsLoading) {
+      if (!demoReadOnly && !ollamaHosts && !ollamaHostsLoading) {
         loadOllamaHosts({ quiet: true });
       }
     if (pendingProgressEvents.length) {
@@ -8128,6 +8182,15 @@ export async function render(root) {
   const onClick = (event) => {
     const button = event.target.closest("[data-processing-action]");
     if (!button || button.disabled) return;
+    if (
+      demoReadOnly &&
+      !DEMO_ALLOWED_ACTIONS.has(button.dataset.processingAction || "")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      toast("展示模式僅供檢視，執行與設定由管理者操作。", "info", 4000);
+      return;
+    }
     if (button.closest(".processing-wf-rail")) {
       // The action rail lives inside <summary>; keep its buttons from also
       // toggling the stage details.
@@ -8200,18 +8263,27 @@ export async function render(root) {
         if (next) showStageTooltip(next);
         else clearStageHover();
       }
+      lockDemoActions();
       if (scroll) {
         content.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
-    if (OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId)) {
+    if (!demoReadOnly && OLLAMA_PRIORITY_WORKFLOWS.has(activeWorkflowId)) {
       loadOllamaHosts({ quiet: true });
     }
     if (activeWorkflowId === "judgment_download") {
       loadJudgmentStatus({ quiet: true });
     }
     if (activeWorkflowId === "index_versions") {
-      loadIndexStorage({ quiet: true });
+      if (demoReadOnly) {
+        indexStorageError = new Error(
+          "展示模式不提供 Qdrant 容器、volume 與主機儲存資訊。",
+        );
+        indexStorageLoading = false;
+        repaintFromSnapshot();
+      } else {
+        loadIndexStorage({ quiet: true });
+      }
     }
     if (activeWorkflowId === "normalize_courts") {
       loadCourtCheck({ quiet: true });
@@ -8280,13 +8352,17 @@ export async function render(root) {
   });
 
   connectRefreshStream();
-  if (typeof EventSource === "undefined") {
+  if (demoReadOnly || typeof EventSource === "undefined") {
     await refresh({ silent: false });
   }
 
   return () => {
     disposed = true;
     disconnectRefreshStream();
+    if (demoTimer) {
+      window.clearInterval(demoTimer);
+      demoTimer = null;
+    }
     page.removeEventListener("click", onClick);
     workflowNav.removeEventListener("click", onWorkflowClick);
     content.removeEventListener("click", onTimelineClick);

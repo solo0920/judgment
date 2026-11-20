@@ -235,6 +235,79 @@ def test_demo_status_and_processing_sanitize_infrastructure(demo_client) -> None
     for service in payload.get("services") or []:
         assert service.get("detail") == ""
 
+    from judgment.web.demo_mode import sanitize_processing_payload
+
+    cleaned = sanitize_processing_payload(
+        {
+            "workflows": [
+                {
+                    "index_runtime": {
+                        "host": "internal.example",
+                        "port": 11437,
+                        "collection": "private_collection",
+                    },
+                    "stages": [
+                        {
+                            "message": (
+                                "選用 http://x570:11437 · bge-m3 · port 11437"
+                            )
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    runtime = cleaned["workflows"][0]["index_runtime"]
+    assert runtime["host"] == ""
+    assert runtime["port"] == 0
+    assert runtime["collection"] == ""
+    assert cleaned["workflows"][0]["stages"][0]["message"] == ""
+
+    from judgment.web.demo_mode import sanitize_status_payload
+
+    status = sanitize_status_payload(
+        {
+            "services": [
+                {
+                    "active_url": "http://x570:11437",
+                    "active_model": "bge-m3",
+                    "detail": "http://x570:11437",
+                    "providers": [{"name": "x570", "role": "primary"}],
+                    "active": {"name": "x570", "role": "primary"},
+                }
+            ],
+            "pipeline": {
+                "stages": [{"message": "模型：bge-m3 · http://x570:11437"}]
+            },
+            "architecture": {
+                "layers": [
+                    {
+                        "nodes": [
+                            {"label": "REST API · :9200", "detail": "x570"},
+                            {"label": "Power Agent · :9201", "detail": "port 9201"},
+                        ]
+                    }
+                ]
+            }
+        }
+    )
+    labels = [
+        node["label"]
+        for layer in status["architecture"]["layers"]
+        for node in layer["nodes"]
+    ]
+    assert labels == ["REST API", "Power Agent"]
+    assert status["services"][0]["providers"][0]["name"] == "主要主機"
+    assert status["services"][0]["active"]["name"] == "主要主機"
+    assert all(
+        node.get("detail") == ""
+        for layer in status["architecture"]["layers"]
+        for node in layer["nodes"]
+    )
+    assert status["services"][0]["active_url"] == ""
+    assert status["services"][0]["active_model"] == ""
+    assert status["pipeline"]["stages"][0]["message"] == ""
+
 
 def test_demo_route_feature_mapping_is_explicit() -> None:
     from judgment.web.route_policy import demo_feature_for, load_demo_policies
@@ -460,3 +533,25 @@ def test_demo_quality_uses_cached_bootstrap(demo_client, monkeypatch) -> None:
     assert payload["archive_count"] == 1
     assert payload["checks"][0]["count"] == 12
     assert "archives" not in payload
+
+
+def test_demo_full_pages_use_admin_layout_with_locked_actions(
+    demo_client,
+) -> None:
+    client, _app = demo_client
+    pages = {
+        "quality": ("renderDemoQuality", "demoLockMarkup"),
+        "performance": ("renderDemoPerformance", "demoLockMarkup"),
+        "processing": ("renderDemoProcessing", "DEMO_ALLOWED_ACTIONS"),
+        "status": ("renderDemoStatus", "DEMO_LOCKED_STATUS_TABS"),
+    }
+    for page, (removed, locked) in pages.items():
+        response = client.get(f"/assets/js/pages/{page}.js")
+        assert response.status_code == 200
+        assert removed not in response.text
+        assert locked in response.text
+
+    css = client.get("/assets/styles.css")
+    assert css.status_code == 200
+    assert "body.is-demo-visitor .processing-actions" not in css.text
+    assert ".demo-lock-card" in css.text

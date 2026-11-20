@@ -18880,11 +18880,7 @@ body.is-demo-closed .primary-nav,
 body.is-demo-closed .nav-update-badge,
 body.is-demo-visitor .rag-model-strip,
 body.is-demo-visitor #rag-test-mode,
-body.is-demo-visitor #rag-test-flow,
-body.is-demo-visitor .processing-actions,
-body.is-demo-visitor [data-action="export-csv"],
-body.is-demo-visitor [data-action="export-json"],
-body.is-demo-visitor [data-action="export-quality"] {
+body.is-demo-visitor #rag-test-flow {
   display: none !important;
 }
 
@@ -19377,4 +19373,50 @@ a.auth-menu-item {
 
 .demo-recent-card {
   margin-top: 14px;
+}
+
+.demo-lock-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px dashed var(--line-strong, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.demo-lock-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface-3, var(--surface));
+  border: 1px solid var(--line);
+}
+
+.demo-lock-copy strong {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.demo-lock-copy p {
+  margin: 5px 0 9px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.is-demo-locked {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.status-tab.is-demo-locked .badge {
+  color: var(--muted);
 }

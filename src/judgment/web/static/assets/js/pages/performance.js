@@ -1,6 +1,5 @@
 import { api, subscribeRefresh } from "../api.js";
-import { isDemoVisitor } from "../demo.js";
-import { renderDemoPerformance } from "../demo_pages.js";
+import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import { createBenchmarkPanel } from "./benchmark_page.js";
 import {
   copyText,
@@ -2536,7 +2535,7 @@ function renderPerformanceReport(result) {
 }
 
 export async function render(root, ctx) {
-  if (isDemoVisitor()) return renderDemoPerformance(root);
+  const demoReadOnly = isDemoVisitor();
   let disposed = false;
   let filters = defaultFilters();
   let options = { processes: [], modules: [], statuses: [], methods: [], models: [] };
@@ -2564,6 +2563,7 @@ export async function render(root, ctx) {
         </div>
       </div>
       <div class="page-actions">
+        ${demoReadOnly ? `<span class="badge badge-neutral badge-mono">展示模式 · 唯讀</span>` : ""}
         <span class="badge badge-neutral badge-mono" id="performance-meta">PERFORMANCE · 讀取中</span>
         <button class="btn btn-secondary" type="button" id="performance-refresh">
           ${icon("refresh", 15)}<span>重新整理</span>
@@ -2589,9 +2589,10 @@ export async function render(root, ctx) {
             <span class="status-tab-icon">${icon("layers", 15)}</span>
             <span class="status-tab-copy"><strong>判決向量索引 Pipeline</strong><small>Host／Model、Blue-Green 與階段耗時</small></span>
           </button>
-          <button class="status-tab" type="button" data-performance-tab="benchmark">
+          <button class="status-tab${demoReadOnly ? " is-demo-locked" : ""}" type="button" data-performance-tab="benchmark"${demoReadOnly ? ' title="展示模式不提供 Benchmark 執行"' : ""}>
             <span class="status-tab-icon">${icon("brain", 15)}</span>
             <span class="status-tab-copy"><strong>RAG Benchmark</strong><small>題庫、模型、評分與同題歷史</small></span>
+            ${demoReadOnly ? `<span class="badge badge-neutral badge-mono">LOCK</span>` : ""}
           </button>
         </nav>
         <div class="status-sidebar-foot">
@@ -2679,6 +2680,12 @@ export async function render(root, ctx) {
   const benchmarkController = createBenchmarkPanel(root, {
     onNavigate: (tab) => syncPerformanceTab(tab),
   });
+  if (demoReadOnly) {
+    flowBox.innerHTML = demoLockMarkup(
+      "系統測試需要管理者權限",
+      "展示模式可瀏覽效能報表、RAG Pipeline 與索引 Pipeline；測試流程與 Benchmark 執行由管理者操作。",
+    );
+  }
 
   const paintPipeline = () => {
     if (!pipelineBox) return;
@@ -2780,7 +2787,19 @@ export async function render(root, ctx) {
 
   const activatePerformanceTab = (tab) => {
     syncPerformanceTab(tab);
-    if (tab === "benchmark") benchmarkController.show();
+    if (tab === "benchmark") {
+      if (demoReadOnly) {
+        const target = performancePanels.benchmark;
+        if (target) {
+          target.innerHTML = demoLockMarkup(
+            "RAG Benchmark 需要管理者權限",
+            "展示模式可瀏覽效能報表與 Pipeline；Benchmark 題庫、模型設定、執行與評分由管理者操作。",
+          );
+        }
+        return;
+      }
+      benchmarkController.show();
+    }
     if (tab === "pipeline") loadPipeline();
     if (tab === "index-pipeline") loadIndexPipeline();
   };
@@ -2853,6 +2872,7 @@ export async function render(root, ctx) {
   };
 
   const loadTestRuns = async () => {
+    if (demoReadOnly) return;
     try {
       const data = await api.testRuns(30);
       if (disposed) return;
@@ -2864,6 +2884,7 @@ export async function render(root, ctx) {
   };
 
   const refreshTestFlow = async (payload = null) => {
+    if (demoReadOnly) return;
     try {
       const data =
         payload && !selectedTestRunId
@@ -2895,7 +2916,7 @@ export async function render(root, ctx) {
   };
 
   const startTestFlowUpdates = () => {
-    if (disposed || testFlowStream) return;
+    if (demoReadOnly || disposed || testFlowStream) return;
     testFlowStream = subscribeRefresh(
       "test-runs",
       (_topic, payload) => refreshLiveTestFlow(payload?.snapshot || null),
@@ -3019,6 +3040,7 @@ export async function render(root, ctx) {
       return;
     }
     if (activePerformanceTab === "benchmark") {
+      if (demoReadOnly) return;
       setBusy(refreshButton, true, "整理中…");
       try {
         await benchmarkController.refresh();
@@ -3089,11 +3111,16 @@ export async function render(root, ctx) {
     runQuery(1, { quiet: true });
   });
 
-  await Promise.allSettled([loadOptions(), loadTestRuns()]);
-  if (!disposed) {
-    await refreshTestFlow();
-    await runQuery(1);
-    startTestFlowUpdates();
+  if (demoReadOnly) {
+    await loadOptions();
+    if (!disposed) await runQuery(1);
+  } else {
+    await Promise.allSettled([loadOptions(), loadTestRuns()]);
+    if (!disposed) {
+      await refreshTestFlow();
+      await runQuery(1);
+      startTestFlowUpdates();
+    }
   }
 
   if (ctx && typeof ctx.setTitle === "function") {

@@ -5,8 +5,7 @@ import {
   getApiBaseSource,
   subscribeRefresh,
 } from "../api.js";
-import { isDemoVisitor } from "../demo.js";
-import { renderDemoStatus } from "../demo_pages.js";
+import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import {
   emptyState,
   escapeHtml,
@@ -52,6 +51,13 @@ const API_SOURCE_LABELS = {
 };
 
 const STATUS_WF_OPEN_STAGES = new Set();
+
+const DEMO_LOCKED_STATUS_TABS = new Set([
+  "tests",
+  "resources",
+  "local-model",
+  "api",
+]);
 
 const STATUS_TABS = [
   { id: "overview", label: "服務總覽", hint: "健康狀態與資料量", icon: "activity" },
@@ -242,7 +248,7 @@ function architectureNode(node, services) {
   </div>`;
 }
 
-function renderArchitecture(architecture, services) {
+function renderArchitecture(architecture, services, demoReadOnly = false) {
   const layers = architecture?.layers || [];
   if (!layers.length) {
     return `<div class="report-empty-inline">狀態 API 未提供架構資料。</div>`;
@@ -271,10 +277,10 @@ function renderArchitecture(architecture, services) {
       <span><i class="legend-key is-off"></i>尚未設定或尚未接入</span>
       <span>${icon("info", 12)} 節點狀態來自主服務健康檢查</span>
     </div>
-    ${renderArchitectureFlowSvg()}`;
+    ${renderArchitectureFlowSvg(demoReadOnly)}`;
 }
 
-function renderArchitectureFlowSvg() {
+function renderArchitectureFlowSvg(demoReadOnly = false) {
   return `<figure class="arch-diagram">
     <figcaption class="arch-diagram-head">
       <span class="section-title">流程方向示意圖</span>
@@ -283,7 +289,7 @@ function renderArchitectureFlowSvg() {
     <div class="arch-diagram-scroll">
       <svg class="arch-diagram-svg" viewBox="0 0 1180 740" role="img" aria-labelledby="arch-flow-title arch-flow-desc">
         <title id="arch-flow-title">Judgment RAG Console 前後端流程方向示意圖</title>
-        <desc id="arch-flow-desc">瀏覽器 RAG Console 透過 REST 與 SSE 連線 FastAPI 9200；FastAPI 呼叫 RAG Orchestrator、Processing Runtime、Scheduler 與 Power Agent。RAG 與處理流程讀寫 PostgreSQL、Qdrant、Parquet 與 llama-server Embedding、Reranker、LLM。瀏覽器另以 IndexedDB 保存提問歷史與稽核資料。</desc>
+        <desc id="arch-flow-desc">瀏覽器 RAG Console 透過 REST 與 SSE 連線 FastAPI${demoReadOnly ? "" : " 9200"}；FastAPI 呼叫 RAG Orchestrator、Processing Runtime、Scheduler 與 Power Agent。RAG 與處理流程讀寫 PostgreSQL、Qdrant、Parquet 與 llama-server Embedding、Reranker、LLM。瀏覽器另以 IndexedDB 保存提問歷史與稽核資料。</desc>
         <defs>
           <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="var(--faint)"></path>
@@ -317,7 +323,7 @@ function renderArchitectureFlowSvg() {
         <text class="arch-diagram-node-sub" x="50" y="475">瀏覽器端保存</text>
 
         <rect class="arch-diagram-node" x="298" y="70" width="484" height="86" rx="9"></rect>
-        <text class="arch-diagram-node-title" x="314" y="94">FastAPI · 127.0.0.1:9200</text>
+        <text class="arch-diagram-node-title" x="314" y="94">${demoReadOnly ? "FastAPI · API" : "FastAPI · 127.0.0.1:9200"}</text>
         <text class="arch-diagram-node-sub" x="314" y="113">REST /api/* · SSE /api/events/stream · OpenAPI</text>
         <text class="arch-diagram-node-sub" x="314" y="129">query · catalog · performance · benchmark · quality</text>
         <text class="arch-diagram-node-sub" x="314" y="145">processing · updates · status · Last-Event-ID replay</text>
@@ -342,7 +348,7 @@ function renderArchitectureFlowSvg() {
         <text class="arch-diagram-node-sub" x="313" y="575">up.sh · cron · judgment-*</text>
 
         <rect class="arch-diagram-node" x="550" y="536" width="232" height="54" rx="9"></rect>
-        <text class="arch-diagram-node-title" x="565" y="558">Power Agent · :9201</text>
+        <text class="arch-diagram-node-title" x="565" y="558">Power Agent${demoReadOnly ? "" : " · :9201"}</text>
         <text class="arch-diagram-node-sub" x="565" y="575">主機 start／stop 控制</text>
 
         <rect class="arch-diagram-node" x="858" y="70" width="286" height="74" rx="9"></rect>
@@ -362,7 +368,7 @@ function renderArchitectureFlowSvg() {
 
         <rect class="arch-diagram-node" x="858" y="340" width="286" height="64" rx="9"></rect>
         <text class="arch-diagram-node-title" x="872" y="364">llama-server Embedding</text>
-        <text class="arch-diagram-node-sub" x="872" y="383">bge-m3 · 1,024 dims · x570／local fallback</text>
+        <text class="arch-diagram-node-sub" x="872" y="383">bge-m3 · 1,024 dims${demoReadOnly ? "" : " · x570／local fallback"}</text>
 
         <rect class="arch-diagram-node" x="858" y="420" width="286" height="64" rx="9"></rect>
         <text class="arch-diagram-node-title" x="872" y="444">Reranker</text>
@@ -1014,7 +1020,7 @@ function renderOverview(status) {
     }`;
 }
 
-function renderArchitectureTab(status) {
+function renderArchitectureTab(status, demoReadOnly = false) {
   const services = Array.isArray(status.services) ? status.services : [];
   const architecture = status.architecture || {};
   return `<div class="data-section card architecture-card">
@@ -1027,7 +1033,7 @@ function renderArchitectureTab(status) {
         (architecture.flow || []).length,
       )} layers</span>
     </div>
-    ${renderArchitecture(architecture, services)}
+    ${renderArchitecture(architecture, services, demoReadOnly)}
   </div>`;
 }
 
@@ -2224,7 +2230,7 @@ function renderLocalModel(hosts, loading, error, editingId) {
   </div>`;
 }
 
-function renderStatusSidebar(status, activeTab, usage) {
+function renderStatusSidebar(status, activeTab, usage, demoReadOnly = false) {
   const data = status?.data || {};
   const overall = status ? statusMeta(status.status) : null;
   const usageStatus = usage ? statusMeta(usage.status) : null;
@@ -2255,14 +2261,15 @@ function renderStatusSidebar(status, activeTab, usage) {
     <nav class="status-tab-list" aria-label="系統狀態分類">
       ${STATUS_TABS.map((tab) => {
         const active = tab.id === activeTab;
-        return `<button class="status-tab${active ? " is-active" : ""}" type="button"
-          data-status-tab="${tab.id}" ${active ? 'aria-current="page"' : ""}>
+        const locked = demoReadOnly && DEMO_LOCKED_STATUS_TABS.has(tab.id);
+        return `<button class="status-tab${active ? " is-active" : ""}${locked ? " is-demo-locked" : ""}" type="button"
+          data-status-tab="${tab.id}" ${active ? 'aria-current="page"' : ""} ${locked ? 'title="展示模式不提供此管理功能"' : ""}>
           <span class="status-tab-icon">${icon(tab.icon, 15)}</span>
           <span class="status-tab-copy">
             <strong>${escapeHtml(tab.label)}</strong>
             <small>${escapeHtml(tab.hint)}</small>
           </span>
-          ${badges[tab.id] || ""}
+          ${locked ? `<span class="badge badge-neutral badge-mono">LOCK</span>` : badges[tab.id] || ""}
         </button>`;
       }).join("")}
     </nav>
@@ -2282,6 +2289,7 @@ function renderStatusTab(
   usageError,
   ollamaState,
   indexedDbState,
+  demoReadOnly = false,
 ) {
   if (tab === "resources") {
     if (usage) return renderResources(usage);
@@ -2300,7 +2308,7 @@ function renderStatusTab(
       state.editingId || null,
     );
   }
-  if (tab === "architecture") return renderArchitectureTab(status);
+  if (tab === "architecture") return renderArchitectureTab(status, demoReadOnly);
   if (tab === "api") return renderApiTab(status);
   if (tab === "data") return renderDataTab(status, indexedDbState);
   if (tab === "runs") return renderRunsTab(status);
@@ -2352,7 +2360,7 @@ function renderError(error) {
 }
 
 export async function render(root, ctx) {
-  if (isDemoVisitor()) return renderDemoStatus(root);
+  const demoReadOnly = isDemoVisitor();
   let disposed = false;
   let autoStream = null;
   let latest = null;
@@ -2386,10 +2394,14 @@ export async function render(root, ctx) {
           並從左側分類切換服務總覽、系統測試、Model Provider、系統資料使用、架構、資料版本與最近下載紀錄。</p>
       </div>
       <div class="page-actions">
-        <label class="auto-refresh">
+        ${
+          demoReadOnly
+            ? `<span class="badge badge-neutral badge-mono">展示模式 · 唯讀</span>`
+            : `<label class="auto-refresh">
           <input type="checkbox" id="auto-refresh" />
           自動更新 30s（推送）
-        </label>
+        </label>`
+        }
         <button class="btn btn-secondary" type="button" id="refresh-status">
           ${icon("refresh", 15)}<span>重新整理</span>
         </button>
@@ -2461,10 +2473,25 @@ export async function render(root, ctx) {
 
   const paint = () => {
     if (!latest) return;
-    const navMarkup = renderStatusSidebar(latest, activeTab, usage);
+    const navMarkup = renderStatusSidebar(
+      latest,
+      activeTab,
+      usage,
+      demoReadOnly,
+    );
     if (navMarkup !== lastNavMarkup) {
       nav.innerHTML = navMarkup;
       lastNavMarkup = navMarkup;
+    }
+    if (demoReadOnly && DEMO_LOCKED_STATUS_TABS.has(activeTab)) {
+      unmountTests();
+      const locked = demoLockMarkup(
+        "此分類需要管理者權限",
+        "展示模式可瀏覽服務總覽、前後端架構、資料版本與最近下載；系統測試、系統資料使用、Model Provider 與 OpenAPI 由管理者操作。",
+      );
+      if (content.innerHTML !== locked) content.innerHTML = locked;
+      lastContentMarkup = locked;
+      return;
     }
     if (activeTab === "tests") {
       if (!testsMounted && !testsMounting) mountTests();
@@ -2488,6 +2515,7 @@ export async function render(root, ctx) {
         loading: indexedDbLoading,
         error: indexedDbError,
       },
+      demoReadOnly,
     );
     if (contentMarkup !== lastContentMarkup) {
       content.innerHTML = contentMarkup;
@@ -2622,6 +2650,7 @@ export async function render(root, ctx) {
     status = null,
   } = {}) => {
     await loadStatus({ quiet, status });
+    if (demoReadOnly) return;
     if (activeTab === "resources") {
       await loadUsage({ quiet });
     }
@@ -2641,6 +2670,7 @@ export async function render(root, ctx) {
     if (!STATUS_TABS.some((tab) => tab.id === nextTab)) return;
     activeTab = nextTab;
     paint();
+    if (demoReadOnly) return;
     if (activeTab === "resources" && !usage && !usageLoading) {
       loadUsage();
     }
@@ -2796,7 +2826,7 @@ export async function render(root, ctx) {
     autoStream = null;
   };
 
-  autoRefresh.addEventListener("change", () => {
+  if (autoRefresh) autoRefresh.addEventListener("change", () => {
     stopAutoRefresh();
     if (autoRefresh.checked) {
       autoStream = subscribeRefresh("status", (_topic, payload) => {

@@ -1,6 +1,5 @@
 import { api } from "../api.js";
-import { isDemoVisitor } from "../demo.js";
-import { renderDemoQuality } from "../demo_pages.js";
+import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import { createQuestionBankController } from "./question_bank.js";
 import {
   downloadText,
@@ -298,7 +297,7 @@ function renderQualityReport(data) {
 }
 
 export async function render(root) {
-  if (isDemoVisitor()) return renderDemoQuality(root);
+  const demoReadOnly = isDemoVisitor();
   root.innerHTML = `<section class="page data-page quality-page">
     <div class="page-header">
       <div class="data-page-heading">
@@ -311,9 +310,10 @@ export async function render(root) {
         </div>
       </div>
       <div class="page-actions">
+        ${demoReadOnly ? `<span class="badge badge-neutral badge-mono">展示模式 · 唯讀</span>` : ""}
         <span class="badge badge-neutral badge-mono" id="quality-meta">DUCKDB · 讀取中</span>
         <button class="btn btn-secondary" type="button" id="quality-refresh">
-          ${icon("refresh", 15)}<span>重新掃描</span>
+          ${icon("refresh", 15)}<span>${demoReadOnly ? "重新整理" : "重新掃描"}</span>
         </button>
       </div>
     </div>
@@ -443,7 +443,18 @@ export async function render(root) {
 
   const activate = (tab) => {
     syncTab(tab);
-    if (tab !== "overview") controller.show(tab);
+    if (tab === "overview") return;
+    if (demoReadOnly) {
+      const target = panels[tab];
+      if (target) {
+        target.innerHTML = demoLockMarkup(
+          "題庫管理需要管理者權限",
+          "展示模式可瀏覽完整的資料品質總覽；題庫新增、管理、Benchmark 與人工驗收由管理者操作。",
+        );
+      }
+      return;
+    }
+    controller.show(tab);
   };
 
   const load = async () => {
@@ -497,5 +508,14 @@ export async function render(root) {
   });
 
   syncTab("overview");
+  if (demoReadOnly) {
+    for (const button of tabs) {
+      if (button.dataset.qualityTab === "overview") continue;
+      button.classList.add("is-demo-locked");
+      button.title = "展示模式不提供題庫管理";
+      const badge = button.querySelector(".badge");
+      if (badge) badge.textContent = "LOCK";
+    }
+  }
   await load();
 }

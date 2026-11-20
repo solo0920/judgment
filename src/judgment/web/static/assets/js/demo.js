@@ -104,7 +104,7 @@ export function applyDemoShell() {
     banner.innerHTML = `<span class="demo-banner-dot" aria-hidden="true"></span>
       <strong>展示模式</strong>
       <span>剩餘 ${escapeHtml(formatDemoRemaining(context.expiresAt))}</span>
-      <span class="demo-banner-note">部分功能由管理者開放</span>`;
+      <span class="demo-banner-note">可瀏覽完整資料頁；管理操作已鎖定</span>`;
   } else {
     banner.hidden = true;
     banner.innerHTML = "";
@@ -155,3 +155,15 @@ export function demoAdminGuardMarkup() {
 }
 
 export { FEATURES, FEATURE_LABELS };
+
+
+export function demoLockMarkup(title, detail) {
+  return `<div class="demo-lock-card">
+    <span class="demo-lock-icon">${icon("shield", 18)}</span>
+    <div class="demo-lock-copy">
+      <strong>${escapeHtml(title || "此功能由管理者操作")}</strong>
+      <p>${escapeHtml(detail || "展示模式僅提供檢視，執行、設定與管理按鈕已鎖定。")}</p>
+      <span class="badge badge-neutral badge-mono">展示模式 · 唯讀</span>
+    </div>
+  </div>`;
+}

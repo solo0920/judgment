@@ -2,7 +2,7 @@
 
 **Status**: Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
 
-**Version**: 1.1
+**Version**: 1.2
 
 **Last Updated**: 2026-11-20
 
@@ -124,7 +124,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - 資料：`GET /api/catalog`、`POST /api/query`、`GET /api/data/suggest`、`GET /api/schema/suggest`、`GET /api/law`、`GET /api/judgment`
 - 品質：`GET /api/quality`（訪客使用最近一次快取掃描）、`GET /api/demo/quality`（訪客專用摘要）、`GET /api/question-bank/stats`、`GET /api/question-bank/items`、`GET /api/question-bank/tags`
 - 效能：`GET /api/performance`、`GET /api/performance/options`
-- 處理：`GET /api/demo/processing`（訪客專用；讀取最近一次 processing snapshot 的摘要，MUST NOT 建置完整 snapshot）
+- 處理：`GET /api/processing`（訪客版本回傳最近一次 cached、sanitized snapshot，供完整頁面使用）、`GET /api/demo/processing`（輕量摘要；MUST NOT 建置完整 snapshot）
 - 狀態：`GET /api/status`
 - 首頁：`GET /api/home`
 
@@ -148,11 +148,10 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 
 ### FR-010a 訪客處理頁效能
 
-- 訪客資料處理頁 MUST 先讀取最近一次 background processing snapshot 的摘要，不得在請求中執行完整 `build_processing_snapshot()`。
-- `GET /api/demo/processing` MUST 只回傳索引 summary／current／copy、active runs、recent runs 與 backlog 數字；MUST NOT 回傳全部 workflows、月份矩陣、archives、host、path 或大型 timeline。
-- 回應 SHOULD 小於 20 KB，讓展示頁在一般網路下快速載入。
+- 訪客資料處理頁 MUST 使用最近一次 background processing snapshot（訪客版 `GET /api/processing` 為 cached、sanitized payload），呈現與 admin 相同的工作流程導覽、處理總覽、月份矩陣與索引 waterfall；MUST NOT 在請求中執行完整 `build_processing_snapshot()`。
+- `GET /api/demo/processing` 保留為輕量摘要端點，只回傳索引 summary／current／copy、active runs、recent runs 與 backlog 數字；MUST NOT 建置完整 snapshot。
+- 訪客 SSE MUST NOT 訂閱 admin-only event stream；頁面以 30 秒輪詢 cached snapshot 更新。
 - 背景 warmer 每 30 秒更新 snapshot；訪客頁面可顯示「快照時間」，不得把舊快照冒充即時狀態。
-- 訪客頁面 MUST NOT 列出所有待執行 workflow；只顯示目前執行與最近完成／中止紀錄。
 
 ### FR-010b 訪客品質頁效能
 
@@ -160,7 +159,15 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - `GET /api/demo/quality` MUST 只回傳 totals、checks、coverage、archive 數量與快照時間；MUST NOT 回傳 archives 明細、host、path 或大型 distributions。
 - 品質掃描快取 MUST 以原子寫入更新，權限 0600；admin 請求仍可建置最新掃描並更新快取。
 - 同一時間 MUST 只允許一個品質掃描；已有掃描執行時，其他請求 MUST 回傳最近快取並標記 `refreshing`，不得排隊堆疊掃描。
-- 回應 SHOULD 小於 20 KB；頁面 MUST 顯示快照時間，不得把舊掃描冒充即時結果。
+- `/api/demo/quality` 回應 SHOULD 小於 20 KB；完整品質頁使用 cached `GET /api/quality`。頁面 MUST 顯示快照時間，不得把舊掃描冒充即時結果。
+
+### FR-010c 展示模式的完整頁面與鎖定
+
+- demo mode 開啟且 feature 允許時，資料品質、效能報表、資料處理、系統狀態 MUST 使用與 admin 相同的頁面結構、資料視覺化與導覽分類；不得只顯示簡化摘要。
+- 訪客 MUST NOT 執行任何寫入、workflow、索引驗證／切換、模型設定、主機管理、測試、Benchmark 或題庫管理操作。
+- 上述執行／管理按鈕 MUST 以停用或 LOCK 狀態呈現，點擊不得送出請求；唯讀查詢、分頁、展開階段、切換唯讀分類與重新整理 MAY 保持可用。
+- admin-only 分類（系統測試、系統資料使用、Model Provider、題庫管理、RAG Benchmark）在訪客頁面 MUST 顯示鎖定說明，不得呼叫 admin-only API。
+- demo mode 關閉時，訪客 MUST 看到既有「展示目前未開放」狀態，不得顯示 cached 資料頁。
 
 ### FR-011 限流與成本
 
@@ -299,4 +306,4 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] 全站 tests、ruff、frontend build 通過。
 - [ ] 不影響 v7 索引；production 重啟等 v7 完成後。
 
-**Revision**: 1.1（2026-11-20）新增訪客處理頁使用 cached snapshot 的 `/api/demo/processing` 摘要端點；不得在訪客請求中建置完整 snapshot。
+**Revision**: 1.2（2026-11-21）展示模式開啟時，四個資料頁改用與 admin 相同的完整頁面；執行與管理控制項以 LOCK／停用呈現，唯讀查詢保留。Demo 關閉時仍顯示未開放狀態。

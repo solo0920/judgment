@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -13,6 +14,13 @@ from sqlalchemy import select
 from ..models import DemoModeAudit, DemoSettings, DemoUsageDaily
 
 logger = logging.getLogger(__name__)
+
+_PORT_SUFFIX = re.compile(r"\s*·\s*:\d{2,5}\s*$")
+_INTERNAL_ENDPOINT = re.compile(
+    r"https?://(?:localhost|127\.0\.0\.1|[^/\s]+):\d{2,5}"
+    r"|\bport\s+\d{2,5}\b",
+    re.IGNORECASE,
+)
 
 FEATURES: Tuple[str, ...] = (
     "rag",
@@ -45,9 +53,14 @@ _SENSITIVE_KEYS = frozenset(
         "pid",
         "host",
         "hosts",
+        "port",
+        "ports",
         "url",
         "urls",
         "base_url",
+        "active_url",
+        "active_host",
+        "active_model",
         "api_key",
         "token",
         "secret",
@@ -167,9 +180,40 @@ def sanitize_status_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     result = sanitize_infrastructure(dict(payload))
     result["endpoints"] = []
     result["model_summary"] = []
+    architecture = result.get("architecture")
+    if isinstance(architecture, dict):
+        for layer in architecture.get("layers") or []:
+            if not isinstance(layer, dict):
+                continue
+            for node in layer.get("nodes") or []:
+                if not isinstance(node, dict):
+                    continue
+                label = node.get("label")
+                if isinstance(label, str):
+                    node["label"] = _PORT_SUFFIX.sub("", label)
+                node["detail"] = ""
     for service in result.get("services") or []:
-        if isinstance(service, dict):
-            service["detail"] = ""
+        if not isinstance(service, dict):
+            continue
+        service["detail"] = ""
+        for provider in service.get("providers") or []:
+            if not isinstance(provider, dict):
+                continue
+            provider["name"] = (
+                "主要主機" if provider.get("role") == "primary" else "備援主機"
+            )
+        active_provider = service.get("active")
+        if isinstance(active_provider, dict):
+            active_provider["name"] = (
+                "主要主機"
+                if active_provider.get("role") == "primary"
+                else "備援主機"
+            )
+    pipeline = result.get("pipeline")
+    if isinstance(pipeline, dict):
+        for stage in pipeline.get("stages") or []:
+            if isinstance(stage, dict):
+                stage["message"] = ""
     for run in result.get("recent_runs") or []:
         if isinstance(run, dict):
             run["error_message"] = ""
@@ -188,8 +232,26 @@ def sanitize_status_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _scrub_internal_messages(value: Any) -> Any:
+    if isinstance(value, dict):
+        result: Dict[str, Any] = {}
+        for key, item in value.items():
+            if (
+                key == "message"
+                and isinstance(item, str)
+                and _INTERNAL_ENDPOINT.search(item)
+            ):
+                result[key] = ""
+            else:
+                result[key] = _scrub_internal_messages(item)
+        return result
+    if isinstance(value, list):
+        return [_scrub_internal_messages(item) for item in value]
+    return value
+
+
 def sanitize_processing_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    result = sanitize_infrastructure(dict(payload))
+    result = _scrub_internal_messages(sanitize_infrastructure(dict(payload)))
     result["external_processes"] = []
     for key in ("active_runs", "recent_runs"):
         for run in result.get(key) or []:
