@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.8
+**Version**: 1.9
 
 **Last Updated**: 2026-11-19
 
@@ -167,8 +167,8 @@ A／R／E 的具體映射：
 
 | 分格 | 完成判定來源 | 不得使用 |
 | --- | --- | --- |
-| A | active collection 對該月份的覆蓋 | 本次 run R／E 進度 |
-| R | 本次 run baseline archive 的 `processed / total`；尚未掃到的後續月份為 0%，顯示 25% 淺色 | active 覆蓋、A 基線、E 進度 |
+| A 既有版本 | 既有版本（active collection）對該月份的向量覆蓋；依月份統計，不是全域 03 copy | 本次 run R／E 進度、全域 copy 進度 |
+| R | 本次 run baseline archive 的 `processed / total`；尚未掃到的後續月份為 0%，顯示 25% 淺色 | active 覆蓋、A 既有版本、E 進度 |
 | E | 無 E backlog：active 覆蓋，文字標示「無 E backlog／不需新 embedding」；有 E backlog：本次 run latest archive 的 `processed / total` | 有 E backlog 時用 active 覆蓋、R 進度；無 E backlog 時把 active 覆蓋說成「本次已 embedding」 |
 
 「E backlog」指該月 latest archive 尚未被 active collection 完整覆蓋。無 E backlog 的未變更月份不需要新 embedding，E 可顯示實心；R 仍是本次 run 的工作，尚未掃到的後續月份 MUST 顯示 25% 淺色。仍有 E backlog 的月份，R／E 都必須顯示本次 run 進度，未處理前維持 25% 淺色。
@@ -183,7 +183,8 @@ A／R／E 的具體映射：
 - latest archive active 覆蓋 100%（無 E backlog）、本次 run processed 67%、或該月為 current：A 可為實心；R MUST 顯示 67% 實色 + 33% 淺色；E 可實心但必須標示「無 E backlog」。
 - latest archive active 覆蓋未滿（有 E backlog）、本次 run processed 0：A 可為實心，R／E MUST 為 0% 淺色。
 - 有 E backlog、本次 run processed 67%：R／E MUST 顯示 67% 實色 + 33% 淺色，不得整格實心。
-- Summary 的 A 基線月份 MUST 由 A 分格聚合，不得使用 R 完成數。
+- Summary 的 A 已覆蓋月份 MUST 由 A 分格聚合，不得使用 R 完成數。
+- A 是依月份的既有版本覆蓋，不是全域處理階段；全域 03 copy 只能顯示在 waterfall 或獨立的 03 chip，MUST NOT 填入 A 分格。
 - Sidebar E badge MUST 與 summary E 未完成（E backlog）一致。
 
 ---
@@ -444,4 +445,5 @@ DOM class：
 | 1.6 | 2026-11-20 | 修正 R 的語意：R 一律使用本次 run 進度，所有尚未掃到的後續月份為 25% 淺色；active 覆蓋只保留給 A 與無 E backlog 的 E。 |
 | 1.7 | 2026-11-20 | 明訂 03 copy 是全域準備階段，不得畫成第四個月份分格或填入 R／E；R 只代表 04 逐月掃描沿用進度。 |
 | 1.8 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度以獨立全域 chip 或 waterfall 顯示。 |
+| 1.9 | 2026-11-20 | 將 A 的顯示名稱改為「既有版本／A 已覆蓋月份」，明訂 A 是依月份的既有版本覆蓋，不是全域處理階段。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

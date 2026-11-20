@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.21
+**Version**: 1.22
 
 **Last Updated**: 2026-11-19
 
@@ -126,7 +126,7 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 
 | 分格 | 來源 | 填充比例 |
 | --- | --- | --- |
-| A 基線 | baseline archives | `baselineProcessed / baselineTotal` |
+| A 既有版本 | baseline archives | `baselineProcessed / baselineTotal` |
 | R 沿用 | baseline archives | 同 A；代表舊版文件沿用既有向量 |
 | E 新 embedding | latest archive | `latestProcessed / latestTotal` |
 
@@ -153,7 +153,7 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 
 ### 5.3 Summary 統計
 
-- A 基線月份：A 分格完成（active collection 已覆蓋）的月份數；不得以 R 完成數代替。
+- A 已覆蓋月份：既有版本（active collection）在該月已完整建立向量的月份數；依月份統計，不得以 R 完成數或全域 03 copy 代替。
 - R 完成月份：本次 run 已處理完成的月份數；尚未掃到的後續月份不列入完成，即使 active collection 已有完整向量。
 - R 未完成月份：本次 run 尚未完成 R 的月份數；包含尚未掃到的後續月份。
 - E 完成月份：latest archive 已完整覆蓋、無需新 embedding 的月份數；包含未變更月份。
@@ -186,7 +186,8 @@ A／R／E 有兩個不同用途，MUST 分開計算，不得互相代替：
 - 202512 latest archive 只有 3 筆、active 0 / 3 → 雖 baseline 36,971 / 36,971 已覆蓋，仍有 E backlog，R／E MUST 為 0% 淺色；202512 之前的無 backlog 月份則維持實心。
 - 202607 本次 run processed 68.9% → R MUST 為 68.9% 實色 + 31.1% 淺色。
 - 202609 active 0%、本次 run 0% → A／R／E 均為 0% 淺色，不是實心也不是無資料空心。
-- Summary `A 基線月份` MUST 以 A 完成數計算；不得再出現「A 367、E 待補 42」這種由 R 完成數冒充 A 的矛盾。
+- Summary `A 已覆蓋月份` MUST 以 A 完成數計算；不得再出現「A 367、E 待補 42」這種由 R 完成數冒充 A 的矛盾。
+- A 是依月份的既有版本覆蓋，不是全域處理階段；全域 03 copy 只能顯示在 waterfall 或獨立 chip，MUST NOT 填入 A 分格。
 
 ---
 
@@ -254,7 +255,7 @@ E 未完成 = 最新 archive 尚未完成的「月份數」
 固定顯示：
 
 ```text
-A 基線月份
+A 已覆蓋月份
 R 完成月份
 R 未完成月份
 E 完成月份
@@ -364,7 +365,7 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - [ ] 舊 archive 作為 A／R 基線；已完成時為實心，不是 25% 淺色。
 - [ ] latest archive 無 E backlog 的未變更月份（例如 201805）A／E 可為實心，但本次 run 尚未處理時 R MUST 為 0% 淺色。
 - [ ] latest archive 仍有 E backlog 的月份（例如 202607／202608）R／E 使用本次 run 進度；尚未處理時為 25% 淺色。
-- [ ] A 基線月份以 A 分格完成數計算，不得用 R 完成數代替。
+- [ ] A 已覆蓋月份以 A 分格完成數計算，不得用 R 完成數或全域 03 copy 代替。
 - [ ] Summary 的 R／E 與時間表方塊一致；sidebar E badge 與 summary E 未完成一致。
 - [ ] 每個 A／R／E 分格有明確完成／未完成／無資料狀態，不以 0% fill 的預設色冒充未完成。
 - [ ] 新 RAR 全部 unchanged 時，不會產生新的 E 未完成月份。
@@ -415,3 +416,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.19 | 2026-11-20 | 明訂 03 copy 是全域 points 準備階段，不得畫成第四個月份分格或填入 R／E；R 是 04 逐月掃描沿用進度。 |
 | 1.20 | 2026-11-20 | 新增階段標題的 R／E phase badge；A 是基線不是執行階段，A／R／E 不得排成三個 sequential waterfall 階段。 |
 | 1.21 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度只顯示在 waterfall 或獨立全域 chip，不填入月份 A 格。 |
+| 1.22 | 2026-11-20 | 將 A 的顯示名稱改為「既有版本／A 已覆蓋月份」，明訂 A 是依月份的既有版本覆蓋，不是全域處理階段。 |

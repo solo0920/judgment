@@ -624,7 +624,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-wf-phase" in processing_js.text
     assert "phaseLabel" in processing_js.text
     assert "03 複製（全域）" in processing_js.text
-    assert "A · active 基線（非 03 copy）" in processing_js.text
+    assert "A · 既有版本覆蓋（依月份，非 03 copy）" in processing_js.text
+    assert "A 已覆蓋月份" in processing_js.text
+    assert "A 既有版本" in processing_js.text
     assert "04 金融判決向量索引 · 月份 A／R／E" in processing_js.text
     assert "月份（舊→新）" in processing_js.text
     assert "等待版本準備（複製可重用向量）完成" in processing_js.text

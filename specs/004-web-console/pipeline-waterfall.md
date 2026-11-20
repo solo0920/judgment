@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.8
+**Version**: 1.9
 
 **Last Updated**: 2026-11-19
 
@@ -285,7 +285,7 @@ hollowWidth = slotWidth - fillWidth
 - 在 sequential waterfall 中，下游階段 MUST 保持 `pending`／等待，直到上游階段完成；不得同時顯示兩個 `running` 階段。判決向量索引 Pipeline 的「複製可重用向量」是版本準備階段，完成前「金融判決向量索引」MUST 顯示等待。
 - 準備階段 MAY 在明細顯示速率與預估剩餘時間（例如 copy points/秒、剩餘時間）。
 - 索引階段 MAY 在明細顯示 A／R／E 的並行子進度與預估剩餘時間；A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成多個 sequential waterfall 階段。
-- 「準備中」是版本準備／copy 的全域狀態，不是 A 分格的一部分；A 仍是 active collection 的月份基線覆蓋。
+- 「準備中」是版本準備／copy 的全域狀態，不是 A 分格的一部分；A 仍是既有版本（active collection）的月份覆蓋，依月份統計，不是全域 03 copy。
 - copy 是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
 - 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示；A 是基線，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 A／R／E 排成三個 sequential waterfall 階段。
 - A MUST NOT 改名或替換為 03 copy；03 進度只顯示在 copy 階段或獨立的「03 複製（全域）」chip。
@@ -533,6 +533,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 | 1.6 | 2026-11-20 | 明訂 03 copy 是全域 points 準備階段，不得畫成第四個月份分格或填入 R／E；R 是 04 逐月掃描沿用進度。 |
 | 1.7 | 2026-11-20 | 新增階段標題的 R／E phase badge；A 是基線不是執行階段，A／R／E 不得排成三個 sequential waterfall 階段。 |
 | 1.8 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度以 copy 階段或獨立全域 chip 顯示。 |
+| 1.9 | 2026-11-20 | 將 A 的說明改為「既有版本／依月份覆蓋」，避免與全域 03 copy 混淆。 |
 | 1.3 | 2026-11-16 | 將 `#/home` 即時摘要載入 Pipeline 納入適用範圍；新增 `/api/home` 階段計時、`home-wf-slow` 最慢階段標示與 `HOME_WF_OPEN_STAGES` 參考實作。 |
 | 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
 | 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |
