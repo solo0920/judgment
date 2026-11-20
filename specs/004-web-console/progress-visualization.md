@@ -2,9 +2,9 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.10
+**Version**: 1.11
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-20
 
 **Applies To**: 全站所有以「階段進度」呈現的月份方格、workflow waterfall bar、index waterfall bar 與等待軌道，包含 `#/processing` 的判決匯入、判決下載、判決／法規／命令時間表、判決向量索引 Pipeline、workflow 流程進度，以及未來新增的任何階段進度圖。
 
@@ -172,6 +172,8 @@ A／R／E 的具體映射：
 | E | 無 E backlog：active 覆蓋，文字標示「無 E backlog／不需新 embedding」；有 E backlog：本次 run latest archive 的 `processed / total` | 有 E backlog 時用 active 覆蓋、R 進度；無 E backlog 時把 active 覆蓋說成「本次已 embedding」 |
 
 「E backlog」指該月 latest archive 尚未被 active collection 完整覆蓋。無 E backlog 的未變更月份不需要新 embedding，E 可顯示實心；R 仍是本次 run 的工作，尚未掃到的後續月份 MUST 顯示 25% 淺色。仍有 E backlog 的月份，R／E 都必須顯示本次 run 進度，未處理前維持 25% 淺色。
+
+Pipeline waterfall 的 04 金融判決向量索引是單一 sequential 階段，bar 顏色 MAY 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段識別色仍固定為 `#a78bfa`。A／R／E 若以分流 bar 呈現，三條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A 是月份基線，MUST NOT 填入 04 本次 run 的進度 bar。圖例 MUST 明示 A 另計且不畫入 04 bar，R／E 才是 04 本次 run。
 
 03「複製可重用向量」是全域 points 準備階段，MUST NOT 畫成第四個月份分格，也不得把 copy 完成填入 R／E。月份方格的 R 只代表 04 索引階段逐月掃描的沿用進度；03 的完成只顯示在 sequential waterfall 的 copy 階段或獨立的「03 複製（全域）」chip。A 是 active collection 基線，MUST NOT 改名或替換為 03 copy。
 
@@ -447,4 +449,5 @@ DOM class：
 | 1.8 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度以獨立全域 chip 或 waterfall 顯示。 |
 | 1.9 | 2026-11-20 | 將 A 的顯示名稱改為「既有版本／A 已覆蓋月份」，明訂 A 是依月份的既有版本覆蓋，不是全域處理階段。 |
 | 1.10 | 2026-11-20 | A 分格與圖例改為橘色（R 藍、E 紫不變）。 |
+| 1.11 | 2026-11-20 | 04 waterfall bar 顏色跟隨目前 phase；A／R／E 分流 bar 各自計算、不相加，A 不填入本次 run bar。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

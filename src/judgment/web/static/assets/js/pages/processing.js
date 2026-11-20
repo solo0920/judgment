@@ -3371,8 +3371,14 @@ function indexWorkflowProgressMarkup(workflow) {
     {
       key: "index",
       label: "金融判決向量索引",
-      caption: "準備完成後，分批顯示 R 重用／E 新 embedding",
+      caption: "R 藍／E 紫；A 既有版本另計",
       color: "#a78bfa",
+      barColor:
+        currentPhaseLabel === "E 新 embedding"
+          ? "#a78bfa"
+          : currentPhaseLabel === "R 重用"
+            ? "#3b82f6"
+            : "",
       status: indexStatus,
       phaseKey:
         currentPhaseLabel === "R 重用"
@@ -3413,6 +3419,7 @@ function indexWorkflowProgressMarkup(workflow) {
             : "—",
         ],
       ],
+      htmlDetails: indexAreBreakdownMarkup(runtime),
       detail: !indexReady
         ? "等待版本準備（複製可重用向量）完成"
         : `${formatNumber(indexed)} / ${formatNumber(
@@ -3559,7 +3566,7 @@ function indexWorkflowProgressMarkup(workflow) {
             : Math.max(0, Math.min(100, Number(phase.percent) || 0));
         const filledWidth = (slotWidth * completion) / 100;
         const hollowWidth = slotWidth - filledWidth;
-        const barColor = escapeHtml(phase.color);
+        const barColor = escapeHtml(phase.barColor || phase.color);
         if (filledWidth > 0) {
           barMarkup += `<span class="rag-wf-bar index-wf-bar is-sequential" style="left:${left.toFixed(
             3,
@@ -3640,7 +3647,9 @@ function indexWorkflowProgressMarkup(workflow) {
           </span>
           <span class="rag-wf-track" style="height:12px">${barMarkup}</span>
         </summary>
-        <div class="rag-wf-details">${detailRows.join("")}</div>
+        <div class="rag-wf-details">${detailRows.join("")}${
+          phase.htmlDetails || ""
+        }</div>
       </details>`;
     })
     .join("");
@@ -3668,6 +3677,12 @@ function indexWorkflowProgressMarkup(workflow) {
       <div class="rag-wf-axis">
         <span>0 ms</span>
         <span>${totalDuration > 0 ? escapeHtml(formatIndexWorkflowDuration(totalDuration)) : "—"}</span>
+      </div>
+      <div class="rag-wf-legend index-wf-are-legend" aria-label="判決索引 A／R／E 顏色圖例">
+        <span><i class="is-active"></i>A 既有版本（不畫入 04 bar）</span>
+        <span><i class="is-reuse"></i>R 本次沿用（04 藍）</span>
+        <span><i class="is-embed"></i>E 新 embedding（04 紫）</span>
+        <span><i class="is-hollow"></i>04 未完成（25% 淺色）</span>
       </div>
       <div class="rag-wf-stages">${rows}</div>
       <p class="rag-wf-hint">階段依執行順序由左至右接續排列，上一階段的結束即下一階段的開始；已完成階段填滿顏色，進行中或未完成階段只著色已完成比例，其餘未完成區段以同色 25% 淺色表示，等待階段保留空心軌道、略過階段不繪製 bar。極短階段會以最小可見寬度呈現。點選任一階段可查看開始／結束時間、進度與詳細數據。</p>
@@ -4070,12 +4085,9 @@ function indexMonthAreBlock(processed, total) {
   };
 }
 
-function indexMonthGridMarkup(runtime) {
+function indexMonthGroups(runtime) {
   const months = Array.isArray(runtime.months) ? runtime.months : [];
   const current = runtime.current || {};
-  const coverageOnly = Boolean(runtime.coverage_only);
-  const activeCoverage = runtime.active_coverage || {};
-  const activeArchiveCoverage = runtime.active_archive_coverage || {};
   const preparingMonthOrder =
     Boolean(current.preparing) && runtime.scan_order === "issue_month";
   const groups = new Map();
@@ -4117,6 +4129,143 @@ function indexMonthGridMarkup(runtime) {
       group.jid = String(current.jid || "");
     }
   }
+  return groups;
+}
+
+function indexAreBreakdown(runtime) {
+  const groups = indexMonthGroups(runtime);
+  const activeCoverage = runtime.active_coverage || {};
+  const summary = runtime.summary || {};
+  const copy = runtime.copy || {};
+  const expected = indexMonthCoverageValue(summary.total);
+  const copyTotal = indexMonthCoverageValue(copy.total);
+  let activeComplete = 0;
+  for (const group of groups.values()) {
+    const rows = [...group.rows].sort(
+      (left, right) =>
+        archiveUpdateRank(right.archive) - archiveUpdateRank(left.archive),
+    );
+    const latest = rows[0];
+    if (!latest) continue;
+    const baselineRows = rows.length > 1 ? rows.slice(1) : [latest];
+    const baselineTotal = baselineRows.reduce(
+      (sum, row) => sum + row.total,
+      0,
+    );
+    const baselineProcessed = baselineRows.reduce(
+      (sum, row) => sum + row.processed,
+      0,
+    );
+    const activeMonth = activeCoverage[group.key] || {};
+    let activeTotal = indexMonthCoverageValue(activeMonth.total);
+    let activeProcessed = indexMonthCoverageValue(activeMonth.processed);
+    if (activeTotal <= 0) {
+      activeTotal = baselineTotal;
+      activeProcessed = baselineProcessed;
+    }
+    if (activeTotal > 0 && activeProcessed >= activeTotal) {
+      activeComplete += 1;
+    }
+  }
+  const totalMonths = groups.size;
+  const reusePool = copyTotal > 0
+    ? Math.min(copyTotal, expected || copyTotal)
+    : 0;
+  const embedPool = copyTotal > 0
+    ? Math.max(0, (expected || copyTotal) - copyTotal)
+    : expected;
+  const reused = indexMonthCoverageValue(summary.reused);
+  const embedded = indexMonthCoverageValue(summary.embedded);
+  return {
+    totalMonths,
+    activeComplete,
+    activePercent: totalMonths
+      ? Math.min(100, (100 * activeComplete) / totalMonths)
+      : null,
+    reusePool,
+    reused,
+    reusePercent: reusePool > 0
+      ? Math.min(100, (100 * reused) / reusePool)
+      : null,
+    embedPool,
+    embedded,
+    embedPercent: embedPool > 0
+      ? Math.min(100, (100 * embedded) / embedPool)
+      : null,
+  };
+}
+
+function indexAreBreakdownMarkup(runtime) {
+  const data = indexAreBreakdown(runtime);
+  if (!data.totalMonths) return "";
+  const rows = [];
+  const addRow = (className, label, value, percent, note) => {
+    const width = percent === null
+      ? 0
+      : Math.max(0, Math.min(100, percent));
+    rows.push(`<div class="index-wf-are-row ${className}">
+      <span class="index-wf-are-label"><i aria-hidden="true"></i>${escapeHtml(
+        label,
+      )}</span>
+      <span class="index-wf-are-value">${escapeHtml(value)}${
+        note ? `<small>${escapeHtml(note)}</small>` : ""
+      }</span>
+      <span class="index-wf-are-track" aria-hidden="true"><span style="width:${width.toFixed(
+        1,
+      )}%"></span></span>
+    </div>`);
+  };
+  addRow(
+    "is-active",
+    "A 既有版本",
+    `${formatNumber(data.activeComplete)} / ${formatNumber(
+      data.totalMonths,
+    )} 月`,
+    data.activePercent,
+    "依月份，非 03 copy",
+  );
+  if (data.reusePool > 0 || data.reused > 0) {
+    addRow(
+      "is-reuse",
+      "R 本次沿用",
+      `${formatNumber(data.reused)} / ${formatNumber(
+        data.reusePool,
+      )} 筆`,
+      data.reusePercent,
+      "04 逐月沿用",
+    );
+  }
+  if (data.embedPool > 0) {
+    addRow(
+      "is-embed",
+      "E 本次新 embedding",
+      `${formatNumber(data.embedded)} / ${formatNumber(
+        data.embedPool,
+      )} 筆`,
+      data.embedPercent,
+      "E backlog",
+    );
+  } else {
+    addRow(
+      "is-embed is-complete",
+      "E 本次新 embedding",
+      "無 E backlog",
+      100,
+      "不需新 embedding",
+    );
+  }
+  return `<div class="index-wf-are-breakdown" aria-label="A／R／E 分流">
+    <div class="index-wf-are-head"><strong>A／R／E 分流</strong><span>三條 bar 各自以自己的 total 計算，不可相加；A 依月份，R／E 依本次 run。</span></div>
+    ${rows.join("")}
+  </div>`;
+}
+
+function indexMonthGridMarkup(runtime) {
+  const current = runtime.current || {};
+  const coverageOnly = Boolean(runtime.coverage_only);
+  const activeCoverage = runtime.active_coverage || {};
+  const activeArchiveCoverage = runtime.active_archive_coverage || {};
+  const groups = indexMonthGroups(runtime);
   if (!groups.size) {
     return '<div class="processing-workflow-empty">尚無可顯示的索引月份；開始索引後會依時間列出月份狀態。</div>';
   }

@@ -2,9 +2,9 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.9
+**Version**: 1.10
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-20
 
 **Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline、`#/home` 的即時摘要載入 Pipeline，以及未來新增的任何 pipeline waterfall。
 
@@ -285,6 +285,9 @@ hollowWidth = slotWidth - fillWidth
 - 在 sequential waterfall 中，下游階段 MUST 保持 `pending`／等待，直到上游階段完成；不得同時顯示兩個 `running` 階段。判決向量索引 Pipeline 的「複製可重用向量」是版本準備階段，完成前「金融判決向量索引」MUST 顯示等待。
 - 準備階段 MAY 在明細顯示速率與預估剩餘時間（例如 copy points/秒、剩餘時間）。
 - 索引階段 MAY 在明細顯示 A／R／E 的並行子進度與預估剩餘時間；A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成多個 sequential waterfall 階段。
+- 金融判決向量索引（04）的 bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。這只改變 04 的 bar 顏色，不代表把 A／R／E 拆成 sequential 階段。
+- 04 階段明細 MUST 顯示 A／R／E 三條獨立分流 bar：A 橘 `#f97316`、R 藍、E 紫。三條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A 是月份基線，MUST NOT 畫入 04 本次 run 的進度 bar。
+- 04 階段的圖例 MUST 明示 A 另計且不畫入 04 bar，R／E 才是 04 本次 run；避免把 A 的橘色或階段識別紫色誤認為目前 batch。
 - 「準備中」是版本準備／copy 的全域狀態，不是 A 分格的一部分；A 仍是既有版本（active collection）的月份覆蓋，依月份統計，不是全域 03 copy。
 - copy 是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E；R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
 - 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示；A 是基線，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 A／R／E 排成三個 sequential waterfall 階段。
@@ -534,6 +537,7 @@ Blue-Green 版本：  left 1.220%    width 1.2195%   filled
 | 1.7 | 2026-11-20 | 新增階段標題的 R／E phase badge；A 是基線不是執行階段，A／R／E 不得排成三個 sequential waterfall 階段。 |
 | 1.8 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度以 copy 階段或獨立全域 chip 顯示。 |
 | 1.9 | 2026-11-20 | 將 A 的說明改為「既有版本／依月份覆蓋」，避免與全域 03 copy 混淆。 |
+| 1.10 | 2026-11-20 | 04 waterfall bar 顏色跟隨目前 phase（R 藍／E 紫）；明細新增 A／R／E 三條獨立分流 bar，三條不相加，A 不畫入 04 本次 run bar。 |
 | 1.3 | 2026-11-16 | 將 `#/home` 即時摘要載入 Pipeline 納入適用範圍；新增 `/api/home` 階段計時、`home-wf-slow` 最慢階段標示與 `HOME_WF_OPEN_STAGES` 參考實作。 |
 | 1.2 | 2026-11-15 | 將 `#/status` 服務總覽載入 Pipeline 納入適用範圍；新增 `/api/status` 後端階段計時、瀏覽器初始化／HTTP 往返合成時間軸與 `status-wf-*` 參考實作。 |
 | 1.1 | 2026-11-15 | 將判決匯入與非索引 workflow 流程進度納入適用範圍；新增 `workflow-wf-*` 包裝、2×3 指標、狀態圖例與 `WORKFLOW_WF_OPEN_STAGES` 參考實作。 |

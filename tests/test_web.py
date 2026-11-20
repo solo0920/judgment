@@ -628,6 +628,13 @@ def test_static_console_is_served(web_client) -> None:
     assert "A 已覆蓋月份" in processing_js.text
     assert "A 既有版本" in processing_js.text
     assert "04 金融判決向量索引 · 月份 A／R／E" in processing_js.text
+    assert "index-wf-are-legend" in processing_js.text
+    assert "index-wf-are-breakdown" in processing_js.text
+    assert "A／R／E 分流" in processing_js.text
+    assert "R 本次沿用" in processing_js.text
+    assert "E 本次新 embedding" in processing_js.text
+    assert "R 藍／E 紫" in processing_js.text
+    assert "barColor" in processing_js.text
     assert "月份（舊→新）" in processing_js.text
     assert "等待版本準備（複製可重用向量）完成" in processing_js.text
     assert "第一批開始前不標示目前月份" in processing_js.text
@@ -740,6 +747,10 @@ def test_static_console_is_served(web_client) -> None:
     assert ".index-current-phase.is-reuse" in css.text
     assert ".index-current-phase.is-embed" in css.text
     assert ".index-wf-bar.is-hollow" in css.text
+    assert ".index-wf-are-legend i.is-active" in css.text
+    assert ".index-wf-are-breakdown" in css.text
+    assert ".index-wf-are-row.is-reuse" in css.text
+    assert ".index-wf-are-row.is-embed" in css.text
     assert ".workflow-wf-card" in css.text
     assert ".workflow-wf-bar.is-hollow" in css.text
     assert ".workflow-wf-card .rag-wf-stage-head" in css.text

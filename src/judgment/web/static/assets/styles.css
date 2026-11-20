@@ -17775,6 +17775,130 @@ a.qb-bank-law:hover {
   border-bottom: 1px solid var(--line);
 }
 
+.index-wf-are-legend {
+  flex-wrap: wrap;
+  row-gap: 5px;
+}
+
+.index-wf-are-legend i.is-active {
+  background: #f97316;
+}
+
+.index-wf-are-legend i.is-reuse {
+  background: #3b82f6;
+}
+
+.index-wf-are-legend i.is-embed {
+  background: #a78bfa;
+}
+
+.index-wf-are-legend i.is-hollow {
+  background: color-mix(in srgb, var(--ink) 20%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+.index-wf-are-breakdown {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.index-wf-are-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.index-wf-are-head strong {
+  color: var(--ink);
+  font-size: 9.5px;
+}
+
+.index-wf-are-row {
+  --are-color: var(--line-strong);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+}
+
+.index-wf-are-row.is-active {
+  --are-color: #f97316;
+}
+
+.index-wf-are-row.is-reuse {
+  --are-color: #3b82f6;
+}
+
+.index-wf-are-row.is-embed {
+  --are-color: #a78bfa;
+}
+
+.index-wf-are-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.index-wf-are-label i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--are-color);
+  flex: none;
+}
+
+.index-wf-are-value {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.index-wf-are-value small {
+  display: block;
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 400;
+}
+
+.index-wf-are-track {
+  grid-column: 1 / -1;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--are-color) 16%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--are-color) 38%, transparent);
+}
+
+.index-wf-are-track > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--are-color);
+}
+
+.index-wf-are-row.is-complete .index-wf-are-track > span {
+  background: var(--are-color);
+}
+
 .index-wf-step {
   color: var(--faint);
   font-family: var(--font-mono);

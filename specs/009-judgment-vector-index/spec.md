@@ -2,9 +2,9 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.23
+**Version**: 1.24
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-20
 
 **Applies To**: `#/processing` 的「Qdrant判決向量索引版本建置」workflow、索引檔案時間表（A／R／E）、覆蓋率模式（coverage-only）、建置模式（build mode）與相關 SSE／快取。
 
@@ -332,6 +332,9 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - A／R／E 是同一批掃描中的並行分類，MUST NOT 被拆成 waterfall 的 sequential 子階段；A 是 active 月份基線，不是「準備中」的一部分。
 - 「複製可重用向量」是全域 points 準備階段，MUST NOT 被畫成第四個月份分格，也不得把 copy 完成填入 R／E。R 是 04 索引階段逐月掃描的沿用進度，不是 03 copy 的全域完成度。
 - 若 A／R／E 要做成視覺小格，只能放在索引階段內部的並行 sub-progress，不得改變 6 個 sequential 階段的順序與時間軸。
+- 金融判決向量索引（04）的 waterfall bar 顏色 MUST 跟隨目前 phase：R 重用為藍色 `#3b82f6`、E 新 embedding 為紫色 `#a78bfa`；階段列左側識別色仍固定為 `#a78bfa`。此規則只改變 04 的 bar 顏色，不代表把 A／R／E 拆成 sequential 階段。
+- 04 階段明細 MUST 顯示 A／R／E 三條獨立分流 bar：A 橘 `#f97316`、R 藍、E 紫。三條 bar MUST 各自以自己的 total 計算，MUST NOT 相加成同一條 100% bar；A 是月份基線，MUST NOT 畫入 04 本次 run 的進度 bar，也不得被標成目前 phase。
+- 04 階段的圖例 MUST 明示「A 另計且不畫入 04 bar；R／E 才是 04 本次 run」，避免把 A 的橘色或階段的紫色誤認為目前 batch。
 - 目前批次是 R 重用或 E 新 embedding MAY 以階段標題旁的 phase badge 顯示（例如 `R 重用`／`E 新 embedding`）；A 是基線，不是執行階段，MUST NOT 被標成目前 phase，也 MUST NOT 把 A／R／E 排成三個 sequential waterfall 階段。
 - A MUST NOT 被改名或替換為「03 複製可重用向量」；A 是 active collection 的月份基線，03 copy 是全域 points。03 進度只能顯示在 sequential waterfall 或獨立的「03 複製（全域）」chip，不得填入 A。
 
@@ -418,3 +421,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.21 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度只顯示在 waterfall 或獨立全域 chip，不填入月份 A 格。 |
 | 1.22 | 2026-11-20 | 將 A 的顯示名稱改為「既有版本／A 已覆蓋月份」，明訂 A 是依月份的既有版本覆蓋，不是全域處理階段。 |
 | 1.23 | 2026-11-20 | A 分格與圖例改為橘色。 |
+| 1.24 | 2026-11-20 | 04 waterfall bar 顏色跟隨目前 phase（R 藍／E 紫）；明細新增 A／R／E 三條獨立分流 bar，三條不相加，A 不畫入 04 本次 run bar。 |
