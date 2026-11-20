@@ -734,6 +734,8 @@ def test_static_console_is_served(web_client) -> None:
     assert css.status_code == 200
     assert "--accent" in css.text
     assert ".index-month-are.is-active" in css.text
+    assert ".index-month-block.is-active" in css.text
+    assert "--block-color: #f97316" in css.text
     assert ".index-month-are-key i.is-current" in css.text
     assert ".index-current-phase.is-reuse" in css.text
     assert ".index-current-phase.is-embed" in css.text

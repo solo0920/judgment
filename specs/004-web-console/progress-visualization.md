@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical component spec）
 
-**Version**: 1.9
+**Version**: 1.10
 
 **Last Updated**: 2026-11-19
 
@@ -167,7 +167,7 @@ A／R／E 的具體映射：
 
 | 分格 | 完成判定來源 | 不得使用 |
 | --- | --- | --- |
-| A 既有版本 | 既有版本（active collection）對該月份的向量覆蓋；依月份統計，不是全域 03 copy | 本次 run R／E 進度、全域 copy 進度 |
+| A 既有版本（橘） | 既有版本（active collection）對該月份的向量覆蓋；依月份統計，不是全域 03 copy | 本次 run R／E 進度、全域 copy 進度 |
 | R | 本次 run baseline archive 的 `processed / total`；尚未掃到的後續月份為 0%，顯示 25% 淺色 | active 覆蓋、A 既有版本、E 進度 |
 | E | 無 E backlog：active 覆蓋，文字標示「無 E backlog／不需新 embedding」；有 E backlog：本次 run latest archive 的 `processed / total` | 有 E backlog 時用 active 覆蓋、R 進度；無 E backlog 時把 active 覆蓋說成「本次已 embedding」 |
 
@@ -446,4 +446,5 @@ DOM class：
 | 1.7 | 2026-11-20 | 明訂 03 copy 是全域準備階段，不得畫成第四個月份分格或填入 R／E；R 只代表 04 逐月掃描沿用進度。 |
 | 1.8 | 2026-11-20 | 明訂 A 不得改名或替換為 03 copy；03 進度以獨立全域 chip 或 waterfall 顯示。 |
 | 1.9 | 2026-11-20 | 將 A 的顯示名稱改為「既有版本／A 已覆蓋月份」，明訂 A 是依月份的既有版本覆蓋，不是全域處理階段。 |
+| 1.10 | 2026-11-20 | A 分格與圖例改為橘色（R 藍、E 紫不變）。 |
 | 1.0 | 2026-11-19 | 建立全站階段進度規格：25% 未完成淺色、完成色進度填充、100% 實心、統一 class／CSS／SSE 契約；涵蓋月份方格、waterfall hollow bar、A／R／E 與等待軌道。 |

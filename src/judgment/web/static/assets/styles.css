@@ -18065,7 +18065,7 @@ a.qb-bank-law:hover {
 }
 
 .index-month-block.is-active {
-  --block-color: var(--success);
+  --block-color: #f97316;
 }
 
 .index-month-block.is-reuse {
@@ -18215,7 +18215,7 @@ a.qb-bank-law:hover {
 }
 
 .index-month-are-key i.is-active {
-  background: var(--success);
+  background: #f97316;
 }
 
 .index-month-are-key i.is-reuse {
