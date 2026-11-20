@@ -4284,7 +4284,29 @@ function indexMonthGridMarkup(runtime) {
       return `<tr><th scope="row">${escapeHtml(year)}</th>${cells}</tr>`;
     })
     .join("");
+  const copy = runtime.copy || {};
+  const copyTotal = indexMonthCoverageValue(copy.total);
+  const copyCopied = indexMonthCoverageValue(copy.copied);
+  const copyStatusLabel =
+    copy.status === "success"
+      ? "完成"
+      : copy.status === "running"
+        ? "執行中"
+        : copy.status === "stale"
+          ? "中止"
+          : "等待";
+  const copyChip =
+    !coverageOnly && copyTotal > 0
+      ? `<div class="index-copy-global-chip" title="03 複製可重用向量是全域 points 準備階段，不列入月份 A／R／E；R 是 04 逐月掃描進度。">
+          <span class="badge badge-neutral">03 複製（全域）</span>
+          <span class="mono">${formatNumber(copyCopied)} / ${formatNumber(
+            copyTotal,
+          )} points</span>
+          <span>· ${escapeHtml(copyStatusLabel)} · 不列入月份 A／R／E</span>
+        </div>`
+      : "";
   return `<div class="judgment-months index-months">
+    ${copyChip}
     <div class="index-runtime-summary index-month-are-summary">
       <span title="A：上一個正式版本基線 archive 已完成的月份數；不列入新版本完成數；以月份計。">A 基線月份 <strong class="mono">${formatNumber(
         counts.active,
@@ -4304,10 +4326,10 @@ function indexMonthGridMarkup(runtime) {
       <span>總月份 <strong class="mono">${formatNumber(groups.size)}</strong></span>
     </div>
     <div class="index-month-are-key processing-timeline-legend" aria-label="A／R／E 階段圖例">
-      <span class="processing-timeline-legend-label">階段</span>
-      <span><i class="is-active"></i>A · 上一個正式版本既有覆蓋</span>
-      <span><i class="is-reuse"></i>R · 本次沿用既有向量</span>
-      <span><i class="is-embed"></i>E · 本次重新計算 embedding</span>
+      <span class="processing-timeline-legend-label">04 月份</span>
+      <span><i class="is-active"></i>A · active 基線（非 03 copy）</span>
+      <span><i class="is-reuse"></i>R · 04 逐月沿用</span>
+      <span><i class="is-embed"></i>E · 04 逐月新 embedding</span>
     </div>
     <div class="index-month-are-key processing-timeline-legend" aria-label="索引月份狀態圖例">
       <span class="processing-timeline-legend-label">狀態</span>
@@ -4684,7 +4706,7 @@ function indexRuntimeMarkup(workflow) {
     : "";
   return `<section class="report-card processing-card index-files-card">
     <div class="side-card-head index-runtime-head">
-      <span class="side-card-title">${icon("table", 14)}索引檔案時間表</span>
+      <span class="side-card-title">${icon("table", 14)}04 金融判決向量索引 · 月份 A／R／E</span>
       ${metricsMarkup}
     </div>
     ${

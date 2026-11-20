@@ -18014,6 +18014,20 @@ a.qb-bank-law:hover {
   padding: 0 0 8px;
 }
 
+.index-copy-global-chip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 0 8px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.index-copy-global-chip .mono {
+  color: var(--ink);
+}
+
 .index-month-number {
   display: block;
   margin-bottom: 2px;

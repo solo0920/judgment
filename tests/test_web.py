@@ -623,6 +623,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "03 複製可重用向量是全域 points 準備階段" in processing_js.text
     assert "index-wf-phase" in processing_js.text
     assert "phaseLabel" in processing_js.text
+    assert "03 複製（全域）" in processing_js.text
+    assert "A · active 基線（非 03 copy）" in processing_js.text
+    assert "04 金融判決向量索引 · 月份 A／R／E" in processing_js.text
     assert "月份（舊→新）" in processing_js.text
     assert "等待版本準備（複製可重用向量）完成" in processing_js.text
     assert "第一批開始前不標示目前月份" in processing_js.text
@@ -3525,8 +3528,16 @@ def test_settings_sidebar_source_and_bundle_are_present() -> None:
 def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     frontend = Path(__file__).resolve().parents[1] / "frontend"
     index = (frontend / "index.html").read_text(encoding="utf-8")
-    assert '<script src="./config.js"></script>' in index
-    assert '<script src="./assets/js/app.js"></script>' in index
+    assert re.search(
+        r'<script src="\./config\.js(?:\?v=\d+)?"></script>', index
+    )
+    assert re.search(
+        r'<script src="\./assets/js/app\.js(?:\?v=\d+)?"></script>',
+        index,
+    )
+    assert re.search(
+        r'href="\./assets/styles\.css(?:\?v=\d+)?"', index
+    )
     assert '<script type="module"' not in index
     assert 'href="/assets/' not in index
     assert 'src="/assets/' not in index
