@@ -6,6 +6,7 @@ import {
   demoActive,
   demoAdminGuardMarkup,
   demoFeature,
+  initDemoLockTooltips,
   isAdmin,
   loadDemoContext,
   renderDemoClosed,
@@ -262,6 +263,7 @@ function initUpdateBadge() {
 
 async function boot() {
   await loadDemoContext();
+  initDemoLockTooltips();
   initAuth();
   initSettings();
   initGlobalShortcuts();

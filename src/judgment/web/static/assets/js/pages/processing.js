@@ -7362,17 +7362,21 @@ export async function render(root) {
       if (DEMO_ALLOWED_ACTIONS.has(button.dataset.processingAction || "")) {
         return;
       }
-      button.disabled = true;
+      if ("disabled" in button) button.disabled = false;
+      button.removeAttribute("disabled");
       button.classList.add("is-demo-locked");
       button.setAttribute("aria-disabled", "true");
-      button.title = "展示模式僅供檢視，執行與設定由管理者操作";
+      button.removeAttribute("title");
+      button.dataset.demoLockTooltip =
+        "展示模式僅供檢視，執行與設定由管理者操作";
     });
     page
       .querySelectorAll("[data-ollama-action], [data-processing-embedding-select]")
       .forEach((control) => {
         control.disabled = true;
         control.classList.add("is-demo-locked");
-        control.title = "展示模式僅供檢視";
+        control.removeAttribute("title");
+        control.dataset.demoLockTooltip = "展示模式僅供檢視";
       });
   };
 

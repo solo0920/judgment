@@ -19420,3 +19420,25 @@ a.auth-menu-item {
 .status-tab.is-demo-locked .badge {
   color: var(--muted);
 }
+
+.demo-lock-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10.5px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 22%);
+  pointer-events: none;
+  white-space: normal;
+}
+
+.demo-lock-tooltip[hidden] {
+  display: none;
+}

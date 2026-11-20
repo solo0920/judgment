@@ -167,3 +167,97 @@ export function demoLockMarkup(title, detail) {
     </div>
   </div>`;
 }
+
+
+let demoLockTooltip = null;
+let demoLockTooltipTimer = 0;
+let demoLockTooltipTarget = null;
+let demoLockTooltipPoint = { x: 0, y: 0 };
+
+function ensureDemoLockTooltip() {
+  if (demoLockTooltip?.isConnected) return demoLockTooltip;
+  demoLockTooltip = document.createElement("div");
+  demoLockTooltip.className = "demo-lock-tooltip";
+  demoLockTooltip.setAttribute("role", "tooltip");
+  demoLockTooltip.hidden = true;
+  document.body.appendChild(demoLockTooltip);
+  return demoLockTooltip;
+}
+
+function placeDemoLockTooltip() {
+  if (!demoLockTooltip || demoLockTooltip.hidden) return;
+  const gap = 18;
+  const rect = demoLockTooltip.getBoundingClientRect();
+  let left = demoLockTooltipPoint.x + gap;
+  let top = demoLockTooltipPoint.y + 14;
+  if (left + rect.width > window.innerWidth - 8) {
+    left = demoLockTooltipPoint.x - rect.width - gap;
+  }
+  if (top + rect.height > window.innerHeight - 8) {
+    top = demoLockTooltipPoint.y - rect.height - 14;
+  }
+  demoLockTooltip.style.transform = `translate3d(${Math.round(
+    Math.max(8, left),
+  )}px, ${Math.round(Math.max(8, top))}px, 0)`;
+}
+
+function showDemoLockTooltip(target) {
+  const text = String(target?.dataset.demoLockTooltip || "").trim();
+  if (!text) return;
+  const tooltip = ensureDemoLockTooltip();
+  tooltip.textContent = text;
+  tooltip.hidden = false;
+  placeDemoLockTooltip();
+}
+
+function hideDemoLockTooltip() {
+  if (demoLockTooltipTimer) {
+    window.clearTimeout(demoLockTooltipTimer);
+    demoLockTooltipTimer = 0;
+  }
+  demoLockTooltipTarget = null;
+  if (demoLockTooltip) demoLockTooltip.hidden = true;
+}
+
+function activateDemoLockTooltip(target, x, y) {
+  if (!target || demoLockTooltipTarget === target) return;
+  hideDemoLockTooltip();
+  demoLockTooltipTarget = target;
+  demoLockTooltipPoint = { x, y };
+  demoLockTooltipTimer = window.setTimeout(() => {
+    demoLockTooltipTimer = 0;
+    if (demoLockTooltipTarget === target) showDemoLockTooltip(target);
+  }, 200);
+}
+
+export function initDemoLockTooltips() {
+  if (initDemoLockTooltips.installed) return;
+  initDemoLockTooltips.installed = true;
+  document.addEventListener("pointerover", (event) => {
+    const target = event.target.closest?.("[data-demo-lock-tooltip]");
+    if (!target) return;
+    activateDemoLockTooltip(target, event.clientX, event.clientY);
+  });
+  document.addEventListener("pointermove", (event) => {
+    if (!demoLockTooltipTarget) return;
+    demoLockTooltipPoint = { x: event.clientX, y: event.clientY };
+    if (demoLockTooltip && !demoLockTooltip.hidden) placeDemoLockTooltip();
+  });
+  document.addEventListener("pointerout", (event) => {
+    if (!demoLockTooltipTarget) return;
+    const related = event.relatedTarget;
+    if (related && demoLockTooltipTarget.contains?.(related)) return;
+    hideDemoLockTooltip();
+  });
+  document.addEventListener("focusin", (event) => {
+    const target = event.target.closest?.("[data-demo-lock-tooltip]");
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    activateDemoLockTooltip(target, rect.right, rect.top);
+  });
+  document.addEventListener("focusout", () => hideDemoLockTooltip());
+  window.addEventListener("scroll", hideDemoLockTooltip, {
+    capture: true,
+    passive: true,
+  });
+}

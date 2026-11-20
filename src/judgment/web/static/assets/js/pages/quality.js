@@ -512,7 +512,8 @@ export async function render(root) {
     for (const button of tabs) {
       if (button.dataset.qualityTab === "overview") continue;
       button.classList.add("is-demo-locked");
-      button.title = "展示模式不提供題庫管理";
+      button.removeAttribute("title");
+      button.dataset.demoLockTooltip = "展示模式不提供題庫管理";
       const badge = button.querySelector(".badge");
       if (badge) badge.textContent = "LOCK";
     }

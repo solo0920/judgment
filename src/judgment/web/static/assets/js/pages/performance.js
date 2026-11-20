@@ -2589,7 +2589,7 @@ export async function render(root, ctx) {
             <span class="status-tab-icon">${icon("layers", 15)}</span>
             <span class="status-tab-copy"><strong>判決向量索引 Pipeline</strong><small>Host／Model、Blue-Green 與階段耗時</small></span>
           </button>
-          <button class="status-tab${demoReadOnly ? " is-demo-locked" : ""}" type="button" data-performance-tab="benchmark"${demoReadOnly ? ' title="展示模式不提供 Benchmark 執行"' : ""}>
+          <button class="status-tab${demoReadOnly ? " is-demo-locked" : ""}" type="button" data-performance-tab="benchmark"${demoReadOnly ? ' data-demo-lock-tooltip="展示模式不提供 Benchmark 執行"' : ""}>
             <span class="status-tab-icon">${icon("brain", 15)}</span>
             <span class="status-tab-copy"><strong>RAG Benchmark</strong><small>題庫、模型、評分與同題歷史</small></span>
             ${demoReadOnly ? `<span class="badge badge-neutral badge-mono">LOCK</span>` : ""}

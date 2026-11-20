@@ -2263,7 +2263,7 @@ function renderStatusSidebar(status, activeTab, usage, demoReadOnly = false) {
         const active = tab.id === activeTab;
         const locked = demoReadOnly && DEMO_LOCKED_STATUS_TABS.has(tab.id);
         return `<button class="status-tab${active ? " is-active" : ""}${locked ? " is-demo-locked" : ""}" type="button"
-          data-status-tab="${tab.id}" ${active ? 'aria-current="page"' : ""} ${locked ? 'title="展示模式不提供此管理功能"' : ""}>
+          data-status-tab="${tab.id}" ${active ? 'aria-current="page"' : ""} ${locked ? 'data-demo-lock-tooltip="展示模式不提供此管理功能"' : ""}>
           <span class="status-tab-icon">${icon(tab.icon, 15)}</span>
           <span class="status-tab-copy">
             <strong>${escapeHtml(tab.label)}</strong>

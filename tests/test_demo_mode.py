@@ -555,3 +555,19 @@ def test_demo_full_pages_use_admin_layout_with_locked_actions(
     assert css.status_code == 200
     assert "body.is-demo-visitor .processing-actions" not in css.text
     assert ".demo-lock-card" in css.text
+    assert ".demo-lock-tooltip" in css.text
+
+    demo_js = client.get("/assets/js/demo.js")
+    assert demo_js.status_code == 200
+    assert "initDemoLockTooltips" in demo_js.text
+    assert "200" in demo_js.text
+    assert "data-demo-lock-tooltip" in demo_js.text
+    app_js = client.get("/assets/js/app.js")
+    assert app_js.status_code == 200
+    assert "initDemoLockTooltips" in app_js.text
+    for page in ("quality", "performance", "status"):
+        text = client.get(f"/assets/js/pages/{page}.js").text
+        assert 'title="展示模式' not in text
+    processing_js = client.get("/assets/js/pages/processing.js").text
+    assert 'title = "展示模式' not in processing_js
+    assert 'if ("disabled" in button) button.disabled = false;' in processing_js
