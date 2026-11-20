@@ -2,7 +2,7 @@
 
 **Status**: Active（canonical feature spec）
 
-**Version**: 1.16
+**Version**: 1.17
 
 **Last Updated**: 2026-11-19
 
@@ -143,7 +143,8 @@ latest archive = archive 名稱中 --(YYYYMMDDUpdate) 的日期最大者
 - 最新 archive 用於 E；較舊 archive 作為 A／R 基線；只有一個 archive 時 baseline = latest。
 - Build mode 先判斷該月 latest archive 是否仍有 E backlog：
   - `latestActiveComplete = active archive processed >= total`（latest archive 已被 active collection 完整覆蓋）。
-  - **無 E backlog（未變更月份）**：R／E MAY 使用 active collection 覆蓋顯示完成；這些月份不需要新 embedding，即使本次 run 尚未掃到，也 MUST 保持實心。
+  - **無 E backlog、尚未開始且非 current 的未變更月份**：R／E MAY 使用 active collection 覆蓋顯示完成；這些月份不需要新 embedding，即使本次 run 尚未掃到，也 MUST 保持實心。
+  - **無 E backlog，但該月是 current 或本次 run `processed > 0`**：R MUST 使用本次 run baseline `processed / total`，不得用 active 覆蓋把當前月份畫成完成；E MAY 使用 active 覆蓋顯示實心，但 tooltip MUST 標示「無 E backlog／不需新 embedding」。
   - **有 E backlog**：R／E MUST 只使用本次 run checkpoint（`runtime.months[].processed / total`）；本次 run 尚未處理的 archive／月份 MUST 顯示 25% 淺色，不得用 active collection 覆蓋提前標成實心。
   - 有 E backlog 的月份，只有本次 run 實際 `processed >= total` 時，R／E 才轉為實心完成。
 - A 分格 MUST 使用 active collection 的月份覆蓋；沒有 active 覆蓋時使用 baseline 進度。A 與 R／E 是不同來源，不得互相填入。
@@ -170,17 +171,18 @@ A／R／E 有兩個不同用途，MUST 分開計算，不得互相代替：
 
 | 用途 | 計算來源 | 可使用的資料 | 不得使用 |
 | --- | --- | --- | --- |
-| 時間表方塊與 summary | `processing.js` `indexMonthGridMarkup()` | A：`active_coverage`；R／E：無 E backlog 月份用 active 覆蓋，有 E backlog 月份用本次 run `months[].processed / total` | 用 active 覆蓋填有 E backlog 的 R／E |
+| 時間表方塊與 summary | `processing.js` `indexMonthGridMarkup()` | A：`active_coverage`；R：current 或本次 run `processed > 0` 用 run 進度，否則無 E backlog 用 active 覆蓋；E：無 E backlog 用 active 覆蓋，有 E backlog 用本次 run `months[].processed / total` | 用 active 覆蓋填 current／已開始月份的 R；用 active 覆蓋填有 E backlog 的 R／E |
 | Sidebar／workflow 待補 badge | 後端 `_index_month_are()`／`_index_month_counts()` | latest archive 仍有新 embedding 的 E backlog 月份 | 本次 run 尚未掃到造成的暫時 0% |
 
 - 時間表的 A／R／E summary MUST 由畫面同一批 `activeState`／`reuseState`／`embedState` 聚合；A 數量 MUST 使用 `activeState.complete`，不得使用 `reuseState.complete`。
-- 後端 `_index_month_are()` 是 backlog 計算，MUST NOT 用來取代時間表方塊的 E backlog 判斷；前端判斷 `latestActiveComplete` 後，才決定 R／E 是否可用 active 覆蓋。
+- 後端 `_index_month_are()` 是 backlog 計算，MUST NOT 用來取代時間表方塊的 E backlog 判斷；前端判斷 `latestActiveComplete` 後，才決定 R／E 是否可用 active 覆蓋，且 current／本次 run 已開始的 R MUST 優先使用 run 進度。
 - 若未來把時間表計算移到後端，MUST 同時提供「時間表顯示狀態」與「E backlog」兩個獨立 payload／函式，不得共用同一份 counts。
 - 任何 A／R／E 顯示變更 MUST 同時更新本規格、`progress-visualization.md` 與對應測試；只改 CSS 或只改其中一個計算來源不算完成。
 
 回歸案例：
 
-- 201805 只有一個 archive，latest active 19,705 / 19,705 = 100%、本次 run 0% → 無 E backlog，R／E MUST 為實心完成。
+- 201805 只有一個 archive，latest active 19,705 / 19,705 = 100%、本次 run 0%、非 current → 無 E backlog，R／E MUST 為實心完成。
+- 200906 只有一個 archive，latest active 15,576 / 15,576 = 100%、本次 run processed 45.1%、current → R MUST 為 45.1% 實色 + 54.9% 淺色；E MAY 實心但 MUST 標示「無 E backlog／不需新 embedding」。
 - 202608 latest archive active 14 / 1,232（1.1%）、本次 run 0% → 有 E backlog，R／E MUST 為 0% 淺色，不得實心。
 - 202512 latest archive 只有 3 筆、active 0 / 3 → 雖 baseline 36,971 / 36,971 已覆蓋，仍有 E backlog，R／E MUST 為 0% 淺色；202512 之前的無 backlog 月份則維持實心。
 - 202607 本次 run processed 68.9% → R MUST 為 68.9% 實色 + 31.1% 淺色。
@@ -243,7 +245,8 @@ E 未完成 = 最新 archive 尚未完成的「月份數」
 - 無資料：淡色空心，不是 25% 淺色；只有 total=0／沒有 archive 才算無資料。
 - A／R／E 可以同時為 25% 淺色（例如新月份尚無 active baseline，且本次 run 尚未處理）；只要該月 total>0，就屬未完成，不是無資料。
 - 目前索引月份：實線 accent 外框，padding 不使用狀態底色，無脈動動畫。
-- Build mode 的 latest archive 若已被 active collection 完整覆蓋（無 E backlog），R／E MAY 使用 active 覆蓋顯示完成；仍有 E backlog 的月份，R／E MUST 使用本次 run 的 `processed / total`，不得以 active 覆蓋提前標成完成。
+- Build mode 的 latest archive 若已被 active collection 完整覆蓋（無 E backlog），且該月不是 current、本次 run 也尚未開始，R／E MAY 使用 active 覆蓋顯示完成；current 或本次 run 已開始的 R MUST 使用本次 run 的 `processed / total`。仍有 E backlog 的月份，R／E MUST 使用本次 run 的 `processed / total`，不得以 active 覆蓋提前標成完成。
+- 無 E backlog 的 E 分格若使用 active 覆蓋顯示實心，tooltip MUST 標示「無 E backlog／不需新 embedding」。
 - 仍有 E backlog 且尚未處理的月份 MUST 顯示 25% 淺色；目前 run 進行中的 R／E 分格 MUST 顯示「已完成比例實色 + 其餘 25% 淺色」；run 停止／stale 後仍保留該 run 最後的 `processed / total`，不得回退成 active 100% 完成。
 - 綠框只代表目前批次所在月份，不代表該月已完成；目前月份 MUST NOT 因綠框或 active 覆蓋而被算入「已處理月份」。
 
@@ -405,3 +408,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.14 | 2026-11-19 | 準備中 current 預覽改用與實際批次相同的月份 cursor，修正 v7 copy 期間綠框停在 202601 的預覽錯誤。 |
 | 1.15 | 2026-11-19 | 明訂 copy 是版本準備階段，索引階段需等待；新增 copy／index ETA 與 A／R／E 並行子進度規則。 |
 | 1.16 | 2026-11-19 | 準備中不再顯示預覽月份外框與 JID；current row 顯示準備中與 copy 進度，第一批開始後才顯示實際月份。 |
+| 1.17 | 2026-11-20 | 修正 current window：current 或本次 run 已開始的月份，R 必須顯示 run 進度，不得用 active 覆蓋畫成完成；無 E backlog 的 E 實心必須標示「不需新 embedding」。 |

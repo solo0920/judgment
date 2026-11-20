@@ -3273,6 +3273,12 @@ function indexWorkflowProgressMarkup(workflow) {
       : progress.run_status === "running"
         ? "準備中"
         : "—";
+  const currentPhaseLabel =
+    String(current.phase || "") === "embedding"
+      ? "E 新 embedding"
+      : String(current.phase || "") === "reuse"
+        ? "R 重用"
+        : "—";
   const phases = [
     {
       key: "probe",
@@ -3384,6 +3390,13 @@ function indexWorkflowProgressMarkup(workflow) {
         ["重用", formatNumber(summary.reused)],
         ["新 embedding", formatNumber(summary.embedded)],
         ["目前月份", currentLabel],
+        ["目前批次", currentPhaseLabel],
+        [
+          "本批 R／E",
+          `R ${formatNumber(current.reused || 0)} · E ${formatNumber(
+            current.embedded || 0,
+          )}`,
+        ],
         [
           "預估剩餘",
           indexReady && indexEtaSeconds !== null
@@ -3397,7 +3410,9 @@ function indexWorkflowProgressMarkup(workflow) {
             expected,
           )} 筆 · 重用 ${formatNumber(summary.reused)} · 新 embedding ${formatNumber(
             summary.embedded,
-          )}`,
+          )}${
+            currentPhaseLabel === "—" ? "" : ` · ${currentPhaseLabel}`
+          }`,
     },
     {
       key: "validate",
@@ -4122,8 +4137,15 @@ function indexMonthGridMarkup(runtime) {
     const latestActiveComplete =
       latestActiveTotal > 0 &&
       latestActiveProcessed >= latestActiveTotal;
+    // Once this month has started in the current run, or is the current
+    // month, R must reflect the run's progress even when the active
+    // collection already has a complete copy.  Otherwise the current month
+    // would look complete while the run is still scanning it.
+    const runStarted = group.current || latest.processed > 0;
+    const useRunProgress =
+      coverageOnly || !latestActiveComplete || runStarted;
     const covered = new Map();
-    if (coverageOnly || !latestActiveComplete) {
+    if (useRunProgress) {
       for (const row of rows) covered.set(row.archive, row.processed);
     } else {
       let knownActive = 0;
@@ -4176,7 +4198,15 @@ function indexMonthGridMarkup(runtime) {
     }
     const active = indexMonthAreBlock(activeProcessed, activeTotal);
     const reuse = indexMonthAreBlock(baselineProcessed, baselineTotal);
-    const embed = indexMonthAreBlock(latestProcessed, latestTotal);
+    // E is "new embeddings for this run", not "all points scanned".  A
+    // month with no E backlog is complete for E even while R is still
+    // being copied; a month with E backlog uses the current run's progress.
+    const embedNoBacklog = !coverageOnly && latestActiveComplete;
+    const embedProcessed = embedNoBacklog
+      ? latestActiveProcessed
+      : latestProcessed;
+    const embedTotal = embedNoBacklog ? latestActiveTotal : latestTotal;
+    const embed = indexMonthAreBlock(embedProcessed, embedTotal);
     group.latest = latest;
     group.baselineRows = baselineRows;
     group.activeState = active;
@@ -4184,6 +4214,7 @@ function indexMonthGridMarkup(runtime) {
     group.embedState = embed;
     group.reuseComplete = reuse.complete;
     group.embedComplete = embed.complete;
+    group.embedNoBacklog = embedNoBacklog;
     if (active.complete) counts.active += 1;
     if (reuse.complete) counts.reuseComplete += 1;
     else counts.reuseIncomplete += 1;
@@ -4207,6 +4238,25 @@ function indexMonthGridMarkup(runtime) {
           state.percent === null ? "—" : `${state.percent}%`;
         const stateText = (state) =>
           state.empty ? "無資料" : state.complete ? "完成" : "未完成";
+        const currentPhase =
+          String(current.phase || "") === "embedding"
+            ? "E 新 embedding"
+            : String(current.phase || "") === "reuse"
+              ? "R 重用"
+              : "R／E";
+        const currentRunPercent =
+          group.latest && group.latest.total > 0
+            ? `${(
+                (100 * group.latest.processed) /
+                group.latest.total
+              ).toFixed(1)}%`
+            : "—";
+        const currentRunText =
+          group.current && group.latest
+            ? `本次 run ${currentPhase} ${formatNumber(
+                group.latest.processed,
+              )} / ${formatNumber(group.latest.total)}（${currentRunPercent}）`
+            : "";
         const title = [
           `${group.year}-${String(group.monthNo).padStart(2, "0")}`,
           group.archives.join("、") || "—",
@@ -4220,15 +4270,20 @@ function indexMonthGridMarkup(runtime) {
           )} / ${formatNumber(group.reuseState.total)}（${percentText(
             group.reuseState,
           )}）· ${stateText(group.reuseState)}`,
-          `E 新 embedding ${formatNumber(
-            group.embedState.processed,
-          )} / ${formatNumber(group.embedState.total)}（${percentText(
-            group.embedState,
-          )}）· ${stateText(group.embedState)}`,
+          group.embedNoBacklog
+            ? `E 無 E backlog（active 已覆蓋 ${formatNumber(
+                group.embedState.total,
+              )} 筆；不需新 embedding）`
+            : `E 新 embedding ${formatNumber(
+                group.embedState.processed,
+              )} / ${formatNumber(group.embedState.total)}（${percentText(
+                group.embedState,
+              )}）· ${stateText(group.embedState)}`,
           !group.reuseComplete ? "待完成：R 既有向量重用" : "",
           !group.embedComplete ? "待完成：E 新 embedding" : "",
+          currentRunText,
           group.current
-            ? `${group.preparing ? "準備索引" : active ? "目前索引" : "最後索引"}${
+            ? `${group.preparing ? "準備索引" : active ? "目前索引" : "最後索引"} · ${currentPhase}${
                 group.jid ? ` · ${group.jid}` : ""
               }`
             : "",
@@ -4301,7 +4356,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，R／E 可使用 active 覆蓋顯示完成；仍有 E backlog 的月份，R／E 只使用本次 run 的 processed／total，未處理前維持淺色。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）且尚未開始、非目前月份的未變更月份，R／E 可使用 active 覆蓋顯示完成；目前月份或本次 run 已開始的月份，R 使用本次 run 的 processed／total；仍有 E backlog 的月份，R／E 只使用本次 run 的 processed／total，未處理前維持淺色。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
         runtime,
       )}綠框只標示目前批次所在月份。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
   </div>`;

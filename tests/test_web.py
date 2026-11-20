@@ -611,6 +611,13 @@ def test_static_console_is_served(web_client) -> None:
     assert "index-host-strip" not in processing_js.text
     assert "scan_order" in processing_js.text
     assert "掃描順序" in processing_js.text
+    assert "const runStarted = group.current || latest.processed > 0;" in processing_js.text
+    assert "const useRunProgress" in processing_js.text
+    assert "E 無 E backlog" in processing_js.text
+    assert "本次 run " in processing_js.text
+    assert "目前批次" in processing_js.text
+    assert "本批 R／E" in processing_js.text
+    assert "目前月份或本次 run 已開始的月份，R 使用本次 run" in processing_js.text
     assert "月份（舊→新）" in processing_js.text
     assert "等待版本準備（複製可重用向量）完成" in processing_js.text
     assert "第一批開始前不標示目前月份" in processing_js.text
