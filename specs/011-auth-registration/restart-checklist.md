@@ -1,6 +1,6 @@
 # 權限熱修重啟與 Smoke Test 檢查清單
 
-**Status**: Ready（程式與 staging 演練已完成；production 尚未重啟）
+**Status**: Production restarted 2026-11-20 after host reboot; auth hotfix and demo mode deployed; demo closed; v7 resumed.
 
 **Last Updated**: 2026-11-20
 

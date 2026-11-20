@@ -1,6 +1,6 @@
 # 展示模式（Demo Mode）評估報告
 
-**Status**: Approved · Implemented（staging 驗證完成 2026-11-20；production 待 v7 完成後重啟）
+**Status**: Approved · Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
 
 **Version**: 0.3
 
