@@ -4129,66 +4129,23 @@ function indexMonthGridMarkup(runtime) {
     const latestActiveProcessed = indexMonthCoverageValue(
       latestEntry?.processed,
     );
-    // A month with no E backlog is an unchanged month: its latest archive is
-    // already fully covered by the active collection.  In that case R/E may
-    // use the active coverage and stay solid.  Once the latest archive still
-    // has pending embeddings, R/E must show this run's real progress instead
-    // of borrowing the baseline coverage.
+    // A month with no E backlog is an unchanged month for E only.  R is
+    // still work in the current build: every month that has not been scanned
+    // yet must show 25% light until the run reaches it.  Never borrow active
+    // coverage for R; active coverage belongs to A.
     const latestActiveComplete =
       latestActiveTotal > 0 &&
       latestActiveProcessed >= latestActiveTotal;
-    // Once this month has started in the current run, or is the current
-    // month, R must reflect the run's progress even when the active
-    // collection already has a complete copy.  Otherwise the current month
-    // would look complete while the run is still scanning it.
-    const runStarted = group.current || latest.processed > 0;
-    const useRunProgress =
-      coverageOnly || !latestActiveComplete || runStarted;
-    const covered = new Map();
-    if (useRunProgress) {
-      for (const row of rows) covered.set(row.archive, row.processed);
-    } else {
-      let knownActive = 0;
-      for (const row of rows) {
-        const entry = archiveMap[row.archive];
-        if (!entry) continue;
-        const entryProcessed = indexMonthCoverageValue(entry.processed);
-        knownActive += entryProcessed;
-        covered.set(row.archive, Math.max(entryProcessed, row.processed));
-      }
-      let residual =
-        activeTotal > 0 ? Math.max(0, activeProcessed - knownActive) : 0;
-      const missingBaseline = baselineRows
-        .filter((row) => !archiveMap[row.archive])
-        .sort(
-          (left, right) =>
-            archiveUpdateRank(left.archive) - archiveUpdateRank(right.archive),
-        );
-      for (const row of missingBaseline) {
-        const take = Math.min(row.total, residual);
-        residual -= take;
-        covered.set(row.archive, Math.max(row.processed, take));
-      }
-      if (!archiveMap[latest.archive] && !covered.has(latest.archive)) {
-        covered.set(
-          latest.archive,
-          Math.max(latest.processed, Math.min(latest.total, residual)),
-        );
-      }
-    }
     const baselineTotal = baselineRows.reduce(
       (sum, row) => sum + row.total,
       0,
     );
     const baselineProcessed = baselineRows.reduce(
-      (sum, row) =>
-        sum + (covered.has(row.archive) ? covered.get(row.archive) : row.processed),
+      (sum, row) => sum + row.processed,
       0,
     );
     const latestTotal = latest.total;
-    const latestProcessed = covered.has(latest.archive)
-      ? covered.get(latest.archive)
-      : latest.processed;
+    const latestProcessed = latest.processed;
     if (coverageOnly) {
       activeTotal = rows.reduce((sum, row) => sum + row.total, 0);
       activeProcessed = rows.reduce((sum, row) => sum + row.processed, 0);
@@ -4316,10 +4273,10 @@ function indexMonthGridMarkup(runtime) {
       <span title="A：上一個正式版本基線 archive 已完成的月份數；不列入新版本完成數；以月份計。">A 基線月份 <strong class="mono">${formatNumber(
         counts.active,
       )}</strong></span>
-      <span title="R 完成：基線 archive 已完成且可沿用的月份數；包含 latest archive 已完整覆蓋、無 E backlog 的未變更月份；以月份計。">R 完成月份 <strong class="mono">${formatNumber(
+      <span title="R 完成：本次 run 已處理完成的月份數；尚未掃到的月份不列入完成；以月份計。">R 完成月份 <strong class="mono">${formatNumber(
         counts.reuseComplete,
       )}</strong></span>
-      <span title="R 未完成：仍有 E backlog 且尚未完成 R 的月份數；以月份計。">R 未完成月份 <strong class="mono">${formatNumber(
+      <span title="R 未完成：本次 run 尚未完成 R 的月份數；包含尚未掃到的後續月份；以月份計。">R 未完成月份 <strong class="mono">${formatNumber(
         counts.reuseIncomplete,
       )}</strong></span>
       <span title="E 完成：latest archive 已完整覆蓋、無需新 embedding 的月份數；包含未變更月份；以月份計，不是 RAR 檔數。">E 完成月份 <strong class="mono">${formatNumber(
@@ -4356,7 +4313,7 @@ function indexMonthGridMarkup(runtime) {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）且尚未開始、非目前月份的未變更月份，R／E 可使用 active 覆蓋顯示完成；目前月份或本次 run 已開始的月份，R 使用本次 run 的 processed／total；仍有 E backlog 的月份，R／E 只使用本次 run 的 processed／total，未處理前維持淺色。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
+    <p class="judgment-months-hint">每格由左至右為 A（上一個正式版本既有覆蓋）、R（本次沿用既有向量）、E（本次重新計算 embedding）。A 不列入新版本完成數，R／E 才是本次建置進度；完成為實心；未完成時已完成比例為實色、剩餘區段為同色 25% 淺色，因此 0% 時整格都是淺色；無資料才是淡色空心。最新 archive 已被 active collection 完整覆蓋（無 E backlog）的未變更月份，E 可使用 active 覆蓋顯示完成；R 一律使用本次 run 的 processed／total，尚未掃到的後續月份維持 25% 淺色。仍有 E backlog 的月份，R／E 都使用本次 run 的 processed／total。E 無 backlog 時若顯示實心，tooltip 會標示不需新 embedding。summary 與方塊使用同一份狀態，sidebar 更新 badge 另以 E backlog 月份計。同一月份可能有多個 archive，A／R 使用較舊的基線 archive，E 使用名稱中更新日期最新的 archive；新舊 archive 不會相加。E 完成／未完成以月份計，不是 RAR 檔數。${indexScanOrderHint(
         runtime,
       )}綠框只標示目前批次所在月份。目前索引月份以實線外框標示，padding 不使用狀態底色。滑鼠移到月份可查看 active 覆蓋、A／R 基線、E 進度與目前案號。</p>
   </div>`;
