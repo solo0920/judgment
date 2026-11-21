@@ -14,7 +14,7 @@ import {
   renderDemoClosed,
   renderDemoLocked,
 } from "./demo.js";
-import { escapeHtml, icon, toast } from "./utils.js";
+import { escapeHtml, icon, initScoreCells, toast } from "./utils.js";
 import * as adminPage from "./pages/admin.js";
 import * as homePage from "./pages/home.js";
 import * as ragPage from "./pages/rag.js";
@@ -286,6 +286,7 @@ async function boot() {
   if (cachedContext) hydrateDemoContext(cachedContext);
   const freshContextPromise = loadDemoContext();
   initDemoLockTooltips();
+  initScoreCells();
   initSettings();
   initGlobalShortcuts();
   let updateBadgeReady = false;

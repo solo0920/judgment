@@ -6,6 +6,7 @@ import {
   formatNumber,
   icon,
   notice,
+  scoreCellsMarkup,
   toast,
 } from "../utils.js";
 
@@ -195,7 +196,7 @@ function caseInnerMarkup(caseItem, history = []) {
             ["citation", "引用", human.scores?.citation ?? 4],
             ["clarity", "清楚", human.scores?.clarity ?? 4],
             ["overall", "整體", human.overall ?? 4],
-          ].map(([key, label, value]) => `<label class="field"><span class="field-label">${label} <span class="field-tag">1–5</span></span><input class="input" type="number" min="1" max="5" name="score_${key}" value="${escapeHtml(String(value))}" /></label>`).join("")}
+          ].map(([key, label, value]) => scoreCellsMarkup({ name: `score_${key}`, label, value })).join("")}
         </div>
         <label class="field"><span class="field-label">人工批注</span><input class="input" name="comment" value="${escapeHtml(human.comment || "")}" placeholder="回答品質、引用或事實錯誤" /></label>
         <button class="btn btn-secondary btn-sm" type="submit">${icon("check", 13)}<span>儲存人工評分</span></button>

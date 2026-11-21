@@ -436,3 +436,41 @@ export function writeLocalCache(key, value) {
     /* cache is best effort */
   }
 }
+
+export function scoreCellsMarkup({ name, label, value = 4 } = {}) {
+  const scoreValue = Math.max(1, Math.min(5, Math.round(Number(value) || 4)));
+  return `<div class="field qb-score-field" data-score-field>
+    <span class="field-label">${escapeHtml(label || "")}</span>
+    <div class="qb-score-cells" role="radiogroup" aria-label="${escapeHtml(label || "")}分數">
+      ${[1, 2, 3, 4, 5]
+        .map(
+          (score) =>
+            `<button class="qb-score-cell${score === scoreValue ? " is-active" : ""}" type="button" role="radio" aria-checked="${score === scoreValue ? "true" : "false"}" data-score-cell data-score="${score}" aria-label="${escapeHtml(label || "")} ${score} 分">${score}</button>`,
+        )
+        .join("")}
+    </div>
+    <input type="hidden" name="${escapeHtml(name || "")}" value="${scoreValue}" data-score-input />
+  </div>`;
+}
+
+export function initScoreCells() {
+  if (initScoreCells.installed) return;
+  initScoreCells.installed = true;
+  document.addEventListener("click", (event) => {
+    const cell = event.target.closest?.("[data-score-cell]");
+    if (!cell) return;
+    const field = cell.closest("[data-score-field]");
+    if (!field) return;
+    const score = Math.max(
+      1,
+      Math.min(5, Math.round(Number(cell.dataset.score) || 0)),
+    );
+    field.querySelectorAll("[data-score-cell]").forEach((item) => {
+      const active = Number(item.dataset.score) === score;
+      item.classList.toggle("is-active", active);
+      item.setAttribute("aria-checked", active ? "true" : "false");
+    });
+    const input = field.querySelector("[data-score-input]");
+    if (input) input.value = String(score);
+  });
+}

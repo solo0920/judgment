@@ -3838,8 +3838,32 @@ def test_question_bank_review_scores_use_five_clickable_cells() -> None:
     css = (
         root / "src" / "judgment" / "web" / "static" / "assets" / "styles.css"
     ).read_text(encoding="utf-8")
-    assert "qb-score-cells" in source
-    assert 'data-qb-action="set-score"' in source
-    assert 'name="score_${key}" value="4" data-score-input' in source
+    utils = (
+        root
+        / "src"
+        / "judgment"
+        / "web"
+        / "static"
+        / "assets"
+        / "js"
+        / "utils.js"
+    ).read_text(encoding="utf-8")
+    benchmark = (
+        root
+        / "src"
+        / "judgment"
+        / "web"
+        / "static"
+        / "assets"
+        / "js"
+        / "pages"
+        / "benchmark_page.js"
+    ).read_text(encoding="utf-8")
+    assert "scoreCellsMarkup" in source
+    assert "scoreCellsMarkup" in benchmark
+    assert "qb-score-cells" in utils
+    assert "data-score-cell" in utils
+    assert "data-score-input" in utils
     assert "qb-score-cell.is-active" in css
     assert "background: #76b900" in css
+    assert 'type="number" min="1" max="5" name="score_' not in benchmark
