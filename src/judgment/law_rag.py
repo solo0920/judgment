@@ -269,6 +269,69 @@ def find_law_records(
     return [by_id[item] for item in selected if item in by_id]
 
 
+_CHAPTER_HEADING_RE = re.compile(
+    r"^第\s*[零〇一二三四五六七八九十百千兩\d之-]+\s*(?:章|編)"
+)
+
+
+def _law_chapter_outline(
+    articles: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return chapter headings and their substantive-article ranges."""
+
+    chapters: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for article in articles:
+        content = str(article.get("article_content") or "").strip()
+        article_no = str(article.get("article_no") or "").strip()
+        article_type = str(article.get("article_type") or "").strip().upper()
+        is_heading = article_type in {"C", "H"} or bool(
+            _CHAPTER_HEADING_RE.match(content)
+        )
+        if is_heading and _CHAPTER_HEADING_RE.match(content):
+            current = {
+                "title": content,
+                "first_article": "",
+                "last_article": "",
+                "article_count": 0,
+            }
+            chapters.append(current)
+            continue
+        if current is None or not article_no:
+            continue
+        current["first_article"] = (
+            current["first_article"] or article_no
+        )
+        current["last_article"] = article_no
+        current["article_count"] = int(current["article_count"]) + 1
+    return chapters
+
+
+def _law_key_articles(
+    articles: Sequence[Mapping[str, Any]],
+    *,
+    limit: int = 6,
+) -> List[Dict[str, str]]:
+    """Small set of substantive articles useful for a law overview."""
+
+    result: List[Dict[str, str]] = []
+    for article in articles:
+        article_no = str(article.get("article_no") or "").strip()
+        content = str(article.get("article_content") or "").strip()
+        article_type = str(article.get("article_type") or "").strip().upper()
+        if not article_no or not content or article_type in {"C", "H"}:
+            continue
+        result.append(
+            {
+                "article_no": article_no,
+                "article_content": re.sub(r"\s+", " ", content)[:220],
+            }
+        )
+        if len(result) >= limit:
+            break
+    return result
+
+
 def _law_parquet_columns() -> List[str]:
     return [
         "law_key",
@@ -927,6 +990,9 @@ def build_law_source(
         or record.law_effective_date,
         "first_promulgation": promulgation,
         "law_histories": histories[:1200],
+        "law_foreword": str(content.get("law_foreword") or "").strip()[:1200],
+        "chapters": _law_chapter_outline(articles),
+        "key_articles": _law_key_articles(articles),
         "articles": selected_articles,
         "stats": stats or None,
     }
@@ -1516,6 +1582,144 @@ def _primary_law_source(
     )
 
 
+_LAW_OVERVIEW_PREFIXES = (
+    "請",
+    "想",
+    "我要",
+    "幫我",
+    "介紹",
+    "簡介",
+    "說明",
+    "概述",
+    "解釋",
+    "告訴我",
+)
+_LAW_OVERVIEW_SUFFIXES = (
+    "是什麼",
+    "的介紹",
+    "的簡介",
+    "的概述",
+    "介紹",
+    "簡介",
+    "概述",
+    "重點",
+    "架構",
+    "內容",
+    "規範",
+    "條文",
+)
+
+
+def _law_overview_key(question: str) -> str:
+    text = _normalize(question)
+    text = re.sub(r"[？?。.!！、，,\s]", "", text)
+    changed = True
+    while changed and text:
+        changed = False
+        for prefix in _LAW_OVERVIEW_PREFIXES:
+            if text.startswith(prefix) and len(text) > len(prefix):
+                text = text[len(prefix) :]
+                changed = True
+        for suffix in _LAW_OVERVIEW_SUFFIXES:
+            if text.endswith(suffix) and len(text) > len(suffix):
+                text = text[: -len(suffix)]
+                changed = True
+    return text
+
+
+def is_law_overview_question(
+    question: str,
+    law_sources: Sequence[Dict[str, Any]],
+) -> bool:
+    """True for a bare law name / short law introduction question."""
+
+    key = _law_overview_key(question)
+    if not key or len(key) > 40:
+        return False
+    canonical = LAW_ALIASES.get(key, key)
+    return any(
+        _normalize(source.get("law_name") or "") == _normalize(canonical)
+        for source in law_sources
+    )
+
+
+def _law_overview_answer(source: Mapping[str, Any]) -> str:
+    name = str(source.get("law_name") or "法規")
+    level = str(source.get("law_level") or "位階未載明")
+    count = int(source.get("article_count") or 0)
+    modified = _format_date(source.get("law_modified_date")) or "未載明"
+    index = int(source.get("index") or 1)
+    lines = [name, ""]
+    meta = (
+        f"{name}是{level}，目前資料庫共 {count} 條，"
+        f"最後異動日為 {modified} [{index}]。"
+    )
+    promulgation = source.get("first_promulgation")
+    if promulgation:
+        meta += (
+            f" 最早於 {promulgation['roc_date']} 制定公布"
+            f"（西元 {promulgation['gregorian_date']}）。"
+        )
+    lines.append(meta)
+
+    lines.extend(["", "一、立法目的與主管機關"])
+    foreword = str(source.get("law_foreword") or "").strip()
+    key_articles = list(source.get("key_articles") or [])
+    if foreword:
+        lines.append(f"立法目的／前言：{foreword[:500]}")
+    elif key_articles:
+        first = key_articles[0]
+        lines.append(
+            f"立法目的（{first['article_no']}）：{first['article_content']}"
+        )
+
+    authority = next(
+        (
+            article
+            for article in key_articles
+            if "主管機關" in str(article.get("article_content") or "")
+        ),
+        None,
+    )
+    if authority:
+        lines.append(
+            f"主管機關（{authority['article_no']}）："
+            f"{authority['article_content'][:260]}"
+        )
+
+    chapters = list(source.get("chapters") or [])
+    if chapters:
+        lines.extend(["", f"二、章節架構（共 {len(chapters)} 章）"])
+        for chapter in chapters:
+            first_no = chapter.get("first_article") or "—"
+            last_no = chapter.get("last_article") or "—"
+            article_range = (
+                first_no
+                if first_no == last_no
+                else f"{first_no}–{last_no}"
+            )
+            lines.append(
+                f"- {chapter.get('title') or '未命名章節'}："
+                f"{article_range}（{int(chapter.get('article_count') or 0)} 條）"
+            )
+
+    if key_articles:
+        lines.extend(["", "三、核心條文"])
+        for article in key_articles[:6]:
+            lines.append(
+                f"- {article['article_no']}：{article['article_content']}"
+            )
+
+    lines.extend(
+        [
+            "",
+            "以上是法規資料庫的章節與條文整理；點擊來源卡可查看本地 Parquet 的完整條文。"
+            "這不是法律意見。",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def structured_law_answer(
     question: str,
     law_sources: Sequence[Dict[str, Any]],
@@ -1524,6 +1728,8 @@ def structured_law_answer(
     if not law_sources:
         return None
     primary = _primary_law_source(question, law_sources)
+    if is_law_overview_question(question, law_sources):
+        return _law_overview_answer(primary)
     if is_article_count_question(question):
         label = primary["source_label"]
         date = _format_date(primary.get("law_modified_date")) or "未載明"

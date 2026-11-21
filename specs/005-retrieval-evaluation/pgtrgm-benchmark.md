@@ -1,7 +1,8 @@
 # pg_trgm A/B/C Benchmark（隔離環境）
 
-- 狀態：Benchmark-only；**沒有正式 GIN index，沒有接入 retrieval pipeline**
-- 日期：2026-11-16
+- 狀態：Benchmark-only；**本文件的結論只適用於 `full_text`，不是 production 的 keyword filter index**
+- 日期：2026-11-16；2026-11-21 補充
+- 2026-11-21 更新：production `judgment_documents` 已建立 `jid`、`court`、`court_normalized`、`title`、`matched_laws_text` 五個 GIN trigram indexes（約 401 MB），供 `/api/query` keyword filter 使用；`full_text` 仍未建立 GIN index。
 - 執行檔：`scripts/legal_term_trgm_benchmark.py`
 - 報告：`.run/pg_trgm-benchmark-report.json`
 

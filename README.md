@@ -1184,6 +1184,7 @@ RAG 的資料流如下：
 
 1. 提問時先從 PostgreSQL `law_documents` 比對問題中的法規／命令名稱與常見簡稱（例如「證交法」對應「證券交易法」），取出 metadata；再從原始法規 Parquet 讀取條文、沿革與制定日期。若問題沒有直接寫出法規名稱，會以法律概念索引找出對應法規（例如「內線交易」對應證券交易法）。條文排名不是只看名稱或 2-gram 次數，而是結合法規概念展開（例如「內線交易」展開為「實際知悉」、「重大影響其股票價格」、「未公開」與第 157-1、171 條）、條號 regex、CJK BM25 與詞組覆蓋率；法規與命令都會納入檢索。前端「法規／命令檢索結果」中的法規名稱、各條文與命中詞彙都可直接點擊開啟完整原文。
 2. 若問題是「有多少條文」、「何時開始有」或「最常觸犯什麼法條」，系統會以法規 metadata、條文與判決引用統計直接產生可驗證的結構化回答；統計會明確標示判決筆數與「被引用次數」，不宣稱定罪或勝訴比例。
+3. 若問題只輸入法規名稱（例如「證券交易法」）、「介紹證券交易法」或「證交法是什麼」，系統會回傳法規簡介：立法目的、主管機關、章節架構與核心條文；此路徑不呼叫 LLM，也不以判決清單取代法規介紹。
 3. 判決端仍從 PostgreSQL `judgment_documents` 取出判決，保留法院、裁判日期、案由與命中法規，並擷取全文頭尾視窗（預設 1,600 字）作為文件級 embedding 文字。
 4. 以本機 Ollama `bge-m3`（1024 維）產生向量；版本化索引寫入 `judgments_vNNN`，正式查詢經 `judgments_current` alias。每筆判決一個 point，point id 由案號決定，重跑可覆寫而不會重複；`judgment_documents` 是未啟用版本化索引時的 legacy／default collection。
 5. 在 `judgment_vector_index` 記錄 `jid`、`version_id`、collection、模型、content hash、index text／payload hash 與維度；重跑時跳過未變更的判決，因此索引可中斷後繼續。
@@ -1424,14 +1425,26 @@ uv run python scripts/legal_term_ground_truth_candidates.py \
 
 本次沒有跑 4.68M 全庫 `--full`（以目前掃描速率估計約 90 分鐘）；全庫統計仍是後續離峰工作。
 
-pg_trgm benchmark 只在獨立 `legal_term_benchmark` schema 建立測試表與 index，不會建立正式 GIN index：
+`pg_trgm` 的 `full_text` 100k sample benchmark 仍在獨立 `legal_term_benchmark` schema 執行；結論是不建立 `full_text` 的正式 GIN index（index 約 839 MB／100k 筆，線性外推約 40 GB；2 字中文詞沒有加速）：
 
 ```bash
 uv run python scripts/legal_term_trgm_benchmark.py \
   --rows 100000 --output .run/pg_trgm-benchmark-report.json
 ```
 
-100k sample（101,769 筆）：A 無 index p50 median 2,670.5 ms、B GIN 14.5 ms、C GIN+exact 25.8 ms；index 建置 227s、大小 839 MB（約 8.6 KB/row，全庫線性外推約 40 GB）。2 字中文詞（`洗錢`、`抵銷`）沒有加速，default planner 仍選 seq scan，forced index 更慢。結論是**暫不建立正式全庫 GIN index**；理由與完整數據見 `specs/005-retrieval-evaluation/pgtrgm-benchmark.md`。
+2026-11-21 已在 production `judgment_documents` 建立 **keyword filter 實際搜尋欄位** 的五個 GIN trigram indexes：
+
+- `jid`、`court`、`court_normalized`、`title`、`matched_laws_text`
+- 合計約 401 MB；`full_text` 不在 `/api/query` 的 keyword filter 內，因此不建立。
+- `EXPLAIN ANALYZE`：`證券交易法` count 約 124 ms、`非常規交易` 約 1.3 ms；2 字詞（如 `民法`）仍約 3.45 秒，planner 會依選擇性決定是否用 index。
+- 建立指令（`CREATE INDEX CONCURRENTLY`，需在 transaction 外執行）：
+
+```bash
+docker exec -i judgment-postgres psql -U judgment -d judgment \
+  -v ON_ERROR_STOP=1 < scripts/create_judgment_trgm_indexes.sql
+```
+
+完整 benchmark 數據見 `specs/005-retrieval-evaluation/pgtrgm-benchmark.md`。
 
 Postings table（GIN 的替代方案，sample 已驗證；尚未接入 RAG）：
 
@@ -2041,7 +2054,7 @@ bash scripts/deploy_web_macos.sh --uninstall
 
 ### 本階段驗證
 
-- `uv run pytest`：690 tests pass（含靜態資源、首頁即時摘要 API／99 條金融法規 11 欄列表／首頁 Pipeline waterfall／管理權杖與 CORS／Ollama SSRF allowlist／Docker loopback 綁定、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／Reranker 服務測試與 test-mode Reranker 階段／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：692 tests pass（含靜態資源、首頁即時摘要 API／99 條金融法規 11 欄列表／首頁 Pipeline waterfall／管理權杖與 CORS／Ollama SSRF allowlist／Docker loopback 綁定、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／Reranker 服務測試與 test-mode Reranker 階段／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - pytest 效能：macOS 對未解析的 `.test` 主機每次 `getaddrinfo` 會等待約 30 秒，原本 4 個 Ollama 主機測試因此佔用約 210 秒；`tests/conftest.py` 將 `.test` 解析為 loopback 後，全套由約 226 秒降至約 17 秒。IP 字面位址與真實主機名稱仍使用系統解析器，並保留 hostname 解析到 metadata IP 時阻擋的測試。
 - P0 安全驗證（demo 關閉時）：`Origin: https://evil.example` 不回傳 CORS 允許；非 loopback 未帶權杖回 401、正確權杖回 200；Qdrant 未帶 key 回 401、帶 key 回 200；Docker ports 僅 `127.0.0.1`；PostgreSQL 只綁 loopback，連線密碼由環境設定提供；`file:///…/frontend/index.html#/home` 與 `#/tests` 正常載入，390px 無水平溢出，console error 為 0。
 - `uv run ruff check .`：clean。

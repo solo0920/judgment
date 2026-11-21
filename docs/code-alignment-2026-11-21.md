@@ -9,7 +9,7 @@
 | Python | `>=3.10`；本機 `.python-version` 為 3.12 |
 | pyarrow | `25.0.1` |
 | pytest | `9.2.0` |
-| 測試 | `uv run pytest -q`：690 tests pass |
+| 測試 | `uv run pytest -q`：692 tests pass |
 | Lint | `uv run ruff check .`：clean |
 | CI | pytest、ruff、frontend build、pip-audit、gitleaks 全歷史、Syft SBOM |
 | pip-audit | 無已知 advisory，CI 無 `--ignore-vuln` |
@@ -76,14 +76,20 @@ POST /api/rag/query/stream
 - 未完成：SESSION-01、AUDIT-01、SameSite 改 Lax 的評估、SSE ticket 一次性／綁定、HSTS 延長。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。
 
-## 5. 備份與資料庫角色
+## 5. 查詢索引
+
+- `judgment_documents` 已有五個 `pg_trgm` GIN indexes：`jid`、`court`、`court_normalized`、`title`、`matched_laws_text`，合計約 401 MB。
+- 這些是 `/api/query` keyword filter 實際使用的欄位；`full_text` 沒有建立 trigram index（會約 40 GB，且 2 字中文詞沒有明顯加速）。
+- 建立腳本：`scripts/create_judgment_trgm_indexes.sql`。
+
+## 6. 備份與資料庫角色
 
 - PostgreSQL dump 使用 age 加密（`postgres/judgment.dump.age`）；`.env` 不進備份；`data/` 與 Qdrant snapshot 仍為明文。
 - 已完成完整備份與 subset restore；完整 157 GB＋Qdrant restore drill 尚未執行。
 - `demo_reader` 已建立並限制；主應用仍使用 `judgment`，目前 `rolsuper=t`、`rolcreatedb=t`。APP-DB-01 尚未完成。
 - age 私鑰：`~/.config/judgment/age.key`，權限 `600`，不可進 repo／備份。
 
-## 6. 文件狀態規則
+## 7. 文件狀態規則
 
 - `README.md`、`specs/*/spec.md`、`specs/security/*.md`：current-state 文件，應以程式與 API 為準。
 - `specs/005-retrieval-evaluation/*-2026-11-17.md`、`specs/006-fraud-relevance-annotation/*`：dated 研究／benchmark 快照；保留當時數據，不強行改成目前值，但會標示 snapshot 性質。

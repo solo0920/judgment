@@ -54,9 +54,11 @@ from judgment.law_rag import (
     _rrf_fuse,
     build_insurance_responsibility_framework,
     is_law_first_question,
+    is_law_overview_question,
     is_related_laws_question,
     law_sources_for_question,
     select_law_articles,
+    structured_law_answer,
 )
 
 
@@ -369,6 +371,109 @@ def _security_law_articles() -> list[dict]:
         },
     ]
 
+
+
+def _security_law_overview_articles() -> list[dict]:
+    return [
+        {
+            "article_type": "C",
+            "article_no": "",
+            "article_content": "第 一 章 總則",
+        },
+        {
+            "article_type": "A",
+            "article_no": "第 1 條",
+            "article_content": "為發展國民經濟，並保障投資，特制定本法。",
+        },
+        {
+            "article_type": "A",
+            "article_no": "第 3 條",
+            "article_content": "本法所稱主管機關，為金融監督管理委員會。",
+        },
+        {
+            "article_type": "A",
+            "article_no": "第 6 條",
+            "article_content": "本法所稱有價證券，指政府債券、公司股票、公司債券及經主管機關核定之其他有價證券。",
+        },
+        {
+            "article_type": "C",
+            "article_no": "",
+            "article_content": "第 二 章 有價證券之募集、發行、私募及買賣",
+        },
+        {
+            "article_type": "A",
+            "article_no": "第 22 條",
+            "article_content": "有價證券之募集與發行，除政府債券或經主管機關核定之其他有價證券外，非經向主管機關申報生效後，不得為之。",
+        },
+        {
+            "article_type": "C",
+            "article_no": "",
+            "article_content": "第 七 章 罰則",
+        },
+        {
+            "article_type": "A",
+            "article_no": "第 171 條",
+            "article_content": "有下列情事之一者，處三年以上十年以下有期徒刑。",
+        },
+    ]
+
+
+def test_law_overview_question_detection() -> None:
+    sources = [{"law_name": "證券交易法"}]
+    assert is_law_overview_question("證券交易法", sources)
+    assert is_law_overview_question("請介紹證券交易法", sources)
+    assert is_law_overview_question("證交法是什麼", sources)
+    assert not is_law_overview_question(
+        "證券交易法對內線交易有什麼規範？", sources
+    )
+
+
+def test_law_overview_answer_has_chapters_and_no_judgments(
+    monkeypatch, tmp_path: Path
+) -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    _seed_laws(session_factory)
+    contents = {
+        ("law", "證券交易法"): {
+            "law_level": "法律",
+            "law_category": "金融法規",
+            "article_count": 229,
+            "law_articles": _security_law_overview_articles(),
+            "law_histories": "中華民國五十七年四月三十日總統令制定公布全文 183 條",
+        }
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda data_dir, records: contents,
+    )
+    settings = _settings(law_data_dir=tmp_path)
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="證券交易法",
+        settings=settings,
+    )
+
+    assert payload["status"] == "operational"
+    assert payload["answer_source"] == "structured"
+    assert payload["judgments"] == []
+    assert payload["citations"] == []
+    assert payload["llm_model"] is None
+    assert "立法目的" in payload["answer"]
+    assert "主管機關" in payload["answer"]
+    assert "章節架構" in payload["answer"]
+    assert "第 一 章 總則" in payload["answer"]
+    assert "第 七 章 罰則" in payload["answer"]
+    assert payload["law_sources"][0]["law_name"] == "證券交易法"
+    assert len(payload["law_sources"][0]["chapters"]) == 3
+
+    direct = structured_law_answer(
+        "證券交易法",
+        [{"law_name": "證券交易法", "index": 1, "article_count": 1}],
+    )
+    assert direct is not None
+    assert "證券交易法" in direct
 
 
 def test_build_index_text_keeps_head_and_tail() -> None:

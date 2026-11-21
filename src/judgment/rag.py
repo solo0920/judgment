@@ -26,6 +26,7 @@ from .law_rag import (
     is_citation_stats_question,
     is_history_question,
     is_law_first_question,
+    is_law_overview_question,
     is_related_laws_question,
     judgment_law_stats,
     law_source_text,
@@ -3670,6 +3671,7 @@ def answer_question(
         is_article_count_question(question)
         or is_history_question(question)
         or is_related_laws_question(question)
+        or is_law_overview_question(question, law_sources)
         or (law_stats and law_stats.get("articles"))
     ):
         assign_law_indexes(law_sources)

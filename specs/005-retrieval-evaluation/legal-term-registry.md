@@ -119,7 +119,7 @@ terms_proxy_supported 72（sample df >= 20）
 
 ## 全庫搜尋擴充（benchmark-only）
 
-目前 `keyword_list` 只在有法院＋年份時啟用，避免全庫 4.68M 筆逐筆 Python 掃描。`pg_trgm` benchmark 已在獨立 `legal_term_benchmark` schema 實作，但**尚未建立正式 GIN index，也未接入 retrieval pipeline**。
+目前 `keyword_list` 只在有法院＋年份時啟用，避免全庫 4.68M 筆逐筆 Python 掃描。`pg_trgm` benchmark 已在獨立 `legal_term_benchmark` schema 實作。2026-11-21 已在 production `judgment_documents` 建立 keyword filter 搜尋欄位的五個 GIN trigram indexes（`jid`、`court`、`court_normalized`、`title`、`matched_laws_text`）；`full_text` 的 GIN index 仍未建立，`keyword_list` 也尚未接入 retrieval pipeline。
 
 可用性檢查（2026-11-16）：
 
@@ -127,7 +127,7 @@ terms_proxy_supported 72（sample df >= 20）
 PostgreSQL 16 / UTF8 / en_US.utf8
 pg_trgm 1.6：**installed 2026-11-16**（database `judgment`）
 pg_bigm：not available in this image
-GIN index（formal `judgment_documents`）：**not created**
+GIN index（formal `judgment_documents`）：**search columns created 2026-11-21；full_text not created**
 GIN index（isolated `legal_term_benchmark`）：created 2026-11-16 for benchmark only
 Retrieval pipeline：**not integrated**
 ```
