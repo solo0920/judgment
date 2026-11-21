@@ -194,6 +194,66 @@ function aiCreateFormMarkup(state) {
   </section>`;
 }
 
+const REVIEW_SCORE_FIELDS = [
+  ["clarity", "題目清晰"],
+  ["labels", "法條標注"],
+  ["answer", "參考答案"],
+  ["difficulty", "難度與標籤"],
+  ["overall", "整體"],
+];
+
+function reviewScoresHistoryMarkup(item) {
+  const reviews = Array.isArray(item?.reviews) ? item.reviews : [];
+  const head = `<div class="side-card-head">
+    <span class="side-card-title">${icon("shield", 14)}人工驗收批注分數</span>
+    <span class="badge badge-neutral badge-mono">${formatNumber(reviews.length)} 筆</span>
+  </div>`;
+  if (!reviews.length) {
+    return `<section class="qb-review-scores-block">
+      ${head}
+      <div class="qb-empty qb-score-history-empty">尚無人工驗收評分；完成驗收後會顯示五項分數與批注。</div>
+    </section>`;
+  }
+  const rows = reviews
+    .map((review) => {
+      const scores = review.rubric_scores || {};
+      return `<tr>
+        <td class="cell-date">${escapeHtml(formatDateTime(review.created_at))}</td>
+        <td>${escapeHtml(review.reviewer || "匿名")}</td>
+        ${REVIEW_SCORE_FIELDS.map(
+          ([key]) =>
+            `<td class="cell-number"><strong>${escapeHtml(
+              scores[key] ?? "—",
+            )}</strong></td>`,
+        ).join("")}
+        <td>${statusBadge(
+          review.decision === "approved" ? "accepted" : review.decision,
+        )}</td>
+        <td class="qb-score-comment">${escapeHtml(review.comment || "—")}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="qb-review-scores-block">
+    ${head}
+    <div class="table-wrap">
+      <table class="data-table is-compact qb-score-history-table">
+        <thead>
+          <tr>
+            <th scope="col">時間</th>
+            <th scope="col">審核者</th>
+            ${REVIEW_SCORE_FIELDS.map(
+              ([, label]) => `<th scope="col" class="cell-number">${label}</th>`,
+            ).join("")}
+            <th scope="col">結果</th>
+            <th scope="col">批注</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 function manualFormMarkup(item) {
   return `<section class="report-card qb-card">
     <div class="side-card-head">
@@ -256,6 +316,7 @@ function manualFormMarkup(item) {
       </div>
       <div class="qb-form-hint">修改已存在的題目會建立新版本；已核准題目修改後會回到待審，需重新驗收。</div>
     </form>
+    ${reviewScoresHistoryMarkup(item)}
     ${importMarkup()}
   </section>`;
 }
@@ -491,11 +552,7 @@ function reviewDetailPaneMarkup(item) {
         <button class="btn btn-ghost btn-sm" type="button" data-qb-action="decide" data-decision="rejected">${icon("x", 13)}<span>拒絕</span></button>
       </div>
     </form>
-    ${
-      item.reviews?.length
-        ? `<div class="qb-review-history"><span class="summary-label">審核紀錄</span>${item.reviews.map((review) => `<div class="qb-review-row"><span>${escapeHtml(review.reviewer || "匿名")}</span>${statusBadge(review.decision === "approved" ? "accepted" : review.decision)}<span>${escapeHtml(formatDateTime(review.created_at))}</span><p>${escapeHtml(review.comment || "—")}</p></div>`).join("")}</div>`
-        : ""
-    }
+    ${reviewScoresHistoryMarkup(item)}
   </article>`;
 }
 
@@ -1696,7 +1753,13 @@ export function createQuestionBankController(
       ];
       const item = candidates.find((entry) => Number(entry.id) === id);
       if (!item) return;
-      state.editing = item;
+      let detail = item;
+      try {
+        detail = await api.questionBankItem(id);
+      } catch (error) {
+        detail = item;
+      }
+      state.editing = detail || item;
       state.editingFrom = state.tab;
       navigate("create");
       return;

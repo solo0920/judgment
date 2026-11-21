@@ -19490,3 +19490,36 @@ a.auth-menu-item {
   background: #76b900;
   color: #0b0f0c;
 }
+
+.qb-review-scores-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.qb-review-scores-block .side-card-head {
+  margin-bottom: 8px;
+}
+
+.qb-score-history-table {
+  min-width: 760px;
+}
+
+.qb-score-history-table th,
+.qb-score-history-table td {
+  white-space: nowrap;
+}
+
+.qb-score-history-table .qb-score-comment {
+  min-width: 180px;
+  max-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.qb-score-history-empty {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-align: center;
+}

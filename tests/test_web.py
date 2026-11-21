@@ -3860,10 +3860,13 @@ def test_question_bank_review_scores_use_five_clickable_cells() -> None:
         / "benchmark_page.js"
     ).read_text(encoding="utf-8")
     assert "scoreCellsMarkup" in source
+    assert "reviewScoresHistoryMarkup" in source
+    assert "await api.questionBankItem(id)" in source
     assert "scoreCellsMarkup" in benchmark
     assert "qb-score-cells" in utils
     assert "data-score-cell" in utils
     assert "data-score-input" in utils
     assert "qb-score-cell.is-active" in css
     assert "background: #76b900" in css
+    assert ".qb-score-history-table" in css
     assert 'type="number" min="1" max="5" name="score_' not in benchmark
