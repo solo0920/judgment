@@ -5301,6 +5301,89 @@ _LIVE_PROCESSING_CACHE: Dict[str, Any] = {
 }
 
 
+
+_SLIM_WORKFLOW_KEYS = (
+    "id",
+    "label",
+    "description",
+    "branch",
+    "stage",
+    "kind",
+    "program",
+    "script",
+    "command",
+    "long_running",
+    "active_run",
+    "last_run",
+    "progress",
+    "update_available",
+    "update_count",
+    "update_origin",
+    "update_mechanism",
+    "update_message",
+    "pending_count",
+    "can_run",
+    "start_blocked_reason",
+)
+
+_SLIM_TOP_LEVEL_KEYS = (
+    "generated_at",
+    "status",
+    "mode",
+    "state",
+    "state_error",
+    "database",
+    "judgment_stats",
+    "index",
+    "legal_index",
+    "raw_backups",
+    "law_raw_backups",
+    "capabilities",
+    "notices",
+    "timeline",
+    "recent_runs",
+    "branches",
+    "file_timelines",
+)
+
+
+def slim_processing_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the first-paint subset without archive/workflow detail payloads."""
+
+    result = {
+        key: snapshot.get(key)
+        for key in _SLIM_TOP_LEVEL_KEYS
+        if key in snapshot
+    }
+    local = snapshot.get("local_archives")
+    if isinstance(local, dict):
+        result["local_archives"] = {
+            key: local.get(key)
+            for key in (
+                "available",
+                "data_dir",
+                "error",
+                "total",
+                "processed",
+                "unprocessed",
+                "total_bytes",
+                "unprocessed_bytes",
+            )
+            if key in local
+        }
+    result["workflows"] = [
+        {
+            key: workflow.get(key)
+            for key in _SLIM_WORKFLOW_KEYS
+            if key in workflow
+        }
+        for workflow in snapshot.get("workflows") or []
+        if isinstance(workflow, dict)
+    ]
+    result["slim"] = True
+    return result
+
+
 def _live_processing_state(
     resolved_path: Path,
     now: datetime,
@@ -5928,4 +6011,5 @@ __all__ = [
     "build_active_import",
     "build_processing_plan",
     "build_processing_snapshot",
+    "slim_processing_snapshot",
 ]

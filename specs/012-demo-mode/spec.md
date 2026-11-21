@@ -2,7 +2,7 @@
 
 **Status**: Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
 
-**Version**: 1.3
+**Version**: 1.4
 
 **Last Updated**: 2026-11-20
 
@@ -152,7 +152,8 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - `GET /api/demo/processing` 保留為輕量摘要端點，只回傳索引 summary／current／copy、active runs、recent runs 與 backlog 數字；MUST NOT 建置完整 snapshot。
 - 訪客 SSE MUST NOT 訂閱 admin-only event stream；頁面以 30 秒輪詢 cached snapshot 更新。
 - 背景 warmer 每 120 秒更新 snapshot；訪客頁面 MUST 顯示「快照時間」，不得把舊快照冒充即時狀態。
-- 管理員頁面 first paint SHOULD 使用 `GET /api/processing?cached=1` 的 cached snapshot；完整重建只在使用者手動重新整理或執行操作後進行。
+- 管理員頁面 first paint SHOULD 使用 `GET /api/processing?cached=1&slim=1` 的 cached slim snapshot；完整重建只在使用者手動重新整理或執行操作後進行。
+- 前端 MAY 將最近一次 slim snapshot 與 auth/demo 狀態快取在瀏覽器，供同一分頁重開時立即顯示；仍 MUST 在背景重新驗證，且 backend policy 為最終授權來源。
 
 ### FR-010b 訪客品質頁效能
 
@@ -307,4 +308,4 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] 全站 tests、ruff、frontend build 通過。
 - [ ] 不影響 v7 索引；production 重啟等 v7 完成後。
 
-**Revision**: 1.3（2026-11-21）資料處理頁 first paint 改用 cached snapshot；索引 coverage／staleness 加上 120 秒 TTL 快取，背景 warmer 改為 120 秒，避免每次開頁觸發 15–20 秒的完整 DB 掃描。
+**Revision**: 1.4（2026-11-21）資料處理頁使用 slim cached snapshot 與瀏覽器端 first-paint 快取；`/api/auth/me` 直接帶 demo 狀態，避免重複 request。重開同頁可立即顯示上次 snapshot，再背景更新。

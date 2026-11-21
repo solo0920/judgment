@@ -1,14 +1,16 @@
 import { api, needsApiConfiguration, subscribeRefresh } from "./api.js";
-import { initAuth } from "./auth.js";
+import { initAuth, setAuthUser } from "./auth.js";
 import { initSettings, refreshSettings } from "./settings.js";
 import {
   applyDemoShell,
   demoActive,
   demoAdminGuardMarkup,
   demoFeature,
+  hydrateDemoContext,
   initDemoLockTooltips,
   isAdmin,
   loadDemoContext,
+  readCachedDemoContext,
   renderDemoClosed,
   renderDemoLocked,
 } from "./demo.js";
@@ -261,25 +263,70 @@ function initUpdateBadge() {
   window.addEventListener("judgment:updates-changed", () => refresh());
 }
 
+function demoContextChanged(before, after) {
+  if (!before || !after) return true;
+  return (
+    Boolean(before.admin) !== Boolean(after.admin) ||
+    Boolean(before.enabled) !== Boolean(after.enabled) ||
+    String(before.expiresAt || "") !== String(after.expiresAt || "") ||
+    JSON.stringify(before.features || {}) !== JSON.stringify(after.features || {})
+  );
+}
+
 async function boot() {
-  await loadDemoContext();
+  if (parseRoute() === "processing") {
+    // Start the cached bytes before auth/demo gating resolves.  The page's
+    // own request below reuses this in-flight promise.
+    void api.processing({ cached: true, slim: true }).catch(() => null);
+  }
+  const cachedContext = readCachedDemoContext();
+  if (cachedContext) hydrateDemoContext(cachedContext);
+  const freshContextPromise = loadDemoContext();
   initDemoLockTooltips();
-  initAuth();
   initSettings();
   initGlobalShortcuts();
-  if (isAdmin()) initUpdateBadge();
+  let updateBadgeReady = false;
+  const ensureAdminChrome = () => {
+    if (isAdmin() && !updateBadgeReady) {
+      initUpdateBadge();
+      updateBadgeReady = true;
+    }
+  };
   window.addEventListener("hashchange", renderRoute);
   window.addEventListener("judgment:auth-changed", async () => {
-    await loadDemoContext();
+    const state = await loadDemoContext();
+    setAuthUser(state.me);
+    ensureAdminChrome();
     applyDemoShell();
     renderRoute();
   });
   window.addEventListener("judgment:demo-denied", async () => {
-    await loadDemoContext();
+    const state = await loadDemoContext();
+    setAuthUser(state.me);
+    ensureAdminChrome();
     applyDemoShell();
     renderRoute();
   });
-  renderRoute();
+  if (cachedContext) {
+    initAuth({ user: cachedContext.me });
+    ensureAdminChrome();
+    applyDemoShell();
+    renderRoute();
+  }
+  const freshContext = await freshContextPromise;
+  if (!cachedContext) {
+    initAuth({ user: freshContext.me });
+    ensureAdminChrome();
+    applyDemoShell();
+    renderRoute();
+  } else {
+    setAuthUser(freshContext.me);
+    ensureAdminChrome();
+    applyDemoShell();
+    if (demoContextChanged(cachedContext, freshContext)) {
+      renderRoute();
+    }
+  }
 
   if (needsApiConfiguration()) {
     window.setTimeout(() => {

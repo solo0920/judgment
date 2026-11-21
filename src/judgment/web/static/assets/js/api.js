@@ -285,6 +285,31 @@ export function subscribeRefresh(
   };
 }
 
+const processingRequestCache = new Map();
+
+function requestProcessing({ cached = false, slim = false } = {}) {
+  const params = new URLSearchParams();
+  if (cached) params.set("cached", "1");
+  if (slim) params.set("slim", "1");
+  const query = params.toString();
+  const key = `/api/processing${query ? `?${query}` : ""}`;
+  const existing = processingRequestCache.get(key);
+  if (existing) return existing;
+  const promise = request(key, {
+    timeout: 45000,
+    trackClient: false,
+  });
+  processingRequestCache.set(key, promise);
+  const clear = () =>
+    window.setTimeout(() => {
+      if (processingRequestCache.get(key) === promise) {
+        processingRequestCache.delete(key);
+      }
+    }, 1500);
+  promise.then(clear, clear);
+  return promise;
+}
+
 function networkErrorMessage(base) {
   const where = base ? `（${base}）` : "";
   return `無法連線到伺服器${where}，請確認後端是否啟動，或到「系統測試」頁設定後端位址。`;
@@ -869,11 +894,8 @@ export const api = {
     });
   },
 
-  processing({ cached = false } = {}) {
-    return request(cached ? "/api/processing?cached=1" : "/api/processing", {
-      timeout: 45000,
-      trackClient: false,
-    });
+  processing({ cached = false, slim = false } = {}) {
+    return requestProcessing({ cached, slim });
   },
 
   demoProcessing() {

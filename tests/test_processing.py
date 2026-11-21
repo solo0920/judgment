@@ -3824,3 +3824,11 @@ def test_processing_cached_query_skips_full_snapshot(
     response = processing_client.get("/api/processing?cached=1")
     assert response.status_code == 200
     assert response.json()["mode"] == "cached"
+
+    slim = processing_client.get("/api/processing?cached=1&slim=1")
+    assert slim.status_code == 200
+    payload = slim.json()
+    assert payload["mode"] == "cached"
+    assert payload["slim"] is True
+    assert "archives" not in payload
+    assert "workflows" in payload

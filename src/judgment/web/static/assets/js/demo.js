@@ -18,10 +18,61 @@ const context = {
   features: {},
   expiresAt: null,
   reason: "",
+  me: null,
 };
+
+const DEMO_CONTEXT_CACHE_KEY = "judgment.demo_context.v1";
+const DEMO_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function demoContext() {
   return context;
+}
+
+export function readCachedDemoContext() {
+  try {
+    const cached = JSON.parse(
+      window.localStorage.getItem(DEMO_CONTEXT_CACHE_KEY) || "null",
+    );
+    if (!cached || typeof cached !== "object") return null;
+    if (Date.now() - Number(cached.saved_at || 0) > DEMO_CONTEXT_CACHE_TTL_MS) {
+      return null;
+    }
+    if (typeof cached.admin !== "boolean") return null;
+    return cached;
+  } catch (error) {
+    return null;
+  }
+}
+
+export function hydrateDemoContext(cached) {
+  if (!cached) return context;
+  context.admin = Boolean(cached.admin);
+  context.enabled = Boolean(cached.enabled);
+  context.features = cached.features || {};
+  context.expiresAt = cached.expiresAt || null;
+  context.reason = cached.reason || "";
+  context.me = cached.me || null;
+  context.loaded = true;
+  return context;
+}
+
+function saveDemoContext() {
+  try {
+    window.localStorage.setItem(
+      DEMO_CONTEXT_CACHE_KEY,
+      JSON.stringify({
+        admin: context.admin,
+        enabled: context.enabled,
+        features: context.features,
+        expiresAt: context.expiresAt,
+        reason: context.reason,
+        me: context.me,
+        saved_at: Date.now(),
+      }),
+    );
+  } catch (error) {
+    /* cache is best effort */
+  }
 }
 
 export function isAdmin() {
@@ -59,18 +110,19 @@ export function formatDemoRemaining(expiresAt) {
 }
 
 export async function loadDemoContext() {
-  const [meResult, demoResult] = await Promise.allSettled([
-    api.authMe(),
-    api.demoStatus(),
-  ]);
-  const me = meResult.status === "fulfilled" ? meResult.value : null;
-  const demo = demoResult.status === "fulfilled" ? demoResult.value : null;
+  const meResult = await Promise.allSettled([api.authMe()]);
+  const me = meResult[0].status === "fulfilled" ? meResult[0].value : null;
+  // /api/auth/me already includes the effective demo state.  Avoid a second
+  // round trip on every page load; only fall back when the payload is older.
+  const demo = me?.demo || (await api.demoStatus().catch(() => null));
   context.admin = Boolean(me?.admin);
   context.enabled = Boolean(demo?.enabled);
   context.features = demo?.features || {};
   context.expiresAt = demo?.expires_at || null;
   context.reason = demo?.reason || "";
+  context.me = me;
   context.loaded = true;
+  saveDemoContext();
   if (context.admin) {
     context.enabled = false;
   }

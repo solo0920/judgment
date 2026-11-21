@@ -5881,6 +5881,34 @@ function panelMarkup(
 
 export async function render(root) {
   const demoReadOnly = isDemoVisitor();
+  const slimCacheKey = `judgment.processing.slim.${
+    demoReadOnly ? "visitor" : "admin"
+  }`;
+  const readSlimCache = () => {
+    try {
+      const cached = JSON.parse(
+        window.localStorage.getItem(slimCacheKey) || "null",
+      );
+      if (!cached?.snapshot || !cached.snapshot.slim) return null;
+      if (Date.now() - Number(cached.saved_at || 0) > 10 * 60 * 1000) {
+        return null;
+      }
+      return cached.snapshot;
+    } catch (error) {
+      return null;
+    }
+  };
+  const saveSlimCache = (snapshot) => {
+    if (!snapshot?.slim) return;
+    try {
+      window.localStorage.setItem(
+        slimCacheKey,
+        JSON.stringify({ snapshot, saved_at: Date.now() }),
+      );
+    } catch (error) {
+      /* cache is best effort */
+    }
+  };
   root.innerHTML = `<section class="page processing-page">
     <div class="page-header">
       <div class="processing-page-heading">
@@ -7395,6 +7423,9 @@ export async function render(root) {
 
   const repaintFromSnapshot = () => {
     if (!lastSnapshot) return;
+    if (lastSnapshot.slim) {
+      void refresh({ silent: true, cached: true });
+    }
     const markup = panelMarkup(
       lastSnapshot,
       activeWorkflowId,
@@ -7414,6 +7445,7 @@ export async function render(root) {
 
   const applySnapshot = (snapshot, { silent = false } = {}) => {
     if (disposed || !snapshot) return;
+    if (snapshot.slim && lastSnapshot && !lastSnapshot.slim) return;
     const incomingAt = Date.parse(snapshot.generated_at || "");
     const currentAt = Date.parse(lastSnapshot?.generated_at || "");
     if (
@@ -7900,11 +7932,16 @@ export async function render(root) {
     }
   };
 
-  const refresh = async ({ silent = false, cached = false } = {}) => {
+  const refresh = async ({
+    silent = false,
+    cached = false,
+    slim = false,
+  } = {}) => {
     if (disposed || refreshing) return;
     refreshing = true;
     try {
-      const snapshot = await api.processing({ cached });
+      const snapshot = await api.processing({ cached, slim });
+      if (slim) saveSlimCache(snapshot);
       applySnapshot(snapshot, { silent });
     } catch (error) {
       if (disposed) return;
@@ -8357,7 +8394,13 @@ export async function render(root) {
     passive: true,
   });
 
-  const initialPaint = refresh({ silent: true, cached: true });
+  const cachedSlim = readSlimCache();
+  if (cachedSlim) applySnapshot(cachedSlim, { silent: true });
+  const initialPaint = refresh({
+    silent: true,
+    cached: true,
+    slim: true,
+  });
   connectRefreshStream();
   await initialPaint;
 

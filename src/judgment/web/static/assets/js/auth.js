@@ -148,12 +148,15 @@ function renderLoggedIn(user) {
   });
 }
 
+function renderAuthState(state) {
+  if (state?.authenticated) renderLoggedIn(state);
+  else renderLoggedOut(state || { google_enabled: false });
+}
+
 async function refreshAuth() {
   if (!slot) return;
   try {
-    const state = await api.authMe();
-    if (state?.authenticated) renderLoggedIn(state);
-    else renderLoggedOut(state);
+    renderAuthState(await api.authMe());
   } catch (error) {
     renderLoggedOut({ google_enabled: false });
   }
@@ -183,7 +186,12 @@ function consumeAuthFlash() {
   }
 }
 
-export function initAuth() {
+export function setAuthUser(user) {
+  if (!slot) return;
+  renderAuthState(user);
+}
+
+export function initAuth({ user = null } = {}) {
   slot = document.getElementById("auth-slot");
   if (!slot) return;
   consumeAuthFlash();
@@ -193,5 +201,6 @@ export function initAuth() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeMenu();
   });
-  refreshAuth();
+  if (user) renderAuthState(user);
+  else refreshAuth();
 }

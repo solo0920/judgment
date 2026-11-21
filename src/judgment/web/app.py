@@ -216,6 +216,7 @@ from .processing import (
     build_processing_live,
     build_processing_plan,
     build_processing_snapshot,
+    slim_processing_snapshot,
 )
 from .quality import build_quality_bootstrap, build_quality_snapshot
 from .route_policy import (
@@ -2394,26 +2395,32 @@ def create_app(
 
     @app.get("/api/processing")
     def processing_snapshot(
-        request: Request, cached: bool = False
+        request: Request, cached: bool = False, slim: bool = False
     ) -> Dict[str, Any]:
         with trace_segment(
             "api.endpoint",
             module=__name__,
             function="processing_snapshot",
-            params={"cached": cached},
+            params={"cached": cached, "slim": slim},
         ):
             if _is_demo_visitor(request):
                 payload = build_processing_bootstrap(
                     settings=settings,
                     session_factory=app.state.session_factory,
                 )
-                return sanitize_processing_payload(payload)
+                payload = sanitize_processing_payload(payload)
+                return (
+                    slim_processing_snapshot(payload) if slim else payload
+                )
             if cached:
                 # First paint should never wait for the full DB/Qdrant scan.
                 # The cached snapshot is refreshed by the background warmer.
-                return build_processing_bootstrap(
+                payload = build_processing_bootstrap(
                     settings=settings,
                     session_factory=app.state.session_factory,
+                )
+                return (
+                    slim_processing_snapshot(payload) if slim else payload
                 )
             return build_processing_snapshot(
                 settings=settings,
