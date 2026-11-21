@@ -52,6 +52,28 @@
 
 尚未完成：DB-ROLE-01、TOKEN-01、SESSION-01、AUDIT-01、SUP-01、備份加密與 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
 
+### 0.3 匿名查詢邊界測試（2026-11-21）
+
+在展示仍開啟時，以匿名請求驗證 `/api/query`：
+
+| 測試 | 結果 |
+|---|---|
+| `filters.table=pg_shadow` | `400`，不支援的資料表 |
+| `filters.table=information_schema.tables` | `400` |
+| `table` 注入 `law_documents"; select 1 --` | `400` |
+| `sort` 注入 `1; select pg_sleep(10)` | `400`，未延遲 |
+| `order_by` 注入 | `200`，但 `order_by` 不是支援參數，會被忽略、不進 SQL |
+| `page_size=100000` | `422`（上限 200） |
+| `page=1000000000` | `200`，demo 路由截斷到最大頁，回應 < 1 秒 |
+| `database=qdrant` | `200`（Qdrant 是 catalog 公開的展示資料源，非內部名稱） |
+| `database=redis` | `422`（不在允許 enum） |
+| 匿名 `/api/catalog` | `200`；無 `127.0.0.1`、`/Users/`、`x570`、`performance`、`question_bank`、`pg_` |
+| 管理員 `/api/catalog` | `200`，仍保留完整 detail（含內部 endpoint），證明去敏只套用訪客 |
+
+本輪另外修掉 catalog 的 `detail` 內嵌 `http://127.0.0.1:6333`：新增 `sanitize_catalog_payload()`，demo 訪客看不到內網 endpoint；管理員不受影響。`sort` 注入也改為直接 `400`。
+
+**結論**：六項邊界測試沒有發現可直接利用的 SQL 注入或內部資料表讀取；`data` 不需要因此關閉。兩個「非失敗」的差異是：Qdrant 是刻意開放的展示資料源；`order_by` 不是支援參數，會被忽略而不是執行。若驗收要求這兩個也必須回 4xx，才需要再收斂。
+
 ## 1. 方法與證據
 
 ### 1.1 已實際驗證
