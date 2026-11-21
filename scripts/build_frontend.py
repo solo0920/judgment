@@ -30,17 +30,28 @@ BUNDLE_SCRIPTS = (
 )
 
 
+ESBUILD_VERSION = "0.28.2"
+
+
 def _esbuild_command(explicit: str | None) -> list[str]:
     if explicit:
         return [explicit]
     direct = shutil.which("esbuild")
     if direct:
-        return [direct]
+        try:
+            version = subprocess.check_output(
+                [direct, "--version"], text=True, timeout=10
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            version = ""
+        if version == ESBUILD_VERSION:
+            return [direct]
     npx = shutil.which("npx")
     if npx:
-        return [npx, "--yes", "esbuild"]
+        return [npx, "--yes", f"esbuild@{ESBUILD_VERSION}"]
     raise SystemExit(
         "找不到 esbuild。請安裝 Node.js/esbuild，或以 --esbuild PATH 指定執行檔。"
+        f"預期版本：{ESBUILD_VERSION}"
     )
 
 

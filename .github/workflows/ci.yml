@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Pytest
+        run: uv run pytest -q
+      - name: Ruff
+        run: uv run ruff check .
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Pin esbuild version
+        run: npx --yes esbuild@0.28.2 --version
+      - name: Build standalone frontend
+        run: uv run python scripts/build_frontend.py --api-base https://api-mbp.ragdemo.win
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Dependency audit
+        # Known accepted risks are tracked in specs/security/supply-chain.md.
+        run: >
+          uv run --with pip-audit pip-audit
+          --ignore-vuln PYSEC-2026-113
+          --ignore-vuln PYSEC-2026-1845
+      - name: Secret scan (full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: judgment-sbom.spdx.json

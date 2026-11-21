@@ -35,7 +35,7 @@
 | AUTH-02 | 題庫狀態機 | 不可直接建立／更新為 accepted | 狀態轉換 API 測試、角色矩陣 | `not_started` | 工程／法律審閱 |
 | AUTH-03 | Google 帳號登入 | 僅 allowlist 內且 email_verified 的 Google 帳號可取得管理員 session；state／CSRF／cookie 安全 | OAuth start／callback、allowlist 拒絕、HttpOnly／SameSite、remote session 測試 | `implemented`（程式與自動測試完成；Google Cloud 實機待設定） | 工程 |
 | DATA-01 | RAG 問題與答案保留 | 有保留天數與遮罩 | retention job／DB policy／備份清單 | `not_started` | PM／工程 |
-| SUP-01 | 供應鏈 | 依賴與 image 可重現、無高風險 CVE | pip-audit、SBOM、digest pinning、npx 固定版 | `not_started` | 工程 |
+| SUP-01 | 供應鏈 | 依賴與 image 可重現、無高風險 CVE | pip-audit、SBOM、digest pinning、npx 固定版 | `implemented`（CI／Dependabot／SBOM／digest／esbuild pin；pyarrow 與 pytest 兩個 advisory 已記錄並暫時 ignore） | 工程 |
 | HIST-01 | Git history | push 前 history 搜不到公開網域與內部連接埠；不含憑證 | `git log -S`／`git log -p` 掃描；目前只有工作樹 redact，歷史仍有 host/ports | `partial` | 工程 |
 
 ## 2. 目前已驗證的證據
