@@ -9,7 +9,7 @@
 | Python | `>=3.10`；本機 `.python-version` 為 3.12 |
 | pyarrow | `25.0.1` |
 | pytest | `9.2.0` |
-| 測試 | `uv run pytest -q`：694 tests pass |
+| 測試 | `uv run pytest -q`：695 tests pass |
 | Lint | `uv run ruff check .`：clean |
 | CI | pytest、ruff、frontend build、pip-audit、gitleaks 全歷史、Syft SBOM |
 | pip-audit | 無已知 advisory，CI 無 `--ignore-vuln` |
@@ -71,6 +71,7 @@ POST /api/rag/query/stream
 - 裸法規名稱或簡介問題（例如「證券交易法」、「刑法」、「介紹銀行法」）回傳結構化法規簡介：立法目的、主管機關、章節架構、核心條文；不呼叫 LLM，也不列判決。
 - 官方名稱有「中華民國」前綴時，支援常用簡稱（例如「刑法」→「中華民國刑法」）。
 - 判決 RAG 只處理與 `documents/金融法規.md` 的 99 項金融相關法規有關的問題。若問題與清單及金融詞彙無關，回傳 `answer_source=notice`、`retrieval.status=not_financial`，提示「本RAG提問功能主要以金融相關判決為主」，不生成判決回答。
+- RAG 回答完成後，問題泡泡與回答卡提供 hover／focus 操作工具列：問題可複製、分享、編輯、重新提問；回答可複製、分享、重新生成。觸控裝置固定顯示按鈕；編輯會帶入目前可見的提問輸入框（對話中為下方續問框）。
 
 ## 5. Auth／security 現況
 

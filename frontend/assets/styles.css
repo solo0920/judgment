@@ -5071,6 +5071,16 @@ button.chip:hover {
   scroll-margin-top: calc(var(--header-height) + 18px);
 }
 
+.rag-user-block {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: min(720px, 82%);
+  min-width: 0;
+}
+
 .rag-user-bubble {
   align-self: flex-end;
   max-width: min(720px, 82%);
@@ -5083,6 +5093,81 @@ button.chip:hover {
   line-height: 1.65;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.rag-user-block .rag-user-bubble {
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.rag-user-actions,
+.rag-answer-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.rag-user-actions {
+  justify-content: flex-end;
+}
+
+.rag-answer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.rag-answer-actions {
+  justify-content: flex-start;
+}
+
+.rag-turn.is-complete .rag-user-block:hover .rag-user-actions,
+.rag-turn.is-complete .rag-user-block:focus-within .rag-user-actions,
+.rag-turn.is-complete .rag-answer-block:hover .rag-answer-actions,
+.rag-turn.is-complete .rag-answer-block:focus-within .rag-answer-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.rag-user-action,
+.rag-answer-action {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.rag-user-action:hover,
+.rag-answer-action:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.rag-user-action:focus-visible,
+.rag-answer-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .rag-user-actions,
+  .rag-answer-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
 }
 
 .rag-assistant-turn {
@@ -9447,8 +9532,13 @@ button.chip:hover {
     width: 100%;
   }
 
-  .rag-user-bubble {
+  .rag-user-block {
     max-width: 92%;
+  }
+
+  .rag-user-block .rag-user-bubble,
+  .rag-user-bubble {
+    max-width: 100%;
   }
 
   .db-options {

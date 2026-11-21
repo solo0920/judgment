@@ -55,11 +55,77 @@ function emptyConversationMarkup() {
   return `<section class="card answer-card rag-empty-answer">${answerPlaceholder()}</section>`;
 }
 
-function turnMarkup(question, answerHtml) {
-  return `<div class="rag-turn">
-    <div class="rag-user-bubble">${escapeHtml(question)}</div>
-    <section class="card rag-assistant-turn" data-rag-answer>${answerHtml}</section>
+function turnMarkup(question, answerHtml, { complete = true } = {}) {
+  const safeQuestion = escapeHtml(question);
+  const stateClass = complete ? " is-complete" : " is-pending";
+  return `<div class="rag-turn${stateClass}">
+    <div class="rag-user-block">
+      <div class="rag-user-bubble">${safeQuestion}</div>
+      <div class="rag-user-actions" role="group" aria-label="問題操作">
+        <button class="rag-user-action" type="button" data-rag-question-action="copy" data-question="${safeQuestion}" title="複製問題" aria-label="複製問題">${icon("copy", 15)}<span class="sr-only">複製問題</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="share" data-question="${safeQuestion}" title="分享問題" aria-label="分享問題">${icon("share", 15)}<span class="sr-only">分享問題</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="edit" data-question="${safeQuestion}" title="編輯問題" aria-label="編輯問題">${icon("edit", 15)}<span class="sr-only">編輯問題</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="reask" data-question="${safeQuestion}" title="重新提問" aria-label="重新提問">${icon("refresh", 15)}<span class="sr-only">重新提問</span></button>
+      </div>
+    </div>
+    <div class="rag-answer-block">
+      <section class="card rag-assistant-turn" data-rag-answer>${answerHtml}</section>
+      <div class="rag-answer-actions" role="group" aria-label="回答操作">
+        <button class="rag-answer-action" type="button" data-rag-answer-action="copy" data-question="${safeQuestion}" title="複製回答" aria-label="複製回答">${icon("copy", 15)}<span class="sr-only">複製回答</span></button>
+        <button class="rag-answer-action" type="button" data-rag-answer-action="share" data-question="${safeQuestion}" title="分享回答" aria-label="分享回答">${icon("share", 15)}<span class="sr-only">分享回答</span></button>
+        <button class="rag-answer-action" type="button" data-rag-answer-action="reask" data-question="${safeQuestion}" title="重新生成回答" aria-label="重新生成回答">${icon("refresh", 15)}<span class="sr-only">重新生成回答</span></button>
+      </div>
+    </div>
   </div>`;
+}
+
+async function shareQuestion(question) {
+  const url = window.location.href;
+  if (typeof navigator.share === "function") {
+    try {
+      await navigator.share({
+        title: "Judgment RAG 提問",
+        text: question,
+        url,
+      });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+  const ok = await copyText(`${question}\n\n${url}`);
+  toast(ok ? "已複製分享內容。" : "無法分享。", ok ? "ok" : "danger");
+}
+
+function answerTextFor(turnElement) {
+  if (!turnElement) return "";
+  const parts = Array.from(
+    turnElement.querySelectorAll("[data-rag-answer] .answer-text"),
+  )
+    .map((element) => String(element.textContent || "").trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join("\n\n");
+  const answer = turnElement.querySelector("[data-rag-answer]");
+  return answer ? String(answer.innerText || "").trim() : "";
+}
+
+async function shareAnswer(question, answer) {
+  const url = window.location.href;
+  const text = [question, answer].filter(Boolean).join("\n\n");
+  if (typeof navigator.share === "function") {
+    try {
+      await navigator.share({
+        title: "Judgment RAG 回答",
+        text,
+        url,
+      });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+  const ok = await copyText(`${text}\n\n${url}`);
+  toast(ok ? "已複製分享內容。" : "無法分享。", ok ? "ok" : "danger");
 }
 
 function lookupWithTimeout(promise, timeoutMs) {
@@ -1504,7 +1570,10 @@ export async function render(root) {
   const appendConversationTurn = (question, answerHtml) => {
     const placeholder = turnsBox.querySelector(".rag-empty-answer");
     if (placeholder) placeholder.remove();
-    turnsBox.insertAdjacentHTML("beforeend", turnMarkup(question, answerHtml));
+    turnsBox.insertAdjacentHTML(
+      "beforeend",
+      turnMarkup(question, answerHtml, { complete: false }),
+    );
     const turnElement = turnsBox.lastElementChild;
     const answerElement = turnElement?.querySelector("[data-rag-answer]");
     window.requestAnimationFrame(() => {
@@ -2667,7 +2736,7 @@ export async function render(root) {
       input.value = "";
       resizeInput();
     }
-    const { answerElement } = appendConversationTurn(
+    const { turnElement, answerElement } = appendConversationTurn(
       trimmed,
       answerLoading(trimmed, testMode),
     );
@@ -2746,6 +2815,8 @@ export async function render(root) {
       stopFlowUpdates();
       const processHtml = processController?.finish(true) || "";
       answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
+      turnElement?.classList.remove("is-pending");
+      turnElement?.classList.add("is-complete");
       if (!payload.pipeline_flow) {
         void hydratePipelineFlow(payload).then(() => {
           if (isStale() || !payload.pipeline_flow) return;
@@ -2771,6 +2842,8 @@ export async function render(root) {
       stopFlowUpdates();
       const processHtml = processController?.finish(false) || "";
       answerElement.innerHTML = renderAnswerError(error, processHtml);
+      turnElement?.classList.remove("is-pending");
+      turnElement?.classList.add("is-complete");
       showFollowup();
       toast(error.message || "檢索失敗。", "danger");
     } finally {
@@ -2817,6 +2890,56 @@ export async function render(root) {
   });
 
   root.addEventListener("click", async (event) => {
+    const questionAction = event.target.closest("[data-rag-question-action]");
+    const answerAction = event.target.closest("[data-rag-answer-action]");
+    if (questionAction || answerAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      const action = questionAction
+        ? questionAction.dataset.ragQuestionAction
+        : answerAction.dataset.ragAnswerAction;
+      const target = questionAction || answerAction;
+      const question = String(target?.dataset.question || "").trim();
+      const turnElement = target?.closest(".rag-turn");
+      if (!question || !turnElement) return;
+      if (action === "copy") {
+        const text = questionAction ? question : answerTextFor(turnElement);
+        const ok = await copyText(text);
+        toast(
+          ok
+            ? questionAction
+              ? "已複製問題。"
+              : "已複製回答。"
+            : "無法複製。",
+          ok ? "ok" : "danger",
+        );
+        return;
+      }
+      if (action === "share") {
+        if (questionAction) await shareQuestion(question);
+        else await shareAnswer(question, answerTextFor(turnElement));
+        return;
+      }
+      if (action === "edit") {
+        const editTarget = conversationActive ? followupInput : input;
+        if (conversationActive) showFollowup();
+        editTarget.value = question;
+        if (conversationActive) resizeFollowupInput();
+        else resizeInput();
+        editTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+        editTarget.focus({ preventScroll: true });
+        editTarget.setSelectionRange(question.length, question.length);
+        return;
+      }
+      if (action === "reask") {
+        if (submit.disabled) {
+          toast("目前仍在檢索中，請稍後再試。", "warn");
+          return;
+        }
+        await runQuestion(question, { fresh: false, source: "followup" });
+      }
+      return;
+    }
     if (event.target.closest('[data-rag-action="refresh-models"]')) {
       await refreshModels();
     }

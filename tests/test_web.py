@@ -3609,6 +3609,31 @@ def test_console_assets_avoid_flicker_prone_effects() -> None:
         assert "is-quiet" not in script
 
 
+def test_rag_question_and_answer_actions_are_bundled() -> None:
+    root = Path(__file__).resolve().parents[1]
+    static_assets = root / "src" / "judgment" / "web" / "static" / "assets"
+    source_js = (static_assets / "js" / "pages" / "rag.js").read_text(
+        encoding="utf-8"
+    )
+    source_css = (static_assets / "styles.css").read_text(encoding="utf-8")
+    bundle_js = (root / "frontend" / "assets" / "js" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    bundle_css = (root / "frontend" / "assets" / "styles.css").read_text(
+        encoding="utf-8"
+    )
+    for script in (source_js, bundle_js):
+        assert "data-rag-question-action" in script
+        assert "data-rag-answer-action" in script
+        assert "rag-user-actions" in script
+    assert "複製回答" in source_js
+    assert "重新生成回答" in source_js
+    for css in (source_css, bundle_css):
+        assert ".rag-user-actions" in css
+        assert ".rag-answer-actions" in css
+        assert ".rag-user-block" in css
+
+
 def test_settings_sidebar_source_and_bundle_are_present() -> None:
     root = Path(__file__).resolve().parents[1]
     static_assets = root / "src" / "judgment" / "web" / "static" / "assets"

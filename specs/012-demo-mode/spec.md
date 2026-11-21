@@ -308,7 +308,7 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] `/api/status`、`/api/processing` 訪客版不含 host／IP／DSN／model path／error stack。
 - [ ] RAG 限流、每日 token 預算、資料／效能 timeout 與每日上限 code 已存在；端到端 429／串流併發／Cloudflare edge 規則待驗。
 - [x] 390px 無水平溢出；console error 0（Playwright 已驗證）。
-- [x] 全站 694 tests、ruff、frontend build 通過。
+- [x] 全站 695 tests、ruff、frontend build 通過。
 - [x] 不影響 v7 索引；v7 已完成並由 `judgments_v005` 提供，production 已重啟多次。
 
 **Revision**: 1.6（2026-11-21）與程式碼重新對照：訪客 route 以 `demo_policies.json` 為準、移除已改為 admin-only 的題庫／performance options、文件不再記錄 demo 開關狀態；資料品質頁 first paint 使用 cached snapshot，索引 coverage 共用 120 秒快取。
