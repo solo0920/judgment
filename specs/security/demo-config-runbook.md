@@ -19,11 +19,11 @@
 | `PERFORMANCE_RETENTION_DAYS` | `90`（目前 UI 文案寫 90 天；若改值，前端文案要同步） |
 | `TRUSTED_HOSTS` | 只列實際 hostname；不要把 `*` 放進 production |
 
-未來訪客查詢唯讀角色完成後，新增：
+訪客查詢唯讀角色：
 
 | 變數 | 說明 |
 |---|---|
-| `DEMO_QUERY_DATABASE_URL` | `demo_reader` 連線字串；**未設定時訪客 data 功能必須 fail closed**，不可 fallback 到 superuser |
+| `DEMO_QUERY_DATABASE_URL` | `demo_reader` 連線字串；**未設定時訪客 data 功能 fail closed**，不可 fallback 到 superuser |
 
 ## 2. 展示開啟
 
@@ -36,6 +36,7 @@
    - `GET /api/performance?process=RAG%20問答` 不含已知問題／答案
    - `GET /api/processing` 不含 `/Users/`
    - 已移除的 demo 路由（題庫、下載狀態、processing plan 等）回 401
+   - `/api/catalog` 的 `detail` 不可含 `127.0.0.1`、內網 host 或絕對路徑；回歸測試：`test_demo_catalog_sanitizes_internal_endpoints`
 
 ## 3. 展示關閉
 
@@ -65,7 +66,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 curl -sS -o /dev/null -w '%{http_code}\n' \
   https://api-mbp.ragdemo.win/api/status
-# 預期 401
+# 預期 403（demo_closed；不是 401，因為 /api/status 是 DEMO_READ）
 
 curl -sS https://api-mbp.ragdemo.win/api/demo/status
 # 預期 enabled:false
@@ -80,9 +81,46 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 - 用 Chrome／Safari 開首頁、RAG、data、performance、processing、status，檢查 console 是否有 CSP violation。
 - 或加一個受 body 上限與 rate limit 保護的 `/api/csp-report`，並在 CSP 加 `report-uri`。
 
-## 5. 已知未完成
+## 5. Demo 唯讀資料庫角色
 
-- `DB-ROLE-01`：訪客 `data` 仍使用主連線（superuser）；展示後做 `demo_reader` 唯讀角色。
-- CSP 尚未 enforce。
+`DEMO_QUERY_DATABASE_URL` 指向 `demo_reader`；只有 demo 訪客的 `/api/query?database=postgres` 使用它。未設定時訪客 data 功能回 403 `demo_data_unavailable`，不會 fallback 到主連線。
+
+已建立的限制：
+
+- `NOSUPERUSER NOCREATEDB NOCREATEROLE`、`CONNECTION LIMIT 10`
+- `statement_timeout=10s`、`idle_in_transaction_session_timeout=15s`、`work_mem=16MB`
+- `default_transaction_read_only=on`、`search_path=public`
+- 只 grant `SELECT` 於 `law_documents`、`law_dataset_versions`、`download_runs`、`judgment_documents`、`judgment_import_runs`
+- 已 `REVOKE CREATE ON SCHEMA public FROM PUBLIC`
+
+驗證指令（不印密碼）：
+
+```bash
+# 以 demo_reader 連線後
+select current_user, rolsuper from pg_roles where rolname=current_user;
+show statement_timeout;                 -- 10s
+show default_transaction_read_only;     -- on
+select count(*) from law_documents;     -- 成功
+create table should_fail(id int);       -- permission denied
+select count(*) from question_bank_items; -- permission denied
+select pg_read_file('/etc/passwd');     -- permission denied
+copy (select 1) to program 'id';        -- permission denied
+```
+
+回滾：移除 `.env` 的 `DEMO_QUERY_DATABASE_URL` 並重啟，訪客 data 會 fail closed；管理員與其他功能不受影響。
+
+## 6. Query 輸出去敏
+
+`/api/query` 的 demo 回應會經 `sanitize_query_payload()`：
+
+- 清空 `parquet_path`、`zip_path`、`error_message` 等敏感 key。
+- 清除字串內的 `/Users/`、`/home/`、`/var/` 與內網 endpoint。
+
+回歸測試：`test_sanitize_query_payload_redacts_operational_fields`。
+
+## 7. 已知未完成
+
+- CSP 尚未 enforce；Report-Only 尚無 `report-uri` 收集端點。
 - `AUTH_COOKIE_SAMESITE=none` 尚未改 Lax。
 - 備份加密與 restore drill 未做。
+- `demo_reader` 的欄位層級授權尚未做；目前是五張表的 table-level SELECT。

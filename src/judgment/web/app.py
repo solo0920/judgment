@@ -193,6 +193,7 @@ from .demo_mode import (
     sanitize_catalog_payload,
     sanitize_infrastructure,
     sanitize_performance_payload,
+    sanitize_query_payload,
     sanitize_processing_payload,
     sanitize_rag_result,
     sanitize_status_payload,
@@ -1334,6 +1335,7 @@ def create_app(
         # Fail fast before opening the database or starting background tasks.
         validate_route_policies(app.routes)
         engine = None
+        demo_engine = None
         if app.state.session_factory is None:
             engine = build_engine(
                 settings.database_url,
@@ -1345,6 +1347,24 @@ def create_app(
                 init_db(engine)
             app.state.engine = engine
             app.state.session_factory = build_session_factory(engine)
+            if settings.demo_query_database_url:
+                try:
+                    demo_engine = build_engine(
+                        settings.demo_query_database_url,
+                        pool_size=2,
+                        max_overflow=2,
+                        pool_timeout=5.0,
+                    )
+                    app.state.demo_query_engine = demo_engine
+                    app.state.demo_query_session_factory = build_session_factory(
+                        demo_engine
+                    )
+                except Exception:
+                    logger.exception(
+                        "failed to initialize demo read-only query engine"
+                    )
+                    app.state.demo_query_engine = None
+                    app.state.demo_query_session_factory = None
             app.state.benchmark_manager.session_factory = app.state.session_factory
             app.state.benchmark_manager.settings = runtime_settings(
                 app.state.settings, app.state.session_factory
@@ -1641,6 +1661,8 @@ def create_app(
             app.state.rag_executor = None
             await app.state.processing_event_server.stop()
             await app.state.event_broker.close()
+            if demo_engine is not None:
+                demo_engine.dispose()
             if engine is not None:
                 engine.dispose()
 
@@ -1658,6 +1680,8 @@ def create_app(
     app.state.data_dir = resolved_data_dir
     app.state.session_factory = session_factory
     app.state.engine = None
+    app.state.demo_query_engine = None
+    app.state.demo_query_session_factory = None
     app.state.llm_context = None
     app.state.rerank_heartbeat = None
     app.state.readiness = {
@@ -3757,12 +3781,25 @@ def create_app(
             page = min(page, max_pages)
 
         def run() -> Dict[str, Any]:
+            query_session_factory = app.state.session_factory
+            if demo_visitor and request.database == "postgres":
+                query_session_factory = (
+                    app.state.demo_query_session_factory
+                )
+                if query_session_factory is None:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "message": "展示資料查詢未設定。",
+                            "code": "demo_data_unavailable",
+                        },
+                    )
             return run_query(
                 database=request.database,
                 filters=request.filters,
                 page=page,
                 page_size=page_size,
-                session_factory=app.state.session_factory,
+                session_factory=query_session_factory,
                 data_dir=app.state.data_dir,
                 settings=runtime_settings(
                     app.state.settings, app.state.session_factory
@@ -3784,7 +3821,7 @@ def create_app(
                 if demo_visitor:
                     future = _DEMO_QUERY_EXECUTOR.submit(run)
                     try:
-                        return future.result(
+                        payload = future.result(
                             timeout=max(
                                 1.0,
                                 float(settings.demo_query_timeout_seconds),
@@ -3795,6 +3832,7 @@ def create_app(
                             status_code=504,
                             detail="展示查詢超過 10 秒，已取消。",
                         ) from exc
+                    return sanitize_query_payload(payload)
                 return run()
         except HTTPException:
             raise

@@ -74,6 +74,19 @@
 
 **結論**：六項邊界測試沒有發現可直接利用的 SQL 注入或內部資料表讀取；`data` 不需要因此關閉。兩個「非失敗」的差異是：Qdrant 是刻意開放的展示資料源；`order_by` 不是支援參數，會被忽略而不是執行。若驗收要求這兩個也必須回 4xx，才需要再收斂。
 
+### 0.4 展示關閉後（2026-11-21）
+
+- **關閉驗證**：admin token `GET /api/admin/demo` → 200；`POST /api/admin/demo/close` 無 Origin → 200；`/api/demo/status` → `enabled:false`；外部 `/api/rag/query` → 403；`/api/status` → **403 `demo_closed`**（不是 401，因為它是 DEMO_READ）。
+- **監聽位址**：llama-server 11435–11437、OrbStack 5432／6333／6334、web 9200、power agent 9201 全部只綁 `127.0.0.1`。
+- **Qdrant 回應掃描**：以 admin token 查 `database=qdrant`，回應沒有 `/Users/`、`file_path`、`source_path`、`x570`、`:6333`、`:9200`；row 只含 jid／court／title／jdate／matched laws／snippet 等展示欄位。
+- **PostgreSQL query 洩漏**：`law_dataset_versions` 原本會回傳 `parquet_path`、`zip_path` 絕對路徑，anon 可讀。已新增 `sanitize_query_payload()`，demo 回應會清空 `parquet_path`、`zip_path`、`error_message` 與字串中的 `/Users/`、`/home/`、`/var/`。
+- **Demo 唯讀角色**：已建立 `demo_reader`（NOSUPERUSER、NOCREATEDB、NOCREATEROLE、CONNECTION LIMIT 10、statement_timeout 10s、default_transaction_read_only=on、search_path=public），只 grant 五張展示表的 SELECT；`CREATE TABLE`、未授權表、`pg_read_file`、`COPY ... PROGRAM` 都以 permission denied 失敗。
+- **Fail closed**：`DEMO_QUERY_DATABASE_URL` 已設定；未設定時 `/api/query?database=postgres` 的 demo 路徑回 403 `demo_data_unavailable`，不會 fallback 到主連線。管理員仍使用主連線，維持完整欄位。
+- **Rate limit**：展示已關閉，無法再做匿名 30 次 live 測試；`DEMO_QUERY_RATE_PER_MINUTE=20` 的 429 路徑由 `DemoRateLimiter` 與既有測試覆蓋。
+- **CSP 收集端點**：尚未實作；目前只有 Report-Only + 手動 console 檢查。
+- **`SameSite=None`**：尚未改 Lax。
+- **備份加密／restore drill**：尚未做。
+
 ## 1. 方法與證據
 
 ### 1.1 已實際驗證

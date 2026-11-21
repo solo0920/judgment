@@ -268,6 +268,14 @@ def sanitize_catalog_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def sanitize_query_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Redact filesystem/operational fields from demo query results."""
+
+    return _scrub_absolute_paths(
+        _scrub_internal_endpoints(sanitize_infrastructure(dict(payload)))
+    )
+
+
 def _scrub_internal_messages(value: Any) -> Any:
     if isinstance(value, dict):
         result: Dict[str, Any] = {}

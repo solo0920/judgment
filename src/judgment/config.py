@@ -83,6 +83,7 @@ class Settings:
     demo_query_timeout_seconds: float = 10.0
     demo_query_max_page_size: int = 50
     demo_query_max_total: int = 100
+    demo_query_database_url: str = ""
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = ""
@@ -297,6 +298,9 @@ class Settings:
             demo_query_max_total=_env_int(
                 "JUDGMENT_DEMO_QUERY_MAX_TOTAL", 100
             ),
+            demo_query_database_url=os.getenv(
+                "DEMO_QUERY_DATABASE_URL", ""
+            ).strip(),
             google_oauth_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
             google_oauth_client_secret=os.getenv(
                 "GOOGLE_CLIENT_SECRET", ""

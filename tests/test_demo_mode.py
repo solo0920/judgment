@@ -570,6 +570,81 @@ def test_sanitize_catalog_payload_hides_internal_endpoints() -> None:
     assert "[internal]" in dumped
 
 
+def test_sanitize_query_payload_redacts_operational_fields() -> None:
+    from judgment.web.demo_mode import sanitize_query_payload
+
+    cleaned = sanitize_query_payload(
+        {
+            "rows": [
+                {
+                    "parquet_path": "/Users/alice/data/laws.parquet",
+                    "zip_path": "/home/alice/data/laws.zip",
+                    "error_message": "failed at /Users/alice/run.log",
+                    "law_name": "銀行法",
+                }
+            ],
+            "query_text": "SELECT * FROM laws -- /Users/alice/secret",
+        }
+    )
+    dumped = json.dumps(cleaned, ensure_ascii=False)
+    assert "/Users/" not in dumped
+    assert "/home/" not in dumped
+    row = cleaned["rows"][0]
+    assert row["parquet_path"] == ""
+    assert row["zip_path"] == ""
+    assert row["error_message"] == ""
+    assert row["law_name"] == "銀行法"
+
+
+def test_demo_catalog_sanitizes_internal_endpoints(demo_client, monkeypatch) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, _app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    synthetic = {
+        "categories": [
+            {
+                "id": "law",
+                "databases": [
+                    {
+                        "id": "qdrant",
+                        "detail": "已連線 http://127.0.0.1:6333；collection「law_articles」",
+                    }
+                ],
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        app_module, "build_catalog", lambda *_args, **_kwargs: synthetic
+    )
+
+    demo = client.get("/api/catalog")
+    assert demo.status_code == 200
+    assert "127.0.0.1" not in demo.text
+    assert "[internal]" in demo.text
+
+    admin = client.get("/api/catalog", headers=ADMIN_HEADERS)
+    assert admin.status_code == 200
+    assert "127.0.0.1" in admin.text
+
+
 def test_demo_error_response_hides_exception_details(demo_client, monkeypatch) -> None:
     import importlib
 
@@ -642,6 +717,72 @@ def test_demo_body_limit_rejects_large_payloads(demo_client) -> None:
         },
     )
     assert response.status_code == 413
+
+
+def test_demo_query_postgres_fails_closed_without_readonly_engine(
+    demo_client,
+) -> None:
+    client, app = demo_client
+    app.state.demo_query_session_factory = None
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    response = client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "law_documents"},
+            "page_size": 1,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "demo_data_unavailable"
+
+
+def test_demo_query_uses_readonly_session_factory(demo_client) -> None:
+    client, app = demo_client
+    app.state.demo_query_session_factory = app.state.session_factory
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    response = client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "law_documents"},
+            "page_size": 1,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["database"] == "postgres"
 
 
 def test_demo_route_feature_mapping_is_explicit() -> None:
