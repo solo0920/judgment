@@ -19560,3 +19560,41 @@ a.auth-menu-item {
   color: var(--faint);
   font-style: italic;
 }
+
+.qb-score-cell.is-active[data-score="3"] {
+  background: #eab308;
+  color: #1a1400;
+}
+
+.qb-score-cell.is-active[data-score="1"],
+.qb-score-cell.is-active[data-score="2"] {
+  background: #dc2626;
+  color: #fff;
+}
+
+.qb-score-value {
+  display: inline-flex;
+  min-width: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.qb-score-value.is-green {
+  background: #76b900;
+  color: #0b0f0c;
+}
+
+.qb-score-value.is-yellow {
+  background: #eab308;
+  color: #1a1400;
+}
+
+.qb-score-value.is-red {
+  background: #dc2626;
+  color: #fff;
+}

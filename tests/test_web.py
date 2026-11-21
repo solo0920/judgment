@@ -3871,4 +3871,7 @@ def test_question_bank_review_scores_use_five_clickable_cells() -> None:
     assert "background: #76b900" in css
     assert ".qb-score-history-table" in css
     assert ".qb-latest-scores" in css
+    assert 'data-score="3"' in css
+    assert "#eab308" in css
+    assert "#dc2626" in css
     assert 'type="number" min="1" max="5" name="score_' not in benchmark

@@ -222,9 +222,9 @@ function reviewScoresHistoryMarkup(item) {
         <td>${escapeHtml(review.reviewer || "匿名")}</td>
         ${REVIEW_SCORE_FIELDS.map(
           ([key]) =>
-            `<td class="cell-number"><strong>${escapeHtml(
-              scores[key] ?? "—",
-            )}</strong></td>`,
+            `<td class="cell-number"><strong class="qb-score-value ${scoreValueTone(
+              scores[key],
+            )}">${escapeHtml(scores[key] ?? "—")}</strong></td>`,
         ).join("")}
         <td>${statusBadge(
           review.decision === "approved" ? "accepted" : review.decision,
@@ -325,6 +325,14 @@ function createFormMarkup(item, state) {
   return item ? manualFormMarkup(item) : aiCreateFormMarkup(state);
 }
 
+function scoreValueTone(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score) || score <= 0) return "";
+  if (score >= 4) return "is-green";
+  if (score === 3) return "is-yellow";
+  return "is-red";
+}
+
 const ITEM_SCORE_FIELDS = [
   ["clarity", "題目清晰"],
   ["labels", "法條標注"],
@@ -345,9 +353,9 @@ function latestReviewScoresMarkup(item) {
     <span class="qb-latest-scores-label">最新評分</span>
     ${ITEM_SCORE_FIELDS.map(
       ([key, label]) =>
-        `<span>${label} <strong>${escapeHtml(
-          scores[key] ?? "—",
-        )}</strong></span>`,
+        `<span>${label} <strong class="qb-score-value ${scoreValueTone(
+          scores[key],
+        )}">${escapeHtml(scores[key] ?? "—")}</strong></span>`,
     ).join("")}
     <span class="qb-latest-scores-meta">${escapeHtml(
       review.reviewer || "匿名",
