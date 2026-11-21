@@ -9,7 +9,7 @@
 | Python | `>=3.10`；本機 `.python-version` 為 3.12 |
 | pyarrow | `25.0.1` |
 | pytest | `9.2.0` |
-| 測試 | `uv run pytest -q`：692 tests pass |
+| 測試 | `uv run pytest -q`：694 tests pass |
 | Lint | `uv run ruff check .`：clean |
 | CI | pytest、ruff、frontend build、pip-audit、gitleaks 全歷史、Syft SBOM |
 | pip-audit | 無已知 advisory，CI 無 `--ignore-vuln` |
@@ -66,7 +66,13 @@ POST /api/rag/query/stream
 - Demo 限流預設：RAG 10/min、60/hour、200/day，另有每日 400 次與 1,000,000 token 預算；query 20/min、200/hour、500/day；poll 120/min、3,000/hour、20,000/day。設定在 `src/judgment/config.py`。
 - Demo visitors 目前多數 demo route 使用主 `judgment` 連線；只有 `POST /api/query?database=postgres` 使用 `demo_reader`。`demo_reader` 是 column-level SELECT、`NOSUPERUSER NOCREATEDB NOCREATEROLE`、`default_transaction_read_only=on`。
 
-## 4. Auth／security 現況
+## 4. RAG 法規／判決範圍
+
+- 裸法規名稱或簡介問題（例如「證券交易法」、「刑法」、「介紹銀行法」）回傳結構化法規簡介：立法目的、主管機關、章節架構、核心條文；不呼叫 LLM，也不列判決。
+- 官方名稱有「中華民國」前綴時，支援常用簡稱（例如「刑法」→「中華民國刑法」）。
+- 判決 RAG 只處理與 `documents/金融法規.md` 的 99 項金融相關法規有關的問題。若問題與清單及金融詞彙無關，回傳 `answer_source=notice`、`retrieval.status=not_financial`，提示「本RAG提問功能主要以金融相關判決為主」，不生成判決回答。
+
+## 5. Auth／security 現況
 
 - 管理員：`solo4study@gmail.com` Google session，或 `X-Judgment-Admin-Token` break-glass token。
 - Session：HttpOnly signed cookie，TTL 7 天（`AUTH_SESSION_TTL_SECONDS=604800`），`SameSite=None`；沒有 server-side session table／撤銷。
@@ -76,20 +82,20 @@ POST /api/rag/query/stream
 - 未完成：SESSION-01、AUDIT-01、SameSite 改 Lax 的評估、SSE ticket 一次性／綁定、HSTS 延長。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。
 
-## 5. 查詢索引
+## 6. 查詢索引
 
 - `judgment_documents` 已有五個 `pg_trgm` GIN indexes：`jid`、`court`、`court_normalized`、`title`、`matched_laws_text`，合計約 401 MB。
 - 這些是 `/api/query` keyword filter 實際使用的欄位；`full_text` 沒有建立 trigram index（會約 40 GB，且 2 字中文詞沒有明顯加速）。
 - 建立腳本：`scripts/create_judgment_trgm_indexes.sql`。
 
-## 6. 備份與資料庫角色
+## 7. 備份與資料庫角色
 
 - PostgreSQL dump 使用 age 加密（`postgres/judgment.dump.age`）；`.env` 不進備份；`data/` 與 Qdrant snapshot 仍為明文。
 - 已完成完整備份與 subset restore；完整 157 GB＋Qdrant restore drill 尚未執行。
 - `demo_reader` 已建立並限制；主應用仍使用 `judgment`，目前 `rolsuper=t`、`rolcreatedb=t`。APP-DB-01 尚未完成。
 - age 私鑰：`~/.config/judgment/age.key`，權限 `600`，不可進 repo／備份。
 
-## 7. 文件狀態規則
+## 8. 文件狀態規則
 
 - `README.md`、`specs/*/spec.md`、`specs/security/*.md`：current-state 文件，應以程式與 API 為準。
 - `specs/005-retrieval-evaluation/*-2026-11-17.md`、`specs/006-fraud-relevance-annotation/*`：dated 研究／benchmark 快照；保留當時數據，不強行改成目前值，但會標示 snapshot 性質。

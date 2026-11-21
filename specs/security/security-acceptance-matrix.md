@@ -78,7 +78,7 @@ MBP Web 自動啟動（2026-11-18）                → LaunchAgent `com.judgmen
 測試：
 
 ```text
-692 tests pass
+694 tests pass
 ruff clean
 ```
 

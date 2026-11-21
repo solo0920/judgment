@@ -51,8 +51,10 @@ from judgment.rerank import RerankOutcome, RerankResult
 from judgment.law_rag import (
     _article_ref_key,
     _extract_article_refs,
+    _law_name_matches_text,
     _rrf_fuse,
     build_insurance_responsibility_framework,
+    is_financial_query,
     is_law_first_question,
     is_law_overview_question,
     is_related_laws_question,
@@ -426,6 +428,49 @@ def test_law_overview_question_detection() -> None:
     assert not is_law_overview_question(
         "證券交易法對內線交易有什麼規範？", sources
     )
+    criminal = [{"law_name": "中華民國刑法"}]
+    assert is_law_overview_question("刑法", criminal)
+    assert not is_law_overview_question("陸海空軍刑法", criminal)
+    assert _law_name_matches_text("中華民國刑法", "刑法")
+    assert not _law_name_matches_text("中華民國刑法", "陸海空軍刑法")
+
+
+def test_financial_query_scope_uses_99_law_list() -> None:
+    law_list = Path("documents/金融法規.md")
+    assert is_financial_query(
+        "證券交易法對內線交易有什麼規範？",
+        [{"law_name": "證券交易法"}],
+        law_list,
+    )
+    assert is_financial_query(
+        "詐騙集團車手的刑責是什麼？",
+        [],
+        law_list,
+    )
+    assert not is_financial_query(
+        "刑法第271條的殺人罪刑責是什麼？",
+        [],
+        law_list,
+    )
+    assert not is_financial_query("離婚後的扶養費怎麼算？", [], law_list)
+
+
+def test_non_financial_question_returns_scope_notice(tmp_path: Path) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    settings = _settings(law_data_dir=tmp_path)
+
+    payload = answer_question(
+        session_factory=session_factory,
+        question="刑法第271條的刑責是什麼？",
+        settings=settings,
+    )
+
+    assert payload["answer_source"] == "notice"
+    assert payload["judgments"] == []
+    assert payload["citations"] == []
+    assert "本RAG提問功能主要以金融相關判決為主" in payload["answer"]
+    assert payload["retrieval"]["status"] == "not_financial"
 
 
 def test_law_overview_answer_has_chapters_and_no_judgments(
@@ -3429,7 +3474,7 @@ def test_answer_question_drops_incidental_law_sources_for_judgment_list(
     )
     payload = answer_question(
         session_factory=session_factory,
-        question="在法院相關的判決有那些",
+        question="銀行借款相關的判決有那些",
         settings=settings,
         store=FakeStore(),
         embedder=FakeEmbedder(),

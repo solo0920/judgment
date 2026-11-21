@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -149,6 +150,26 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", "", str(text or ""))
 
 
+def _short_law_name(name: str) -> str:
+    normalized = _normalize(name)
+    prefix = "中華民國"
+    if normalized.startswith(prefix) and len(normalized) > len(prefix):
+        return normalized[len(prefix) :]
+    return normalized
+
+
+def _law_name_matches_text(name: str, text: str) -> bool:
+    normalized = _normalize(name)
+    if normalized and normalized in text:
+        return True
+    short = _short_law_name(normalized)
+    return bool(
+        short
+        and short != normalized
+        and (text == short or text.startswith(short))
+    )
+
+
 def _latest_parquet_files(data_dir: Path) -> Dict[str, Path]:
     base = Path(data_dir).expanduser().resolve() / "raw_parquet"
     latest: Dict[str, Tuple[str, float, Path]] = {}
@@ -201,7 +222,7 @@ def find_law_records(
         name = _normalize(row.law_name)
         if not name:
             continue
-        if name in text or name in alias_targets:
+        if _law_name_matches_text(name, text) or name in alias_targets:
             exact.append((0 if row.source_type == "law" else 1, name, int(row.id)))
     selected: List[int] = []
     if exact:
@@ -270,7 +291,7 @@ def find_law_records(
 
 
 _CHAPTER_HEADING_RE = re.compile(
-    r"^第\s*[零〇一二三四五六七八九十百千兩\d之-]+\s*(?:章|編)"
+    r"^第\s*[零〇一二三四五六七八九十百千兩\d之-]+\s*章"
 )
 
 
@@ -1636,11 +1657,141 @@ def is_law_overview_question(
     key = _law_overview_key(question)
     if not key or len(key) > 40:
         return False
-    canonical = LAW_ALIASES.get(key, key)
+    canonical = _normalize(LAW_ALIASES.get(key, key))
     return any(
-        _normalize(source.get("law_name") or "") == _normalize(canonical)
+        _normalize(source.get("law_name") or "") == canonical
+        or _short_law_name(source.get("law_name") or "") == canonical
         for source in law_sources
     )
+
+
+_FINANCIAL_QUERY_TERMS = (
+    "金融",
+    "銀行",
+    "證券",
+    "期貨",
+    "保險",
+    "票據",
+    "洗錢",
+    "資恐",
+    "信託",
+    "金控",
+    "存款",
+    "授信",
+    "放款",
+    "借款",
+    "借貸",
+    "返還",
+    "債務",
+    "清償",
+    "利息",
+    "保證",
+    "連帶",
+    "欠款",
+    "匯款",
+    "支付",
+    "外匯",
+    "債券",
+    "基金",
+    "上市",
+    "上櫃",
+    "內線交易",
+    "操縱市場",
+    "非常規交易",
+    "公開收購",
+    "公司治理",
+    "財報",
+    "背信",
+    "侵占",
+    "詐欺",
+    "詐騙",
+    "車手",
+    "人頭帳戶",
+    "信用卡",
+    "利率",
+    "匯率",
+    "投資",
+    "理財",
+    "虛擬資產",
+    "電子支付",
+    "融資",
+    "租賃",
+    "擔保",
+    "抵押",
+    "質押",
+    "破產",
+    "重整",
+    "清算",
+    "董監",
+    "股東",
+    "增資",
+    "減資",
+    "私募",
+    "承銷",
+    "自營",
+    "經紀",
+    "證券交易所",
+    "櫃買",
+    "集保",
+    "金融消費者",
+    "金融科技",
+    "監理沙盒",
+    "保險業務員",
+    "業務員",
+    "理賠",
+    "保單",
+    "貸款",
+    "房貸",
+    "信貸",
+    "第三方支付",
+)
+
+
+@lru_cache(maxsize=8)
+def load_financial_law_names(path: str) -> frozenset[str]:
+    """Load the 99-law whitelist, including aliases and base names."""
+
+    source = Path(path).expanduser()
+    try:
+        lines = source.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return frozenset()
+    names: set[str] = set()
+    for line in lines:
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        name = re.split(r"[（(]", raw, 1)[0].strip()
+        if len(name) < 2 or not re.search(r"[\u4e00-\u9fff]", name):
+            continue
+        names.add(name)
+        names.add(_normalize(name))
+    for alias, canonical in LAW_ALIASES.items():
+        if canonical in names or _normalize(canonical) in names:
+            names.add(alias)
+            names.add(_normalize(alias))
+    return frozenset(names)
+
+
+def is_financial_query(
+    question: str,
+    law_sources: Sequence[Dict[str, Any]],
+    law_list_path: Path,
+) -> bool:
+    """Return True when the question is within the financial-law corpus."""
+
+    names = load_financial_law_names(str(law_list_path))
+    if not names:
+        # Do not break RAG if the whitelist is unavailable.
+        return True
+    for source in law_sources:
+        name = _normalize(source.get("law_name") or "")
+        if name and name in names:
+            return True
+    text = _normalize(question)
+    if any(name and name in text for name in names):
+        return True
+    return any(term in text for term in _FINANCIAL_QUERY_TERMS)
 
 
 def _law_overview_answer(source: Mapping[str, Any]) -> str:

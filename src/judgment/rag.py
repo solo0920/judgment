@@ -24,6 +24,7 @@ from .law_rag import (
     extract_stat_entity,
     is_article_count_question,
     is_citation_stats_question,
+    is_financial_query,
     is_history_question,
     is_law_first_question,
     is_law_overview_question,
@@ -235,6 +236,9 @@ def _mentions_law(question: str, law_name: str) -> bool:
     if not text or not name:
         return False
     if name in text:
+        return True
+    short_name = name[4:] if name.startswith("中華民國") else ""
+    if short_name and short_name in text:
         return True
     return any(
         alias in text
@@ -3667,6 +3671,13 @@ def answer_question(
                     )
             return payload
 
+    if is_law_overview_question(question, law_sources):
+        law_sources = [
+            source
+            for source in law_sources
+            if is_law_overview_question(question, [source])
+        ][:1]
+
     if law_sources and not test_mode_enabled and (
         is_article_count_question(question)
         or is_history_question(question)
@@ -3713,6 +3724,35 @@ def answer_question(
                 "coverage": coverage,
                 "duration_ms": _elapsed_ms(started),
             }
+
+    if not is_financial_query(
+        question, law_sources, settings.judgment_law_list
+    ):
+        notice = (
+            "本RAG提問功能主要以金融相關判決為主。"
+            "此問題未對應 99 項金融相關法規，因此不生成判決 RAG 回答。"
+        )
+        return {
+            "status": "operational",
+            "answer": notice,
+            "notice": "",
+            "citations": [],
+            "judgments": [],
+            "law_sources": [],
+            "matched_terms": [],
+            "answer_source": "notice",
+            "llm_model": None,
+            "embedding_model": settings.embedding_model or None,
+            "retrieval": {
+                "status": "not_financial",
+                "mode": "out_of_scope",
+                "law_hits": 0,
+                "hits": 0,
+                "reason": "not_in_financial_law_list",
+            },
+            "coverage": coverage,
+            "duration_ms": _elapsed_ms(started),
+        }
 
     rerank_degraded = str(law_rerank.get("status") or "") == "degraded"
     if on_partial is not None and law_sources and not test_mode_enabled:
