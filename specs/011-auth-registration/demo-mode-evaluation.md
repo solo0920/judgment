@@ -1,10 +1,12 @@
 # 展示模式（Demo Mode）評估報告
 
-**Status**: Approved · Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
+**Status**: Approved · Implemented and deployed 2026-11-20；2026-11-21 已 production 驗證，v7 完成，admin token／session secret 已輪替。
 
 **Version**: 0.3
 
-**Last Updated**: 2026-11-20
+**Last Updated**: 2026-11-21
+
+> **Postscript 2026-11-21**：production 已重啟並完成 Google OAuth 實機登入；v7 索引已完成（`judgments_v005`、4,714,967 / 4,714,967）；admin token 與 session secret 已輪替。以下保留評估與當時待辦，不再代表目前狀態；目前狀態見 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md) 與 [`../security/security-acceptance-matrix.md`](../security/security-acceptance-matrix.md)。
 
 **Applies To**: `judgment.ragdemo.win` 首頁、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、右上角帳號選單、管理設定頁、`/api/*` 訪客邊界。
 
@@ -547,14 +549,14 @@ curl -I --max-time 5 https://api-mbp.ragdemo.win/api/health
 | Route policy | 118 條，default deny | 新增 `DEMO_READ`／`DEMO_QUERY` |
 | `JUDGMENT_DEMO_HARD_DISABLE` | 新環境變數，未設定＝不干預 | `1` 時所有 `/api/demo/*` 強制關閉；管理頁顯示實際生效原因 |
 | `RagAdmission` | 併發／佇列 | 沿用；另加 per-IP 與每日 token |
-| v7 索引 | 仍在執行 | **不要在索引期間重啟 production** |
+| v7 索引 | 已完成（`judgments_v005`、4,714,967 / 4,714,967） | 歷史注意事項：不要在索引期間重啟 production |
 | Auth 熱修 | 程式完成，待重啟 | 展示模式上線前先完成重啟與 smoke test |
 
 部署順序：
 
 1. 在 branch 完成程式與測試。
 2. 9202 staging 驗證展示關閉／開啟／到期／一鍵關閉。
-3. 等 v7 索引完成。
+3. v7 索引已完成；後續部署可依一般維護窗口進行。
 4. 依 restart checklist 重啟 production，讓 auth 熱修生效。
 5. 執行 migration，建立 `demo_settings` 預設列：`enabled=false`，六個旗標全 true（初始值；總開關關閉不會暴露）。
 6. 管理者登入，確認關閉狀態與靜態首頁。
@@ -626,7 +628,7 @@ curl -I --max-time 5 https://api-mbp.ragdemo.win/api/health
 - [ ] 管理面板可用鍵盤操作。
 - [ ] console error 0。
 - [ ] 既有測試、ruff、frontend build 通過。
-- [ ] 關閉／開啟不影響 v7 索引程序。
+- [x] 關閉／開啟不影響 v7 索引程序（v7 已完成）。
 
 ---
 

@@ -41,7 +41,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 本機缺少 1996-01 到 2026-08 之間的某月份檔案，**When** 執行，**Then** 該月份最新 fileset 被下載到 raw_rar。
+1. **Given** 本機缺少 1996-01 到 2026-09 之間的某月份檔案，**When** 執行，**Then** 該月份最新 fileset 被下載到 raw_rar。
 2. **Given** 本機已有某月份檔案且為最新 fileset，**When** 執行，**Then** metadata 未變更時略過，不重新下載。
 3. **Given** 本機已有同月份舊版檔案，遠端有較新 fileset，**When** 執行，**Then** 下載新版本、原子取代，並將同月份舊檔移至 `raw_rar/history/` 或依設定刪除。
 4. **Given** 同月份遠端檔案大小或 validator 改變，**When** 執行，**Then** 重新下載並取代。
@@ -67,7 +67,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** manifest 有 368 個月狀態，**When** 開啟判決下載頁，**Then** 顯示 1996–2026 共 31 列，每列 12 個月份欄位。
+1. **Given** manifest 有 369 個月狀態，**When** 開啟判決下載頁，**Then** 顯示 1996–2026 共 31 列，每列 12 個月份欄位。
 2. **Given** 某月份最新 fileset 已存在本機，**When** 顯示表格，**Then** 該月份為綠色。
 3. **Given** 某月份本機檔案是舊版，**When** 顯示表格，**Then** 該月份為灰色。
 4. **Given** 某月份沒有本機檔案或官方沒有資料，**When** 顯示表格，**Then** 該月份為紅色。
@@ -185,7 +185,7 @@
 
 - 使用司法院資料開放平臺 `opendata.judicial.gov.tw` 的 FilesetLists API。
 - 官方 resources 清單是判決壓縮檔的權威來源；71644–72011 之間有些月份有多個更新版本，因此以 `YYYYMM` 分組並取最新 fileset，而不是直接把 fileset ID 當成月份。
-- 1996-01 到 2026-08 是目前資料快照的 368 個月；實際範圍與數量由執行時 resources 決定。本機 `raw_rar` 目前有 294 個月份壓縮檔（約 39 GB），`download_manifest.json` 為 294 green／0 gray／74 red，下一個待補齊月份為 `2014-10`（fileset `71869`；2026-11-11 觀測值，會隨下載變動）。
+- 1996-01 到 2026-09 是目前資料快照的 369 個月；API 回報 371 個 archive（含同月份多版本）。實際範圍與數量由執行時 resources 決定。`raw_rar` 與 `download_manifest.json` 的 green／red 數量會隨下載變動，查詢時以 `/api/judgment-download/status` 為準。
 - 第一次完整同步可能需要下載數百個月份；預設非 API 時段也可續傳，嚴格時段模式則會跨越多個 00:00–06:00 時段；`backfill` 佇列會保留跨日進度。
 - 2026-11-11 實測：帶 Bearer Token 的檔案 GET、resources 與 HEAD metadata 在非 00:00–06:00 時段仍可使用；官方檔案端點忽略 `Range`，回傳 200 與完整內容。
 - Delete-Infor CSV 的後續刪除套用不在本次範圍。

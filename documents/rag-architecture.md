@@ -150,12 +150,12 @@ Accept: text/event-stream
     "top_score": 0.6123
   },
   "coverage": {
-    "total_judgments": 738743,
-    "indexed_judgments": 738743,
+    "total_judgments": 4714967,
+    "indexed_judgments": 4714967,
     "remaining_judgments": 0,
-    "collection": "judgments_v002",
+    "collection": "judgments_v005",
     "model": "bge-m3",
-    "version_id": 4,
+    "version_id": 7,
     "latest_indexed_at": "2026-11-09T12:10:38.042901+00:00"
   },
   "duration_ms": 2415
@@ -211,7 +211,7 @@ HTTP 層：
 
 ### 5.2 Qdrant 檢索
 
-- Collection：`judgments_current` alias 指向目前 active 的版本化 collection（目前為 `judgments_v002`）；若 alias 不存在，才使用 `JUDGMENT_VECTOR_COLLECTION`（預設 legacy `judgment_documents`）。
+- Collection：`judgments_current` alias 指向目前 active 的版本化 collection（目前為 `judgments_v005`）；若 alias 不存在，才使用 `JUDGMENT_VECTOR_COLLECTION`（預設 legacy `judgment_documents`）。
 - 距離：Cosine。
 - 參數：`top_k=4`、`score_threshold=0.35`。
 - 每個 point 對應一筆判決，point id 為 `uuid5(NAMESPACE_URL, "judgment:<jid>")`，重跑為 idempotent upsert。
@@ -348,19 +348,19 @@ uv run judgment-index-vectors --activate-version 4
 uv run judgment-index-vectors --rollback
 ```
 
-目前狀態（2026-11-11）：
+目前狀態（2026-11-21；動態值以 `/api/home`／`/api/status` 為準）：
 
 | 項目 | 數值 |
 | --- | --- |
-| PostgreSQL 判決總數 | 738,743 |
-| active 版本 | `version_id=4`、`judgments_v002` |
-| 已索引／覆蓋率 | 738,743／738,743（100%） |
-| Qdrant points | 738,743 |
+| PostgreSQL current 判決 | 4,714,967 |
+| active 版本 | `version_id=7`、`judgments_v005` |
+| 已索引／覆蓋率 | 4,714,967／4,714,967（100%） |
+| Qdrant points | 4,714,967 |
 | 向量維度 | 1,024 |
 | 索引模型 | `bge-m3` |
-| Alias | `judgments_current` -> `judgments_v002` |
-| Legacy collection | `judgment_documents`（version 2，retired，仍保留 points） |
-| `judgment_vector_index` 總列數 | 1,477,486（legacy 與 active 版本合計） |
+| Alias | `judgments_current` -> `judgments_v005` |
+| Legacy collection | `judgment_documents`（retired，仍保留 points） |
+| `judgment_vector_index` | active 4,714,967；含歷史版本時以 DB 查詢為準 |
 
 ## 8. 設定與目前值
 
@@ -463,7 +463,7 @@ sequenceDiagram
 
 ## 10. 已知限制
 
-1. **全量索引已完成**：目前 `judgment_vector_index` 與 Qdrant 為 738,743／738,743（100%）；正式查詢使用 `judgments_current` alias，新版本以 Blue-Green collection 建置。
+1. **全量索引已完成**：目前 `judgment_vector_index` 與 Qdrant 為 4,714,967／4,714,967（100%）；正式查詢使用 `judgments_current → judgments_v005` alias，新版本以 Blue-Green collection 建置。
 2. **文件級向量而非片段級**：每筆判決只取 head/tail 1,600 字作為 embedding，判決中段的細節可能不會被檢索到。
 3. **Reranker 只覆蓋候選排序**：判決候選與法規／命令候選由 `bge-reranker-v2-m3` 重新排序，法規與命令再依 `source_type` 分組；關閉、逾時或服務失敗時保留檢索原順序。檢索本身仍是 BM25／dense（RRF）與 Qdrant cosine，不是端到端學習式檢索。
 4. **引用驗證是結構驗證**：只檢查 `[n]` 是否落在範圍內、拒答是否含案號；不驗證每個句子是否真的由對應片段支持。

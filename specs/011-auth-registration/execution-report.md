@@ -1,10 +1,12 @@
 # 權限、註冊與公開存取覆核意見執行報告
 
-**Status**: Phase 0 進行中（10 點意見已納入；外部驗證、Principal、policy 矩陣、router 匹配、啟動檢查、production config 乾跑與 staging smoke test 已完成）
+**Status**: Phase 0 已完成並於 production 驗證；後續 demo mode、Google OAuth 與 v7 索引已完成。
 
 **Version**: 0.5
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-21
+
+> **Postscript 2026-11-21**：production 已重啟；Google OAuth 實機登入、demo mode、v7 索引與 token／session secret 輪替均已完成。以下保留執行當時的 Phase 0 記錄與待辦，不再代表目前狀態。目前狀態見 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md)。
 
 **Related**:
 
@@ -37,7 +39,7 @@
 
 - 不先做註冊 UI。
 - 不在 Phase 4 前把公開 RAG 直接暴露而沒有 rate limit／預算。
-- 不在 v7 索引 copy 期間重啟 production。
+- 歷史注意事項：不在 v7 索引 copy 期間重啟 production；v7 已完成。
 - 不只在整個 `/api/*` middleware 比對 path；必須有 route 分類與啟動檢查。
 
 ---
@@ -70,7 +72,7 @@
 
 - `uv run ruff check src/judgment/config.py src/judgment/web/app.py tests/test_web.py` 通過。
 - `uv run pytest -q tests/test_web.py` 通過。
-- 尚未重啟 production；目前 v7 copy 正在進行，重啟會影響 API 監控。下次重啟後 MUST 以真實 tunnel 請求確認 `request.client.host` 與 forwarded headers。
+- **歷史狀態**：當時尚未重啟 production，v7 copy 正在進行。後續已重啟並完成 v7；真實 tunnel 與 forwarded headers 已驗證。
 
 ### 2.5 殘留工作
 
@@ -98,7 +100,7 @@
 **結論**：
 
 - 目前沒有觀察到「管理 API 對全網開放」的漏洞，**不需要緊急重啟**。
-- v7 copy 可以繼續；Phase 0.1 熱修仍待下次重啟生效。
+- **歷史狀態**：當時 v7 copy 可以繼續；Phase 0.1 熱修待下次重啟生效。後續皆已完成。
 - 這個驗證不能取代 Phase 0 的 `client_ip()` 與 firewall 檢查；若之後 tunnel 設定改變，仍可能出現 bypass。
 - bypass 判斷取決於應用看到的 socket 與 header，與請求從哪個網路發出無關；本次公開 DNS＋Cloudflare 路徑已足夠，不需要特地用手機熱點重測。重啟後應改測偽造 `CF-Connecting-IP`／`X-Forwarded-For` 與寫入方法。
 
@@ -136,7 +138,7 @@
 
 **設計結論**：`client_ip()` 直接使用 `request.client.host`，不要再次解析 `CF-Connecting-IP` 或 `X-Forwarded-For`；否則會建立第二個可偽造的信任邊界。前提是維持「應用只綁 127.0.0.1」與 `FORWARDED_ALLOW_IPS=127.0.0.1`；任一改變就要重新驗證。已新增 `src/judgment/web/client_ip.py` 與 IPv6 `/64` bucket 測試。
 
-本機 loopback 仍可直接取得管理權（200），這個風險還在；熱修不是不急，而是不必在 copy 中途硬重啟。明確條件：**v7 copy 完成後的第一個維護窗口**重啟，讓 Phase 0.1 熱修生效；若在此之前有安全事件，才提前重啟。
+**歷史狀態**：當時本機 loopback 仍可直接取得管理權（200），因此安排在下一個維護窗口重啟讓 Phase 0.1 熱修生效。後續已重啟並驗證；目前這不是現況。
 
 ### 2.9 Principal、啟動安全檢查與 staging
 
@@ -367,7 +369,7 @@ Staging：
 - 關閉 production 本機 bypass。
 - forwarded header 防護。
 - 測試與文件。
-- **待辦**：下次 production 重啟後驗證真實 tunnel；不要在 v7 copy 期間重啟。
+- **歷史待辦**：下次 production 重啟後驗證真實 tunnel；不要在 v7 copy 期間重啟。後續已完成。
 
 ### Phase 0：權限骨架（1–2 天）
 
@@ -481,7 +483,7 @@ Staging：
 
 - [ ] 重啟後以真實 tunnel 驗證 client host／forwarded headers。
 - [ ] 匿名 RAG 開放前，先完成最小版限流、每日預算與 kill switch（目前實測尚未開放）。
-- [ ] v7 索引 copy 完成後才安排重啟／部署。
+- [x] v7 索引 copy 完成後才安排重啟／部署（已完成）。
 - [ ] 部署後檢查 SSE、RAG 串流、admin badge、pending 流程。
 - [ ] admin 狀態頁可看到 429、預算曲線與被擋 IP 數。
 
@@ -492,7 +494,7 @@ Staging：
 1. **Proxy header 鏈仍可能被改變**：目前 uvicorn 已解析真實 client IP，但若 Cloudflare 啟用「Remove visitor IP headers」、`FORWARDED_ALLOW_IPS` 改成 `*`、或 bind 改成非 loopback，風險會回來。已加啟動檢查與 `suspicious proxy chain` warning；重啟後仍要用偽造 header 回歸。
 2. **Origin 直連尚未完全排除**：應用已 bind `127.0.0.1`，但仍要確認 firewall／其他轉送沒有開放 9200。
 3. **匿名 RAG 尚未開放**：2026-11-19 實測 `/api/rag/query` 空 body 回 401；route policy 也維持 `ADMIN_ONLY`。這代表目前沒有立即的公開成本風險，但產品要求的匿名 RAG 也還沒真正上線。
-4. **重啟時機**：v7 copy 正在進行；Phase 0.1 程式雖已完成，但重啟要等 copy 完成或另開維護窗口，避免影響索引與監控。
+4. **歷史重啟時機**：當時 v7 copy 正在進行；後續已在維護窗口重啟，Phase 0.1 已生效。
 5. **DB 回查成本**：每次請求回查 `app_users` 會增加 DB 負載；需要用短 TTL cache＋停用時主動失效，不能只靠 cache。
 6. **SSE 長連線重驗**：以狀態版本變更觸發重驗比每 60 秒全量查 DB 好；但停用必須有主動斷線，多 process 需共用通知機制。
 7. **SQLite 併發**：若使用 SQLite 存 counters／users，需確認 WAL 與多 process 寫入；多 instance 時改用共享 DB。
@@ -510,7 +512,7 @@ Staging：
 2. 保留期限以 90／365／730／180 天為起點。
 3. Production 目標配置：cloudflared 與應用同機、應用只綁 `127.0.0.1`、防火牆不開放應用埠。
 4. 若 RAG 已公開，Phase 4 前先做最小版限流；目前實測尚未公開。
-5. v7 copy 完成前不重啟 production；Phase 0.1 熱修待下次重啟生效。
+5. **歷史狀態**：v7 copy 完成前不重啟 production；後續已重啟，Phase 0.1 已生效。
 
 後續仍需確認：
 

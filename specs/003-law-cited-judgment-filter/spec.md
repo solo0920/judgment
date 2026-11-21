@@ -8,9 +8,9 @@
 
 **Input**: 使用者提供之需求（原文）：
 
-> /Users/leesolomon/projects/judgment/documents/金融法規.md 以md檔所列之法規來作選擇，有當中的法規的判決才納入資料庫
+> documents/金融法規.md 以 md 檔所列之法規來作選擇，有當中的法規的判決才納入資料庫
 
-**需求解讀**: 以 `documents/金融法規.md`（使用者提供的絕對路徑為 `/Users/leesolomon/projects/judgment/documents/金融法規.md`）作為法規白名單。判決必須明確引用清單中至少一項法規，才可納入資料庫與檢索索引；未引用清單法規的判決保留原始檔，但不進入索引。此功能補充 `001-judgment-rag-search` 的資料處理流程，並遵循 `002-judgment-data-storage` 的檔案儲存規範。
+**需求解讀**: 以 `documents/金融法規.md` 作為法規白名單。判決必須明確引用清單中至少一項法規，才可納入資料庫與檢索索引；未引用清單法規的判決保留原始檔，但不進入索引。此功能補充 `001-judgment-rag-search` 的資料處理流程，並遵循 `002-judgment-data-storage` 的檔案儲存規範。
 
 ## User Scenarios & Testing *(mandatory)*
 

@@ -1,6 +1,8 @@
 # Fraud Relevance Sampling & Annotation Specification v2.0
 
-- 狀態：Final（Sampler v2.0；標註暫停，無人力）
+- 狀態：Final（Sampler v2.0；標註暫停，無人力）；抽樣母體是歷史凍結快照
+
+> **Historical snapshot**：本文的 4,681,502 筆母體與抽樣 manifest 是當時凍結的研究資料；目前 current 判決為 4,714,967 筆。重跑 sampler 時必須建立新 manifest，不可把舊抽樣結果直接套到新資料。
 - 日期：2026-11-16
 - 修訂：2026-11-16（雙尾超幾何上限、空白正規化、Coverage 門檻、盲標、凍結母體、組合驗證；母體 1,581）
 - 適用範圍：Judgment 判決的 fraud relevance ground truth

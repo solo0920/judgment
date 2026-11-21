@@ -1,9 +1,12 @@
 # RAG 判決查詢 Filter 交接資料
 
-- 產生時間：`2026-11-16T09:17:38.551183+00:00`
-- Qdrant alias：`judgments_current`
-- 實際 collection：`judgments_v003`
-- points：`4681502`
+> **快照說明（2026-11-21）**：以下是 2026-11-16 的 payload 匯出快照。目前 active collection 已改為 `judgments_v005`、points 為 4,714,967；payload 分佈與缺值比例請重新執行 `scripts/export_qdrant_schema.py`，不要直接把這份 2026-11-16 的分佈當成現況。
+
+- 快照產生時間：`2026-11-16T09:17:38.551183+00:00`
+- 快照時 Qdrant alias：`judgments_current`
+- 快照時實際 collection：`judgments_v003`
+- 快照時 points：`4681502`
+- 目前 active collection（2026-11-21）：`judgments_v005`、4,714,967 points
 - 向量維度：`1024`
 - 抽樣 payload 數：`5000`
 

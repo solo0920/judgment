@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Status**: Draft
+**Status**: Implemented（資料根目錄、Parquet、manifest、原子寫入與備份流程已存在；目前值與剩餘項見 `docs/code-alignment-2026-11-21.md`）
 
 **Input**: 使用者提供之需求（原文）：
 

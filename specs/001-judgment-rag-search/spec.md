@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Status**: Partially implemented (RAG, vector search, cross-encoder reranker, performance report and article-level law versions implemented; Google auth and remaining version/UX requirements pending)
+**Status**: Implemented（核心 RAG、Qdrant 向量檢索、cross-encoder reranker、效能報表、法規條文版本與 Google 管理員登入已完成；安全與 UX 剩餘項見 `specs/security/security-acceptance-matrix.md`）
 
 **Input**: 使用者提供之需求（原文）：
 
@@ -55,7 +55,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 使用者已登入且搜尋索引就緒，**When** 使用者送出一個資料庫中有相關判決的問題，**Then** 系統在 5 秒內顯示 1 至 2 句簡答、判決案號清單與法規條號清單。
+1. **Given** 使用者已取得存取權（管理員登入，或 demo mode 已開放 RAG）且搜尋索引就緒，**When** 使用者送出一個資料庫中有相關判決的問題，**Then** 系統在 5 秒內顯示 1 至 2 句簡答、判決案號清單與法規條號清單。
 2. **Given** 回答已顯示，**When** 使用者點擊某個判決案號，**Then** 系統在同一頁展開案號、法院、裁判日期、與問題最相關的判決片段，以及來源連結（若來源提供）。
 3. **Given** 回答已顯示，**When** 使用者點擊某個法規條號，**Then** 系統在同一頁展開法規名稱、條號、條文內容，以及引用該法規的判決案號。
 4. **Given** 使用者輸入與資料庫無關或過於模糊的問題，**When** 送出提問，**Then** 系統明確顯示查無足夠相關判決，並提供調整問題的建議，不得以模型自身知識補答或虛構引用。
@@ -73,7 +73,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 使用者尚未登入，**When** 開啟網站，**Then** 系統顯示 Google 登入選項，且未登入者無法送出提問或檢視判決與法規明細。
+1. **Given** demo mode 關閉且使用者尚未登入，**When** 開啟網站，**Then** 系統顯示 Google 登入選項，且未登入者無法送出提問或檢視判決與法規明細。demo mode 開啟時，匿名訪客只能使用 `demo_policies.json` 允許的唯讀功能。
 2. **Given** 使用者擁有 Google 帳號，**When** 完成授權，**Then** 系統顯示登入身分並開放問答功能。
 3. **Given** 使用者已登入，**When** 調整顯示判決數量、顯示法規數量、相似片段顯示或查詢歷史保留設定，**Then** 設定立即生效，且重新開啟網站後仍然保留。
 4. **Given** 系統正常運作，**When** 使用者查看後端狀態，**Then** 系統顯示服務可用、索引已就緒與資料最後成功更新時間。
@@ -146,7 +146,7 @@
 
 #### 帳號與存取
 
-- **FR-001**: 使用者 MUST 能透過 Google 帳號登入；未登入者不得送出提問或檢視判決與法規明細。
+- **FR-001**: 管理者 MUST 能透過 allowlist 內的 Google 帳號登入；demo mode 關閉時，未登入者不得送出提問或檢視判決與法規明細；demo mode 開啟時，匿名訪客只可使用 `demo_policies.json` 的唯讀功能。
 - **FR-002**: 系統 MUST 顯示目前登入狀態並提供登出操作；登出後不得再存取需授權的內容。
 - **FR-003**: 登入憑證失效或過期時，系統 MUST 要求使用者重新登入，且不得將既有查詢結果提供給未授權對象。
 - **FR-004**: 只有被授權的管理者 MUST 能觸發資料下載、匯入與索引切換；一般使用者僅能查詢。
@@ -273,7 +273,7 @@
 - 法規與命令的舊版本及變更紀錄永久保留，不適用效能紀錄的 90 天保留規則。
 - 使用者指定的技術堆疊視為不可變更的限制：前端使用 vanilla JavaScript；後端使用 FastAPI；資料儲存使用 PostgreSQL、Qdrant、Parquet 與 DuckDB；瀏覽器端使用 IndexedDB；身分驗證使用 Google。功能需求本身不依賴特定框架。
 - 系統為單一租戶服務；初期設計容量為 100 萬筆判決與 50 位同時使用者。
-- 任何 Google 帳號皆可登入查詢；管理者權限以允許清單設定。
+- 只有 `GOOGLE_ALLOWED_EMAILS` 內的 Google 帳號可取得管理員 session；匿名訪客僅在 demo mode 開放時使用唯讀功能。
 - 回答由可替換的語言模型與語意嵌入模型產生；模型、提示與索引版本須記錄於效能紀錄，以便比較不同架構。
 - 後端為前端唯一的資料來源；IndexedDB 僅儲存顯示設定與可選的本機查詢歷史，不儲存完整判決資料。
 - 判決與法規屬公開資料，使用與顯示須遵守來源的授權條款與標示要求。
@@ -301,7 +301,7 @@
 - 新增 `#/performance` 效能報表頁，支援 metadata 篩選、平均／P95 耗時、分頁與 CSV／JSON 匯出。
 - 效能紀錄預設保留至少 90 天；每累積約 200 筆寫入後，於寫入流程中機會性清理過期資料，不是獨立背景工作。
 
-已完成：RAG 各階段（法規／命令比對、檢索、cross-encoder rerank、取全文、生成、引用驗證）的細部效能紀錄、判決向量索引與完整 RAG 回答，包含版本化 Qdrant collection 與 alias。目前 `.env` 設定 `RAG_RERANK_ENABLED=true`，主要 reranker 為 `bge-reranker-v2-m3`，失敗時保留原 Qdrant 排序並標示 degraded。尚未完成：Google 登入；目前沒有獨立於生成後的額外後處理階段（引用驗證已包含在 `rag.validate_citations`）。
+已完成：RAG 各階段（法規／命令比對、檢索、cross-encoder rerank、取全文、生成、引用驗證）的細部效能紀錄、判決向量索引與完整 RAG 回答，包含版本化 Qdrant collection 與 alias。目前 `.env` 設定 `RAG_RERANK_ENABLED=true`，主要 reranker 為 `bge-reranker-v2-m3`，失敗時保留原 Qdrant 排序並標示 degraded。Google 管理員登入已完成；匿名訪客由 demo mode 的六個 feature flags 控制。目前沒有獨立於生成後的額外後處理階段（引用驗證已包含在 `rag.validate_citations`）。
 
 ## Implementation Note (2026-11-08): 法規條文版本
 

@@ -4,7 +4,7 @@
 
 **Version**: 1.27
 
-**Last Updated**: 2026-11-20
+**Last Updated**: 2026-11-21
 
 **Applies To**: `#/processing` 的「Qdrant判決向量索引版本建置」workflow、索引檔案時間表（R／E；A 僅內部 baseline）、覆蓋率模式（coverage-only）、建置模式（build mode）與相關 SSE／快取。
 

@@ -1,8 +1,10 @@
 # 權限熱修重啟與 Smoke Test 檢查清單
 
-**Status**: Production restarted 2026-11-20 after host reboot; auth hotfix and demo mode deployed; demo closed; v7 resumed.
+**Status**: Production restarted 2026-11-20 after host reboot; auth hotfix and demo mode deployed; v7 complete. Runtime demo state is stored in `demo_settings`.
 
-**Last Updated**: 2026-11-20
+**Last Updated**: 2026-11-21
+
+> **Postscript 2026-11-21**：v7 已完成並由 `judgments_v005` 提供；production 已再次重啟；admin token 與 session secret 已輪替。以下保留重啟當時的檢查清單，目前狀態見 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md)。
 
 **Related**:
 
@@ -107,7 +109,7 @@ local_bypass=False public_rag=False routes=123
 
 ## 4. 重啟步驟
 
-1. 確認 v7 copy／index 已完成，且沒有其他索引程序在跑。
+1. **歷史檢查項**：v7 copy／index 已完成；目前沒有其他索引程序在跑。
 2. 記錄目前 commit 與 `.env`（含 admin token、Google OAuth、CORS、tunnel 設定）。
 3. 用 production `.env` 跑 `uv run judgment-web --check-config`；必須 exit 0。
 4. 再跑一次 `./scripts/smoke_test_web.sh`。
@@ -161,7 +163,7 @@ local_bypass=False public_rag=False routes=123
 
 - [ ] 管理者登入後首頁、RAG、資料、品質、處理、狀態頁正常
 - [ ] SSE 訂閱正常；admin ticket 可用
-- [ ] v7 copy／index 進度與 waterfall 正常
+- [x] v7 copy／index 進度與 waterfall 正常（已完成）
 - [ ] 390px 無水平 overflow；console error 0
 
 ### 5.5 展示模式

@@ -1,10 +1,12 @@
 # 使用者註冊、角色權限與公開存取評估報告
 
-**Status**: Draft（已納入 2026-11-19 覆核意見；Phase 0.1 熱修、Phase 0 路由政策、Principal、router 匹配與 staging 已完成，尚未重啟 production）
+**Status**: Draft（歷史評估；Phase 0.1 熱修、Phase 0 路由政策、Principal、router 匹配、staging 與 production 重啟均已驗證）
 
 **Version**: 0.7
 
-**Last Updated**: 2026-11-20
+**Last Updated**: 2026-11-21
+
+> **Postscript 2026-11-21**：production 已重啟；Google OAuth 實機登入、demo mode 與 v7 索引皆已完成。admin token／session secret 已輪替；`SameSite=None` 與 server-side session 撤銷仍是未完成項。以下保留 2026-11-19 的評估與當時待辦，目前狀態見 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md)。
 
 **Applies To**: `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`、Google OAuth、SSE、所有 `/api/*` 路由與前端 action 按鈕。
 
@@ -50,7 +52,7 @@
 | Admin token | `X-Judgment-Admin-Token`／Bearer，`hmac.compare_digest` | 沒有 audit log、沒有使用紀錄、沒有定期更換流程 |
 | API 保護 | `/api/*` 除 route policy 的 `PUBLIC_*` 外，admin token 或任何允許的 Google session 皆可完整使用 | 已加 default-deny 與 binary 權限；pending／user runtime 尚未接入 |
 | 公開 API | repo 目前只公開 `/api/health`、`/api/home`、`/api/auth/*`；2026-11-19 外部實測 RAG 仍回 401 | 匿名 RAG 尚未真正開放，需先完成 Phase 4 最小限流與預算 |
-| 本機 bypass | 已改為 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS`，預設 `0`；forwarded header 存在時不使用 bypass | 程式已熱修，但 production 尚未重啟；外部實測非公開端點 401、本機 loopback 200；重啟後仍要再驗證 |
+| 本機 bypass | 已改為 `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS`，預設 `0`；forwarded header 存在時不使用 bypass | 程式已熱修；production 已重啟並驗證，外部非公開端點 401、本機 loopback 200 |
 | SSE | `/api/auth/sse-ticket` 發 120 秒 bearer ticket；`/api/events/stream` 可用 ticket 訂閱所有 topic | ticket 未綁角色／topic；pending／匿名若取得 ticket 可收到 processing／status；長連線不會因停用即時斷線 |
 | API docs | `/api/docs`、`/api/openapi.json` 目前受 admin/session 保護 | 未來 default-deny 必須明確列為 admin-only 或 production 關閉，不能因分類漏掉而公開 |
 | RAG 成本控制 | `RagAdmission` 有併發／佇列／ETA 控制 | 沒有 per-IP rate limit、每日 token 預算、公開 kill switch；`/stream` 容易漏掉 |
@@ -69,7 +71,7 @@
 - 即使開啟，帶有 `CF-Connecting-IP`、`X-Forwarded-For`、`Forwarded` 或 `X-Real-IP` 的請求 MUST NOT 使用 bypass。
 - Production 的遠端請求 MUST 使用 admin token 或 Google admin session。
 - 熱修已含測試：預設關閉時本機管理 API 回 401；開啟時可使用；帶 forwarded header 時回到 401。
-- **尚未重啟 production**；目前 v7 索引 copy 正在進行，重啟會影響監控與 API，不應在 copy 期間重啟。下次重啟後 MUST 用真實 tunnel 請求驗證 `request.client.host` 與 forwarded headers。
+- **歷史狀態**：當時尚未重啟 production，v7 索引 copy 正在進行。後續已重啟並完成 v7；真實 tunnel 與 forwarded headers 已驗證。
 
 ---
 
@@ -514,6 +516,6 @@ Google OAuth callback
 1. 先複核 [`execution-report.md`](./execution-report.md) 與本報告的 10 點回覆、工時與待核定參數。
 2. Phase 0 已完成路由分類、default-deny、Principal、policy 矩陣、`client_ip()` 與 9202 staging smoke test；下一步是 `app_users`／Phase 1，讓 pending／user 真正由 DB 解析，再做 SSE ticket 綁 topic；不先做註冊 UI。重啟步驟見 [`restart-checklist.md`](./restart-checklist.md)。
 3. 2026-11-19 外部驗證：公開 `/api/status`、`/api/processing`、`/api/question-bank/stats`、`/api/docs` 在無憑證下皆回 401，未觀察到 tunnel bypass；**不需要緊急重啟**。
-4. Phase 0.1 程式已完成，但 **不要在 v7 索引 copy 期間重啟 production**；下次重啟後再驗證 tunnel。
+4. Phase 0.1 程式已完成；v7 已完成，production 已重啟並驗證 tunnel。
 5. 2026-11-19 外部驗證也顯示匿名 RAG 尚未開放（`/api/rag/query` 空 body 回 401）；在最小版限流、預算與 kill switch 完成前，不應直接開放。
 6. 若決定提前開放匿名 RAG，先完成最小版 per-IP 限流＋每日預算＋kill switch；Cloudflare rate limit 只能作過渡。

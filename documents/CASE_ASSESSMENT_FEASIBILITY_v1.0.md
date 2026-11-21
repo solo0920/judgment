@@ -7,6 +7,8 @@
 - **Status:** Architecture / product feasibility assessment
 - **Related document:** `documents/CASE_ASSESSMENT_DATA_DICTIONARY_v1.0.md`
 
+> **2026-11-21 更新**：Google 管理員登入已完成；CASE 所需的一般使用者、RBAC、私有案件隔離與 audit 仍未實作。本文保留 2026-11-08 的產品可行性評估。
+
 ---
 
 ## 1. Executive Conclusion
@@ -54,7 +56,7 @@ CASE 在目前的技術棧上**技術可行**，但它不是目前 RAG Console �
 | 證據映射與缺口 | 無 | 中 | 證據與事實／要件的 link model |
 | 正反判決比較 | 有判決資料與向量索引 | 中 | 多階段 retrieval、比較 schema |
 | 風險／策略／情境 | 無 | 中低 | 規則、模板、專家覆核、避免單一 LLM 分數 |
-| 使用者認證／RBAC | 無 | 低 | Google auth 尚未實作 |
+| 使用者認證／RBAC | 無 | 低 | Google 管理員登入已完成；CASE 所需的一般使用者／RBAC 尚未實作 |
 | 案件資料隔離 | 無 | 低 | Auth + server-side authorization + tenant 設計 |
 | 可重現性 | 有部分版本／執行紀錄概念 | 中 | Analysis Run、snapshot、model/prompt version |
 | 評估資料集 | 無 | 低 | 專家標註、指標、benchmark |
@@ -129,7 +131,7 @@ Specification 建議：
 
 ### 4.2 Authentication and Authorization
 
-CASE 涉及案件私有文件、交易資訊、個資與商業機密，但目前的 Google authentication 尚未實作。
+CASE 涉及案件私有文件、交易資訊、個資與商業機密；目前只有 Google 管理員登入，CASE 所需的一般使用者、RBAC 與案件隔離尚未實作。
 
 **這必須是 P0，而不是最後補上：**
 

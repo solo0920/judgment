@@ -4,7 +4,7 @@
 
 **Version**: 1.3
 
-**Last Updated**: 2026-11-19
+**Last Updated**: 2026-11-21
 
 **Applies To**: 全站八個路由（`#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`）、所有 workflow、Model Provider、Embedding／LLM／Reranker host strip、API 端點目錄、頁尾與使用者可見錯誤訊息。
 

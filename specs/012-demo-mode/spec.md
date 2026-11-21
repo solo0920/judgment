@@ -1,10 +1,10 @@
 # 展示模式（Demo Mode）規格
 
-**Status**: Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
+**Status**: Implemented and deployed 2026-11-20；runtime 開關與到期狀態存在 `demo_settings`，本文件不記錄目前是開啟或關閉。
 
-**Version**: 1.5
+**Version**: 1.6
 
-**Last Updated**: 2026-11-20
+**Last Updated**: 2026-11-21
 
 **Applies To**: `judgment.ragdemo.win` 首頁、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、右上角帳號選單、`#/admin`、Google 登入、`/api/*` 訪客邊界。
 
@@ -118,20 +118,21 @@
 
 MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api/demo/*` 包裝；response MUST 依 principal 套用基礎設施欄位隔離。
 
-訪客可用代表端點：
+訪客可用端點以 `src/judgment/web/demo_policies.json` 為唯一來源，目前為：
 
 - RAG：`POST /api/rag/query`、`POST /api/rag/query/stream`
 - 資料：`GET /api/catalog`、`POST /api/query`、`GET /api/data/suggest`、`GET /api/schema/suggest`、`GET /api/law`、`GET /api/judgment`
-- 品質：`GET /api/quality`（訪客使用最近一次快取掃描）、`GET /api/demo/quality`（訪客專用摘要）、`GET /api/question-bank/stats`、`GET /api/question-bank/items`、`GET /api/question-bank/tags`
-- 效能：`GET /api/performance`、`GET /api/performance/options`
-- 處理：`GET /api/processing`（訪客版本回傳最近一次 cached、sanitized snapshot，供完整頁面使用）、`GET /api/demo/processing`（輕量摘要；MUST NOT 建置完整 snapshot）
+- 品質：`GET /api/quality`（訪客使用最近一次快取掃描）、`GET /api/demo/quality`（訪客專用摘要）
+- 效能：`GET /api/performance`
+- 處理：`GET /api/processing`（訪客版本回傳最近一次 cached、sanitized snapshot）、`GET /api/demo/processing`（輕量摘要；MUST NOT 建置完整 snapshot）
 - 狀態：`GET /api/status`
 - 首頁：`GET /api/home`
 
 永遠 admin-only：
 
-- 所有 `POST/PATCH/DELETE` 寫入、workflow、index、host、model、benchmark、test mode。
-- 匯出：`GET /api/question-bank/export`。
+- 所有寫入類 `POST/PATCH/DELETE`、workflow、index、host、model、benchmark、test mode；`POST /api/query`、`POST /api/rag/query`、`POST /api/rag/query/stream` 是 READ-ONLY DEMO_QUERY 例外。
+- 題庫所有端點，包括 `GET /api/question-bank/stats`、`items`、`tags`、`export` 與 `POST/PATCH/DELETE`。
+- `GET /api/performance/options`、`GET /api/processing/plan`、`GET /api/processing/active`、`GET /api/updates/status`、`GET /api/courts/check`、`GET /api/law-versions/check`、`GET /api/judgment-download/status`。
 - `/api/docs`、`/api/openapi.json`。
 - 管理 API。
 
@@ -144,7 +145,8 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
   - 原始 SQL、schema 內部細節、錯誤堆疊
   - admin email、token、session、ticket
   - 其他訪客的 IP／usage
-- `/api/status`、`/api/processing` 對訪客 MUST 套用 sanitizer；admin 版本不變。
+- `/api/status`、`/api/processing`、`/api/catalog`、`/api/query`、`/api/performance`、`/api/rag/query`、`/api/rag/query/stream` 對訪客 MUST 套用對應 sanitizer（`sanitize_status_payload`、`sanitize_processing_payload`、`sanitize_catalog_payload`、`sanitize_query_payload`、`sanitize_performance_payload`、`sanitize_rag_result`／SSE event sanitizer）；admin 版本不變。`/api/home` 使用 `sanitize_infrastructure`。
+- `/api/judgment`、`/api/law`、`/api/quality` 目前沒有經過 query sanitizer；其 payload 只包含判決／法規公開資料與品質統計（archive 名稱、計數），不得再加入 host、path、DSN、token 或內部 endpoint。若欄位變更，必須同步加 sanitizer 與測試。
 
 ### FR-010a 訪客處理頁效能
 
@@ -176,7 +178,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 
 - RAG per-IP：
   - 10 次／分、60 次／小時、200 次／日（可設定）。
-  - 全站每日 token 預算預設 1,000,000；約 244–356 題（P95 4,096／P50 2,809）。
+  - 另有全站每日 request limit 預設 400；全站每日 token 預算預設 1,000,000；約 244–356 題（P95 4,096／P50 2,809）。
 - 資料／效能查詢 per-IP：
   - 20 次／分、200 次／小時、500 次／日。
   - 查詢 timeout 10 秒。
@@ -304,9 +306,9 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] 「立即關閉展示」只關 master，保留 flags；下一個請求生效。
 - [ ] `JUDGMENT_DEMO_HARD_DISABLE=1` 時全部 demo API 403，管理頁顯示原因。
 - [ ] `/api/status`、`/api/processing` 訪客版不含 host／IP／DSN／model path／error stack。
-- [ ] RAG 限流、每日 token 預算、資料／效能 timeout 與每日上限生效。
-- [ ] 390px 無水平溢出；console error 0。
-- [ ] 全站 tests、ruff、frontend build 通過。
-- [ ] 不影響 v7 索引；production 重啟等 v7 完成後。
+- [ ] RAG 限流、每日 token 預算、資料／效能 timeout 與每日上限 code 已存在；端到端 429／串流併發／Cloudflare edge 規則待驗。
+- [x] 390px 無水平溢出；console error 0（Playwright 已驗證）。
+- [x] 全站 690 tests、ruff、frontend build 通過。
+- [x] 不影響 v7 索引；v7 已完成並由 `judgments_v005` 提供，production 已重啟多次。
 
-**Revision**: 1.5（2026-11-21）資料品質頁 first paint 改用 cached snapshot；索引 coverage 共用 120 秒快取，前端快取最近品質 snapshot。完整 DuckDB 掃描只保留給手動重新整理。
+**Revision**: 1.6（2026-11-21）與程式碼重新對照：訪客 route 以 `demo_policies.json` 為準、移除已改為 admin-only 的題庫／performance options、文件不再記錄 demo 開關狀態；資料品質頁 first paint 使用 cached snapshot，索引 coverage 共用 120 秒快取。

@@ -186,8 +186,9 @@ copy (select 1) to program 'id';        -- permission denied
 
 ## 9. 已知未完成
 
-- CSP 已 enforce；`report-uri` 收集端點已上線。
-- 管理權杖已改存 `sessionStorage`，且已於 2026-11-21 輪替；但仍是靜態長效權杖，沒有 server-side 撤銷。
-- `AUTH_COOKIE_SAMESITE=none` 尚未改 Lax。
-- 完整備份 restore drill（DB＋Qdrant＋data）尚未執行。
-- `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。
+- CSP 已 enforce；`report-uri` 收集端點已上線；`report-to`／Reporting-Endpoints 尚未設定。
+- 管理權杖已改存 `sessionStorage`，且已於 2026-11-21 輪替；但仍是靜態長效權杖，沒有 server-side 撤銷（SESSION-01）。
+- `AUTH_COOKIE_SAMESITE=none` 尚未改 Lax；目前依賴 Origin／Sec-Fetch-Site 檢查。
+- 完整備份 restore drill（DB＋Qdrant＋data）尚未執行；目前只有 subset restore。
+- `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。主應用仍使用 `judgment` superuser／createdb（APP-DB-01）。
+- AUDIT-01、SSE ticket 一次性／綁定、PRIV-01（Google Fonts 自架）尚未完成。

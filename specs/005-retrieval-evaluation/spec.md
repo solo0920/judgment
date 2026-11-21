@@ -1,6 +1,8 @@
 # Judgment Retrieval Evaluation Specification v1.0
 
-- 狀態：Draft（P1.6）
+- 狀態：Draft（P1.6）；2026-11-16 baseline 的歷史快照
+
+> **Historical snapshot**：本文的 baseline、召回稽核與筆數是 2026-11-16 的研究快照；目前資料為 4,714,967 筆 current 判決、`judgments_current → judgments_v005`。若要拿數字做決策，請先重跑 benchmark／稽核，不要直接把舊值當成現況。
 - 日期：2026-11-16
 - 適用範圍：Judgment RAG 的結構化檢索、語意檢索、混合排序與引用驗證
 - 現行實作：P0 Structured Retrieval + P1 Query Plan / Lexical RRF（預設關閉）

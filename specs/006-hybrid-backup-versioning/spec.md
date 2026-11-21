@@ -8,6 +8,8 @@
 
 **Status**: Implemented
 
+> **備份邊界**：本規格處理判決／法規資料的版本化與 delta；完整環境備份（PostgreSQL dump age 加密、`.env` 排除、Qdrant snapshot、`data/`）見 [`../security/demo-config-runbook.md`](../security/demo-config-runbook.md)。
+
 > 線上更新檢查、更新紀錄與 header/sidebar 橘色提醒見 [`specs/007-update-notifications/spec.md`](../007-update-notifications/spec.md)。
 
 **Input**: 使用者需求（原文摘要）：

@@ -10,7 +10,7 @@
   - ruff
   - frontend build（esbuild 固定 `0.28.2`）
   - pip-audit
-  - gitleaks 全歷史掃描（CLI 8.24.3；binary 以 version＋SHA-256 固定；掃描 273 commits／約 40 MB，0 credential leaks）
+  - gitleaks 全歷史掃描（CLI 8.24.3；binary 以 version＋SHA-256 固定；本機掃描 273 commits、CI 掃描 285 commits，約 40 MB，0 credential leaks）
   - Syft SBOM（SPDX JSON artifact）
 - `.github/dependabot.yml`
   - pip／docker／github-actions 每週更新
@@ -41,13 +41,20 @@ CI 已移除 `--ignore-vuln`。若未來出現新的 advisory，security job 會
 
 先在 temp venv 完成相容性測試；正式 `.venv` 同步後也重跑一次：
 
-- `pyarrow 25.0.1` + `pytest 9.2.0`：689 tests pass。
+- `pyarrow 25.0.1` + `pytest 9.2.0`：690 tests pass。
 - `pytest-cov 6.3.0` 可搭配 pytest 9.2.0，`--cov` 正常。
 - 法規 Parquet（1,351 rows／26 columns）與判決 Parquet（1,295 rows／18 columns）：pyarrow 18 與 25 的 schema、row count、前 100 筆 SHA-256 相同。
 - pyarrow 25 寫出的 ZSTD Parquet 可被 pyarrow 18 與 DuckDB 讀取；DuckDB 寫出的 Parquet 也可被 pyarrow 18 與 25 讀取。
 - `pip-audit` 在 pyarrow 25.0.1 + pytest 9.2.0 環境回報 no known vulnerabilities。
 
 正式環境升級仍應在備份完成、展示關閉時進行，並先跑一個月份的匯入與查詢 smoke test；不要只在測試套件通過後就直接切 production。
+
+## 尚未完成的 CI 硬化
+
+- GitHub Actions 仍使用 `@v4`／`@v5` 等 tag，尚未以 commit SHA 固定。
+- `actions/checkout` 尚未設 `persist-credentials: false`。
+- CI 仍是 `uv sync --extra dev`，尚未加 `--frozen`／`uv lock --check`；Dependabot PR 也不一定同步更新 `uv.lock`。
+- `main` 尚未設定 branch protection；目前可直接 push。
 
 ## 手動驗證
 

@@ -1,16 +1,18 @@
 # Judgment 安全性補充評估報告
 
 - 日期：2026-11-21
-- 版本：v1.0
+- 版本：v1.1（2026-11-21 與程式碼重新對照）
 - 範圍：公開展示站 `judgment.ragdemo.win`、API `api-mbp.ragdemo.win`、本機主控台 `127.0.0.1:9200`、電源代理 `127.0.0.1:9201`、備份流程、題庫與 RAG 資料流
 - 定位：補充 `specs/security/security-acceptance-matrix.md`，只列「本次新發現」與「尚未關閉的既有項目」
 - 測試原則：只做唯讀驗證與程式碼追蹤；未執行破壞性測試、未取得或輸出任何真實密鑰
+
+> **現況對照（2026-11-21 後續更新）**：本文件保留發現與修復歷程；目前控制狀態以 [`security-acceptance-matrix.md`](security-acceptance-matrix.md) 與 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md) 為準。CSP 已 enforce、admin token／session secret 已輪替、gitleaks 已做全歷史掃描、pyarrow／pytest 已升級。仍未完成：SESSION-01、AUDIT-01、APP-DB-01、SSE-01、PRIV-01、完整 restore drill、SameSite 評估、HIST-01 歷史清理。以下「當時」段落與 P1/P2 建議不應直接當成目前待辦。
 
 ## 0. 摘要
 
 本次新增 **1 個 P0、5 個 P1、12 個 P2、5 個 P3／外部**。P0 已於 2026-11-21 修復並上線（見 0.1）。
 
-最需要立即處理的五件事：
+當時最需要立即處理的五件事（多數已修復，見下方與 matrix）：
 
 1. **P0：展示訪客可從 `/api/performance` 讀到完整的 RAG 問題與答案。** 已在正式站以匿名請求重現。
 2. **P1：展示訪客可從 `/api/processing`、`/api/judgment-download/status` 讀到伺服器絕對路徑與 macOS 使用者名稱。**
@@ -18,7 +20,7 @@
 4. **P1：Google 登入 session 使用 `SameSite=None`，且 `GET /api/index-alias/reconcile?repair=true` 會改資料；Origin 檢查只涵蓋非 GET，形成 CSRF 路徑。**
 5. **P1：電源代理接受 `Origin: null` 與任意 localhost 來源，只靠固定標頭 `X-Judgment-Power: 1`；沙箱 iframe 可跨站啟動／停止後端。**
 
-另外，備份脚本會把 `.env` 明文複製到 removable disk，與資料庫 dump、Qdrant snapshot 放在一起；這是本次風險最高的「非展示路徑」問題之一（P1）。
+當時備份腳本會把 `.env` 明文複製到 removable disk，與資料庫 dump、Qdrant snapshot 放在一起；後續已改為 age 加密 PostgreSQL dump、排除 `.env`，完整 restore drill 仍待執行。
 
 > 展示狀態：2026-11-21T05:15Z 時，展示仍開啟，六個功能全開，到期時間為 `2026-11-21T16:55:18Z`。在 P0 修復前，最安全的作法是先關閉 `allow_performance`，或直接關閉展示；若必須保留展示，請先部署 P0 熱修復。
 
@@ -40,7 +42,7 @@
 - **CSRF-01（部分）**：`/api/index-alias/reconcile` 的 repair 改為 `POST`，GET 只讀；Google session 寫入要求 `Origin`，並拒絕 `Sec-Fetch-Site: cross-site`。`SameSite=None` 尚未改。
 - **POWER-01**：power agent 拒絕 `Origin: null`、只允許 backend port 的 loopback origin、拒絕 `Sec-Fetch-Site: cross-site`。
 - **BAK-01（部分）**：`backup.sh` 不再複製 `.env`；`restore.sh` 會在缺少 `.env` 時警告。備份加密與 restore drill 尚未做。
-- **HDR-01（部分）**：API 加上 CSP Report-Only、X-Frame-Options、Referrer-Policy、Permissions-Policy；Pages `_headers` 同步加 CSP Report-Only。尚未 enforce。
+- **HDR-01（當時部分；後續已 enforce）**：API 加上 CSP Report-Only、X-Frame-Options、Referrer-Policy、Permissions-Policy；Pages `_headers` 同步加 CSP Report-Only。後續已切到 `Content-Security-Policy` enforce；`report-to` 仍待補。
 - **XSS-01**：新增 `safeUrl()`，套用到判決 PDF、法規 URL、附件、首頁來源與題庫法規連結。
 - **DEMO-QB-01**：題庫讀取改為 admin-only，demo 訪客不再取得內部批注／審核史。
 - **RATE-01**：demo limiter 改用 `client_ip_key()`（IPv6 /64）；加 auth endpoint limiter、demo body 64 KB／admin 20 MB 上限、`filters` key/value 限制。
@@ -48,7 +50,7 @@
 - **INFO-01**：`/api/health` 只回 status／version／readiness；`.env` 設 `APP_ENV=production`。
 - **CORS-01**：正式 CORS 移除 localhost、`127.0.0.1:9200`、已無 DNS 的 `judement.ragdemo.win`。
 
-驗證：677 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。
+當時驗證：677 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。目前為 690 tests pass、CSP enforce。
 
 尚未完成：DB-ROLE-01（已做 column-level demo role）、TOKEN-01（admin token 與 session secret 已於 2026-11-21 輪替，仍為靜態長效、缺 server-side 撤銷）、SESSION-01、AUDIT-01、完整 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
 
@@ -85,7 +87,7 @@
 - **Rate limit**：展示已關閉，無法再做匿名 30 次 live 測試；`DEMO_QUERY_RATE_PER_MINUTE=20` 的 429 路徑由 `DemoRateLimiter` 與既有測試覆蓋。
 - **CSP 收集端點**：已實作 `POST /api/csp-report`（8 KB、per-IP/每日限流、`.run/csp-report.log` 輪替）；API 與 Pages 都已加 `report-uri`。
 - **CSP 手動 console 檢查**：Playwright + Chrome／WebKit／Firefox，demo 開啟時跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出、performance／quality／processing／status／admin；inline theme script 已移到 `assets/js/boot.js`。Cloudflare Web Analytics 已關閉並 purge，beacon 已消失。
-- **CSP enforce**：2026-11-21 已從 Report-Only 切到 `Content-Security-Policy`；enforce 後同一組跨瀏覽器功能測試 0 CSP violation、0 page error、下載正常。Demo 已再次關閉。
+- **CSP enforce**：2026-11-21 已從 Report-Only 切到 `Content-Security-Policy`；enforce 後同一組跨瀏覽器功能測試 0 CSP violation、0 page error、下載正常。當時 demo 已再次關閉；目前開關狀態以 `demo_settings`／`GET /api/demo/status` 為準。
 - **TOKEN-01（部分）**：管理權杖改存 `sessionStorage`，舊 `localStorage` 權杖會自動遷移並刪除；Google session 驗證成功後會清掉 break-glass token。2026-11-21 已輪替 `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET`，舊 admin token 回 401、舊 session cookie 失效；但仍是靜態長效權杖，且沒有 server-side 撤銷。
 - **SUP-01（CI／供應鏈）**：新增 GitHub Actions（pytest、ruff、frontend build、pip-audit、gitleaks 全歷史掃描、SBOM）、Dependabot、esbuild `0.28.2` pin、PostgreSQL／Qdrant digest pinning。依賴已升至 pyarrow 25.0.1、pytest 9.2.0；pip-audit 無已知 advisory，CI 不再使用 ignore。gitleaks 8.24.3 全歷史掃描 0 credential leaks；HIST-01 仍因歷史含主機／port 未結案。詳見 `specs/security/supply-chain.md`。
 - **`SameSite=None`**：尚未改 Lax。
@@ -152,7 +154,7 @@
 | SSE-01 | P3 | SSE ticket 120 秒可重複使用、未綁 session／IP | 短暫事件流外洩 | 程式碼確認 |
 | PRIV-01 | P3 | Google Fonts 由訪客瀏覽器直連 | 訪客 IP 暴露給第三方 | 已重現 |
 | HIST-01 | P3 | public repo 歷史含內部主機／port | 基礎設施情資 | 既有 matrix `partial` |
-| EXT-01 | 外部 | Google OAuth 實機、第二台設備、restore drill、SSH／防火牆 | 驗收尚未閉環 | 見第 8 節 |
+| EXT-01 | 外部 | Google OAuth 實機、第二台設備、restore drill、SSH／防火牆 | Google OAuth 已實機驗證；第二台設備、完整 restore drill、SSH／防火牆仍待驗收 | 見第 8 節 |
 
 ## 3. 詳細發現
 
@@ -397,7 +399,7 @@ Pages /:
 
 **修復**
 
-1. 先在 API middleware 與 Pages `_headers` 加 **Report-Only** CSP，收集違規。
+1. CSP 已 enforce；後續只需補 `report-to`／Reporting-Endpoints 與 header 全面抽查。
 2. 建議政策：
    ```text
    default-src 'self';
@@ -780,18 +782,20 @@ docker exec judgment-postgres psql -U judgment -d judgment -tAc \
 
 | Matrix ID | 本次結論 |
 |---|---|
-| XSS-01 | 仍未完成；新增 `safeUrl` 與 CSP 建議 |
-| HDR-01 | 仍未完成；API 完全沒有 CSP／XFO |
-| BAK-01 | 仍未完成；本次確認 `.env` 明文進備份 |
-| BAK-02 | 仍未完成；restore drill 尚無證據 |
-| ABUSE-01 | 部分完成（demo 有 rate/budget），但 IPv6 /64 與 auth 限流仍缺 |
-| AUTH-01 | 部分完成；remote actor 固定為 `admin`，缺 audit |
-| AUTH-02 | 仍未完成；狀態機可直接寫 accepted |
-| DATA-01 | 仍未完成；90 天完整問答保留 |
-| SUP-01 | 已加入 CI／Dependabot／SBOM／pip-audit／gitleaks 全歷史掃描、esbuild 與 Docker digest pinning；pyarrow 25.0.1、pytest 9.2.0，pip-audit 無 ignore；gitleaks 全歷史 0 credential leaks |
-| HIST-01 | 仍為 partial；gitleaks 全歷史 0 credential leaks，但 public repo 歷史仍含主機／port |
-| CF-01/02 | 仍有效；docs/openapi 401 已再次確認 |
-| WEB-01/02/03 | 仍有效；但 CSRF-01 是 GET 路徑的新缺口 |
+| XSS-01 | `implemented`：`safeUrl()` 與 CSP enforce 已完成；Safari／完整瀏覽器注入測試待補 |
+| HDR-01 | `implemented`：CSP enforce、XFO／Referrer／Permissions 已加；`report-to` 待補 |
+| BAK-01 | `implemented`：PG dump age 加密、`.env` 排除；`data/` 與 Qdrant snapshot 仍明文 |
+| BAK-02 | `partial`：subset restore 已通過；完整 157 GB＋Qdrant drill 尚未執行 |
+| ABUSE-01 | `partial`：demo RAG／query／poll 限流與每日預算已實作；端到端 429／串流併發／Cloudflare edge 規則待驗 |
+| AUTH-01 | `partial`：Google session actor email 已實機驗證；admin token actor 與 audit 待補 |
+| AUTH-02 | `not_started`：狀態機仍可直接寫 accepted |
+| DATA-01 | `partial`：90 天 prune 存在，但每 200 次寫入才觸發；備份保留政策待定 |
+| SUP-01 | `implemented`：CI／Dependabot／SBOM／pip-audit／gitleaks 全歷史、esbuild 與 Docker digest pinning；pyarrow 25.0.1、pytest 9.2.0；Actions SHA pin／frozen lock／branch protection 待補 |
+| HIST-01 | `partial`：gitleaks 全歷史 0 credential leaks，但 public repo 歷史仍含主機／port |
+| CF-01/02 | `verified`；demo 關閉時受保護 API 401，demo 開啟時依 `demo_policies.json` |
+| WEB-01/02/03 | `verified`；CSRF-01 仍待 SameSite 評估 |
+| TOKEN-01 | `partial`：sessionStorage、token／session secret 已輪替；無 server-side 撤銷 |
+| DB-ROLE-01 | `partial`：`demo_reader` 受限；主應用 `judgment` 仍 superuser／createdb |
 
 建議在 matrix 新增：
 
@@ -817,7 +821,7 @@ docker exec judgment-postgres psql -U judgment -d judgment -tAc \
 - 多數 demo payload 已做 key-based 清洗（status／quality／部分 processing）。
 - HTTP → HTTPS 301；HSTS、nosniff 已存在。
 - `.env` 權限 600；cloudflared credentials 400。
-- 以已知 key 名稱與常見 token pattern 抽查 tracked files 與 git 歷史，未發現真實密鑰（仍建議 gitleaks 全歷史掃描）。
+- 以已知 key 名稱與常見 token pattern 抽查 tracked files 與 git 歷史，未發現真實密鑰；後續已完成 gitleaks 8.24.3 全歷史掃描，0 credential leaks。
 - 前端未發現 `eval`、`new Function`、`document.write`；多數輸出有 `escapeHtml`。
 - 備份有 checksum、manifest、restore script（但需加密）。
 
@@ -839,7 +843,7 @@ docker exec judgment-postgres psql -U judgment -d judgment -tAc \
 
 ### 6.3 本週（P2）
 
-1. CSP／security headers（先 Report-Only）。
+1. CSP／security headers（CSP 已 enforce；`report-to` 與 header 全面抽查待補）。
 2. Demo 題庫 DTO；限制 accepted。
 3. 題庫狀態機。
 4. Rate limit 用 `client_ip_key`；auth 限流；body 上限。
