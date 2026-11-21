@@ -43,6 +43,12 @@ let cleanup = null;
 let routeToken = 0;
 
 function parseRoute() {
+  try {
+    const question = new URLSearchParams(window.location.search).get("q");
+    if (question && question.trim()) return "rag";
+  } catch (error) {
+    /* fall through to the hash route */
+  }
   const raw = window.location.hash.replace(/^#\/?/, "").trim();
   const route = raw.split("/")[0] || DEFAULT_ROUTE;
   return Object.prototype.hasOwnProperty.call(ROUTES, route) ? route : DEFAULT_ROUTE;
