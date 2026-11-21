@@ -166,10 +166,28 @@ copy (select 1) to program 'id';        -- permission denied
   - manifest 已移除 `hostname`、`project_root`、source 絕對路徑；沒有 password/token/secret；只保留 `http://127.0.0.1:6333` 這個 localhost Qdrant URL。
 - **完整 150 GB＋Qdrant restore drill 尚未執行**；目前只驗證 dump 可讀與 subset restore，需安排維護窗口做完整還原。
 
-## 8. 已知未完成
+## 8. 管理權杖與 session secret 輪替
+
+2026-11-21 已輪替 `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET`；舊 admin token 回 401，舊 session cookie 失效。輪替 `AUTH_SESSION_SECRET` 會讓所有既有 Google session 登出，需重新登入。
+
+安全輪替順序：
+
+1. 產生新值（不要貼到終端機或 issue）：
+   ```bash
+   openssl rand -base64 48
+   ```
+2. 更新 `.env` 的 `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET`，保持檔案 `600`。
+3. 重啟 `judgment-web`。
+4. 先驗證新 admin token 可用，再確認舊 token 回 401。
+5. 用新 secret 簽發的 session cookie 測 `/api/auth/me` 的 `authenticated` 為 `true`；舊 cookie 應為 `false`。
+6. 重新以 Google 登入管理頁。
+
+不要把 token／secret 寫進 shell 指令參數、issue、commit 或截圖。若曾出現在終端機輸出，視為已外洩並立即輪替。
+
+## 9. 已知未完成
 
 - CSP 已 enforce；`report-uri` 收集端點已上線。
-- 管理權杖已改存 `sessionStorage`，但仍是靜態長效權杖，尚未輪替。
+- 管理權杖已改存 `sessionStorage`，且已於 2026-11-21 輪替；但仍是靜態長效權杖，沒有 server-side 撤銷。
 - `AUTH_COOKIE_SAMESITE=none` 尚未改 Lax。
 - 完整備份 restore drill（DB＋Qdrant＋data）尚未執行。
 - `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。

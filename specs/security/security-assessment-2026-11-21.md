@@ -50,7 +50,7 @@
 
 驗證：677 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。
 
-尚未完成：DB-ROLE-01（已做 column-level demo role）、TOKEN-01、SESSION-01、AUDIT-01、完整 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
+尚未完成：DB-ROLE-01（已做 column-level demo role）、TOKEN-01（admin token 與 session secret 已於 2026-11-21 輪替，仍為靜態長效、缺 server-side 撤銷）、SESSION-01、AUDIT-01、完整 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
 
 ### 0.3 匿名查詢邊界測試（2026-11-21）
 
@@ -86,7 +86,7 @@
 - **CSP 收集端點**：已實作 `POST /api/csp-report`（8 KB、per-IP/每日限流、`.run/csp-report.log` 輪替）；API 與 Pages 都已加 `report-uri`。
 - **CSP 手動 console 檢查**：Playwright + Chrome／WebKit／Firefox，demo 開啟時跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出、performance／quality／processing／status／admin；inline theme script 已移到 `assets/js/boot.js`。Cloudflare Web Analytics 已關閉並 purge，beacon 已消失。
 - **CSP enforce**：2026-11-21 已從 Report-Only 切到 `Content-Security-Policy`；enforce 後同一組跨瀏覽器功能測試 0 CSP violation、0 page error、下載正常。Demo 已再次關閉。
-- **TOKEN-01（部分）**：管理權杖改存 `sessionStorage`，舊 `localStorage` 權杖會自動遷移並刪除；Google session 驗證成功後會清掉 break-glass token。靜態長效權杖本身仍未輪替。
+- **TOKEN-01（部分）**：管理權杖改存 `sessionStorage`，舊 `localStorage` 權杖會自動遷移並刪除；Google session 驗證成功後會清掉 break-glass token。2026-11-21 已輪替 `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET`，舊 admin token 回 401、舊 session cookie 失效；但仍是靜態長效權杖，且沒有 server-side 撤銷。
 - **SUP-01（CI／供應鏈）**：新增 GitHub Actions（pytest、ruff、frontend build、pip-audit、gitleaks 全歷史掃描、SBOM）、Dependabot、esbuild `0.28.2` pin、PostgreSQL／Qdrant digest pinning。依賴已升至 pyarrow 25.0.1、pytest 9.2.0；pip-audit 無已知 advisory，CI 不再使用 ignore。gitleaks 8.24.3 全歷史掃描 0 credential leaks；HIST-01 仍因歷史含主機／port 未結案。詳見 `specs/security/supply-chain.md`。
 - **`SameSite=None`**：尚未改 Lax。
 - **備份加密／restore drill**：PostgreSQL dump 已改為 age 加密（`postgres/judgment.dump.age`），`.env` 不進備份；`BACKUP_REQUIRE_ENCRYPTION=1` 會 fail closed。2026-11-21 完整備份已寫入 `/Volumes/T500_2TB/judgment-backup-20261121-1846`（157 GB；data 114 GB、PG 13.7 GB age、Qdrant 29.4 GB／4,714,967 points）。`data/` 逐檔大小一致；安全退出重掛後 checksum OK；`pg_restore --list` rc=0、443 行。manifest 已移除 hostname、project_root 與 source 絕對路徑，沒有 password/token/secret。完整 150 GB＋Qdrant restore drill 尚未執行；subset drill 已通過。
@@ -136,7 +136,7 @@
 | CSRF-01 | **P1** | `SameSite=None` + 會寫資料的 GET + Origin 檢查缺口 | 管理員被跨站誘導改索引狀態 | 程式碼確認 |
 | POWER-01 | **P1** | 電源代理接受 `Origin: null`／任意 localhost | 跨站啟動／停止後端（DoS） | 程式碼＋測試確認 |
 | BAK-01 | **P1** | 備份明文複製 `.env` 與 DB dump | 備份失竊即取得全部密鑰與資料 | 程式碼確認 |
-| TOKEN-01 | P2 | 管理權杖存 localStorage、靜態長效 | 任一 XSS／供應鏈事件即取得完整管理權 | 程式碼確認 |
+| TOKEN-01 | P2 | 管理權杖存 localStorage、靜態長效 | 任一 XSS／供應鏈事件即取得完整管理權 | 程式碼確認；2026-11-21 已輪替 token／session secret |
 | HDR-01 | P2 | API／Console 無 CSP 與多項 security headers | XSS 縱深不足、可被嵌入 | 已重現 |
 | DEMO-QB-01 | P2 | 展示題庫露出內部批注、審核者、完整審核史 | 內部工作流程與未公開內容外流 | 已重現 |
 | AUTH-02 | P2 | 題庫可直接建立／更新為 `accepted` | 繞過審核狀態機 | 程式碼確認 |
