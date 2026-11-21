@@ -151,6 +151,13 @@ def test_create_review_and_benchmark_suite(session_factory) -> None:
     assert reviewed["status"] == "accepted"
     assert reviewed["benchmark_ready"] is True
     assert reviewed["reviews"][0]["decision"] == "approved"
+    listed = next(
+        entry
+        for entry in list_items(session_factory, limit=10)["items"]
+        if entry["id"] == item["id"]
+    )
+    assert listed["latest_review"]["rubric_scores"] == {"overall": 5}
+    assert listed["latest_review"]["reviewer"] == "reviewer"
 
     suite = create_suite(
         session_factory,

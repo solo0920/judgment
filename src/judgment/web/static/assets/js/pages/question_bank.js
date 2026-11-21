@@ -325,6 +325,36 @@ function createFormMarkup(item, state) {
   return item ? manualFormMarkup(item) : aiCreateFormMarkup(state);
 }
 
+const ITEM_SCORE_FIELDS = [
+  ["clarity", "題目清晰"],
+  ["labels", "法條標注"],
+  ["answer", "參考答案"],
+  ["difficulty", "難度與標籤"],
+  ["overall", "整體"],
+];
+
+function latestReviewScoresMarkup(item) {
+  const review = item?.latest_review || item?.reviews?.[0] || null;
+  if (!review) {
+    return `<div class="qb-latest-scores is-empty">尚無人工驗收評分</div>`;
+  }
+  const scores = review.rubric_scores || {};
+  return `<div class="qb-latest-scores" title="${escapeHtml(
+    `${formatDateTime(review.created_at)} · ${review.reviewer || "匿名"}`,
+  )}">
+    <span class="qb-latest-scores-label">最新評分</span>
+    ${ITEM_SCORE_FIELDS.map(
+      ([key, label]) =>
+        `<span>${label} <strong>${escapeHtml(
+          scores[key] ?? "—",
+        )}</strong></span>`,
+    ).join("")}
+    <span class="qb-latest-scores-meta">${escapeHtml(
+      review.reviewer || "匿名",
+    )} · ${escapeHtml(formatDateTime(review.created_at))}</span>
+  </div>`;
+}
+
 function itemCardMarkup(item) {
   const retired = item.status === "retired" || Boolean(item.deleted_at);
   return `<article class="qb-item" data-qb-item="${item.id}">
@@ -362,6 +392,7 @@ function itemCardMarkup(item) {
                <button class="btn btn-ghost btn-sm" type="button" data-qb-action="delete" data-id="${item.id}">${icon("trash", 13)}<span>刪除</span></button>`
         }
       </div>
+      ${latestReviewScoresMarkup(item)}
     </div>
   </article>`;
 }

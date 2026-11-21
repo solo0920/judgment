@@ -413,11 +413,46 @@ def _item_snapshot(item: QuestionBankItem) -> Dict[str, Any]:
     }
 
 
+def _serialize_review(review: QuestionBankReview) -> Dict[str, Any]:
+    return {
+        "id": review.id,
+        "item_version": review.item_version,
+        "reviewer": review.reviewer,
+        "decision": review.decision,
+        "rubric_scores": review.rubric_scores or {},
+        "comment": review.comment,
+        "created_at": _iso(review.created_at),
+    }
+
+
+def _latest_reviews_for(
+    session: Session, item_ids: Sequence[int]
+) -> Dict[int, QuestionBankReview]:
+    ids = [int(item_id) for item_id in item_ids if item_id]
+    if not ids:
+        return {}
+    reviews = session.scalars(
+        select(QuestionBankReview)
+        .where(QuestionBankReview.item_id.in_(ids))
+        .order_by(
+            QuestionBankReview.item_id.asc(),
+            QuestionBankReview.created_at.desc(),
+        )
+    ).all()
+    latest: Dict[int, QuestionBankReview] = {}
+    for review in reviews:
+        latest.setdefault(int(review.item_id), review)
+    return latest
+
+
 def serialize_item(
     item: QuestionBankItem,
     *,
     reviews: Optional[Sequence[QuestionBankReview]] = None,
+    latest_review: Optional[QuestionBankReview] = None,
 ) -> Dict[str, Any]:
+    review_list = list(reviews or [])
+    latest = latest_review or (review_list[0] if review_list else None)
     return {
         "id": item.id,
         "lineage_id": item.lineage_id,
@@ -447,18 +482,10 @@ def serialize_item(
         "deleted_at": _iso(item.deleted_at),
         "created_at": _iso(item.created_at),
         "updated_at": _iso(item.updated_at),
-        "reviews": [
-            {
-                "id": review.id,
-                "item_version": review.item_version,
-                "reviewer": review.reviewer,
-                "decision": review.decision,
-                "rubric_scores": review.rubric_scores or {},
-                "comment": review.comment,
-                "created_at": _iso(review.created_at),
-            }
-            for review in (reviews or [])
-        ],
+        "latest_review": (
+            _serialize_review(latest) if latest is not None else None
+        ),
+        "reviews": [_serialize_review(review) for review in review_list],
     }
 
 
@@ -709,8 +736,16 @@ def list_items(
                 ).all()
             )
             total = int(session.scalar(total_statement) or 0)
+        latest_reviews = _latest_reviews_for(
+            session, [int(item.id) for item in items]
+        )
         return {
-            "items": [serialize_item(item) for item in items],
+            "items": [
+                serialize_item(
+                    item, latest_review=latest_reviews.get(int(item.id))
+                )
+                for item in items
+            ],
             "total": total,
             "limit": limit,
             "offset": offset,

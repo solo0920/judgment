@@ -19523,3 +19523,40 @@ a.auth-menu-item {
   font-size: 10.5px;
   text-align: center;
 }
+
+.qb-latest-scores {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.qb-latest-scores-label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.qb-latest-scores strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.qb-latest-scores-meta {
+  margin-left: auto;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.qb-latest-scores.is-empty {
+  color: var(--faint);
+  font-style: italic;
+}
