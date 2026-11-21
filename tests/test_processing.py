@@ -3796,3 +3796,31 @@ def test_merge_prior_index_runtime_restores_completed_copy_stage() -> None:
     assert merged["copy"]["resumed"] is True
     assert merged["copy"]["resumed_from_run_id"] == "prior-copy-run"
     assert merged["index_prior_duration_ms"] == 103545112 - 27178879
+
+
+def test_processing_cached_query_skips_full_snapshot(
+    processing_client: TestClient, monkeypatch
+) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    cached = {
+        "status": "operational",
+        "mode": "cached",
+        "generated_at": "2026-11-21T00:00:00+00:00",
+        "workflows": [],
+        "active_runs": [],
+    }
+    monkeypatch.setattr(
+        app_module, "build_processing_bootstrap", lambda **_kwargs: cached
+    )
+
+    def fail_full_snapshot(**_kwargs):
+        raise AssertionError("cached request built a full snapshot")
+
+    monkeypatch.setattr(
+        app_module, "build_processing_snapshot", fail_full_snapshot
+    )
+    response = processing_client.get("/api/processing?cached=1")
+    assert response.status_code == 200
+    assert response.json()["mode"] == "cached"

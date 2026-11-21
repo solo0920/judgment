@@ -6668,7 +6668,7 @@ export async function render(root) {
     if (disposed || refreshStream) return;
     if (demoReadOnly) {
       demoTimer = window.setInterval(() => {
-        if (!disposed) void refresh({ silent: true });
+        if (!disposed) void refresh({ silent: true, cached: true });
       }, 30000);
       return;
     }
@@ -6691,7 +6691,7 @@ export async function render(root) {
           } else {
             // Compatibility fallback for an older backend that only sends
             // the refresh notification.
-            refresh({ silent: true });
+            refresh({ silent: true, cached: true });
           }
           return;
         }
@@ -6752,7 +6752,7 @@ export async function render(root) {
         onError: () => {
           // Fallback only when the stream never delivered an initial
           // snapshot.  Normal updates always come via SSE.
-          if (!lastSnapshot) refresh({ silent: true });
+          if (!lastSnapshot) refresh({ silent: true, cached: true });
         },
       },
     );
@@ -7900,11 +7900,11 @@ export async function render(root) {
     }
   };
 
-  const refresh = async ({ silent = false } = {}) => {
+  const refresh = async ({ silent = false, cached = false } = {}) => {
     if (disposed || refreshing) return;
     refreshing = true;
     try {
-      const snapshot = await api.processing();
+      const snapshot = await api.processing({ cached });
       applySnapshot(snapshot, { silent });
     } catch (error) {
       if (disposed) return;
@@ -8202,7 +8202,9 @@ export async function render(root) {
       event.stopPropagation();
     }
     const action = button.dataset.processingAction;
-    if (action === "refresh") refresh({ silent: false });
+    if (action === "refresh") {
+      refresh({ silent: false, cached: demoReadOnly });
+    }
     else if (action === "open-stage") {
       openProcessingStage(button.dataset.stageId || "");
     } else if (action === "refresh-judgment-months") {
@@ -8355,10 +8357,9 @@ export async function render(root) {
     passive: true,
   });
 
+  const initialPaint = refresh({ silent: true, cached: true });
   connectRefreshStream();
-  if (demoReadOnly || typeof EventSource === "undefined") {
-    await refresh({ silent: false });
-  }
+  await initialPaint;
 
   return () => {
     disposed = true;

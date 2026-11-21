@@ -1292,7 +1292,6 @@ def _index_month_coverage_runtime(
     key = (
         id(session_factory),
         index.get("version_id"),
-        index.get("indexed"),
         index.get("collection"),
         index.get("model"),
     )
@@ -1611,7 +1610,10 @@ def _index_metrics_with_factory(
         }
     try:
         from ..index_versions import active_version
-        from ..judgment_index import index_coverage, index_staleness
+        from ..judgment_index import (
+            cached_index_coverage,
+            cached_index_staleness,
+        )
 
         active = active_version(
             session_factory, alias_name=settings.judgment_vector_alias
@@ -1622,17 +1624,19 @@ def _index_metrics_with_factory(
             else settings.judgment_vector_collection
         )
         version_id = active["version_id"] if active else None
-        coverage = index_coverage(
+        coverage = cached_index_coverage(
             session_factory,
             collection=collection,
             model=settings.embedding_model,
             version_id=version_id,
+            ttl_seconds=120.0,
         )
-        staleness = index_staleness(
+        staleness = cached_index_staleness(
             session_factory,
             collection=collection,
             model=settings.embedding_model,
             version_id=version_id,
+            ttl_seconds=120.0,
         )
         indexed = int(coverage.get("indexed_judgments") or 0)
         total = int(coverage.get("total_judgments") or 0)

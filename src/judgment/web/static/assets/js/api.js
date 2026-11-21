@@ -869,8 +869,8 @@ export const api = {
     });
   },
 
-  processing() {
-    return request("/api/processing", {
+  processing({ cached = false } = {}) {
+    return request(cached ? "/api/processing?cached=1" : "/api/processing", {
       timeout: 45000,
       trackClient: false,
     });

@@ -1371,7 +1371,7 @@ def create_app(
 
         async def warm_processing_snapshots() -> None:
             while True:
-                await asyncio.sleep(30)
+                await asyncio.sleep(120)
                 try:
                     snapshot = await asyncio.to_thread(
                         build_processing_snapshot,
@@ -2393,22 +2393,28 @@ def create_app(
             )
 
     @app.get("/api/processing")
-    def processing_snapshot(request: Request) -> Dict[str, Any]:
+    def processing_snapshot(
+        request: Request, cached: bool = False
+    ) -> Dict[str, Any]:
         with trace_segment(
             "api.endpoint",
             module=__name__,
             function="processing_snapshot",
-            params={},
+            params={"cached": cached},
         ):
             if _is_demo_visitor(request):
-                # Visitors get the last cached snapshot immediately.  The
-                # background warmer refreshes it every 30 seconds; admin
-                # requests keep building a fresh full snapshot.
                 payload = build_processing_bootstrap(
                     settings=settings,
                     session_factory=app.state.session_factory,
                 )
                 return sanitize_processing_payload(payload)
+            if cached:
+                # First paint should never wait for the full DB/Qdrant scan.
+                # The cached snapshot is refreshed by the background warmer.
+                return build_processing_bootstrap(
+                    settings=settings,
+                    session_factory=app.state.session_factory,
+                )
             return build_processing_snapshot(
                 settings=settings,
                 session_factory=app.state.session_factory,

@@ -2,7 +2,7 @@
 
 **Status**: Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
 
-**Version**: 1.2
+**Version**: 1.3
 
 **Last Updated**: 2026-11-20
 
@@ -151,7 +151,8 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - 訪客資料處理頁 MUST 使用最近一次 background processing snapshot（訪客版 `GET /api/processing` 為 cached、sanitized payload），呈現與 admin 相同的工作流程導覽、處理總覽、月份矩陣與索引 waterfall；MUST NOT 在請求中執行完整 `build_processing_snapshot()`。
 - `GET /api/demo/processing` 保留為輕量摘要端點，只回傳索引 summary／current／copy、active runs、recent runs 與 backlog 數字；MUST NOT 建置完整 snapshot。
 - 訪客 SSE MUST NOT 訂閱 admin-only event stream；頁面以 30 秒輪詢 cached snapshot 更新。
-- 背景 warmer 每 30 秒更新 snapshot；訪客頁面可顯示「快照時間」，不得把舊快照冒充即時狀態。
+- 背景 warmer 每 120 秒更新 snapshot；訪客頁面 MUST 顯示「快照時間」，不得把舊快照冒充即時狀態。
+- 管理員頁面 first paint SHOULD 使用 `GET /api/processing?cached=1` 的 cached snapshot；完整重建只在使用者手動重新整理或執行操作後進行。
 
 ### FR-010b 訪客品質頁效能
 
@@ -306,4 +307,4 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] 全站 tests、ruff、frontend build 通過。
 - [ ] 不影響 v7 索引；production 重啟等 v7 完成後。
 
-**Revision**: 1.2（2026-11-21）展示模式開啟時，四個資料頁改用與 admin 相同的完整頁面；執行與管理控制項以 LOCK／停用呈現，唯讀查詢保留。Demo 關閉時仍顯示未開放狀態。
+**Revision**: 1.3（2026-11-21）資料處理頁 first paint 改用 cached snapshot；索引 coverage／staleness 加上 120 秒 TTL 快取，背景 warmer 改為 120 秒，避免每次開頁觸發 15–20 秒的完整 DB 掃描。
