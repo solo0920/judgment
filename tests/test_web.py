@@ -1611,6 +1611,23 @@ def test_performance_middleware_records_api_calls(web_client) -> None:
     assert filtered.json()["total"] >= 1
 
 
+def test_query_rejects_invalid_sort_key(web_client) -> None:
+    response = web_client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {
+                "table": "law_documents",
+                "sort": "1; select pg_sleep(10)",
+            },
+            "page": 1,
+            "page_size": 1,
+        },
+    )
+    assert response.status_code == 400
+    assert "排序" in response.text
+
+
 def test_performance_report_includes_index_stats(web_client) -> None:
     started = datetime.now(timezone.utc)
     record_performance(

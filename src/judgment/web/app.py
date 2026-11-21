@@ -190,6 +190,7 @@ from .demo_mode import (
     load_demo_state,
     load_demo_usage,
     public_demo_payload,
+    sanitize_catalog_payload,
     sanitize_infrastructure,
     sanitize_performance_payload,
     sanitize_processing_payload,
@@ -3556,14 +3557,14 @@ def create_app(
         }
 
     @app.get("/api/catalog")
-    def catalog() -> Dict[str, Any]:
+    def catalog(request: Request) -> Dict[str, Any]:
         with trace_segment(
             "api.endpoint",
             module=__name__,
             function="catalog",
             params={},
         ):
-            return endpoint_cache.get_or_build(
+            payload = endpoint_cache.get_or_build(
                 "catalog",
                 60.0,
                 lambda: build_catalog(
@@ -3573,6 +3574,9 @@ def create_app(
                     judgment_law_list=settings.judgment_law_list,
                 ),
             )
+            if _is_demo_visitor(request):
+                return sanitize_catalog_payload(payload)
+            return payload
 
     @app.get("/api/judgment-stats")
     def judgment_stats() -> Dict[str, Any]:

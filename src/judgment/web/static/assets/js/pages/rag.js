@@ -1365,7 +1365,7 @@ export async function render(root) {
             <div class="rag-library-empty">讀取本機紀錄中…</div>
           </div>
           <div class="rag-library-foot" id="rag-storage-note">
-            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器另保留效能紀錄。
+            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器會保留提問與回答文字 90 天用於效能與品質分析。
           </div>
         </section>
       </aside>
@@ -1965,7 +1965,7 @@ export async function render(root) {
       renderLibrary();
       storageNote.textContent =
         storageMode() === "indexeddb"
-          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器另保留效能紀錄。"
+          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器會保留提問與回答文字 90 天用於效能與品質分析。"
           : "瀏覽器儲存不可用，提問紀錄只保留在本次工作階段。";
     } catch (error) {
       if (disposed) return;

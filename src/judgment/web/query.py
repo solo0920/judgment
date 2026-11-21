@@ -495,6 +495,8 @@ def _resolve_sort(table: str, filters: Dict[str, Any]) -> Tuple[str, str]:
         if key in available:
             return key, direction
     if key not in SORTABLE.get(table, {}):
+        if not re.fullmatch(r"[A-Za-z0-9_]+", key):
+            raise ValueError(f"不支援的排序欄位：{key}")
         key = {
             "law_documents": "law_name",
             "law_dataset_versions": "id",

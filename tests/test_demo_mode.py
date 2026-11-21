@@ -237,6 +237,9 @@ def test_demo_status_and_processing_sanitize_infrastructure(demo_client) -> None
     assert payload["data"]["judgment_vector_alias"] == ""
     for service in payload.get("services") or []:
         assert service.get("detail") == ""
+    admin_status = client.get("/api/status", headers=ADMIN_HEADERS)
+    assert admin_status.status_code == 200
+    assert admin_status.json()["endpoints"]
 
     from judgment.web.demo_mode import sanitize_processing_payload
 
@@ -537,6 +540,34 @@ def test_sanitize_processing_payload_redacts_paths() -> None:
     assert cleaned["workflows"][0]["update_status"]["download_path"] == ""
     assert cleaned["law_list"] == ""
     assert "[internal]" in cleaned["workflows"][0]["note"]
+
+
+def test_sanitize_catalog_payload_hides_internal_endpoints() -> None:
+    from judgment.web.demo_mode import sanitize_catalog_payload
+
+    cleaned = sanitize_catalog_payload(
+        {
+            "categories": [
+                {
+                    "id": "law",
+                    "databases": [
+                        {
+                            "id": "qdrant",
+                            "detail": "已連線 http://127.0.0.1:6333；collection「law_articles」",
+                        },
+                        {
+                            "id": "postgres",
+                            "detail": "讀取 /Users/alice/project/data/laws.parquet",
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+    dumped = json.dumps(cleaned, ensure_ascii=False)
+    assert "127.0.0.1" not in dumped
+    assert "/Users/" not in dumped
+    assert "[internal]" in dumped
 
 
 def test_demo_error_response_hides_exception_details(demo_client, monkeypatch) -> None:

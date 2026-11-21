@@ -251,6 +251,23 @@ def _scrub_absolute_paths(value: Any) -> Any:
     return value
 
 
+def _scrub_internal_endpoints(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _scrub_internal_endpoints(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scrub_internal_endpoints(item) for item in value]
+    if isinstance(value, str):
+        return _INTERNAL_ENDPOINT.sub("[internal]", value)
+    return value
+
+
+def sanitize_catalog_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    result = _scrub_absolute_paths(
+        _scrub_internal_endpoints(sanitize_infrastructure(dict(payload)))
+    )
+    return result
+
+
 def _scrub_internal_messages(value: Any) -> Any:
     if isinstance(value, dict):
         result: Dict[str, Any] = {}
