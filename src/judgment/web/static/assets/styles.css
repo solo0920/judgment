@@ -19442,3 +19442,51 @@ a.auth-menu-item {
 .demo-lock-tooltip[hidden] {
   display: none;
 }
+
+.qb-score-field {
+  min-width: 0;
+}
+
+.qb-score-cells {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: transparent;
+}
+
+.qb-score-cell {
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.qb-score-cell:last-child {
+  border-right: 0;
+}
+
+.qb-score-cell:hover {
+  background: var(--surface-2);
+}
+
+.qb-score-cell:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.qb-score-cell.is-active {
+  background: #76b900;
+  color: #0b0f0c;
+}

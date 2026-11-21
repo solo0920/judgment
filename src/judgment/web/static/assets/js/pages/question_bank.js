@@ -481,7 +481,13 @@ function reviewDetailPaneMarkup(item) {
           ["answer", "參考答案"],
           ["difficulty", "難度與標籤"],
           ["overall", "整體"],
-        ].map(([key, label]) => `<label class="field"><span class="field-label">${label} <span class="field-tag">1–5</span></span><input class="input" type="number" min="1" max="5" name="score_${key}" value="4" /></label>`).join("")}
+        ].map(([key, label]) => `<div class="field qb-score-field" data-score-field>
+          <span class="field-label">${label}</span>
+          <div class="qb-score-cells" role="radiogroup" aria-label="${label}分數">
+            ${[1, 2, 3, 4, 5].map((score) => `<button class="qb-score-cell${score === 4 ? " is-active" : ""}" type="button" role="radio" aria-checked="${score === 4 ? "true" : "false"}" data-qb-action="set-score" data-score="${score}" aria-label="${label} ${score} 分">${score}</button>`).join("")}
+          </div>
+          <input type="hidden" name="score_${key}" value="4" data-score-input />
+        </div>`).join("")}
       </div>
       <label class="field"><span class="field-label">批注</span><textarea class="input" name="comment" rows="3" placeholder="標註理由、需要修改的欄位，或驗收結論。"></textarea></label>
       <div class="qb-actions qb-review-decisions">
@@ -1640,6 +1646,22 @@ export function createQuestionBankController(
     if (!action) return;
     const button = event.target.closest("[data-qb-action]");
     const id = Number(button.dataset.id || 0);
+    if (action === "set-score") {
+      const field = button.closest("[data-score-field]");
+      if (!field) return;
+      const score = Math.max(
+        1,
+        Math.min(5, Math.round(Number(button.dataset.score) || 0)),
+      );
+      field.querySelectorAll("[data-qb-action='set-score']").forEach((cell) => {
+        const active = Number(cell.dataset.score) === score;
+        cell.classList.toggle("is-active", active);
+        cell.setAttribute("aria-checked", active ? "true" : "false");
+      });
+      const input = field.querySelector("[data-score-input]");
+      if (input) input.value = String(score);
+      return;
+    }
     if (action === "open-tag-search") {
       const container = button.closest("[data-qb-tag-filter]");
       openTagSearch(container, { focus: true });

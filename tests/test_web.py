@@ -3820,3 +3820,26 @@ def test_google_start_uses_loopback_callback_for_local_console(web_client) -> No
     assert query["redirect_uri"] == [
         "http://localhost:9200/api/auth/google/callback"
     ]
+
+
+def test_question_bank_review_scores_use_five_clickable_cells() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (
+        root
+        / "src"
+        / "judgment"
+        / "web"
+        / "static"
+        / "assets"
+        / "js"
+        / "pages"
+        / "question_bank.js"
+    ).read_text(encoding="utf-8")
+    css = (
+        root / "src" / "judgment" / "web" / "static" / "assets" / "styles.css"
+    ).read_text(encoding="utf-8")
+    assert "qb-score-cells" in source
+    assert 'data-qb-action="set-score"' in source
+    assert 'name="score_${key}" value="4" data-score-input' in source
+    assert "qb-score-cell.is-active" in css
+    assert "background: #76b900" in css
