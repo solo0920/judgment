@@ -298,6 +298,34 @@ function renderQualityReport(data) {
 
 export async function render(root) {
   const demoReadOnly = isDemoVisitor();
+  const cacheKey = `judgment.quality.snapshot.${
+    demoReadOnly ? "visitor" : "admin"
+  }`;
+  const readCachedSnapshot = () => {
+    try {
+      const cached = JSON.parse(
+        window.localStorage.getItem(cacheKey) || "null",
+      );
+      if (!cached?.snapshot) return null;
+      if (Date.now() - Number(cached.saved_at || 0) > 10 * 60 * 1000) {
+        return null;
+      }
+      return cached.snapshot;
+    } catch (error) {
+      return null;
+    }
+  };
+  const saveCachedSnapshot = (snapshot) => {
+    if (!snapshot) return;
+    try {
+      window.localStorage.setItem(
+        cacheKey,
+        JSON.stringify({ snapshot, saved_at: Date.now() }),
+      );
+    } catch (error) {
+      /* cache is best effort */
+    }
+  };
   root.innerHTML = `<section class="page data-page quality-page">
     <div class="page-header">
       <div class="data-page-heading">
@@ -457,10 +485,11 @@ export async function render(root) {
     controller.show(tab);
   };
 
-  const load = async () => {
-    setBusy(refresh, true, "掃描中…");
+  const load = async ({ cached = false } = {}) => {
+    setBusy(refresh, true, cached ? "整理中…" : "掃描中…");
     try {
-      current = await api.quality();
+      current = await api.quality({ cached });
+      saveCachedSnapshot(current);
       paint();
     } catch (error) {
       content.innerHTML = `<div class="report-card">
@@ -508,6 +537,11 @@ export async function render(root) {
   });
 
   syncTab("overview");
+  const cachedSnapshot = readCachedSnapshot();
+  if (cachedSnapshot) {
+    current = cachedSnapshot;
+    paint();
+  }
   if (demoReadOnly) {
     for (const button of tabs) {
       if (button.dataset.qualityTab === "overview") continue;
@@ -518,5 +552,5 @@ export async function render(root) {
       if (badge) badge.textContent = "LOCK";
     }
   }
-  await load();
+  await load({ cached: true });
 }

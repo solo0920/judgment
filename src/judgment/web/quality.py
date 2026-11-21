@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
 from ..index_versions import active_version
-from ..judgment_index import index_coverage
+from ..judgment_index import cached_index_coverage
 from ..judgment_quality import compute_raw_quality
 from ..judgment_raw_parquet import RAW_SCHEMA_VERSION, latest_raw_manifests
 from ..models import JudgmentDocument
@@ -103,11 +103,12 @@ def _coverage(
             if active_index
             else settings.judgment_vector_collection
         )
-        index = index_coverage(
+        index = cached_index_coverage(
             session_factory,
             collection=collection,
             model=settings.embedding_model,
             version_id=active_index["version_id"] if active_index else None,
+            ttl_seconds=120.0,
         )
         indexed = _int(index.get("indexed_judgments"))
         total = _int(index.get("total_judgments"))

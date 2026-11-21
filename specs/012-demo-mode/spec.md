@@ -2,7 +2,7 @@
 
 **Status**: Implemented and deployed 2026-11-20（demo closed; v7 indexing resumed）
 
-**Version**: 1.4
+**Version**: 1.5
 
 **Last Updated**: 2026-11-20
 
@@ -161,7 +161,8 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - `GET /api/demo/quality` MUST 只回傳 totals、checks、coverage、archive 數量與快照時間；MUST NOT 回傳 archives 明細、host、path 或大型 distributions。
 - 品質掃描快取 MUST 以原子寫入更新，權限 0600；admin 請求仍可建置最新掃描並更新快取。
 - 同一時間 MUST 只允許一個品質掃描；已有掃描執行時，其他請求 MUST 回傳最近快取並標記 `refreshing`，不得排隊堆疊掃描。
-- `/api/demo/quality` 回應 SHOULD 小於 20 KB；完整品質頁使用 cached `GET /api/quality`。頁面 MUST 顯示快照時間，不得把舊掃描冒充即時結果。
+- `/api/demo/quality` 回應 SHOULD 小於 20 KB；完整品質頁 first paint MUST 使用 cached `GET /api/quality?cached=1`，完整 DuckDB 掃描只在使用者手動重新整理時執行。
+- 頁面 MUST 顯示快照時間，不得把舊掃描冒充即時結果；前端 MAY 快取最近一次品質 snapshot 供重開頁立即顯示。
 
 ### FR-010c 展示模式的完整頁面與鎖定
 
@@ -308,4 +309,4 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] 全站 tests、ruff、frontend build 通過。
 - [ ] 不影響 v7 索引；production 重啟等 v7 完成後。
 
-**Revision**: 1.4（2026-11-21）資料處理頁使用 slim cached snapshot 與瀏覽器端 first-paint 快取；`/api/auth/me` 直接帶 demo 狀態，避免重複 request。重開同頁可立即顯示上次 snapshot，再背景更新。
+**Revision**: 1.5（2026-11-21）資料品質頁 first paint 改用 cached snapshot；索引 coverage 共用 120 秒快取，前端快取最近品質 snapshot。完整 DuckDB 掃描只保留給手動重新整理。

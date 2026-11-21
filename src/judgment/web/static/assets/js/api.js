@@ -287,6 +287,27 @@ export function subscribeRefresh(
 
 const processingRequestCache = new Map();
 
+const qualityRequestCache = new Map();
+
+function requestQuality({ cached = false } = {}) {
+  const key = cached ? "/api/quality?cached=1" : "/api/quality";
+  const existing = qualityRequestCache.get(key);
+  if (existing) return existing;
+  const promise = request(key, {
+    timeout: 180000,
+    trackClient: false,
+  });
+  qualityRequestCache.set(key, promise);
+  const clear = () =>
+    window.setTimeout(() => {
+      if (qualityRequestCache.get(key) === promise) {
+        qualityRequestCache.delete(key);
+      }
+    }, 1500);
+  promise.then(clear, clear);
+  return promise;
+}
+
 function requestProcessing({ cached = false, slim = false } = {}) {
   const params = new URLSearchParams();
   if (cached) params.set("cached", "1");
@@ -880,11 +901,8 @@ export const api = {
     });
   },
 
-  quality() {
-    return request("/api/quality", {
-      timeout: 180000,
-      trackClient: false,
-    });
+  quality({ cached = false } = {}) {
+    return requestQuality({ cached });
   },
 
   demoQuality() {

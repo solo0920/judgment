@@ -274,10 +274,13 @@ function demoContextChanged(before, after) {
 }
 
 async function boot() {
-  if (parseRoute() === "processing") {
+  const bootRoute = parseRoute();
+  if (bootRoute === "processing") {
     // Start the cached bytes before auth/demo gating resolves.  The page's
     // own request below reuses this in-flight promise.
     void api.processing({ cached: true, slim: true }).catch(() => null);
+  } else if (bootRoute === "quality") {
+    void api.quality({ cached: true }).catch(() => null);
   }
   const cachedContext = readCachedDemoContext();
   if (cachedContext) hydrateDemoContext(cachedContext);

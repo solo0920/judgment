@@ -2881,9 +2881,11 @@ def create_app(
         )
 
     @app.get("/api/quality")
-    def quality_snapshot(request: Request) -> Dict[str, Any]:
+    def quality_snapshot(
+        request: Request, cached: bool = False
+    ) -> Dict[str, Any]:
         try:
-            if _is_demo_visitor(request):
+            if _is_demo_visitor(request) or cached:
                 return build_quality_bootstrap(
                     settings=settings,
                     session_factory=app.state.session_factory,
