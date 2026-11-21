@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Judgment RAG backend modules"
 requires-python = ">=3.10"
 dependencies = [
-  "fastapi>=0.115,<1",
+  "fastapi>=0.162.5,<1",
   "httpx>=0.27,<0.29",
   "pyarrow>=25.0.1,<26",
   "SQLAlchemy>=2.0,<2.1",
