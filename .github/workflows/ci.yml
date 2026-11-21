@@ -59,11 +59,20 @@ jobs:
       - name: Dependency audit
         # Exceptions must be documented in specs/security/supply-chain.md.
         run: uv run --with pip-audit pip-audit
-      - name: Secret scan (push/PR diff)
-        # Full-history scan is still pending; this action scans the pushed/PR range.
-        uses: gitleaks/gitleaks-action@v2
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.24.3"
+          GITLEAKS_SHA256: "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c"
+        run: |
+          curl --retry 3 --retry-delay 2 -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/gitleaks"
+          tar -xzf /tmp/gitleaks.tar.gz -C "${RUNNER_TEMP}/gitleaks" gitleaks
+          echo "${RUNNER_TEMP}/gitleaks" >> "${GITHUB_PATH}"
+      - name: Secret scan (full history)
+        run: gitleaks detect --source . --log-opts=--all --redact -v --exit-code=2
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:

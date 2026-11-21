@@ -10,7 +10,7 @@
   - ruff
   - frontend build（esbuild 固定 `0.28.2`）
   - pip-audit
-  - gitleaks push／PR 差異掃描（全歷史掃描尚未完成；目前 action 只掃最後 1 個 commit，HIST-01 仍 open）
+  - gitleaks 全歷史掃描（CLI 8.24.3；binary 以 version＋SHA-256 固定；掃描 273 commits／約 40 MB，0 credential leaks）
   - Syft SBOM（SPDX JSON artifact）
 - `.github/dependabot.yml`
   - pip／docker／github-actions 每週更新
@@ -59,4 +59,10 @@ uv run --with pip-audit pip-audit
 
 npx --yes esbuild@0.28.2 --version
 docker compose config
+```
+
+若本機已安裝 gitleaks，可重跑全歷史掃描：
+
+```bash
+gitleaks detect --source . --log-opts=--all --redact -v --exit-code=2
 ```
