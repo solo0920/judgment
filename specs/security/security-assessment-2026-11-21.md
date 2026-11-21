@@ -48,7 +48,7 @@
 - **INFO-01**：`/api/health` 只回 status／version／readiness；`.env` 設 `APP_ENV=production`。
 - **CORS-01**：正式 CORS 移除 localhost、`127.0.0.1:9200`、已無 DNS 的 `judement.ragdemo.win`。
 
-驗證：676 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。
+驗證：677 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。
 
 尚未完成：DB-ROLE-01、TOKEN-01、SESSION-01、AUDIT-01、SUP-01、備份加密與 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
 

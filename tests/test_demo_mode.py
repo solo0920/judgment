@@ -629,6 +629,28 @@ def test_demo_route_feature_mapping_is_explicit() -> None:
     assert demo_feature_for("GET", "/api/not-demo") is None
 
 
+def test_demo_visible_routes_are_explicitly_allowlisted() -> None:
+    from judgment.web.route_policy import load_demo_policies
+
+    assert set(load_demo_policies()) == {
+        "GET /api/catalog",
+        "GET /api/data/suggest",
+        "GET /api/demo/processing",
+        "GET /api/demo/quality",
+        "GET /api/home",
+        "GET /api/judgment",
+        "GET /api/law",
+        "GET /api/performance",
+        "GET /api/processing",
+        "GET /api/quality",
+        "GET /api/schema/suggest",
+        "GET /api/status",
+        "POST /api/query",
+        "POST /api/rag/query",
+        "POST /api/rag/query/stream",
+    }
+
+
 def test_demo_ui_assets_are_served(demo_client) -> None:
     client, _app = demo_client
     index = client.get("/")
