@@ -2361,6 +2361,7 @@ LIMIT ${l} OFFSET ${u}`,warnings:d,meta:{store:n,filters:a,client_side:!0}}}asyn
         <textarea class="ask-input" id="rag-question" name="question" rows="3"
           maxlength="500" placeholder="\u4F8B\u5982\uFF1A\u91D1\u878D\u6D88\u8CBB\u8005\u4FDD\u8B77\u6CD5\u5982\u4F55\u8655\u7406\u91D1\u878D\u6D88\u8CBB\u722D\u8B70\uFF1F"
           aria-describedby="rag-input-help"></textarea>
+        <p class="ask-privacy-note">\u8ACB\u52FF\u8F38\u5165\u500B\u4EBA\u8CC7\u6599\uFF1B\u63D0\u554F\u8207\u56DE\u7B54\u6587\u5B57\u6703\u4FDD\u7559 90 \u5929\u7528\u65BC\u6548\u80FD\u8207\u54C1\u8CEA\u5206\u6790\u3002</p>
         <div class="ask-footer">
           <div class="ask-hints" id="rag-input-help">
             <span><kbd>Enter</kbd> \u9001\u51FA</span>

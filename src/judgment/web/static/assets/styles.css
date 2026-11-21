@@ -4401,6 +4401,13 @@ button.chip:hover {
   color: var(--faint);
 }
 
+.ask-privacy-note {
+  margin: 0 16px 8px;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .ask-footer {
   display: flex;
   align-items: center;

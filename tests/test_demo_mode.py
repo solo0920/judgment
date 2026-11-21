@@ -853,6 +853,10 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert api_js.status_code == 200
     assert "demoProcessing" in api_js.text
 
+    rag_js = client.get("/assets/js/pages/rag.js")
+    assert rag_js.status_code == 200
+    assert "請勿輸入個人資料" in rag_js.text
+
     css = client.get("/assets/styles.css")
     assert css.status_code == 200
     assert ".demo-banner" in css.text

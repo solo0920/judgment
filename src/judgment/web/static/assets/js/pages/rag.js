@@ -1382,6 +1382,7 @@ export async function render(root) {
         <textarea class="ask-input" id="rag-question" name="question" rows="3"
           maxlength="500" placeholder="例如：金融消費者保護法如何處理金融消費爭議？"
           aria-describedby="rag-input-help"></textarea>
+        <p class="ask-privacy-note">請勿輸入個人資料；提問與回答文字會保留 90 天用於效能與品質分析。</p>
         <div class="ask-footer">
           <div class="ask-hints" id="rag-input-help">
             <span><kbd>Enter</kbd> 送出</span>
