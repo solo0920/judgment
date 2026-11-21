@@ -790,6 +790,36 @@ def question_bank_stats(session: Session) -> Dict[str, Any]:
     status_counts: Dict[str, int] = {}
     for item in items:
         status_counts[item.status] = status_counts.get(item.status, 0) + 1
+    score_keys = ("clarity", "labels", "answer", "difficulty", "overall")
+    score_values: Dict[str, List[int]] = {key: [] for key in score_keys}
+    review_count = 0
+    reviews = session.scalars(
+        select(QuestionBankReview)
+        .join(
+            QuestionBankItem,
+            QuestionBankItem.id == QuestionBankReview.item_id,
+        )
+        .where(QuestionBankItem.deleted_at.is_(None))
+    ).all()
+    for review in reviews:
+        scores = review.rubric_scores or {}
+        if not isinstance(scores, dict):
+            continue
+        found = False
+        for key in score_keys:
+            try:
+                value = int(scores.get(key))
+            except (TypeError, ValueError):
+                continue
+            if 1 <= value <= 5:
+                score_values[key].append(value)
+                found = True
+        if found:
+            review_count += 1
+    rubric_scores = {
+        key: round(sum(values) / len(values), 1) if values else None
+        for key, values in score_values.items()
+    }
     return {
         "total": len(items),
         "status_counts": status_counts,
@@ -801,6 +831,8 @@ def question_bank_stats(session: Session) -> Dict[str, Any]:
         "retired": status_counts.get("retired", 0),
         "stale": sum(1 for item in items if item.stale),
         "benchmark_ready": sum(1 for item in items if _item_benchmark_ready(item)),
+        "rubric_scores": rubric_scores,
+        "rubric_review_count": review_count,
     }
 
 

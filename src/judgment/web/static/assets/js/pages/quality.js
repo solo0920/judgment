@@ -343,11 +343,11 @@ export async function render(root) {
   root.innerHTML = `<section class="page data-page quality-page">
     <div class="page-header">
       <div class="data-page-heading">
-        <div class="eyebrow">DATA QUALITY</div>
+        <div class="eyebrow">DATA QUALITY · ITEM REVIEW</div>
         <div class="data-title-line">
           <h1 class="page-title">資料品質</h1>
           <p class="page-subtitle data-page-subtitle">
-            DuckDB 直接掃描原始判決 Parquet，檢查案號、全文、中繼資料、引用一致性與 archive 統計；數值不足時顯示「—」，不以推測補齊。
+            以五項題目評比為核心，整合原始 Parquet 掃描、題庫版本、人工驗收與 Benchmark 題庫；每個題目都使用同一套評分與狀態規格。
           </p>
         </div>
       </div>
@@ -359,67 +359,82 @@ export async function render(root) {
         </button>
       </div>
     </div>
-    <div class="status-layout quality-layout">
-      <aside class="status-sidebar quality-sidebar" aria-label="資料品質功能">
-        <div class="status-sidebar-head">
-          <div class="eyebrow">DATA QUALITY</div>
-          <div class="status-sidebar-title">品質與題庫</div>
+
+    <div class="quality-rubric-panel" aria-label="五項題目評比標準">
+      <div class="quality-rubric-head">
+        <div>
+          <div class="eyebrow">5-POINT ITEM REVIEW</div>
+          <strong>五項題目評比</strong>
+          <p>題庫、人工驗收與 Benchmark 共用同一套五項評分；每項 1–5 分。</p>
         </div>
-        <nav class="status-tab-list" aria-label="資料品質功能">
-          <button class="status-tab is-active" type="button" data-quality-tab="overview" aria-current="page">
-            <span class="status-tab-icon">${icon("activity", 15)}</span>
-            <span class="status-tab-copy"><strong>品質總覽</strong><small>DuckDB 原始資料與覆蓋檢查</small></span>
-            <span class="badge badge-neutral" id="quality-badge-overview">—</span>
-          </button>
-          <button class="status-tab" type="button" data-quality-tab="create">
-            <span class="status-tab-icon">${icon("plus", 15)}</span>
-            <span class="status-tab-copy"><strong>題庫新增</strong><small>llama-server 自動出題與 JSON 匯入</small></span>
-          </button>
-          <button class="status-tab" type="button" data-quality-tab="manage">
-            <span class="status-tab-icon">${icon("database", 15)}</span>
-            <span class="status-tab-copy"><strong>題庫管理</strong><small>版本、狀態、標籤與刪除</small></span>
-            <span class="badge badge-neutral" id="quality-badge-manage">—</span>
-          </button>
-          <button class="status-tab" type="button" data-quality-tab="suite">
-            <span class="status-tab-icon">${icon("cube", 15)}</span>
-            <span class="status-tab-copy"><strong>Benchmark 題庫</strong><small>凍結 suite 與 benchmark-ready 題目</small></span>
-            <span class="badge badge-neutral" id="quality-badge-suite">—</span>
-          </button>
-          <button class="status-tab" type="button" data-quality-tab="review">
-            <span class="status-tab-icon">${icon("shield", 15)}</span>
-            <span class="status-tab-copy"><strong>題庫人工驗收批注</strong><small>待審、批注、核准與退回</small></span>
-            <span class="badge badge-warn" id="quality-badge-review">—</span>
-          </button>
-        </nav>
-        <div class="status-sidebar-foot">
-          <span>題目驗證</span>
-          <span class="mono">現行法規條文 + 判決 jid</span>
-        </div>
-      </aside>
-      <section class="status-panel quality-panel">
-        <div id="quality-panel-overview">
-          <div id="quality-content">${`<div class="report-card">
-            <div class="report-head">
-              <div class="report-title-group">
-                <div class="report-kicker">DUCKDB DATA QUALITY</div>
-                <div class="report-title">讀取原始 Parquet 統計</div>
-                <div class="report-sub">正在掃描最新 manifest 與查詢欄位…</div>
-              </div>
-              <span class="spinner" aria-hidden="true"></span>
-            </div>
-            <div class="report-loading">
-              <div class="skeleton skeleton-line" style="width:92%"></div>
-              <div class="skeleton skeleton-line" style="width:84%"></div>
-              <div class="skeleton skeleton-line" style="width:68%;margin-bottom:0"></div>
-            </div>
-          </div>`}</div>
-        </div>
-        <div id="quality-panel-question-create" hidden></div>
-        <div id="quality-panel-question-manage" hidden></div>
-        <div id="quality-panel-benchmark-bank" hidden></div>
-        <div id="quality-panel-question-review" hidden></div>
-      </section>
+        <span class="badge badge-neutral badge-mono" id="quality-rubric-counts">尚無評比</span>
+      </div>
+      <div class="quality-rubric-grid">
+        ${[
+          ["clarity", "題目清晰"],
+          ["labels", "法條標注"],
+          ["answer", "參考答案"],
+          ["difficulty", "難度與標籤"],
+          ["overall", "整體"],
+        ].map(([key, label]) => `<div class="quality-rubric-item">
+          <span>${label}</span>
+          <strong id="quality-rubric-${key}">—</strong>
+          <small>/ 5</small>
+        </div>`).join("")}
+      </div>
     </div>
+
+    <nav class="quality-step-nav" aria-label="資料品質工作流程">
+      <button class="quality-step is-active" type="button" data-quality-tab="overview" aria-current="page">
+        <span class="quality-step-index">01</span>
+        <span class="quality-step-copy"><strong>品質總覽</strong><small>原始資料、覆蓋率與五項評比</small></span>
+        <span class="badge badge-neutral" id="quality-badge-overview">—</span>
+      </button>
+      <button class="quality-step" type="button" data-quality-tab="bank">
+        <span class="quality-step-index">02</span>
+        <span class="quality-step-copy"><strong>題庫工作台</strong><small>新增、編輯、版本與標籤</small></span>
+        <span class="badge badge-neutral" id="quality-badge-bank">—</span>
+      </button>
+      <button class="quality-step" type="button" data-quality-tab="review">
+        <span class="quality-step-index">03</span>
+        <span class="quality-step-copy"><strong>人工驗收</strong><small>逐題五項評分、批注與核准</small></span>
+        <span class="badge badge-warn" id="quality-badge-review">—</span>
+      </button>
+      <button class="quality-step" type="button" data-quality-tab="suite">
+        <span class="quality-step-index">04</span>
+        <span class="quality-step-copy"><strong>Benchmark 題庫</strong><small>凍結 suite 與可評測題目</small></span>
+        <span class="badge badge-neutral" id="quality-badge-suite">—</span>
+      </button>
+    </nav>
+
+    <div class="quality-subview-bar" id="quality-subview-bar" hidden>
+      <button class="btn btn-ghost btn-sm" type="button" id="quality-back-to-bank">← 返回題庫</button>
+      <span>新增／編輯題目</span>
+    </div>
+
+    <section class="quality-workspace">
+      <div id="quality-panel-overview">
+        <div id="quality-content">${`<div class="report-card">
+          <div class="report-head">
+            <div class="report-title-group">
+              <div class="report-kicker">DUCKDB DATA QUALITY</div>
+              <div class="report-title">讀取原始 Parquet 統計</div>
+              <div class="report-sub">正在掃描最新 manifest 與查詢欄位…</div>
+            </div>
+            <span class="spinner" aria-hidden="true"></span>
+          </div>
+          <div class="report-loading">
+            <div class="skeleton skeleton-line" style="width:92%"></div>
+            <div class="skeleton skeleton-line" style="width:84%"></div>
+            <div class="skeleton skeleton-line" style="width:68%;margin-bottom:0"></div>
+          </div>
+        </div>`}</div>
+      </div>
+      <div id="quality-panel-question-create" hidden></div>
+      <div id="quality-panel-question-manage" hidden></div>
+      <div id="quality-panel-benchmark-bank" hidden></div>
+      <div id="quality-panel-question-review" hidden></div>
+    </section>
   </section>`;
 
   const content = root.querySelector("#quality-content");
@@ -446,57 +461,105 @@ export async function render(root) {
     if (badge) badge.textContent = formatNumber(current.totals?.rows || 0);
   };
 
-  const syncTab = (tab) => {
-    activeTab = tab === "overview" ? "overview" : tab;
+  const STEP_BY_PANEL = {
+    overview: "overview",
+    create: "bank",
+    manage: "bank",
+    review: "review",
+    suite: "suite",
+  };
+  const PANEL_BY_STEP = {
+    overview: "overview",
+    bank: "manage",
+    review: "review",
+    suite: "suite",
+  };
+  const STEP_META = {
+    bank: "題庫工作台 · 5 分項目評比",
+    review: "人工驗收 · 5 分項目評比",
+    suite: "Benchmark 題庫 · 5 分項目評比",
+  };
+
+  const syncTab = (panelName) => {
+    const nextPanel = panels[panelName] ? panelName : "overview";
+    activeTab = nextPanel;
+    const step = STEP_BY_PANEL[nextPanel] || "overview";
     for (const button of tabs) {
-      const active = button.dataset.qualityTab === activeTab;
+      const active = button.dataset.qualityTab === step;
       button.classList.toggle("is-active", active);
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
     }
     for (const [name, panel] of Object.entries(panels)) {
-      if (panel) panel.hidden = name !== activeTab;
+      if (panel) panel.hidden = name !== nextPanel;
     }
-    if (activeTab !== "overview") {
-      meta.textContent = "QUESTION BANK · 題庫工作區";
-    } else if (current) {
-      paint();
+    const subview = root.querySelector("#quality-subview-bar");
+    if (subview) subview.hidden = nextPanel !== "create";
+    if (nextPanel === "overview") {
+      if (current) paint();
+    } else {
+      meta.textContent = STEP_META[step] || "QUESTION BANK · 題庫工作區";
     }
   };
 
   const controller = createQuestionBankController(root, {
-    onNavigate: (tab) => syncTab(tab),
+    onNavigate: (panelName) => syncTab(panelName),
     onStats: (stats) => {
       const values = stats || {};
-      const manageBadge = root.querySelector("#quality-badge-manage");
+      const bankBadge = root.querySelector("#quality-badge-bank");
       const suiteBadge = root.querySelector("#quality-badge-suite");
       const reviewBadge = root.querySelector("#quality-badge-review");
-      if (manageBadge) manageBadge.textContent = formatNumber(values.total || 0);
+      if (bankBadge) bankBadge.textContent = formatNumber(values.total || 0);
       if (suiteBadge) {
         suiteBadge.textContent = formatNumber(values.benchmark_ready || 0);
       }
-      if (reviewBadge) {
-        reviewBadge.textContent = formatNumber(
-          (values.pending_review || 0) + (values.changes_requested || 0),
-        );
+      const pending =
+        Number(values.pending_review || 0) +
+        Number(values.changes_requested || 0);
+      if (reviewBadge) reviewBadge.textContent = formatNumber(pending);
+      const rubric = values.rubric_scores || {};
+      for (const key of ["clarity", "labels", "answer", "difficulty", "overall"]) {
+        const element = root.querySelector(`#quality-rubric-${key}`);
+        if (!element) continue;
+        const value = rubric[key];
+        element.textContent =
+          value === null || value === undefined || value === ""
+            ? "—"
+            : Number(value).toFixed(1);
+      }
+      const counts = root.querySelector("#quality-rubric-counts");
+      if (counts) {
+        const reviewed = Number(values.rubric_review_count || 0);
+        counts.textContent =
+          reviewed > 0
+            ? `${formatNumber(reviewed)} 次評比 · ${formatNumber(pending)} 待驗收`
+            : "尚無評比";
       }
     },
   });
 
-  const activate = (tab) => {
-    syncTab(tab);
-    if (tab === "overview") return;
+  root
+    .querySelector("#quality-back-to-bank")
+    ?.addEventListener("click", () => {
+      syncTab("manage");
+      controller.show("manage");
+    });
+
+  const activate = (step) => {
+    const panelName = PANEL_BY_STEP[step] || "overview";
+    syncTab(panelName);
+    if (panelName === "overview") return;
     if (demoReadOnly) {
-      const target = panels[tab];
+      const target = panels[panelName];
       if (target) {
         target.innerHTML = demoLockMarkup(
           "題庫管理需要管理者權限",
-          "展示模式可瀏覽完整的資料品質總覽；題庫新增、管理、Benchmark 與人工驗收由管理者操作。",
+          "展示模式可瀏覽完整的資料品質總覽；題庫工作台、Benchmark 與人工驗收由管理者操作。",
         );
       }
       return;
     }
-    controller.show(tab);
+    controller.show(panelName);
   };
 
   const load = async ({ cached = false } = {}) => {

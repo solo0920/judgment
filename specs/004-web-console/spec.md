@@ -951,3 +951,11 @@ judgment-reranker:
 ### Addendum Success Criteria — Data Quality
 
 - **SC-019**: 同月份新舊 update archive 重複收錄相同 JID 時，品質頁不得誤報 PostgreSQL 匯入短少；差異必須為 0，並可另外看到重複列數。
+
+
+### Addendum Requirements — Unified Quality Workspace
+
+- **FR-046**: 資料品質頁 MUST 以「五項題目評比」為主要資訊架構：題目清晰、法條標注、參考答案、難度與標籤、整體，每項 1–5 分。
+- **FR-047**: 品質頁 MUST 使用一致的 4 步工作流程：品質總覽 → 題庫工作台 → 人工驗收 → Benchmark 題庫；題庫新增／編輯為題庫工作台的子視圖。
+- **FR-048**: 題庫列表、人工驗收與 Benchmark 人工評分 MUST 共用同一套五格評分元件、狀態 badge、卡片標題與操作按鈕規格。
+- **FR-049**: 品質總覽 SHOULD 顯示最近人工驗收的五項平均分數、評比次數與待驗收數量，讓使用者先理解評分制度再進入題庫或驗收。
