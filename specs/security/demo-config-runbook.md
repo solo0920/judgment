@@ -118,8 +118,10 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 - `NOSUPERUSER NOCREATEDB NOCREATEROLE`、`CONNECTION LIMIT 10`
 - `statement_timeout=10s`、`idle_in_transaction_session_timeout=15s`、`work_mem=16MB`
 - `default_transaction_read_only=on`、`search_path=public`
-- 只 grant `SELECT` 於 `law_documents`、`law_dataset_versions`、`download_runs`、`judgment_documents`、`judgment_import_runs`
+- 只 grant 五張展示表的 **column-level SELECT**；`/api/query` 也改成只 select 授權欄位，不再 `SELECT *`／`select(model)`
+- 明確不授權：`judgment_documents.full_text`、`pdf_url`、`law_documents.law_attachments_json`、`judgment_import_runs.data_dir`、`law_list_path`、`source_url` 等內部欄位
 - 已 `REVOKE CREATE ON SCHEMA public FROM PUBLIC`
+- `pg_hba.conf`：`local judgment demo_reader reject`、`samehost`／`samenet` 用 `scram-sha-256`、其他來源 `reject`。Docker Desktop 的 app 來源是 bridge gateway（實測 `192.168.107.1`），所以用 `samenet` 而不是只寫 `127.0.0.1`；DB port 仍只綁 host loopback。
 
 驗證指令（不印密碼）：
 
@@ -129,6 +131,9 @@ select current_user, rolsuper from pg_roles where rolname=current_user;
 show statement_timeout;                 -- 10s
 show default_transaction_read_only;     -- on
 select count(*) from law_documents;     -- 成功
+select full_text from judgment_documents limit 1; -- permission denied
+select pdf_url from judgment_documents limit 1;   -- permission denied
+select data_dir from judgment_import_runs limit 1; -- permission denied
 create table should_fail(id int);       -- permission denied
 select count(*) from question_bank_items; -- permission denied
 select pg_read_file('/etc/passwd');     -- permission denied
@@ -148,7 +153,7 @@ copy (select 1) to program 'id';        -- permission denied
 
 ## 7. 已知未完成
 
-- CSP 尚未 enforce；Report-Only 尚無 `report-uri` 收集端點。
+- CSP 已 enforce；`report-uri` 收集端點已上線。
 - `AUTH_COOKIE_SAMESITE=none` 尚未改 Lax。
 - 備份加密與 restore drill 未做。
-- `demo_reader` 的欄位層級授權尚未做；目前是五張表的 table-level SELECT。
+- `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。

@@ -80,7 +80,7 @@
 - **監聽位址**：llama-server 11435–11437、OrbStack 5432／6333／6334、web 9200、power agent 9201 全部只綁 `127.0.0.1`。
 - **Qdrant 回應掃描**：以 admin token 查 `database=qdrant`，回應沒有 `/Users/`、`file_path`、`source_path`、`x570`、`:6333`、`:9200`；row 只含 jid／court／title／jdate／matched laws／snippet 等展示欄位。
 - **PostgreSQL query 洩漏**：`law_dataset_versions` 原本會回傳 `parquet_path`、`zip_path` 絕對路徑，anon 可讀。已新增 `sanitize_query_payload()`，demo 回應會清空 `parquet_path`、`zip_path`、`error_message` 與字串中的 `/Users/`、`/home/`、`/var/`。
-- **Demo 唯讀角色**：已建立 `demo_reader`（NOSUPERUSER、NOCREATEDB、NOCREATEROLE、CONNECTION LIMIT 10、statement_timeout 10s、default_transaction_read_only=on、search_path=public），只 grant 五張展示表的 SELECT；`CREATE TABLE`、未授權表、`pg_read_file`、`COPY ... PROGRAM` 都以 permission denied 失敗。
+- **Demo 唯讀角色**：已建立 `demo_reader`（NOSUPERUSER、NOCREATEDB、NOCREATEROLE、CONNECTION LIMIT 10、statement_timeout 10s、default_transaction_read_only=on、search_path=public），只 grant 五張展示表的 **column-level SELECT**；`/api/query` 改為只 select 授權欄位。`judgment_documents.full_text`／`pdf_url`、`judgment_import_runs.data_dir` 等內部欄位 permission denied；`CREATE TABLE`、未授權表、`pg_read_file`、`COPY ... PROGRAM` 也都失敗。`pg_hba` 只允許 `samehost`／`samenet` 的 `demo_reader`，其他來源 reject。
 - **Fail closed**：`DEMO_QUERY_DATABASE_URL` 已設定；未設定時 `/api/query?database=postgres` 的 demo 路徑回 403 `demo_data_unavailable`，不會 fallback 到主連線。管理員仍使用主連線，維持完整欄位。
 - **Rate limit**：展示已關閉，無法再做匿名 30 次 live 測試；`DEMO_QUERY_RATE_PER_MINUTE=20` 的 429 路徑由 `DemoRateLimiter` 與既有測試覆蓋。
 - **CSP 收集端點**：已實作 `POST /api/csp-report`（8 KB、per-IP/每日限流、`.run/csp-report.log` 輪替）；API 與 Pages 都已加 `report-uri`。

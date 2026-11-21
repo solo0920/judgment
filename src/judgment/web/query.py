@@ -646,10 +646,15 @@ def _query_postgres(
         )
         total = int(session.scalar(count_stmt) or 0)
 
-        statement = _apply_filters(select(model), table, filters)
+        selected = [getattr(model, item["key"]) for item in columns]
+        if table == "law_documents":
+            selected.append(model.law_key)
+        elif table == "judgment_documents":
+            selected.append(model.court_normalized)
+        statement = _apply_filters(select(*selected), table, filters)
         statement = _apply_sort(statement, table, filters)
         statement = statement.offset((page - 1) * page_size).limit(page_size)
-        records = session.scalars(statement).all()
+        records = session.execute(statement).all()
         rows = []
         for record in records:
             row = {item["key"]: getattr(record, item["key"], None) for item in columns}
