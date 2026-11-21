@@ -87,8 +87,23 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 2026-11-21 手動 console 檢查（Playwright + Chrome，首頁／RAG／data／performance／processing／quality／status）：
 
 - 原本的 inline theme script 已搬到 `assets/js/boot.js`；inline violation 已消失。
-- 目前只剩 Cloudflare Pages 自動注入的 `https://static.cloudflareinsights.com/beacon.min.js/...` 違反 `script-src 'self'`。
+- 目前只剩 Cloudflare 自動注入的 `https://static.cloudflareinsights.com/beacon.min.js/...` 違反 `script-src 'self'`。
 - 沒有 page error；CSP report 有實際送到 `/api/csp-report` 並寫入日誌。
+
+2026-11-21 功能流程檢查（demo 開啟 2 小時，Chromium／WebKit／Firefox）：
+
+- RAG 提問與串流回答：成功，無 CSP violation。
+- 資料頁 PostgreSQL 查詢、Qdrant 查詢、JSON 匯出下載：成功；`blob:` 下載沒有被 CSP 擋。
+- performance／quality／processing／status／admin：無非 beacon 的 CSP violation。
+- Firefox 會對 `/api/csp-report` 顯示 `OpaqueResponseBlocking` warning；報告請求仍有到達 API，屬於 console 噪音，不是 CSP violation。
+- 測試完成後已立即關閉 demo。
+
+Cloudflare Web Analytics 的 beacon 同時出現在 `judgment.ragdemo.win` 與 `api-mbp.ragdemo.win`，是 zone 層級自動注入。目前 wrangler OAuth token 只有 `zone (read)`，**無法從 CLI/API 關閉**；需要在 Cloudflare dashboard 操作：
+
+1. `ragdemo.win` zone → Analytics → Web Analytics → Manage site → Advanced options → Disable automatic setup（或刪除 site）。
+2. Pages project `judgment` → Metrics → Web Analytics → 若有啟用也關閉。
+3. Caching → Configuration → Purge Everything（兩個 host 都會受影響）。
+4. 用全新的瀏覽器 profile 重跑 console；確認 beacon 不再出現。
 
 轉 enforce 前要決定 Cloudflare Web Analytics：
 

@@ -84,7 +84,7 @@
 - **Fail closed**：`DEMO_QUERY_DATABASE_URL` 已設定；未設定時 `/api/query?database=postgres` 的 demo 路徑回 403 `demo_data_unavailable`，不會 fallback 到主連線。管理員仍使用主連線，維持完整欄位。
 - **Rate limit**：展示已關閉，無法再做匿名 30 次 live 測試；`DEMO_QUERY_RATE_PER_MINUTE=20` 的 429 路徑由 `DemoRateLimiter` 與既有測試覆蓋。
 - **CSP 收集端點**：已實作 `POST /api/csp-report`（8 KB、per-IP/每日限流、`.run/csp-report.log` 輪替）；API 與 Pages 都已加 `report-uri`。
-- **CSP 手動 console 檢查**：Playwright + Chrome 跑首頁／RAG／data／performance／processing／quality／status；inline theme script 已移到 `assets/js/boot.js`，只剩 Cloudflare Web Analytics beacon 違反 `script-src 'self'`。Enforce 前需決定關閉 Web Analytics 或 allowlist。
+- **CSP 手動 console 檢查**：Playwright + Chrome／WebKit／Firefox，demo 開啟時跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出、performance／quality／processing／status／admin；inline theme script 已移到 `assets/js/boot.js`，只剩 Cloudflare Web Analytics beacon 違反 `script-src 'self'`。Beacon 是 zone 層級注入，CLI token 只有 zone read，需在 dashboard 關閉。Enforce 前仍需處理 beacon。
 - **`SameSite=None`**：尚未改 Lax。
 - **備份加密／restore drill**：尚未做。
 
