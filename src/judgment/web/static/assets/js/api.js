@@ -746,8 +746,9 @@ export const api = {
   },
 
   reconcileIndexAlias(repair = false) {
-    const params = new URLSearchParams({ repair: repair ? "true" : "false" });
-    return request(`/api/index-alias/reconcile?${params.toString()}`, {
+    return request("/api/index-alias/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ repair: Boolean(repair) }),
       trackClient: false,
     });
   },

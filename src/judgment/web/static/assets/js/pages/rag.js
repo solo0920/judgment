@@ -25,6 +25,7 @@ import {
   formatRelativeTime,
   icon,
   notice,
+  safeUrl,
   setBusy,
   statusBadge,
   toast,
@@ -485,7 +486,7 @@ function judgmentCard(judgment, index) {
         aria-label="開啟 DB 儲存原文判決 ${escapeHtml(judgment.jid)}"`
     : "";
   const pdfLink = judgment.pdf_url
-    ? `<a class="citation-link" href="${escapeHtml(judgment.pdf_url)}" target="_blank" rel="noopener noreferrer" title="開啟司法院原判決 PDF">司法院原判決 PDF${icon(
+    ? `<a class="citation-link" href="${escapeHtml(safeUrl(judgment.pdf_url))}" target="_blank" rel="noopener noreferrer" title="開啟司法院原判決 PDF">司法院原判決 PDF${icon(
         "external",
         11,
       )}</a>`
@@ -572,7 +573,7 @@ function citationCard(citation, index) {
     .map((value) => `<span>${escapeHtml(value)}</span>`)
     .join("");
   const link = citation.law_url
-    ? `<a class="citation-link" href="${escapeHtml(citation.law_url)}" target="_blank" rel="noopener noreferrer">來源${icon(
+    ? `<a class="citation-link" href="${escapeHtml(safeUrl(citation.law_url))}" target="_blank" rel="noopener noreferrer">來源${icon(
         "external",
         11,
       )}</a>`
@@ -656,7 +657,7 @@ function lawSourceCard(source, index) {
     })
     .join("");
   const link = source.law_url
-    ? `<a class="citation-link" href="${escapeHtml(source.law_url)}" target="_blank" rel="noopener noreferrer">法規來源${icon(
+    ? `<a class="citation-link" href="${escapeHtml(safeUrl(source.law_url))}" target="_blank" rel="noopener noreferrer">法規來源${icon(
         "external",
         11,
       )}</a>`
@@ -1364,7 +1365,7 @@ export async function render(root) {
             <div class="rag-library-empty">讀取本機紀錄中…</div>
           </div>
           <div class="rag-library-foot" id="rag-storage-note">
-            提問紀錄儲存在瀏覽器 IndexedDB，不會上傳到伺服器。
+            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器另保留效能紀錄。
           </div>
         </section>
       </aside>
@@ -1964,7 +1965,7 @@ export async function render(root) {
       renderLibrary();
       storageNote.textContent =
         storageMode() === "indexeddb"
-          ? "提問紀錄儲存在瀏覽器 IndexedDB，不會上傳到伺服器。"
+          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器另保留效能紀錄。"
           : "瀏覽器儲存不可用，提問紀錄只保留在本次工作階段。";
     } catch (error) {
       if (disposed) return;

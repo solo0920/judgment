@@ -10,6 +10,7 @@ import {
   formatRelativeTime,
   icon,
   notice,
+  safeUrl,
   setBusy,
   toast,
 } from "../utils.js";
@@ -2765,7 +2766,7 @@ function judgmentMonthDownloadMarkup(item) {
   if (!item.download_url) return "";
   const month = judgmentMonthKey(item);
   return `<a class="judgment-month-download" href="${escapeHtml(
-    apiUrl(item.download_url),
+    safeUrl(apiUrl(item.download_url)),
   )}" target="_blank" rel="noreferrer" title="下載 ${month} 判決" aria-label="下載 ${month} 判決">${icon("download", 11)}</a>`;
 }
 

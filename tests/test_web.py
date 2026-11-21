@@ -3294,7 +3294,15 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert policy_for("GET", "/api/unknown", policies) == "ADMIN_ONLY"
     assert (
         policy_for("GET", "/api/question-bank/items/abc", policies)
-        == "DEMO_READ"
+        == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for("GET", "/api/judgment-download/status", policies)
+        == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for("POST", "/api/index-alias/reconcile", policies)
+        == "ADMIN_WRITE"
     )
     assert (
         policy_for("PATCH", "/api/question-bank/items/abc", policies)
@@ -3359,6 +3367,18 @@ def test_remote_google_session_authorizes_and_rejects_bad_origin(web_client) -> 
             headers={"Origin": "https://evil.example"},
         )
         assert bad_origin.status_code == 403
+
+        missing_origin = remote.post("/api/auth/sse-ticket")
+        assert missing_origin.status_code == 403
+
+        cross_site = remote.post(
+            "/api/auth/sse-ticket",
+            headers={
+                "Origin": "https://app.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+        assert cross_site.status_code == 403
 
         good_origin = remote.post(
             "/api/auth/sse-ticket",

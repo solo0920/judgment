@@ -31,6 +31,27 @@
   - 已新增單元測試與 demo/admin 整合測試，完整 pytest 與 ruff 通過。
   - 已重啟本機後端並以匿名請求複驗：已知問題／答案字串不再出現，`flow.metadata` 只剩 `rag_status`、timing、`rag_response` 統計欄位。
 
+### 0.2 第二階段修復（2026-11-21）
+
+已完成的展示前 hardening：
+
+- **DEMO-PATH-01**：`/api/question-bank/*`、`/api/judgment-download/status`、`/api/processing/plan`、`/api/processing/active`、`/api/performance/options`、`/api/updates/status`、`/api/courts/check`、`/api/law-versions/check` 已從 `DEMO_READ` 移除；`/api/processing` 保留但加入絕對路徑 scrub（`manifest_path`、`download_path`、`law_list` 與 value-level `/Users/`、`/home/`、`/var/`）。
+- **DEMO-ERR-01**：新增全域 `HTTPException`／未處理例外 handler；demo 5xx 只回 generic message + `request_id`；SSE error 事件同步套用。
+- **CSRF-01（部分）**：`/api/index-alias/reconcile` 的 repair 改為 `POST`，GET 只讀；Google session 寫入要求 `Origin`，並拒絕 `Sec-Fetch-Site: cross-site`。`SameSite=None` 尚未改。
+- **POWER-01**：power agent 拒絕 `Origin: null`、只允許 backend port 的 loopback origin、拒絕 `Sec-Fetch-Site: cross-site`。
+- **BAK-01（部分）**：`backup.sh` 不再複製 `.env`；`restore.sh` 會在缺少 `.env` 時警告。備份加密與 restore drill 尚未做。
+- **HDR-01（部分）**：API 加上 CSP Report-Only、X-Frame-Options、Referrer-Policy、Permissions-Policy；Pages `_headers` 同步加 CSP Report-Only。尚未 enforce。
+- **XSS-01**：新增 `safeUrl()`，套用到判決 PDF、法規 URL、附件、首頁來源與題庫法規連結。
+- **DEMO-QB-01**：題庫讀取改為 admin-only，demo 訪客不再取得內部批注／審核史。
+- **RATE-01**：demo limiter 改用 `client_ip_key()`（IPv6 /64）；加 auth endpoint limiter、demo body 64 KB／admin 20 MB 上限、`filters` key/value 限制。
+- **DATA-01（部分）**：前端文案改成「歷史清單只存在瀏覽器；提問會傳到伺服器產生答案，伺服器另保留效能紀錄」；retention floor 改為可設定（`.env` 仍為 90 天）。
+- **INFO-01**：`/api/health` 只回 status／version／readiness；`.env` 設 `APP_ENV=production`。
+- **CORS-01**：正式 CORS 移除 localhost、`127.0.0.1:9200`、已無 DNS 的 `judement.ragdemo.win`。
+
+驗證：676 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。
+
+尚未完成：DB-ROLE-01、TOKEN-01、SESSION-01、AUDIT-01、SUP-01、備份加密與 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
+
 ## 1. 方法與證據
 
 ### 1.1 已實際驗證
@@ -65,6 +86,8 @@
 - `frontend/_headers`、`scripts/build_frontend.py`
 
 ## 2. 風險總表
+
+> 本表保留初次評估狀態；2026-11-21 第二階段已修項目見 0.2。
 
 | ID | 等級 | 發現 | 主要影響 | 狀態 |
 |---|---|---|---|---|

@@ -374,9 +374,10 @@ if [[ "$SKIP_DATA" != "1" ]]; then
 fi
 
 info "複製設定"
+# Secrets are deliberately excluded from the backup.  Restore them separately
+# from 1Password/Keychain (or an age-encrypted vault) before starting services.
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
-  cp "$PROJECT_ROOT/.env" "$TARGET_DIR/config/.env"
-  echo "已包含 .env（內含資料庫連線資訊，請妥善保管）" >&2
+  echo "已排除 .env；請從密鑰管理器另行還原。" >&2
 fi
 for file in docker-compose.yml pyproject.toml uv.lock; do
   if [[ -f "$PROJECT_ROOT/$file" ]]; then
@@ -518,7 +519,7 @@ cd /Volumes/USB/judgment-backup-20261108
 - `-s, --source`：備份來源目錄；可省略，預設為 `restore.sh` 所在目錄。
 - 目標專案必須已 clone（含 `pyproject.toml`、`src/judgment`、`up.sh`）。
 
-還原前會檢查 Docker、manifest、checksum、備份檔案與目標空間，然後還原 PostgreSQL schema、Qdrant collection、`data/` 與 `.env`，最後執行 `uv sync` 與 `./up.sh`。
+還原前會檢查 Docker、manifest、checksum、備份檔案與目標空間，然後還原 PostgreSQL schema、Qdrant collection 與 `data/`。`.env` 不會進備份；請先從密鑰管理器還原 `.env`，再執行 `uv sync` 與 `./up.sh`。
 
 常用選項：
 
@@ -536,7 +537,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 - `judgment_vector_index` 必須與 Qdrant collection／alias 一起還原。
 - 若跳過 Qdrant，重新索引前請先清空 `judgment_vector_index`。
-- `config/.env` 可能含資料庫密碼，請加密保存備份。
+- `.env` 不會進備份；secrets 請另存於加密的密鑰管理器。若備份磁碟仍含資料庫 dump，請整顆磁碟加密。
 - 還原後若要接續索引，執行 `./scripts/index_full_task.sh`。
 EOF
 

@@ -334,11 +334,15 @@ def safe_next_url(raw: Any, request: Request, settings: Settings) -> str:
 
 
 def origin_allowed(
-    request: Request, settings: Settings, cors_origins: tuple[str, ...]
+    request: Request,
+    settings: Settings,
+    cors_origins: tuple[str, ...],
+    *,
+    require_origin: bool = False,
 ) -> bool:
     origin = request.headers.get("Origin")
     if origin is None:
-        return True
+        return not require_origin
     if origin == "null":
         return False
     normalized = origin.rstrip("/")

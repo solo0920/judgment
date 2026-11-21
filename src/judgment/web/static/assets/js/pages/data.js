@@ -25,6 +25,7 @@ import {
   icon,
   notice,
   readLocalCache,
+  safeUrl,
   setBusy,
   statusBadge,
   statusMeta,
@@ -1039,7 +1040,7 @@ function renderLawAttachments(attachments) {
       const label = item?.name || item?.url || "";
       if (!label) return "";
       if (item.url) {
-        return `<a class="law-attachment" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+        return `<a class="law-attachment" href="${escapeHtml(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">
           ${icon("file", 12)}<span>${escapeHtml(label)}</span>${icon("external", 11)}
         </a>`;
       }

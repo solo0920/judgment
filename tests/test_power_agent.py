@@ -36,15 +36,23 @@ def power_agent_url():
         thread.join(timeout=2)
 
 
-def test_power_status_allows_file_and_local_origins(power_agent_url) -> None:
+def test_power_status_rejects_file_and_foreign_origins(power_agent_url) -> None:
     with httpx.Client() as client:
-        response = client.get(
+        null_origin = client.get(
             f"{power_agent_url}/api/power/status",
             headers={"Origin": "null"},
         )
-    assert response.status_code == 200
-    assert response.json()["backend"]["running"] is True
-    assert response.headers["access-control-allow-origin"] == "null"
+        foreign_origin = client.get(
+            f"{power_agent_url}/api/power/status",
+            headers={"Origin": "https://evil.example"},
+        )
+        wrong_port = client.get(
+            f"{power_agent_url}/api/power/status",
+            headers={"Origin": "http://127.0.0.1:9999"},
+        )
+    assert null_origin.status_code == 403
+    assert foreign_origin.status_code == 403
+    assert wrong_port.status_code == 403
 
     with httpx.Client() as client:
         response = client.get(
@@ -56,24 +64,34 @@ def test_power_status_allows_file_and_local_origins(power_agent_url) -> None:
 
 
 def test_power_start_and_stop_require_header(power_agent_url) -> None:
+    origin = "http://127.0.0.1:9200"
     with httpx.Client() as client:
         denied = client.post(
             f"{power_agent_url}/api/power/start",
-            headers={"Origin": "null"},
+            headers={"Origin": origin},
         )
         started = client.post(
             f"{power_agent_url}/api/power/start",
-            headers={"Origin": "null", "X-Judgment-Power": "1"},
+            headers={"Origin": origin, "X-Judgment-Power": "1"},
         )
         stopped = client.post(
             f"{power_agent_url}/api/power/stop",
-            headers={"Origin": "null", "X-Judgment-Power": "1"},
+            headers={"Origin": origin, "X-Judgment-Power": "1"},
+        )
+        cross_site = client.post(
+            f"{power_agent_url}/api/power/start",
+            headers={
+                "Origin": origin,
+                "Sec-Fetch-Site": "cross-site",
+                "X-Judgment-Power": "1",
+            },
         )
     assert denied.status_code == 403
     assert started.status_code == 200
     assert started.json()["running"] is True
     assert stopped.status_code == 200
     assert stopped.json()["running"] is False
+    assert cross_site.status_code == 403
 
 
 def test_power_preflight_is_limited_to_local_origins(power_agent_url) -> None:
@@ -93,11 +111,20 @@ def test_power_preflight_is_limited_to_local_origins(power_agent_url) -> None:
                 "Access-Control-Request-Method": "POST",
             },
         )
+        null_origin = client.options(
+            f"{power_agent_url}/api/power/start",
+            headers={
+                "Origin": "null",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
     assert allowed.status_code == 204
     assert allowed.headers["access-control-allow-origin"] == "http://localhost:9200"
     assert "x-judgment-power" in allowed.headers["access-control-allow-headers"].lower()
     assert denied.status_code == 403
     assert "access-control-allow-origin" not in denied.headers
+    assert null_origin.status_code == 403
+    assert "access-control-allow-origin" not in null_origin.headers
 
 
 def test_power_unknown_route_returns_404(power_agent_url) -> None:

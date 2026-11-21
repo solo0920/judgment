@@ -164,7 +164,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 > PostgreSQL 的索引版本、`judgment_vector_index` 與 Qdrant collection 必須一起還原。若只還原 Qdrant，仍需有 PostgreSQL 的 `judgment_documents` 才能重新建立索引；若只還原 PostgreSQL，Qdrant 會是空的，且 `judgment_index_versions` 可能仍標示 active，索引器不一定會自動重建。還原時 `restore.sh` 會依 manifest 的 alias mapping 重建 `judgments_current`；若刻意只還原部分元件，應先清除或退役 `judgment_index_versions` 與 `judgment_vector_index` 的對應版本，再重新建立 collection 與 alias。
 
-以目前資料量估算，完整備份至少約 35–40 GB（`data/` 約 28 GB、PostgreSQL dump 約 2 GB、Qdrant snapshot 約 4 GB，另加 checksums 與暫存空間）；建議使用 64 GB 以上的 USB，並加密保存，因為 `config/.env` 可能包含資料庫密碼。
+以目前資料量估算，完整備份至少約 35–40 GB（`data/` 約 28 GB、PostgreSQL dump 約 2 GB、Qdrant snapshot 約 4 GB，另加 checksums 與暫存空間）；建議使用 64 GB 以上的 USB，並加密保存。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。
 
 ## 設定
 

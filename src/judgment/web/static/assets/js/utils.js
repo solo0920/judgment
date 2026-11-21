@@ -129,6 +129,20 @@ export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ESCAPE_MAP[char]);
 }
 
+export function safeUrl(value, fallback = "#") {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  if (raw.startsWith("#")) return raw;
+  if (raw.startsWith("//") || raw.startsWith("/\\")) return fallback;
+  if (raw.startsWith("/")) return raw;
+  try {
+    const url = new URL(raw, window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? raw : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
 export function icon(name, size = 16, className = "") {
   const paths = ICONS[name] || ICONS.info;
   const cls = className ? ` class="${escapeHtml(className)}"` : "";
@@ -282,7 +296,7 @@ export function formatCell(value, type = "text") {
       const text = String(value);
       const label = truncate(text.replace(/^https?:\/\//, ""), 46);
       return `<span class="cell-url"><a href="${escapeHtml(
-        text,
+        safeUrl(text),
       )}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(
         text,
       )}">${icon("external", 10)}${escapeHtml(label)}</a></span>`;

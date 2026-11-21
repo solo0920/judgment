@@ -87,7 +87,16 @@ _SENSITIVE_KEYS = frozenset(
         "log_path",
         "working_dir",
         "cwd",
+        "manifest_path",
+        "download_path",
+        "law_list",
     }
+)
+
+_ABSOLUTE_PATH = re.compile(
+    r"(?:/Users|/home|/private|/var|/tmp|/opt|/Volumes)/[^\s\"']*"
+    r"|[A-Za-z]:\\\\[^\s\"']*"
+    r"|file://[^\s\"']*"
 )
 
 
@@ -177,7 +186,7 @@ def sanitize_infrastructure(value: Any) -> Any:
 
 
 def sanitize_status_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    result = sanitize_infrastructure(dict(payload))
+    result = _scrub_absolute_paths(sanitize_infrastructure(dict(payload)))
     result["endpoints"] = []
     result["model_summary"] = []
     architecture = result.get("architecture")
@@ -232,6 +241,16 @@ def sanitize_status_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _scrub_absolute_paths(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _scrub_absolute_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scrub_absolute_paths(item) for item in value]
+    if isinstance(value, str):
+        return _ABSOLUTE_PATH.sub("[internal]", value)
+    return value
+
+
 def _scrub_internal_messages(value: Any) -> Any:
     if isinstance(value, dict):
         result: Dict[str, Any] = {}
@@ -251,7 +270,9 @@ def _scrub_internal_messages(value: Any) -> Any:
 
 
 def sanitize_processing_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    result = _scrub_internal_messages(sanitize_infrastructure(dict(payload)))
+    result = _scrub_internal_messages(
+        _scrub_absolute_paths(sanitize_infrastructure(dict(payload)))
+    )
     result["external_processes"] = []
     for key in ("active_runs", "recent_runs"):
         for run in result.get(key) or []:
@@ -347,7 +368,7 @@ def sanitize_performance_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     client breadcrumbs) must be removed while timing and status fields remain.
     """
 
-    result = sanitize_infrastructure(dict(payload))
+    result = _scrub_absolute_paths(sanitize_infrastructure(dict(payload)))
     rows = result.get("rows")
     if not isinstance(rows, list):
         return result

@@ -9,6 +9,7 @@ import {
   formatNumber,
   icon,
   readLocalCache,
+  safeUrl,
   writeLocalCache,
 } from "../utils.js";
 
@@ -271,7 +272,7 @@ function sourceCardMarkup(kind, data) {
           <small>裁判書原始資料</small>
         </div>
         <a class="home-source-link" href="${escapeHtml(
-          source.url || "https://opendata.judicial.gov.tw/",
+          safeUrl(source.url, "https://opendata.judicial.gov.tw/"),
         )}" target="_blank" rel="noopener noreferrer">${icon("external", 12)}來源</a>
       </div>
       <p class="home-source-copy">判決全文、案號、法院、裁判日期與 PDF 連結皆保留原始欄位；匯入前先寫入不可變的 raw Parquet 備份。</p>
@@ -296,7 +297,7 @@ function sourceCardMarkup(kind, data) {
         <small>法規、命令與條文版本</small>
       </div>
       <a class="home-source-link" href="${escapeHtml(
-        source.url || "https://law.moj.gov.tw/",
+        safeUrl(source.url, "https://law.moj.gov.tw/"),
       )}" target="_blank" rel="noopener noreferrer">${icon("external", 12)}來源</a>
     </div>
     <p class="home-source-copy">以官方 JSON 端點下載現行法規與命令，保留版本、條文與變更事件；判決引用可回到對應條號。</p>

@@ -508,6 +508,111 @@ def test_demo_performance_redacts_rag_question_and_answer(demo_client) -> None:
     assert admin_row["flow"]["metadata"]["answer"] == "測試機密答案"
 
 
+def test_sanitize_processing_payload_redacts_paths() -> None:
+    from judgment.web.demo_mode import sanitize_processing_payload
+
+    cleaned = sanitize_processing_payload(
+        {
+            "raw_backups": {
+                "latest": {
+                    "manifest_path": "/Users/alice/project/data/manifest.json"
+                }
+            },
+            "workflows": [
+                {
+                    "update_status": {
+                        "download_path": "/home/alice/data/law.zip"
+                    },
+                    "note": "see /var/tmp/secret",
+                }
+            ],
+            "law_list": "/Users/alice/docs/law.md",
+        }
+    )
+    dumped = json.dumps(cleaned, ensure_ascii=False)
+    assert "/Users/" not in dumped
+    assert "/home/" not in dumped
+    assert "/var/" not in dumped
+    assert cleaned["raw_backups"]["latest"]["manifest_path"] == ""
+    assert cleaned["workflows"][0]["update_status"]["download_path"] == ""
+    assert cleaned["law_list"] == ""
+    assert "[internal]" in cleaned["workflows"][0]["note"]
+
+
+def test_demo_error_response_hides_exception_details(demo_client, monkeypatch) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, _app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    def fail(**_kwargs):
+        raise RuntimeError("SECRET_INTERNAL_DETAIL")
+
+    monkeypatch.setattr(app_module, "query_performance", fail)
+
+    demo = client.get("/api/performance", params={"page_size": 1})
+    assert demo.status_code == 500
+    demo_payload = demo.json()
+    assert "SECRET_INTERNAL_DETAIL" not in json.dumps(demo_payload)
+    assert "RuntimeError" not in json.dumps(demo_payload)
+    assert demo_payload["detail"] == "請求失敗，請稍後再試。"
+    assert demo_payload["request_id"]
+
+    admin = client.get(
+        "/api/performance",
+        params={"page_size": 1},
+        headers=ADMIN_HEADERS,
+    )
+    assert admin.status_code == 500
+    assert "SECRET_INTERNAL_DETAIL" in json.dumps(admin.json())
+
+
+def test_demo_body_limit_rejects_large_payloads(demo_client) -> None:
+    client, _app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    response = client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"keyword": "x" * 70_000},
+            "page_size": 1,
+        },
+    )
+    assert response.status_code == 413
+
+
 def test_demo_route_feature_mapping_is_explicit() -> None:
     from judgment.web.route_policy import demo_feature_for, load_demo_policies
 
@@ -517,7 +622,10 @@ def test_demo_route_feature_mapping_is_explicit() -> None:
     assert mapping["POST /api/rag/query"] == "rag"
     assert mapping["POST /api/query"] == "data"
     assert demo_feature_for("GET", "/api/status") == "status"
-    assert demo_feature_for("GET", "/api/question-bank/items/abc") == "quality"
+    assert demo_feature_for("GET", "/api/processing") == "processing"
+    assert demo_feature_for("GET", "/api/quality") == "quality"
+    assert demo_feature_for("GET", "/api/question-bank/items/abc") is None
+    assert demo_feature_for("GET", "/api/judgment-download/status") is None
     assert demo_feature_for("GET", "/api/not-demo") is None
 
 

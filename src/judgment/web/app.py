@@ -33,7 +33,7 @@ from fastapi.responses import (
 )
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.background import BackgroundTask
 from starlette.routing import Match, Mount
 
@@ -152,7 +152,6 @@ from ..rag import (
     answer_question,
     CitationValidationError,
     generate_answer_with_model_async,
-    llm_circuit_snapshot,
     mark_citation_usage,
     warm_index_coverage,
     warm_index_staleness,
@@ -174,7 +173,11 @@ from ..runtime_settings import (
     set_test_mode,
 )
 from .catalog import build_catalog
-from .client_ip import effective_client_ip, suspicious_proxy_chain
+from .client_ip import (
+    client_ip_key,
+    effective_client_ip,
+    suspicious_proxy_chain,
+)
 from .demo_mode import (
     DemoConflict,
     DemoRateLimiter,
@@ -257,6 +260,8 @@ _UPDATE_CHECK_LOCK = threading.Lock()
 _DEMO_QUERY_EXECUTOR = ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="demo-query"
 )
+_MAX_DEMO_BODY_BYTES = 64 * 1024
+_MAX_ADMIN_BODY_BYTES = 20 * 1024 * 1024
 
 
 class QueryRequest(BaseModel):
@@ -264,6 +269,20 @@ class QueryRequest(BaseModel):
     filters: Dict[str, Any] = Field(default_factory=dict)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=25, ge=1, le=200)
+
+    @field_validator("filters")
+    @classmethod
+    def _limit_filters(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+        if len(value) > 20:
+            raise ValueError("filters 最多 20 個條件。")
+        for key, item in value.items():
+            if len(str(key)) > 64:
+                raise ValueError("filter 名稱過長。")
+            if isinstance(item, str) and len(item) > 200:
+                raise ValueError("filter 字串值過長。")
+            if isinstance(item, (list, tuple)) and len(item) > 20:
+                raise ValueError("filter 列表過長。")
+        return value
 
 
 class RagRequest(BaseModel):
@@ -347,6 +366,10 @@ class ProcessingUpdateRequest(BaseModel):
 
 class UpdateCheckRequest(BaseModel):
     source_types: List[str] = Field(default_factory=list)
+
+
+class IndexReconcileRequest(BaseModel):
+    repair: bool = False
 
 
 class _TTLCache:
@@ -494,6 +517,7 @@ def _demo_check(
     client_ip = str(
         getattr(request.state, "client_ip", "") or effective_client_ip(request)
     )
+    rate_key = client_ip_key(client_ip)
     if policy == "DEMO_QUERY":
         if feature == "rag":
             usage = load_demo_usage(request.app.state.session_factory)
@@ -512,7 +536,7 @@ def _demo_check(
                     retry_after=3600,
                 )
             retry_after = request.app.state.demo_limiter.check(
-                client_ip,
+                rate_key,
                 "rag",
                 per_minute=settings.demo_rag_rate_per_minute,
                 per_hour=settings.demo_rag_rate_per_hour,
@@ -520,7 +544,7 @@ def _demo_check(
             )
         else:
             retry_after = request.app.state.demo_limiter.check(
-                client_ip,
+                rate_key,
                 "query",
                 per_minute=settings.demo_query_rate_per_minute,
                 per_hour=settings.demo_query_rate_per_hour,
@@ -528,7 +552,7 @@ def _demo_check(
             )
     else:
         retry_after = request.app.state.demo_limiter.check(
-            client_ip,
+            rate_key,
             "poll",
             per_minute=settings.demo_poll_rate_per_minute,
             per_hour=settings.demo_poll_rate_per_hour,
@@ -1649,6 +1673,7 @@ def create_app(
         ),
     }
     app.state.demo_limiter = DemoRateLimiter()
+    app.state.auth_limiter = DemoRateLimiter()
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
         max_queue=settings.rag_admission_max_queue,
@@ -1662,6 +1687,53 @@ def create_app(
         initial_service_seconds=settings.llm_admission_initial_service_seconds,
     )
     app.state.rag_executor = None
+
+    csp_report_only = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self' https://api-mbp.ragdemo.win "
+        "http://127.0.0.1:9200 http://localhost:9200; "
+        "frame-ancestors 'none'; base-uri 'none'; "
+        "form-action 'self'; object-src 'none'"
+    )
+
+    @app.exception_handler(HTTPException)
+    async def demo_http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
+        demo_visitor = _is_demo_visitor(request)
+        detail = exc.detail
+        if demo_visitor and exc.status_code >= 500:
+            logger.warning("HTTP %s: %s", exc.status_code, exc.detail)
+            detail = "請求失敗，請稍後再試。"
+        content: Dict[str, Any] = {"detail": detail}
+        if demo_visitor and exc.status_code >= 500:
+            content["request_id"] = str(
+                getattr(request.state, "request_id", "")
+            )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=content,
+            headers=dict(exc.headers or {}),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        logger.exception("unhandled request error")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "請求失敗，請稍後再試。",
+                "request_id": str(
+                    getattr(request.state, "request_id", "")
+                ),
+            },
+        )
 
     @app.middleware("http")
     async def record_asgi_start(request: Request, call_next):
@@ -1807,6 +1879,20 @@ def create_app(
         request.state.client_ip = client_ip
         if suspicious_proxy_chain(request, client_ip):
             _warn_suspicious_proxy_chain(client_ip)
+        if path in {"/api/auth/google/start", "/api/auth/google/callback"}:
+            retry_after = request.app.state.auth_limiter.check(
+                client_ip_key(client_ip),
+                "auth",
+                per_minute=10,
+                per_hour=60,
+                per_day=300,
+            )
+            if retry_after is not None:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "登入請求過於頻繁，請稍後再試。"},
+                    headers={"Retry-After": str(max(1, retry_after))},
+                )
 
         matched_route = _match_route(app, request.scope)
         policy = _policy_for_matched_route(matched_route, request.method)
@@ -1829,6 +1915,22 @@ def create_app(
                 public_rag_enabled=current.public_rag_enabled,
             )
         if allowed:
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    body_bytes = int(content_length)
+                except ValueError:
+                    body_bytes = 0
+                body_limit = (
+                    _MAX_DEMO_BODY_BYTES
+                    if _is_demo_visitor(request)
+                    else _MAX_ADMIN_BODY_BYTES
+                )
+                if body_bytes > body_limit:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": "請求內容過大。"},
+                    )
             if not is_public and request.method not in {
                 "GET",
                 "HEAD",
@@ -1854,16 +1956,32 @@ def create_app(
                                 "detail": "跨站請求不可寫入本機管理 API。"
                             },
                         )
-                elif (
-                    principal.source in {"google", "anonymous"}
-                    and not origin_allowed(request, current, cors_origins)
-                ):
-                    return JSONResponse(
-                        status_code=403,
-                        content={
-                            "detail": "不允許的 Origin 對展示或登入工作階段寫入。"
-                        },
-                    )
+                elif principal.source in {"google", "anonymous"}:
+                    if not origin_allowed(
+                        request,
+                        current,
+                        cors_origins,
+                        require_origin=principal.source == "google",
+                    ):
+                        return JSONResponse(
+                            status_code=403,
+                            content={
+                                "detail": "不允許的 Origin 對展示或登入工作階段寫入。"
+                            },
+                        )
+                    if principal.source == "google":
+                        sec_fetch_site = request.headers.get("Sec-Fetch-Site")
+                        if sec_fetch_site is not None and sec_fetch_site not in {
+                            "same-origin",
+                            "same-site",
+                            "none",
+                        }:
+                            return JSONResponse(
+                                status_code=403,
+                                content={
+                                    "detail": "跨站請求不可寫入管理 API。"
+                                },
+                            )
             return await call_next(request)
 
         if path == "/api/events/stream":
@@ -2123,7 +2241,9 @@ def create_app(
 
         started_at = datetime.now(timezone.utc)
         started = time.perf_counter()
-        request_id = _incoming_request_id(request)
+        request_id = str(
+            getattr(request.state, "request_id", "") or _incoming_request_id(request)
+        )
         flow = start_flow(
             request_id=request_id,
             entrypoint=path,
@@ -2203,11 +2323,10 @@ def create_app(
         payload = {
             "status": "ok" if readiness.get("ready") else "starting",
             "version": __version__,
-            "readiness": readiness,
-            "admission": app.state.rag_admission.snapshot,
-            "llm_admission": app.state.llm_admission.snapshot,
-            "database_pool": _database_pool_snapshot(app.state.engine),
-            "llm_circuit": llm_circuit_snapshot(),
+            "readiness": {
+                "ready": bool(readiness.get("ready")),
+                "detail": str(readiness.get("detail") or ""),
+            },
         }
         if not readiness.get("ready"):
             return JSONResponse(status_code=503, content=payload)
@@ -2445,8 +2564,7 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"索引回滾失敗：{exc}") from exc
 
-    @app.get("/api/index-alias/reconcile")
-    def index_version_reconcile(repair: bool = False) -> Dict[str, Any]:
+    def _reconcile_index_alias(repair: bool) -> Dict[str, Any]:
         store = QdrantStore(settings.qdrant_url, api_key=settings.qdrant_api_key)
         try:
             return reconcile_alias(
@@ -2456,7 +2574,19 @@ def create_app(
                 repair=repair,
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"索引狀態檢查失敗：{exc}") from exc
+            raise HTTPException(
+                status_code=500, detail=f"索引狀態檢查失敗：{exc}"
+            ) from exc
+
+    @app.get("/api/index-alias/reconcile")
+    def index_version_reconcile() -> Dict[str, Any]:
+        return _reconcile_index_alias(False)
+
+    @app.post("/api/index-alias/reconcile")
+    def index_version_reconcile_repair(
+        payload: IndexReconcileRequest,
+    ) -> Dict[str, Any]:
+        return _reconcile_index_alias(payload.repair)
 
     @app.get("/api/system-usage")
     def system_usage() -> Dict[str, Any]:
@@ -4068,8 +4198,13 @@ def create_app(
                         (
                             "error",
                             {
-                                "message": error_message or "RAG 流程失敗。",
+                                "message": (
+                                    "RAG 流程失敗，請稍後再試。"
+                                    if demo_visitor
+                                    else error_message or "RAG 流程失敗。"
+                                ),
                                 "status": "failed",
+                                "request_id": request_id,
                             },
                         ),
                     )
@@ -4474,9 +4609,13 @@ def create_app(
                         (
                             "error",
                             {
-                                "message": error_message
-                                or "RAG 流程失敗。",
+                                "message": (
+                                    "RAG 流程失敗，請稍後再試。"
+                                    if demo_visitor
+                                    else error_message or "RAG 流程失敗。"
+                                ),
                                 "status": "failed",
+                                "request_id": request_id,
                             },
                         )
                     )
@@ -4562,6 +4701,31 @@ def create_app(
             expose_headers=["X-Judgment-Request-Id"],
             max_age=600,
         )
+
+    @app.middleware("http")
+    async def request_context_middleware(request: Request, call_next):
+        request_id = _incoming_request_id(request)
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers.setdefault("X-Judgment-Request-Id", request_id)
+        return response
+
+    @app.middleware("http")
+    async def security_headers_middleware(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "geolocation=(), microphone=(), camera=()",
+        )
+        response.headers.setdefault(
+            "Content-Security-Policy-Report-Only", csp_report_only
+        )
+        return response
 
     return app
 

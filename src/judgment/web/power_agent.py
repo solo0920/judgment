@@ -311,12 +311,32 @@ class PowerRequestHandler(BaseHTTPRequestHandler):
         if not origin:
             return True
         if origin == "null":
-            return True
+            return False
         try:
-            hostname = (urlparse(origin).hostname or "").lower()
+            parsed = urlparse(origin)
+            hostname = (parsed.hostname or "").lower()
+            port = parsed.port
         except ValueError:
             return False
-        return hostname in {"localhost", "127.0.0.1", "::1", "[::1]"}
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        backend_port = int(
+            getattr(self.controller, "backend_port", DEFAULT_BACKEND_PORT)
+        )
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+        return (
+            hostname in {"localhost", "127.0.0.1", "::1"}
+            and int(port) == backend_port
+        )
+
+    def _cross_site_request(self) -> bool:
+        site = self.headers.get("Sec-Fetch-Site")
+        return site is not None and site not in {
+            "same-origin",
+            "same-site",
+            "none",
+        }
 
     def _cors_headers(self, origin: Optional[str]) -> bool:
         if not self._allowed_origin(origin):
@@ -347,7 +367,7 @@ class PowerRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         origin = self.headers.get("Origin")
-        if not self._allowed_origin(origin):
+        if self._cross_site_request() or not self._allowed_origin(origin):
             self.send_response(HTTPStatus.FORBIDDEN)
             self.end_headers()
             return
@@ -358,6 +378,13 @@ class PowerRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         origin = self.headers.get("Origin")
         path = urlparse(self.path).path
+        if self._cross_site_request() or not self._allowed_origin(origin):
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {"detail": "不允許的來源。"},
+                origin,
+            )
+            return
         if path != "/api/power/status":
             self._send_json(HTTPStatus.NOT_FOUND, {"detail": "找不到電源控制端點。"}, origin)
             return
@@ -374,6 +401,13 @@ class PowerRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         origin = self.headers.get("Origin")
         path = urlparse(self.path).path
+        if self._cross_site_request() or not self._allowed_origin(origin):
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {"detail": "不允許的來源。"},
+                origin,
+            )
+            return
         if self.headers.get("X-Judgment-Power") != "1":
             self._send_json(
                 HTTPStatus.FORBIDDEN,

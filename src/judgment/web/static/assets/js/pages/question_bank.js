@@ -7,6 +7,7 @@ import {
   formatNumber,
   icon,
   notice,
+  safeUrl,
   scoreCellsMarkup,
   toast,
 } from "../utils.js";
@@ -698,7 +699,7 @@ function answerSourcesMarkup(answer) {
           }`;
           return source.law_url
             ? `<a class="qb-bank-law" href="${escapeHtml(
-                source.law_url,
+                safeUrl(source.law_url),
               )}" target="_blank" rel="noreferrer">${body}</a>`
             : `<span class="qb-bank-law">${body}</span>`;
         })

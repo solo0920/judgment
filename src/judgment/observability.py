@@ -681,7 +681,7 @@ def record_performance(
         if _write_count % 200 == 0:
             try:
                 days = max(
-                    90, int(os.getenv("PERFORMANCE_RETENTION_DAYS", "90"))
+                    1, int(os.getenv("PERFORMANCE_RETENTION_DAYS", "90"))
                 )
                 cutoff = datetime.now(timezone.utc) - timedelta(days=days)
                 with session_factory() as session:

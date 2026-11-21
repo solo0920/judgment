@@ -321,6 +321,8 @@ if [[ -f "$BACKUP_DIR/config/.env" ]]; then
   fi
   cp "$BACKUP_DIR/config/.env" "$PROJECT_DIR/.env"
   echo "已還原 .env；若新電腦路徑或主機不同，請先檢查內容。"
+elif [[ ! -f "$PROJECT_DIR/.env" ]]; then
+  echo "警告：備份未包含 .env。請先從密鑰管理器還原 .env，再啟動服務。" >&2
 fi
 if [[ ! -f "$PROJECT_DIR/docker-compose.yml" && -f "$BACKUP_DIR/config/docker-compose.yml" ]]; then
   cp "$BACKUP_DIR/config/docker-compose.yml" "$PROJECT_DIR/docker-compose.yml"
