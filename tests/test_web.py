@@ -1124,6 +1124,7 @@ def test_quality_endpoint_reports_raw_parquet(web_client) -> None:
     assert payload["totals"]["rows"] == 2
     assert payload["totals"]["unique_jids"] == 2
     assert payload["totals"]["matched_rows"] == 2
+    assert payload["totals"]["matched_unique_jids"] == 2
     assert len(payload["archives"]) == 1
     assert payload["archives"][0]["archive"] == "202601.rar"
     assert payload["coverage"]["postgres_judgments"] == 2

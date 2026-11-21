@@ -941,3 +941,13 @@ judgment-reranker:
 
 - **SC-017**: 同一 production 分頁重複切換主要頁面 SHOULD 在 1.5 秒內完成 first paint；Quality／Processing 使用 cached snapshot 時應低於 1 秒。
 - **SC-018**: 資料品質與資料處理頁不得因開啟頁面而執行 15–20 秒的完整 DB／DuckDB 掃描。
+
+
+### Addendum Requirements — Data Quality Reconciliation
+
+- **FR-044**: 資料品質頁的 PostgreSQL 收錄差異 MUST 以「原始 Parquet `citation_count > 0` 的 distinct JID」為比較基準，不得使用含重複列的 `matched_rows`。
+- **FR-045**: 頁面 MAY 同時顯示含重複的 matched rows 與重複列數，但「精確命中」主數字與 PostgreSQL 差異 MUST 使用去重 JID。
+
+### Addendum Success Criteria — Data Quality
+
+- **SC-019**: 同月份新舊 update archive 重複收錄相同 JID 時，品質頁不得誤報 PostgreSQL 匯入短少；差異必須為 0，並可另外看到重複列數。

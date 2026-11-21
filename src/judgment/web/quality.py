@@ -53,6 +53,7 @@ def _empty_totals() -> Dict[str, Any]:
         "missing_title_rows": 0,
         "missing_pdf_rows": 0,
         "matched_rows": 0,
+        "matched_unique_jids": 0,
         "citation_total": 0,
         "inconsistent_law_rows": 0,
         "inconsistent_citation_rows": 0,
@@ -70,6 +71,7 @@ def _coverage(
     settings: Settings,
     session_factory: Optional[sessionmaker[Session]],
     raw_matched_rows: int,
+    raw_matched_unique_rows: int,
 ) -> Dict[str, Any]:
     if session_factory is None:
         return {
@@ -78,6 +80,11 @@ def _coverage(
             "postgres_judgments": None,
             "postgres_diff": None,
             "postgres_coverage_pct": None,
+            "raw_matched_rows": raw_matched_rows,
+            "raw_matched_unique_jids": raw_matched_unique_rows,
+            "raw_matched_duplicate_rows": max(
+                0, raw_matched_rows - raw_matched_unique_rows
+            ),
             "vector_indexed": None,
             "vector_total": None,
             "vector_remaining": None,
@@ -116,8 +123,16 @@ def _coverage(
             "status": "operational",
             "detail": "PostgreSQL 與向量索引統計可用。",
             "postgres_judgments": postgres_judgments,
-            "postgres_diff": postgres_judgments - int(raw_matched_rows),
-            "postgres_coverage_pct": _percent(postgres_judgments, raw_matched_rows),
+            "postgres_diff": postgres_judgments
+            - int(raw_matched_unique_rows),
+            "postgres_coverage_pct": _percent(
+                postgres_judgments, raw_matched_unique_rows
+            ),
+            "raw_matched_rows": raw_matched_rows,
+            "raw_matched_unique_jids": raw_matched_unique_rows,
+            "raw_matched_duplicate_rows": max(
+                0, raw_matched_rows - raw_matched_unique_rows
+            ),
             "vector_indexed": indexed,
             "vector_total": total,
             "vector_remaining": _int(index.get("remaining_judgments")),
@@ -136,6 +151,11 @@ def _coverage(
             "postgres_judgments": None,
             "postgres_diff": None,
             "postgres_coverage_pct": None,
+            "raw_matched_rows": raw_matched_rows,
+            "raw_matched_unique_jids": raw_matched_unique_rows,
+            "raw_matched_duplicate_rows": max(
+                0, raw_matched_rows - raw_matched_unique_rows
+            ),
             "vector_indexed": None,
             "vector_total": None,
             "vector_remaining": None,
@@ -175,8 +195,8 @@ def _warnings(
         and int(postgres_diff) != 0
     ):
         warnings.append(
-            "PostgreSQL 判決數與原始 Parquet 精確命中相差 "
-            f"{int(postgres_diff):,} 筆；可能尚未完成匯入或存在重複 JID。"
+            "PostgreSQL 判決數與原始 Parquet 去重後精確命中相差 "
+            f"{int(postgres_diff):,} 筆；可能尚未完成匯入或存在非重複 JID 的落差。"
         )
     vector_coverage = coverage.get("vector_coverage_pct")
     if (
@@ -216,6 +236,7 @@ def _build_quality_snapshot(
             settings=settings,
             session_factory=session_factory,
             raw_matched_rows=0,
+            raw_matched_unique_rows=0,
         )
         return {
             "status": "empty",
@@ -251,6 +272,10 @@ def _build_quality_snapshot(
         settings=settings,
         session_factory=session_factory,
         raw_matched_rows=_int(totals.get("matched_rows")),
+        raw_matched_unique_rows=_int(
+            totals.get("matched_unique_jids")
+            or totals.get("matched_rows")
+        ),
     )
     warnings = _warnings(raw=raw, coverage=coverage)
     summary = raw.get("summary") or {}

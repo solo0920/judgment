@@ -33,6 +33,9 @@ SELECT
     count(*) FILTER (WHERE title IS NULL OR title = '') AS missing_title_rows,
     count(*) FILTER (WHERE pdf_url IS NULL OR pdf_url = '') AS missing_pdf_rows,
     count(*) FILTER (WHERE citation_count > 0) AS matched_rows,
+    count(DISTINCT jid) FILTER (
+        WHERE citation_count > 0 AND jid IS NOT NULL AND jid <> ''
+    ) AS matched_unique_jids,
     coalesce(sum(CASE WHEN citation_count > 0 THEN citation_count ELSE 0 END), 0)
         AS citation_total,
     count(*) FILTER (
@@ -78,6 +81,7 @@ CORE_COLUMNS = [
     "missing_title_rows",
     "missing_pdf_rows",
     "matched_rows",
+    "matched_unique_jids",
     "citation_total",
     "inconsistent_law_rows",
     "inconsistent_citation_rows",
@@ -91,7 +95,10 @@ CORE_COLUMNS = [
 GLOBAL_SQL = """
 SELECT
     count(*) AS rows,
-    count(DISTINCT jid) FILTER (WHERE jid IS NOT NULL AND jid <> '') AS unique_jids
+    count(DISTINCT jid) FILTER (WHERE jid IS NOT NULL AND jid <> '') AS unique_jids,
+    count(DISTINCT jid) FILTER (
+        WHERE citation_count > 0 AND jid IS NOT NULL AND jid <> ''
+    ) AS matched_unique_jids
 FROM read_parquet(?)
 """
 
@@ -256,7 +263,11 @@ def compute_raw_quality(manifests: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             dict(zip(CORE_COLUMNS, row))
             for row in connection.execute(CORE_SQL, [paths]).fetchall()
         ]
-        global_row = connection.execute(GLOBAL_SQL, [paths]).fetchone() or (0, 0)
+        global_row = connection.execute(GLOBAL_SQL, [paths]).fetchone() or (
+            0,
+            0,
+            0,
+        )
         duplicate_jid = connection.execute(
             DUPLICATE_JID_SQL, [paths]
         ).fetchone() or (0, 0)
@@ -305,6 +316,9 @@ def compute_raw_quality(manifests: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                 "missing_title_rows": _int(row.get("missing_title_rows")),
                 "missing_pdf_rows": _int(row.get("missing_pdf_rows")),
                 "matched_rows": _int(row.get("matched_rows")),
+                "matched_unique_jids": _int(
+                    row.get("matched_unique_jids")
+                ),
                 "citation_total": _int(row.get("citation_total")),
                 "inconsistent_law_rows": _int(row.get("inconsistent_law_rows")),
                 "inconsistent_citation_rows": _int(
@@ -330,6 +344,9 @@ def compute_raw_quality(manifests: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     duplicate_content_groups = _int(duplicate_content[0])
     duplicate_content_rows = _int(duplicate_content[1])
     matched_rows = sum(item["matched_rows"] for item in archives)
+    matched_unique_jids = _int(
+        global_row[2] if len(global_row) > 2 else 0
+    )
     citation_total = sum(item["citation_total"] for item in archives)
     missing_jid_rows = sum(item["missing_jid_rows"] for item in archives)
     empty_text_rows = sum(item["empty_text_rows"] for item in archives)
@@ -371,6 +388,7 @@ def compute_raw_quality(manifests: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "missing_title_rows": missing_title_rows,
         "missing_pdf_rows": missing_pdf_rows,
         "matched_rows": matched_rows,
+        "matched_unique_jids": matched_unique_jids,
         "citation_total": citation_total,
         "inconsistent_law_rows": inconsistent_law_rows,
         "inconsistent_citation_rows": inconsistent_citation_rows,

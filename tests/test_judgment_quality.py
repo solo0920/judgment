@@ -197,6 +197,7 @@ def test_compute_raw_quality_reports_checks_and_distributions(
     assert totals["missing_title_rows"] == 2
     assert totals["missing_pdf_rows"] == 2
     assert totals["matched_rows"] == 3
+    assert totals["matched_unique_jids"] == 2
     assert totals["citation_total"] == 3
     assert totals["inconsistent_law_rows"] == 1
     assert totals["inconsistent_citation_rows"] == 1

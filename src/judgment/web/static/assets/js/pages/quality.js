@@ -98,13 +98,20 @@ function renderCoverage(data) {
   const coverage = data.coverage || {};
   const totals = data.totals || {};
   const source = data.source || {};
+  const matchedUnique = Number(
+    totals.matched_unique_jids ?? totals.matched_rows ?? 0,
+  );
+  const matchedRows = Number(totals.matched_rows ?? matchedUnique);
+  const matchedDuplicates = Math.max(0, matchedRows - matchedUnique);
   const pgDiff = coverage.postgres_diff;
   const pgFoot =
     pgDiff === null || pgDiff === undefined
       ? "—"
       : pgDiff === 0
-        ? "與原始精確命中一致"
-        : `與原始精確命中相差 ${formatNumber(Math.abs(pgDiff))} 筆`;
+        ? "與原始精確命中（去重 JID）一致"
+        : `與原始精確命中（去重 JID）相差 ${formatNumber(
+            Math.abs(pgDiff),
+          )} 筆`;
   const vectorFoot =
     coverage.vector_indexed === null || coverage.vector_indexed === undefined
       ? coverage.detail || "無法取得索引統計"
@@ -113,9 +120,11 @@ function renderCoverage(data) {
         )} · ${coverage.model || "—"}`;
   return `<div class="metric-grid quality-coverage-grid">
     <div class="metric-card">
-      <div class="metric-label">${icon("filter", 13)}<span>原始精確命中</span></div>
-      <div class="metric-value">${formatNumber(totals.matched_rows)}</div>
-      <div class="metric-foot">citation_count &gt; 0；共 ${formatNumber(
+      <div class="metric-label">${icon("filter", 13)}<span>原始精確命中（去重 JID）</span></div>
+      <div class="metric-value">${formatNumber(matchedUnique)}</div>
+      <div class="metric-foot">citation_count &gt; 0；含重複 ${formatNumber(
+        matchedRows,
+      )} 筆${matchedDuplicates ? `，重複 ${formatNumber(matchedDuplicates)} 筆` : ""}；共 ${formatNumber(
         totals.citation_total,
       )} 筆引用</div>
     </div>
@@ -154,7 +163,7 @@ function renderArchiveTable(archives) {
           <th scope="col">壓縮檔</th>
           <th scope="col" class="cell-number">筆數</th>
           <th scope="col" class="cell-number">候選</th>
-          <th scope="col" class="cell-number">精確命中</th>
+          <th scope="col" class="cell-number">精確命中 JID</th>
           <th scope="col" class="cell-number">命中率</th>
           <th scope="col" class="cell-number">過短</th>
           <th scope="col" class="cell-number" title="缺少法院、正規化法院、裁判日期或案由的欄位次數">缺中繼</th>
@@ -182,7 +191,9 @@ function renderArchiveTable(archives) {
               </td>
               <td class="cell-number">${formatNumber(item.rows)}</td>
               <td class="cell-number">${candidate}</td>
-              <td class="cell-number">${formatNumber(item.matched_rows)}</td>
+              <td class="cell-number">${formatNumber(
+                item.matched_unique_jids ?? item.matched_rows,
+              )}</td>
               <td class="cell-number">${escapeHtml(percent(item.match_rate))}</td>
               <td class="cell-number">${formatNumber(item.short_text_rows)}</td>
               <td class="cell-number">${formatNumber(missingMeta)}</td>
@@ -200,6 +211,9 @@ function renderArchiveTable(archives) {
 
 function renderQualityReport(data) {
   const totals = data.totals || {};
+  const matchedUnique = Number(
+    totals.matched_unique_jids ?? totals.matched_rows ?? 0,
+  );
   const source = data.source || {};
   const checks = Array.isArray(data.checks) ? data.checks : [];
   const summary = data.summary || {};
@@ -241,8 +255,8 @@ function renderQualityReport(data) {
         <div class="summary-value">${formatNumber(totals.rows)}</div>
       </div>
       <div class="summary-item">
-        <div class="summary-label">精確命中</div>
-        <div class="summary-value">${formatNumber(totals.matched_rows)}</div>
+        <div class="summary-label">精確命中（去重）</div>
+        <div class="summary-value">${formatNumber(matchedUnique)}</div>
       </div>
       <div class="summary-item">
         <div class="summary-label">命中率</div>
