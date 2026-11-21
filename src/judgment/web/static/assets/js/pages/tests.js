@@ -314,7 +314,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
             <input class="input mono" id="tests-admin-token-input" name="admin-token"
               type="password" autocomplete="off" spellcheck="false"
               placeholder="JUDGMENT_ADMIN_TOKEN" />
-            <span class="field-help">本機 127.0.0.1 可直接使用；透過 cloudflared 或其他主機連線時，遠端管理 API 需要此權杖。權杖不會送往 ?api= 指定的位址。</span>
+            <span class="field-help">本機 127.0.0.1 可直接使用；透過 cloudflared 或其他主機連線時，遠端管理 API 需要此權杖。權杖只保留在目前分頁，關閉分頁後需重新輸入；也不會送往 ?api= 指定的位址。</span>
           </label>
           <div class="api-dialog-preview" id="tests-api-preview"></div>
           <div class="api-dialog-status" id="tests-api-status" role="status"></div>

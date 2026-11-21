@@ -852,6 +852,12 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     api_js = client.get("/assets/js/api.js")
     assert api_js.status_code == 200
     assert "demoProcessing" in api_js.text
+    assert "sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)" in api_js.text
+    assert "localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY)" in api_js.text
+
+    auth_js = client.get("/assets/js/auth.js")
+    assert auth_js.status_code == 200
+    assert 'setAdminToken("")' in auth_js.text
 
     rag_js = client.get("/assets/js/pages/rag.js")
     assert rag_js.status_code == 200

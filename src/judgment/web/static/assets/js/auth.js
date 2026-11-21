@@ -1,4 +1,10 @@
-import { api, apiUrl, getApiBase, getApiBaseSource } from "./api.js";
+import {
+  api,
+  apiUrl,
+  getApiBase,
+  getApiBaseSource,
+  setAdminToken,
+} from "./api.js";
 import { escapeHtml, toast } from "./utils.js";
 
 const GOOGLE_ICON = `
@@ -156,7 +162,12 @@ function renderAuthState(state) {
 async function refreshAuth() {
   if (!slot) return;
   try {
-    renderAuthState(await api.authMe());
+    const state = await api.authMe();
+    if (state?.authenticated) {
+      // Prefer the HttpOnly Google session; drop any break-glass token.
+      setAdminToken("");
+    }
+    renderAuthState(state);
   } catch (error) {
     renderLoggedOut({ google_enabled: false });
   }

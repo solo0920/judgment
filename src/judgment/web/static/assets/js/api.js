@@ -136,7 +136,20 @@ export function setApiBase(value) {
 
 export function getAdminToken() {
   try {
-    return String(window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "").trim();
+    const current = String(
+      window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "",
+    ).trim();
+    if (current) return current;
+    // Migrate tokens stored by older builds, then remove the persistent copy.
+    const legacy = String(
+      window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || "",
+    ).trim();
+    if (legacy) {
+      window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, legacy);
+      window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+      return legacy;
+    }
+    return "";
   } catch (error) {
     return "";
   }
@@ -145,8 +158,10 @@ export function getAdminToken() {
 export function setAdminToken(value) {
   const token = String(value || "").trim();
   try {
-    if (token) window.localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
-    else window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    if (token) window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    else window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    // Never leave a persistent legacy copy behind.
+    window.localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
   } catch (error) {
     /* storage may be unavailable */
   }
