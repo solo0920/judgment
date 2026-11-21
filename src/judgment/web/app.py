@@ -188,6 +188,7 @@ from .demo_mode import (
     load_demo_usage,
     public_demo_payload,
     sanitize_infrastructure,
+    sanitize_performance_payload,
     sanitize_processing_payload,
     sanitize_rag_result,
     sanitize_status_payload,
@@ -3879,7 +3880,7 @@ def create_app(
             else:
                 payload = fetch()
             if demo_visitor:
-                return sanitize_infrastructure(payload)
+                return sanitize_performance_payload(payload)
             return payload
         except HTTPException:
             raise

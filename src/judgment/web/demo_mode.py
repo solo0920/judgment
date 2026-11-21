@@ -271,6 +271,113 @@ def sanitize_rag_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
+_RAG_RESPONSE_PUBLIC_KEYS = frozenset(
+    {
+        "status",
+        "answer_source",
+        "citation_count",
+        "judgment_citations",
+        "law_citations",
+        "reference_judgments",
+        "judgment_candidates",
+        "judgment_limit",
+        "judgment_limit_applied",
+        "abstain",
+        "duration_ms",
+        "has_answer",
+    }
+)
+_RAG_METADATA_PUBLIC_KEYS = frozenset(
+    {
+        "rag_status",
+        "asgi_to_handler_ms",
+        "asgi_to_flow_ms",
+        "handler_to_flow_ms",
+        "citation_retry",
+    }
+)
+# Segment details that can contain visitor-derived text.  Counts, scores,
+# token usage and timings remain visible for the public performance demo.
+_PERFORMANCE_SEGMENT_TEXT_KEYS = frozenset(
+    {
+        "parsed_query",
+        "filter",
+        "stat_entity",
+        "errors",
+        "error",
+    }
+)
+
+
+def _sanitize_rag_performance_metadata(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result: Dict[str, Any] = {}
+    for key in _RAG_METADATA_PUBLIC_KEYS:
+        if key in value:
+            result[key] = value[key]
+    response = value.get("rag_response")
+    if isinstance(response, dict):
+        result["rag_response"] = {
+            key: response[key]
+            for key in _RAG_RESPONSE_PUBLIC_KEYS
+            if key in response
+        }
+    return result
+
+
+def _scrub_performance_segment_details(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _scrub_performance_segment_details(item)
+            for key, item in value.items()
+            if key not in _PERFORMANCE_SEGMENT_TEXT_KEYS
+        }
+    if isinstance(value, list):
+        return [_scrub_performance_segment_details(item) for item in value]
+    return value
+
+
+def sanitize_performance_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Remove visitor text from the public performance report.
+
+    ``query_performance`` returns the full flow JSON so the admin page can
+    inspect RAG traces.  Demo visitors receive the same report, so the free
+    text fields (question, answer, citation audit sentences, request params and
+    client breadcrumbs) must be removed while timing and status fields remain.
+    """
+
+    result = sanitize_infrastructure(dict(payload))
+    rows = result.get("rows")
+    if not isinstance(rows, list):
+        return result
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row["params_text"] = ""
+        flow = row.get("flow")
+        if not isinstance(flow, dict):
+            continue
+        metadata = _sanitize_rag_performance_metadata(flow.get("metadata"))
+        if metadata:
+            flow["metadata"] = metadata
+        else:
+            flow.pop("metadata", None)
+        flow.pop("params", None)
+        flow.pop("client", None)
+        segments = flow.get("segments")
+        if isinstance(segments, list):
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    continue
+                for key in ("params", "metadata"):
+                    if key in segment:
+                        segment[key] = _scrub_performance_segment_details(
+                            segment[key]
+                        )
+    return result
+
+
 def _row_features(row: DemoSettings) -> Dict[str, bool]:
     return {
         feature: bool(getattr(row, f"allow_{feature}", False))

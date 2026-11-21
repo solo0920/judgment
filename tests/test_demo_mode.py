@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
 from judgment.models import Base
+from judgment.observability import record_performance
 from judgment.web.app import create_app
 
 ADMIN_HEADERS = {"X-Judgment-Admin-Token": "secret-demo-token"}
@@ -307,6 +310,202 @@ def test_demo_status_and_processing_sanitize_infrastructure(demo_client) -> None
     assert status["services"][0]["active_url"] == ""
     assert status["services"][0]["active_model"] == ""
     assert status["pipeline"]["stages"][0]["message"] == ""
+
+
+def test_sanitize_performance_payload_redacts_rag_text() -> None:
+    from judgment.web.demo_mode import sanitize_performance_payload
+
+    payload = {
+        "rows": [
+            {
+                "id": 1,
+                "process": "RAG 問答",
+                "duration_ms": 1234,
+                "params_text": '{"question_length": 16}',
+                "flow": {
+                    "request_id": "req-1",
+                    "total_ms": 1234,
+                    "status": "success",
+                    "params": {"question_length": 16},
+                    "metadata": {
+                        "question": "測試機密問題",
+                        "answer": "測試機密答案",
+                        "rag_status": "operational",
+                        "asgi_to_handler_ms": 9.1,
+                        "rag_response": {
+                            "status": "operational",
+                            "citation_count": 2,
+                            "llm_model": "secret-model",
+                            "has_answer": True,
+                        },
+                        "citation_audit": {
+                            "unsupported_sentences": ["測試機密答案片段"]
+                        },
+                    },
+                    "client": {"route": "/#/rag", "total_ms": 1200},
+                    "summary": {
+                        "segment_count": 1,
+                        "models": ["secret-model"],
+                    },
+                    "segments": [
+                        {
+                            "seq": 1,
+                            "name": "rag.parse_question",
+                            "params": {
+                                "question_length": 16,
+                                "stat_entity": "測試實體",
+                            },
+                            "metadata": {
+                                "parsed_query": {"topics": ["測試主題"]},
+                                "filter": {"keyword": "測試關鍵字"},
+                                "input_length": 16,
+                                "status": "ok",
+                            },
+                            "duration_ms": 10,
+                            "status": "ok",
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+    cleaned = sanitize_performance_payload(payload)
+    dumped = json.dumps(cleaned, ensure_ascii=False)
+    for secret in (
+        "測試機密問題",
+        "測試機密答案",
+        "測試機密答案片段",
+        "測試實體",
+        "測試主題",
+        "測試關鍵字",
+    ):
+        assert secret not in dumped
+
+    row = cleaned["rows"][0]
+    assert row["params_text"] == ""
+    flow = row["flow"]
+    assert "params" not in flow
+    assert "client" not in flow
+    assert flow["metadata"]["rag_status"] == "operational"
+    assert flow["metadata"]["rag_response"]["citation_count"] == 2
+    assert "llm_model" not in flow["metadata"]["rag_response"]
+    assert "citation_audit" not in flow["metadata"]
+    assert flow["summary"]["segment_count"] == 1
+    assert flow["summary"]["models"] == []
+    segment = flow["segments"][0]
+    assert segment["params"]["question_length"] == 16
+    assert "stat_entity" not in segment["params"]
+    assert segment["metadata"]["input_length"] == 16
+    assert "parsed_query" not in segment["metadata"]
+    assert "filter" not in segment["metadata"]
+
+
+def test_demo_performance_redacts_rag_question_and_answer(demo_client) -> None:
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    now = datetime.now(timezone.utc)
+    record_performance(
+        app.state.session_factory,
+        process="RAG 問答",
+        module="judgment.rag.answer_question",
+        status="success",
+        started_at=now,
+        finished_at=now,
+        duration_ms=1234,
+        method="POST",
+        path="/api/rag/query",
+        request_id="demo-leak-regression",
+        params={"question_length": 12},
+        flow={
+            "version": "1",
+            "request_id": "demo-leak-regression",
+            "entrypoint": "/api/rag/query",
+            "method": "POST",
+            "path": "/api/rag/query",
+            "started_at": now.isoformat(),
+            "finished_at": now.isoformat(),
+            "total_ms": 1234,
+            "status": "success",
+            "params": {"question_length": 12},
+            "metadata": {
+                "question": "測試機密問題",
+                "answer": "測試機密答案",
+                "rag_status": "operational",
+                "rag_response": {
+                    "status": "operational",
+                    "citation_count": 2,
+                },
+                "citation_audit": {
+                    "unsupported_sentences": ["測試機密答案片段"]
+                },
+            },
+            "client": {"route": "/#/rag"},
+            "summary": {"segment_count": 1},
+            "segments": [
+                {
+                    "seq": 1,
+                    "name": "rag.answer_question",
+                    "params": {"question_length": 12},
+                    "metadata": {"status": "ok", "input_length": 12},
+                    "offset_ms": 0,
+                    "duration_ms": 1234,
+                    "status": "success",
+                }
+            ],
+        },
+    )
+
+    response = client.get(
+        "/api/performance",
+        params={"process": "RAG 問答", "page_size": 10},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    dumped = json.dumps(payload, ensure_ascii=False)
+    for secret in ("測試機密問題", "測試機密答案", "測試機密答案片段"):
+        assert secret not in dumped
+    row = next(
+        item
+        for item in payload["rows"]
+        if item["request_id"] == "demo-leak-regression"
+    )
+    assert row["params_text"] == ""
+    assert "params" not in row["flow"]
+    assert "client" not in row["flow"]
+    assert "question" not in row["flow"]["metadata"]
+    assert "answer" not in row["flow"]["metadata"]
+    assert "citation_audit" not in row["flow"]["metadata"]
+
+    admin = client.get(
+        "/api/performance",
+        params={"process": "RAG 問答", "page_size": 10},
+        headers=ADMIN_HEADERS,
+    )
+    assert admin.status_code == 200
+    admin_row = next(
+        item
+        for item in admin.json()["rows"]
+        if item["request_id"] == "demo-leak-regression"
+    )
+    assert admin_row["flow"]["metadata"]["question"] == "測試機密問題"
+    assert admin_row["flow"]["metadata"]["answer"] == "測試機密答案"
 
 
 def test_demo_route_feature_mapping_is_explicit() -> None:
