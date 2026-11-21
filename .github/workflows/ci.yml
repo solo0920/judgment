@@ -61,7 +61,7 @@ jobs:
         run: uv run --with pip-audit pip-audit
       - name: Secret scan (push/PR diff)
         # Full-history scan is still pending; this action scans the pushed/PR range.
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: SBOM
