@@ -112,6 +112,19 @@ Cloudflare Web Analytics 的 beacon 同時出現在 `judgment.ragdemo.win` 與 `
 - 決策後再跑一次 console；確認只剩預期項目，才把 header 從 `Content-Security-Policy-Report-Only` 改為 `Content-Security-Policy`。
 - `style-src 'unsafe-inline'` 目前保留（動態 style 屬性需要）。
 
+### CSP enforce 回滾
+
+若 enforce 後頁面異常：
+
+1. 把 `app.py` 的 `Content-Security-Policy` 改回 `Content-Security-Policy-Report-Only`。
+2. 把 `frontend/_headers` 與 `scripts/build_frontend.py` 的 header 名稱改回 Report-Only。
+3. `uv run python scripts/build_frontend.py --api-base https://api-mbp.ragdemo.win`
+4. `npx wrangler pages deploy frontend --project-name judgment --branch main`
+5. 重啟 `judgment-web`（`tmux kill-session -t judgment-web` 後執行 `JUDGMENT_SKIP_UPDATE_CHECK=1 ./up.sh`）。
+6. 確認 response header 已回到 Report-Only，頁面可正常載入。
+
+實際切換前先演練一次這個流程，記錄從改檔到生效的時間。Enforce 後前幾天每天檢查 `.run/csp-report.log`。
+
 ## 5. Demo 唯讀資料庫角色
 
 `DEMO_QUERY_DATABASE_URL` 指向 `demo_reader`；只有 demo 訪客的 `/api/query?database=postgres` 使用它。未設定時訪客 data 功能回 403 `demo_data_unavailable`，不會 fallback 到主連線。
