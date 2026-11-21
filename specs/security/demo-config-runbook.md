@@ -151,9 +151,18 @@ copy (select 1) to program 'id';        -- permission denied
 
 回歸測試：`test_sanitize_query_payload_redacts_operational_fields`。
 
-## 7. 已知未完成
+## 7. 備份加密
+
+- `backup.sh` 會把 PostgreSQL dump 用 age 加密成 `postgres/judgment.dump.age`；`.env` 仍不進備份。
+- `BACKUP_REQUIRE_ENCRYPTION=1` 時，沒有 `BACKUP_AGE_RECIPIENT` 會直接失敗。
+- `restore.sh` 偵測 `.age` 後用 `BACKUP_AGE_IDENTITY`（預設 `~/.config/judgment/age.key`）解密到暫存檔再 `pg_restore`。
+- 空間檢查已納入 PostgreSQL 大小與 Qdrant reserve；目前資料量約需 150 GB+。
+- 已完成加密 subset restore drill：`law_dataset_versions` 4 筆，age 解密後 `pg_restore` 到 scratch DB，筆數一致。
+- **完整 150 GB＋Qdrant restore drill 尚未執行**，需安排維護窗口。
+
+## 8. 已知未完成
 
 - CSP 已 enforce；`report-uri` 收集端點已上線。
 - `AUTH_COOKIE_SAMESITE=none` 尚未改 Lax。
-- 備份加密與 restore drill 未做。
+- 完整備份 restore drill（DB＋Qdrant＋data）尚未執行。
 - `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。

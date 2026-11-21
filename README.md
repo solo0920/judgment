@@ -164,7 +164,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 > PostgreSQL 的索引版本、`judgment_vector_index` 與 Qdrant collection 必須一起還原。若只還原 Qdrant，仍需有 PostgreSQL 的 `judgment_documents` 才能重新建立索引；若只還原 PostgreSQL，Qdrant 會是空的，且 `judgment_index_versions` 可能仍標示 active，索引器不一定會自動重建。還原時 `restore.sh` 會依 manifest 的 alias mapping 重建 `judgments_current`；若刻意只還原部分元件，應先清除或退役 `judgment_index_versions` 與 `judgment_vector_index` 的對應版本，再重新建立 collection 與 alias。
 
-以目前資料量估算，完整備份至少約 35–40 GB（`data/` 約 28 GB、PostgreSQL dump 約 2 GB、Qdrant snapshot 約 4 GB，另加 checksums 與暫存空間）；建議使用 64 GB 以上的 USB，並加密保存。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。
+以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設會用 age 加密成 `postgres/judgment.dump.age`；`BACKUP_REQUIRE_ENCRYPTION=1` 時未設定 recipient 會直接失敗，還原時需要對應的 `BACKUP_AGE_IDENTITY`。
 
 ## 設定
 
@@ -175,6 +175,9 @@ cd /Volumes/USB/judgment-backup-20261108
 | `DATABASE_URL` | `postgresql+psycopg://judgment:judgment@localhost:5432/judgment` | PostgreSQL 連線字串；正式環境請使用強密碼 |
 | `POSTGRES_PASSWORD` | `change-me` | Docker Compose 初始化 PostgreSQL 的密碼；`.env.example` 要求自行設定 |
 | `JUDGMENT_PG_PASSWORD` | 空 | `backup.sh`／`restore.sh` 使用的 PostgreSQL 密碼；未設定時沿用 `POSTGRES_PASSWORD` |
+| `BACKUP_AGE_RECIPIENT` | 空 | age 公鑰；設定後 PostgreSQL dump 會加密成 `.age` |
+| `BACKUP_AGE_IDENTITY` | `~/.config/judgment/age.key` | `restore.sh` 解密用的 age 私鑰路徑 |
+| `BACKUP_REQUIRE_ENCRYPTION` | `0` | 設為 `1` 時，沒有 `BACKUP_AGE_RECIPIENT` 就拒絕備份 |
 | `LAW_DATA_DIR` | `/data/laws` | 法規產物根目錄（與判決資料 `/data/judgments` 分開）；`.env.example` 本機預設為 `./data/laws` |
 | `JUDGMENT_DATA_DIR` | `/data/judgments` | 判決資料根目錄；原始 `.rar` 可放在根目錄或 `raw_rar/` 子目錄。`.env.example` 本機預設為 `./data/judgments` |
 | `JUDGMENT_LAW_LIST` | `documents/金融法規.md` | 判決納入資料庫所依據的金融法規白名單 |

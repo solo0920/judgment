@@ -20,6 +20,8 @@ SKIP_POSTGRES=0
 SKIP_QDRANT=0
 ALLOW_RUNNING=0
 DRY_RUN=0
+BACKUP_AGE_RECIPIENT="${BACKUP_AGE_RECIPIENT:-}"
+BACKUP_REQUIRE_ENCRYPTION="${BACKUP_REQUIRE_ENCRYPTION:-0}"
 
 usage() {
   cat <<'EOF'
@@ -216,6 +218,14 @@ fi
 if ! docker info >/dev/null 2>&1; then
   die "Docker daemon 沒有執行，請先啟動 OrbStack／Docker Desktop"
 fi
+if [[ "$SKIP_POSTGRES" != "1" ]]; then
+  if [[ "$BACKUP_REQUIRE_ENCRYPTION" == "1" && -z "$BACKUP_AGE_RECIPIENT" ]]; then
+    die "BACKUP_REQUIRE_ENCRYPTION=1 但未設定 BACKUP_AGE_RECIPIENT"
+  fi
+  if [[ -n "$BACKUP_AGE_RECIPIENT" ]]; then
+    need age
+  fi
+fi
 
 info "啟動並檢查資料庫"
 START_SERVICES=()
@@ -293,12 +303,23 @@ mkdir -p "$TARGET_DIR"
 JUDGMENT_BYTES="$(dir_size "$JUDGMENT_DATA_ABS")"
 LAW_BYTES="$(dir_size "$LAW_DATA_ABS")"
 TOTAL_BYTES=$((JUDGMENT_BYTES + LAW_BYTES))
-if [[ "$SKIP_DATA" != "1" ]]; then
-  AVAILABLE_BYTES="$(df -Pk "$TARGET_DIR" | awk 'NR==2 {print $4 * 1024}')"
-  REQUIRED_BYTES=$((TOTAL_BYTES + 4 * 1024 * 1024 * 1024))
-  if [[ -n "$AVAILABLE_BYTES" && "$AVAILABLE_BYTES" -lt "$REQUIRED_BYTES" ]]; then
-    die "備份空間不足：需要約 $((REQUIRED_BYTES / 1024 / 1024 / 1024)) GB，可用 $((AVAILABLE_BYTES / 1024 / 1024 / 1024)) GB"
-  fi
+PG_BYTES=0
+if [[ "$SKIP_POSTGRES" != "1" ]]; then
+  PG_BYTES="$(docker compose exec -T "$JUDGMENT_PG_SERVICE" \
+    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+    psql -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" -tAc \
+    "select pg_database_size(current_database());" 2>/dev/null \
+    | tr -d '[:space:]' || true)"
+  [[ "$PG_BYTES" =~ ^[0-9]+$ ]] || PG_BYTES=0
+fi
+COPY_BYTES="$TOTAL_BYTES"
+[[ "$SKIP_DATA" == "1" ]] && COPY_BYTES=0
+QDRANT_RESERVE=0
+[[ "$SKIP_QDRANT" != "1" ]] && QDRANT_RESERVE=$((8 * 1024 * 1024 * 1024))
+REQUIRED_BYTES=$((COPY_BYTES + PG_BYTES + QDRANT_RESERVE))
+AVAILABLE_BYTES="$(df -Pk "$TARGET_DIR" | awk 'NR==2 {print $4 * 1024}')"
+if [[ -n "$AVAILABLE_BYTES" && -n "$REQUIRED_BYTES" && "$AVAILABLE_BYTES" -lt "$REQUIRED_BYTES" ]]; then
+  die "備份空間不足：需要約 $((REQUIRED_BYTES / 1024 / 1024 / 1024)) GB，可用 $((AVAILABLE_BYTES / 1024 / 1024 / 1024)) GB"
 fi
 
 info "備份計畫"
@@ -306,7 +327,13 @@ printf '專案目錄：%s\n' "$PROJECT_ROOT"
 printf '備份目錄：%s\n' "$TARGET_DIR"
 printf '判決資料：%s（%s bytes）\n' "$JUDGMENT_DATA_ABS" "$JUDGMENT_BYTES"
 printf '法規資料：%s（%s bytes）\n' "$LAW_DATA_ABS" "$LAW_BYTES"
-printf 'PostgreSQL：%s / %s\n' "$JUDGMENT_PG_DB" "$JUDGMENT_PG_USER"
+printf 'PostgreSQL：%s / %s（約 %s bytes）\n' "$JUDGMENT_PG_DB" "$JUDGMENT_PG_USER" "$PG_BYTES"
+printf 'PostgreSQL 加密：%s\n' "$([[ -n "$BACKUP_AGE_RECIPIENT" ]] && echo 'age' || echo '未設定（明文）')"
+printf '預估需求：約 %s GB（data %s + PG %s + Qdrant reserve %s）\n' \
+  "$((REQUIRED_BYTES / 1024 / 1024 / 1024))" \
+  "$((COPY_BYTES / 1024 / 1024 / 1024))" \
+  "$((PG_BYTES / 1024 / 1024 / 1024))" \
+  "$((QDRANT_RESERVE / 1024 / 1024 / 1024))"
 printf 'Qdrant：%s / %s\n' "$QDRANT_URL" "$JUDGMENT_VECTOR_COLLECTION"
 printf '略過 data：%s；略過 PostgreSQL：%s；略過 Qdrant：%s\n' \
   "$SKIP_DATA" "$SKIP_POSTGRES" "$SKIP_QDRANT"
@@ -331,6 +358,12 @@ QDRANT_COLLECTION_SNAPSHOT=""
 
 if [[ "$SKIP_POSTGRES" != "1" ]]; then
   info "匯出 PostgreSQL"
+  if [[ "$BACKUP_REQUIRE_ENCRYPTION" == "1" && -z "$BACKUP_AGE_RECIPIENT" ]]; then
+    die "BACKUP_REQUIRE_ENCRYPTION=1 但未設定 BACKUP_AGE_RECIPIENT"
+  fi
+  if [[ -n "$BACKUP_AGE_RECIPIENT" ]]; then
+    need age
+  fi
   PG_DUMP_REL="postgres/judgment.dump"
   if ! docker compose exec -T "$JUDGMENT_PG_SERVICE" \
     env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
@@ -340,9 +373,20 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
     die "pg_dump 失敗"
   fi
   [[ -s "$TARGET_DIR/$PG_DUMP_REL" ]] || die "pg_dump 產生空檔案"
+  if [[ -n "$BACKUP_AGE_RECIPIENT" ]]; then
+    if ! age -r "$BACKUP_AGE_RECIPIENT" \
+      -o "$TARGET_DIR/$PG_DUMP_REL.age" "$TARGET_DIR/$PG_DUMP_REL"; then
+      rm -f "$TARGET_DIR/$PG_DUMP_REL" "$TARGET_DIR/$PG_DUMP_REL.age"
+      die "age 加密 PostgreSQL dump 失敗"
+    fi
+    rm -f "$TARGET_DIR/$PG_DUMP_REL"
+    PG_DUMP_REL="postgres/judgment.dump.age"
+  fi
   PG_DUMP_SHA="$(sha256_file "$TARGET_DIR/$PG_DUMP_REL")"
   printf '%s  %s\n' "$PG_DUMP_SHA" "$PG_DUMP_REL" >> "$TARGET_DIR/checksums.sha256"
-  printf 'PostgreSQL dump：%s bytes\n' "$(file_size "$TARGET_DIR/$PG_DUMP_REL")"
+  printf 'PostgreSQL dump：%s bytes%s\n' \
+    "$(file_size "$TARGET_DIR/$PG_DUMP_REL")" \
+    "$([[ -n "$BACKUP_AGE_RECIPIENT" ]] && echo '（age 加密）' || true)"
 fi
 
 if [[ "$SKIP_QDRANT" != "1" ]]; then
@@ -396,6 +440,7 @@ export TARGET_DIR PROJECT_ROOT JUDGMENT_DATA_ABS LAW_DATA_ABS
 export JUDGMENT_BYTES LAW_BYTES TOTAL_BYTES
 export JUDGMENT_PG_SERVICE JUDGMENT_PG_USER JUDGMENT_PG_DB
 export PG_DUMP_REL PG_DUMP_SHA
+export BACKUP_AGE_RECIPIENT
 export QDRANT_URL JUDGMENT_VECTOR_COLLECTION JUDGMENT_VECTOR_ALIAS
 export QDRANT_SNAPSHOT_REL QDRANT_SNAPSHOT_SHA QDRANT_POINTS QDRANT_COLLECTION_SNAPSHOT
 export GIT_COMMIT GIT_BRANCH
@@ -434,6 +479,8 @@ manifest = {
         "database": os.environ["JUDGMENT_PG_DB"],
         "dump": os.environ.get("PG_DUMP_REL", ""),
         "sha256": os.environ.get("PG_DUMP_SHA", ""),
+        "encrypted": bool(os.environ.get("BACKUP_AGE_RECIPIENT")),
+        "encryption": "age" if os.environ.get("BACKUP_AGE_RECIPIENT") else "",
         "bytes": 0,
     },
     "qdrant": {
@@ -498,7 +545,9 @@ cat > "$TARGET_DIR/USAGE.md" <<'EOF'
 --dry-run            只檢查環境，不寫入備份
 ```
 
-備份內容包含 `data/`、`postgres/judgment.dump`、`qdrant/` snapshot、`config/`、`manifest.json`、checksums 與 `restore.sh`。
+備份內容包含 `data/`、PostgreSQL dump（預設 `postgres/judgment.dump.age`）、`qdrant/` snapshot、`config/`、`manifest.json`、checksums 與 `restore.sh`。
+
+若 `.env` 設定了 `BACKUP_AGE_RECIPIENT`，PostgreSQL dump 會用 age 加密成 `.age`；`BACKUP_REQUIRE_ENCRYPTION=1` 時未設定 recipient 會直接失敗。還原時需要對應的 `BACKUP_AGE_IDENTITY`（預設 `~/.config/judgment/age.key`）。
 
 ## restore.sh
 
@@ -519,7 +568,7 @@ cd /Volumes/USB/judgment-backup-20261108
 - `-s, --source`：備份來源目錄；可省略，預設為 `restore.sh` 所在目錄。
 - 目標專案必須已 clone（含 `pyproject.toml`、`src/judgment`、`up.sh`）。
 
-還原前會檢查 Docker、manifest、checksum、備份檔案與目標空間，然後還原 PostgreSQL schema、Qdrant collection 與 `data/`。`.env` 不會進備份；請先從密鑰管理器還原 `.env`，再執行 `uv sync` 與 `./up.sh`。
+還原前會檢查 Docker、manifest、checksum、備份檔案與目標空間，然後還原 PostgreSQL schema、Qdrant collection 與 `data/`。若 PostgreSQL dump 是 `.age`，會用 `BACKUP_AGE_IDENTITY` 解密到暫存檔再 `pg_restore`。`.env` 不會進備份；請先從密鑰管理器還原 `.env`，再執行 `uv sync` 與 `./up.sh`。
 
 常用選項：
 

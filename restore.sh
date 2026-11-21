@@ -21,6 +21,7 @@ SKIP_QDRANT=0
 NO_START=0
 NO_DEPS=0
 DRY_RUN=0
+PG_RESTORE_TMP=""
 
 usage() {
   cat <<'EOF'
@@ -53,6 +54,11 @@ die() {
   printf '錯誤：%s\n' "$*" >&2
   exit 1
 }
+
+cleanup_restore_tmp() {
+  [[ -z "${PG_RESTORE_TMP:-}" ]] || rm -f "$PG_RESTORE_TMP"
+}
+trap cleanup_restore_tmp EXIT
 
 info() {
   printf '\n== %s ==\n' "$*"
@@ -357,6 +363,16 @@ done
 
 if [[ "$SKIP_POSTGRES" != "1" ]]; then
   info "還原 PostgreSQL"
+  PG_RESTORE_FILE="$PG_DUMP"
+  if [[ "$PG_DUMP_REL" == *.age ]]; then
+    need age
+    AGE_IDENTITY="${BACKUP_AGE_IDENTITY:-$HOME/.config/judgment/age.key}"
+    [[ -f "$AGE_IDENTITY" ]] || die "找不到 age identity：$AGE_IDENTITY（請設定 BACKUP_AGE_IDENTITY）"
+    PG_RESTORE_TMP="$(mktemp -t judgment-pg-restore.XXXXXX)"
+    age -d -i "$AGE_IDENTITY" -o "$PG_RESTORE_TMP" "$PG_DUMP" \
+      || die "age 解密 PostgreSQL dump 失敗"
+    PG_RESTORE_FILE="$PG_RESTORE_TMP"
+  fi
   docker compose exec -T "$PG_SERVICE" \
     env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
@@ -364,7 +380,7 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
   docker compose exec -T "$PG_SERVICE" \
     env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     pg_restore -U "$PG_USER" -d "$PG_DB" \
-    --no-owner --no-privileges --exit-on-error < "$PG_DUMP"
+    --no-owner --no-privileges --exit-on-error < "$PG_RESTORE_FILE"
   JUDGMENT_COUNT="$(docker compose exec -T "$PG_SERVICE" \
     env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
     psql -U "$PG_USER" -d "$PG_DB" -tAc \

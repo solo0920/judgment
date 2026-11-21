@@ -87,7 +87,7 @@
 - **CSP 手動 console 檢查**：Playwright + Chrome／WebKit／Firefox，demo 開啟時跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出、performance／quality／processing／status／admin；inline theme script 已移到 `assets/js/boot.js`。Cloudflare Web Analytics 已關閉並 purge，beacon 已消失。
 - **CSP enforce**：2026-11-21 已從 Report-Only 切到 `Content-Security-Policy`；enforce 後同一組跨瀏覽器功能測試 0 CSP violation、0 page error、下載正常。Demo 已再次關閉。
 - **`SameSite=None`**：尚未改 Lax。
-- **備份加密／restore drill**：尚未做。
+- **備份加密／restore drill**：PostgreSQL dump 已改為 age 加密（`postgres/judgment.dump.age`），`.env` 不進備份；`BACKUP_REQUIRE_ENCRYPTION=1` 會 fail closed。已完成加密 subset restore drill（`law_dataset_versions` 4 筆，解密後 restore 到 scratch DB，筆數一致）。完整 150 GB＋Qdrant restore drill 尚未執行。備份空間檢查已納入 PostgreSQL 大小與 Qdrant reserve。
 
 ## 1. 方法與證據
 
