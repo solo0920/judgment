@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -59,6 +60,7 @@ class ProcessingEventStore:
             ),
         )
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.RLock()
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -67,6 +69,10 @@ class ProcessingEventStore:
         return self._conn
 
     def start(self) -> None:
+        with self._lock:
+            self._start_locked()
+
+    def _start_locked(self) -> None:
         if self._conn is not None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -205,21 +211,26 @@ class ProcessingEventStore:
                 )
 
     def _prune(self) -> None:
-        try:
-            self.connection.execute(
-                """
-                DELETE FROM processing_events
-                WHERE id <= (
-                    SELECT COALESCE(MAX(id), 0) - ? FROM processing_events
+        with self._lock:
+            try:
+                self.connection.execute(
+                    """
+                    DELETE FROM processing_events
+                    WHERE id <= (
+                        SELECT COALESCE(MAX(id), 0) - ? FROM processing_events
+                    )
+                    """,
+                    (self.retention,),
                 )
-                """,
-                (self.retention,),
-            )
-            self.connection.commit()
-        except sqlite3.Error:
-            logger.warning("無法修剪 processing event journal", exc_info=True)
+                self.connection.commit()
+            except sqlite3.Error:
+                logger.warning("無法修剪 processing event journal", exc_info=True)
 
     def append(self, event: Dict[str, Any]) -> int:
+        with self._lock:
+            return self._append_locked(event)
+
+    def _append_locked(self, event: Dict[str, Any]) -> int:
         event = validate_event(dict(event))
         payload = json.dumps(
             event, ensure_ascii=False, separators=(",", ":")
@@ -257,14 +268,24 @@ class ProcessingEventStore:
         return event_id
 
     def latest_id(self) -> int:
-        if self._conn is None:
-            return 0
-        row = self.connection.execute(
-            "SELECT COALESCE(MAX(id), 0) FROM processing_events"
-        ).fetchone()
-        return int(row[0] or 0) if row else 0
+        with self._lock:
+            if self._conn is None:
+                return 0
+            row = self.connection.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM processing_events"
+            ).fetchone()
+            return int(row[0] or 0) if row else 0
 
     def replay_after(
+        self,
+        last_event_id: int,
+        *,
+        limit: int = 1000,
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        with self._lock:
+            return self._replay_after_locked(last_event_id, limit=limit)
+
+    def _replay_after_locked(
         self,
         last_event_id: int,
         *,
@@ -305,13 +326,15 @@ class ProcessingEventStore:
         return events, complete
 
     def close(self) -> None:
-        if self._conn is None:
-            return
-        try:
-            self._conn.close()
-        except sqlite3.Error:
-            pass
-        self._conn = None
+        with self._lock:
+            if self._conn is None:
+                return
+            conn = self._conn
+            self._conn = None
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
 
 
 __all__ = ["ProcessingEventStore"]

@@ -5,6 +5,9 @@ import json
 import shutil
 import sqlite3
 import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from judgment.processing_events import EventPublisher
@@ -484,6 +487,56 @@ def test_processing_event_store_dedupes_identified_runs_only(
         events, complete = store.replay_after(1)
         assert complete is True
         assert len(events) == 4
+    finally:
+        store.close()
+
+
+def test_processing_event_store_close_waits_for_inflight_replay(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "events.db"
+    store = ProcessingEventStore(path)
+    store.start()
+    try:
+        store.append(
+            {
+                "version": 1,
+                "run_id": "run-1",
+                "seq": 1,
+                "type": "archive_started",
+            }
+        )
+        original = store._replay_after_locked
+        replay_started = threading.Event()
+        replay_release = threading.Event()
+
+        def blocked_replay(last_event_id: int, *, limit: int = 1000):
+            replay_started.set()
+            assert replay_release.wait(timeout=5)
+            return original(last_event_id, limit=limit)
+
+        monkeypatch.setattr(store, "_replay_after_locked", blocked_replay)
+        close_started = threading.Event()
+
+        def close_store() -> None:
+            close_started.set()
+            store.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            replay_future = pool.submit(store.replay_after, 0)
+            assert replay_started.wait(timeout=5)
+            close_future = pool.submit(close_store)
+            assert close_started.wait(timeout=5)
+            time.sleep(0.2)
+            assert not close_future.done()
+            replay_release.set()
+            events, complete = replay_future.result(timeout=5)
+            assert complete is True
+            assert len(events) == 1
+            close_future.result(timeout=5)
+
+        assert store.latest_id() == 0
     finally:
         store.close()
 
