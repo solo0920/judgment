@@ -462,8 +462,6 @@ def number(name):
 manifest = {
     "version": 1,
     "created_at": os.environ["BACKUP_CREATED_AT"],
-    "hostname": os.environ["BACKUP_HOSTNAME"],
-    "project_root": os.environ["PROJECT_ROOT"],
     "git": {
         "branch": os.environ.get("GIT_BRANCH", ""),
         "commit": os.environ.get("GIT_COMMIT", ""),
@@ -494,8 +492,6 @@ manifest = {
         "points_count": number("QDRANT_POINTS"),
     },
     "data": {
-        "judgment_source_dir": os.environ["JUDGMENT_DATA_ABS"],
-        "law_source_dir": os.environ["LAW_DATA_ABS"],
         "judgment_bytes": number("JUDGMENT_BYTES"),
         "law_bytes": number("LAW_BYTES"),
         "total_bytes": number("TOTAL_BYTES"),

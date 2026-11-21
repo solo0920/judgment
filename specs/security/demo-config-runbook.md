@@ -158,7 +158,13 @@ copy (select 1) to program 'id';        -- permission denied
 - `restore.sh` 偵測 `.age` 後用 `BACKUP_AGE_IDENTITY`（預設 `~/.config/judgment/age.key`）解密到暫存檔再 `pg_restore`。
 - 空間檢查已納入 PostgreSQL 大小與 Qdrant reserve；目前資料量約需 150 GB+。
 - 已完成加密 subset restore drill：`law_dataset_versions` 4 筆，age 解密後 `pg_restore` 到 scratch DB，筆數一致。
-- **完整 150 GB＋Qdrant restore drill 尚未執行**，需安排維護窗口。
+- 2026-11-21 完整備份已寫入 `/Volumes/T500_2TB/judgment-backup-20261121-1846`：
+  - 總大小 157 GB：`data/` 114 GB＋PostgreSQL dump 13.7 GB（age）＋Qdrant snapshot 29.4 GB（4,714,967 points）。
+  - `data/judgments` 1,388 files、`data/laws` 16 files，與來源逐檔大小一致。
+  - 安全退出、重新掛載後 `checksums.sha256` 仍 OK。
+  - `pg_restore --list` rc=0，443 行；包含 `question_bank_items`、`performance_records`、`demo_settings`、`judgment_documents`。
+  - manifest 已移除 `hostname`、`project_root`、source 絕對路徑；沒有 password/token/secret；只保留 `http://127.0.0.1:6333` 這個 localhost Qdrant URL。
+- **完整 150 GB＋Qdrant restore drill 尚未執行**；目前只驗證 dump 可讀與 subset restore，需安排維護窗口做完整還原。
 
 ## 8. 已知未完成
 

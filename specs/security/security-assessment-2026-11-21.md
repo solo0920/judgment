@@ -87,7 +87,7 @@
 - **CSP 手動 console 檢查**：Playwright + Chrome／WebKit／Firefox，demo 開啟時跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出、performance／quality／processing／status／admin；inline theme script 已移到 `assets/js/boot.js`。Cloudflare Web Analytics 已關閉並 purge，beacon 已消失。
 - **CSP enforce**：2026-11-21 已從 Report-Only 切到 `Content-Security-Policy`；enforce 後同一組跨瀏覽器功能測試 0 CSP violation、0 page error、下載正常。Demo 已再次關閉。
 - **`SameSite=None`**：尚未改 Lax。
-- **備份加密／restore drill**：PostgreSQL dump 已改為 age 加密（`postgres/judgment.dump.age`），`.env` 不進備份；`BACKUP_REQUIRE_ENCRYPTION=1` 會 fail closed。已完成加密 subset restore drill（`law_dataset_versions` 4 筆，解密後 restore 到 scratch DB，筆數一致）。完整 150 GB＋Qdrant restore drill 尚未執行。備份空間檢查已納入 PostgreSQL 大小與 Qdrant reserve。
+- **備份加密／restore drill**：PostgreSQL dump 已改為 age 加密（`postgres/judgment.dump.age`），`.env` 不進備份；`BACKUP_REQUIRE_ENCRYPTION=1` 會 fail closed。2026-11-21 完整備份已寫入 `/Volumes/T500_2TB/judgment-backup-20261121-1846`（157 GB；data 114 GB、PG 13.7 GB age、Qdrant 29.4 GB／4,714,967 points）。`data/` 逐檔大小一致；安全退出重掛後 checksum OK；`pg_restore --list` rc=0、443 行。manifest 已移除 hostname、project_root 與 source 絕對路徑，沒有 password/token/secret。完整 150 GB＋Qdrant restore drill 尚未執行；subset drill 已通過。
 
 ## 1. 方法與證據
 
