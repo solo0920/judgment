@@ -15,7 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
 from urllib.parse import unquote, urlparse
@@ -29,6 +29,7 @@ from fastapi.responses import (
     FileResponse,
     JSONResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
 from fastapi.routing import APIRoute
@@ -264,6 +265,13 @@ _DEMO_QUERY_EXECUTOR = ThreadPoolExecutor(
 )
 _MAX_DEMO_BODY_BYTES = 64 * 1024
 _MAX_ADMIN_BODY_BYTES = 20 * 1024 * 1024
+_CSP_MAX_BYTES = 8 * 1024
+_CSP_LOG_MAX_BYTES = 1_000_000
+_CSP_LOG_BACKUPS = 3
+_CSP_DAILY_LIMIT = 5000
+_CSP_LOG_LOCK = threading.Lock()
+_CSP_DAILY_LOCK = threading.Lock()
+_CSP_DAILY = {"date": "", "count": 0}
 
 
 class QueryRequest(BaseModel):
@@ -409,6 +417,109 @@ def _incoming_request_id(request: Request) -> str:
     ):
         return raw
     return uuid4().hex
+
+
+def _csp_log_path() -> Path:
+    raw = os.getenv("JUDGMENT_CSP_LOG_PATH", ".run/csp-report.log").strip()
+    return Path(raw or ".run/csp-report.log").expanduser()
+
+
+def _rotate_csp_log(path: Path) -> None:
+    if not path.exists() or path.stat().st_size <= _CSP_LOG_MAX_BYTES:
+        return
+    for index in range(_CSP_LOG_BACKUPS, 0, -1):
+        source = path if index == 1 else path.with_name(
+            f"{path.name}.{index - 1}"
+        )
+        target = path.with_name(f"{path.name}.{index}")
+        if source.exists():
+            target.unlink(missing_ok=True)
+            source.replace(target)
+
+
+def _csp_safe_uri(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw in {"inline", "eval", "data", "blob", "wasm-eval"}:
+        return raw
+    try:
+        parts = urlparse(raw)
+    except ValueError:
+        return raw[:300]
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}{parts.path or '/'}"[:300]
+    return (parts.path or raw.split("?", 1)[0])[:300]
+
+
+def _csp_report_summary(payload: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(payload, dict) and isinstance(payload.get("csp-report"), dict):
+        report = payload["csp-report"]
+    elif isinstance(payload, list):
+        report = None
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            body = item.get("body")
+            if isinstance(body, dict) and item.get("type") in {
+                "csp-violation",
+                "csp_report",
+            }:
+                report = body
+                break
+        if report is None:
+            return None
+    elif isinstance(payload, dict):
+        report = payload
+    else:
+        return None
+    return {
+        "document_uri": _csp_safe_uri(
+            report.get("document-uri") or report.get("documentURL")
+        ),
+        "blocked_uri": _csp_safe_uri(
+            report.get("blocked-uri") or report.get("blockedURL")
+        ),
+        "violated_directive": str(
+            report.get("violated-directive")
+            or report.get("effective-directive")
+            or report.get("effectiveDirective")
+            or ""
+        )[:120],
+        "disposition": str(report.get("disposition") or "")[:40],
+        "status_code": report.get("status-code")
+        if report.get("status-code") is not None
+        else report.get("statusCode"),
+    }
+
+
+def _csp_daily_allowed() -> bool:
+    today = date.today().isoformat()
+    with _CSP_DAILY_LOCK:
+        if _CSP_DAILY["date"] != today:
+            _CSP_DAILY["date"] = today
+            _CSP_DAILY["count"] = 0
+        if _CSP_DAILY["count"] >= _CSP_DAILY_LIMIT:
+            return False
+        _CSP_DAILY["count"] += 1
+        return True
+
+
+def _write_csp_report(summary: Dict[str, Any]) -> None:
+    path = _csp_log_path()
+    line = json.dumps(
+        {"at": datetime.now(timezone.utc).isoformat(), **summary},
+        ensure_ascii=False,
+    )
+    with _CSP_LOG_LOCK:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _rotate_csp_log(path)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+            path.chmod(0o600)
+        except OSError:
+            logger.warning("failed to write CSP report", exc_info=True)
 
 
 PUBLIC_POLICIES = {"PUBLIC_READ", "PUBLIC_QUERY", "PUBLIC_AUTH"}
@@ -1699,6 +1810,7 @@ def create_app(
     }
     app.state.demo_limiter = DemoRateLimiter()
     app.state.auth_limiter = DemoRateLimiter()
+    app.state.csp_limiter = DemoRateLimiter()
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
         max_queue=settings.rag_admission_max_queue,
@@ -1722,7 +1834,8 @@ def create_app(
         "connect-src 'self' https://api-mbp.ragdemo.win "
         "http://127.0.0.1:9200 http://localhost:9200; "
         "frame-ancestors 'none'; base-uri 'none'; "
-        "form-action 'self'; object-src 'none'"
+        "form-action 'self'; object-src 'none'; "
+        "report-uri https://api-mbp.ragdemo.win/api/csp-report"
     )
 
     @app.exception_handler(HTTPException)
@@ -2341,6 +2454,36 @@ def create_app(
     @app.get("/favicon.svg", include_in_schema=False)
     def favicon() -> FileResponse:
         return FileResponse(STATIC_DIR / "favicon.svg")
+
+    @app.post("/api/csp-report")
+    async def csp_report(request: Request) -> Response:
+        retry_after = app.state.csp_limiter.check(
+            client_ip_key(effective_client_ip(request)),
+            "csp",
+            per_minute=30,
+            per_hour=200,
+            per_day=1000,
+        )
+        if retry_after is not None:
+            return Response(
+                status_code=429,
+                headers={"Retry-After": str(max(1, retry_after))},
+            )
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > _CSP_MAX_BYTES:
+                return Response(status_code=413)
+        if not _csp_daily_allowed():
+            return Response(status_code=429)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return Response(status_code=204)
+        summary = _csp_report_summary(payload)
+        if summary is not None:
+            _write_csp_report(summary)
+        return Response(status_code=204)
 
     @app.get("/api/health")
     def health():

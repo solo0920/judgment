@@ -91,6 +91,7 @@ def build(
         STATIC_DIR / "assets" / "styles.css",
         STATIC_DIR / "assets" / "themes.css",
         STATIC_DIR / "assets" / "js" / "app.js",
+        STATIC_DIR / "assets" / "js" / "boot.js",
         STATIC_DIR / "favicon.svg",
     ]
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
@@ -108,6 +109,10 @@ def build(
 
     shutil.copy2(STATIC_DIR / "assets" / "styles.css", assets_dir / "styles.css")
     shutil.copy2(STATIC_DIR / "assets" / "themes.css", assets_dir / "themes.css")
+    shutil.copy2(
+        STATIC_DIR / "assets" / "js" / "boot.js",
+        assets_dir / "js" / "boot.js",
+    )
     shutil.copy2(STATIC_DIR / "favicon.svg", out_dir / "favicon.svg")
 
     command = [
@@ -135,6 +140,7 @@ def build(
         ('href="./assets/themes.css"', f'href="./assets/themes.css?v={asset_version}"'),
         ('href="./assets/styles.css"', f'href="./assets/styles.css?v={asset_version}"'),
         ('src="./config.js"', f'src="./config.js?v={asset_version}"'),
+        ('src="./assets/js/boot.js"', f'src="./assets/js/boot.js?v={asset_version}"'),
         ('src="./assets/js/app.js"', f'src="./assets/js/app.js?v={asset_version}"'),
     ):
         built_html = built_html.replace(source, target, 1)
@@ -160,7 +166,8 @@ def build(
         "https://fonts.gstatic.com; img-src 'self' data:; "
         "connect-src 'self' https://api-mbp.ragdemo.win; "
         "frame-ancestors 'none'; base-uri 'none'; "
-        "form-action 'self'; object-src 'none'\n"
+        "form-action 'self'; object-src 'none'; "
+        "report-uri https://api-mbp.ragdemo.win/api/csp-report\n"
         "\n"
         "/config.js\n"
         "  Cache-Control: no-cache\n"

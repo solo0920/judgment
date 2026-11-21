@@ -501,7 +501,7 @@ def test_static_console_is_served(web_client) -> None:
     assert 'id="settings-sidebar"' in page.text
     assert 'id="settings-panel"' in page.text
     assert 'id="auth-slot"' in page.text
-    assert "judgment.appearance" in page.text
+    assert "/assets/js/boot.js" in page.text
     assert 'id="style-trigger"' not in page.text
     assert 'id="style-menu"' not in page.text
     assert 'class="style-picker"' not in page.text
@@ -515,6 +515,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "© 2026 Judgment RAG Console" in page.text
     assert 'data-route="performance"' in page.text
     assert 'data-route="quality"' in page.text
+
+    boot_js = web_client.get("/assets/js/boot.js")
+    assert boot_js.status_code == 200
+    assert "judgment.theme" in boot_js.text
 
     home_js = web_client.get("/assets/js/pages/home.js")
     assert home_js.status_code == 200
@@ -1626,6 +1630,58 @@ def test_query_rejects_invalid_sort_key(web_client) -> None:
     )
     assert response.status_code == 400
     assert "排序" in response.text
+
+
+def test_csp_report_accepts_and_logs_summary(
+    web_client, tmp_path, monkeypatch
+) -> None:
+    log_path = tmp_path / "csp-report.log"
+    monkeypatch.setenv("JUDGMENT_CSP_LOG_PATH", str(log_path))
+    payload = {
+        "csp-report": {
+            "document-uri": "https://judgment.ragdemo.win/#/rag?q=secret",
+            "blocked-uri": "https://evil.example/script.js?token=secret",
+            "violated-directive": "script-src-elem",
+            "disposition": "report",
+            "status-code": 200,
+        }
+    }
+    response = web_client.post(
+        "/api/csp-report",
+        content=json.dumps(payload),
+        headers={"Content-Type": "application/csp-report"},
+    )
+    assert response.status_code == 204
+    logged = log_path.read_text(encoding="utf-8")
+    assert "script-src-elem" in logged
+    assert "judgment.ragdemo.win" in logged
+    assert "secret" not in logged
+    assert "token=" not in logged
+
+
+def test_csp_report_rejects_oversized_body(web_client) -> None:
+    response = web_client.post(
+        "/api/csp-report",
+        content=b"x" * (8 * 1024 + 1),
+        headers={"Content-Type": "application/csp-report"},
+    )
+    assert response.status_code == 413
+
+
+def test_csp_report_is_rate_limited(web_client, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_CSP_LOG_PATH", str(tmp_path / "csp-report.log")
+    )
+    payload = b'{"csp-report":{"violated-directive":"script-src"}}'
+    responses = [
+        web_client.post(
+            "/api/csp-report",
+            content=payload,
+            headers={"Content-Type": "application/csp-report"},
+        ).status_code
+        for _ in range(31)
+    ]
+    assert 429 in responses
 
 
 def test_performance_report_includes_index_stats(web_client) -> None:

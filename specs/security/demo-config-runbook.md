@@ -74,12 +74,28 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 
 最後再決定是否停止 cloudflared tunnel；停止前確認沒有其他服務依賴它。
 
-## 4. CSP Report-Only
+## 4. CSP Report-Only／收集端點
 
-目前只有 Report-Only，沒有 `report-uri` 收集端點。轉 enforce 前，至少：
+已加入公開 `POST /api/csp-report`：
 
-- 用 Chrome／Safari 開首頁、RAG、data、performance、processing、status，檢查 console 是否有 CSP violation。
-- 或加一個受 body 上限與 rate limit 保護的 `/api/csp-report`，並在 CSP 加 `report-uri`。
+- 只接受 8 KB 以下 body。
+- per-IP `30/min`、`200/hr`、`1000/day`，全域 `5000/day`。
+- 只記錄 `document_uri`、`blocked_uri`、`violated_directive`、`disposition`、`status_code`；不記 query／fragment／完整 body。
+- 寫入 `.run/csp-report.log`（`0600`、1 MB 輪替、保留 3 份），不寫主資料庫。
+- API 與 Pages 的 CSP 都已加 `report-uri https://api-mbp.ragdemo.win/api/csp-report`。
+
+2026-11-21 手動 console 檢查（Playwright + Chrome，首頁／RAG／data／performance／processing／quality／status）：
+
+- 原本的 inline theme script 已搬到 `assets/js/boot.js`；inline violation 已消失。
+- 目前只剩 Cloudflare Pages 自動注入的 `https://static.cloudflareinsights.com/beacon.min.js/...` 違反 `script-src 'self'`。
+- 沒有 page error；CSP report 有實際送到 `/api/csp-report` 並寫入日誌。
+
+轉 enforce 前要決定 Cloudflare Web Analytics：
+
+- 若不需要：在 Cloudflare Pages 關掉 Web Analytics，讓 beacon 不再注入。
+- 若要保留：`script-src` 加 `https://static.cloudflareinsights.com`，`connect-src` 加 `https://cloudflareinsights.com`，並接受第三方 script 的供應鏈風險。
+- 決策後再跑一次 console；確認只剩預期項目，才把 header 從 `Content-Security-Policy-Report-Only` 改為 `Content-Security-Policy`。
+- `style-src 'unsafe-inline'` 目前保留（動態 style 屬性需要）。
 
 ## 5. Demo 唯讀資料庫角色
 

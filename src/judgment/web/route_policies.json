@@ -89,6 +89,7 @@
     "POST /api/benchmark/runs": "ADMIN_ONLY",
     "POST /api/benchmark/runs/{run_id}/stop": "ADMIN_ONLY",
     "POST /api/benchmark/suites": "ADMIN_ONLY",
+    "POST /api/csp-report": "PUBLIC_READ",
     "POST /api/index-alias/reconcile": "ADMIN_WRITE",
     "POST /api/index-versions/rollback": "ADMIN_WRITE",
     "POST /api/index-versions/{version_id}/activate": "ADMIN_WRITE",
