@@ -5124,6 +5124,7 @@ button.chip:hover {
 
 .rag-answer-actions {
   justify-content: flex-start;
+  margin-top: 6px;
 }
 
 .rag-turn.is-complete .rag-user-block:hover .rag-user-actions,

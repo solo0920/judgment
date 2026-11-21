@@ -3626,6 +3626,7 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert "data-rag-question-action" in script
         assert "data-rag-answer-action" in script
         assert "rag-user-actions" in script
+        assert "rag-answer-actions" in script
     assert "複製回答" in source_js
     assert "重新生成回答" in source_js
     for css in (source_css, bundle_css):
