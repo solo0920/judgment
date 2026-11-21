@@ -348,6 +348,25 @@ class UpdateCheckRequest(BaseModel):
     source_types: List[str] = Field(default_factory=list)
 
 
+class _TTLCache:
+    """Small per-app TTL cache for read-only aggregate endpoints."""
+
+    def __init__(self) -> None:
+        self._values: Dict[str, tuple[float, Any]] = {}
+        self._lock = threading.Lock()
+
+    def get_or_build(self, key: str, ttl: float, builder) -> Any:
+        now = time.monotonic()
+        with self._lock:
+            entry = self._values.get(key)
+            if entry is not None and entry[0] > now:
+                return entry[1]
+        value = builder()
+        with self._lock:
+            self._values[key] = (time.monotonic() + max(0.0, ttl), value)
+        return value
+
+
 def _client_started_ms(request: Request) -> Optional[float]:
     raw = request.headers.get("X-Judgment-Client-Started-At", "").strip()
     try:
@@ -1279,6 +1298,7 @@ def create_app(
     data_dir: Optional[Path] = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    endpoint_cache = _TTLCache()
     validate_forwarded_allow_ips(settings.forwarded_allow_ips)
     resolved_data_dir = Path(data_dir or settings.law_data_dir).expanduser().resolve()
     owns_session_factory = session_factory is None
@@ -1317,6 +1337,7 @@ def create_app(
                         exc_info=True,
                     )
         warm_task: Optional[asyncio.Task] = None
+        read_cache_task: Optional[asyncio.Task] = None
         coverage_task: Optional[asyncio.Task] = None
         staleness_task: Optional[asyncio.Task] = None
         rerank_task: Optional[asyncio.Task] = None
@@ -1469,6 +1490,55 @@ def create_app(
                     )
                 await asyncio.sleep(interval)
 
+        async def warm_read_caches() -> None:
+            await asyncio.sleep(3)
+            while True:
+                try:
+                    await asyncio.to_thread(
+                        endpoint_cache.get_or_build,
+                        "home",
+                        120.0,
+                        lambda: build_home_summary(
+                            settings=runtime_settings(
+                                app.state.settings,
+                                app.state.session_factory,
+                            ),
+                            session_factory=app.state.session_factory,
+                        ),
+                    )
+                    await asyncio.to_thread(
+                        endpoint_cache.get_or_build,
+                        "status",
+                        30.0,
+                        status_payload,
+                    )
+                    await asyncio.to_thread(
+                        endpoint_cache.get_or_build,
+                        "catalog",
+                        300.0,
+                        lambda: build_catalog(
+                            app.state.session_factory,
+                            app.state.data_dir,
+                            settings=app.state.settings,
+                            judgment_law_list=app.state.settings.judgment_law_list,
+                        ),
+                    )
+                    await asyncio.to_thread(
+                        endpoint_cache.get_or_build,
+                        "performance-options",
+                        300.0,
+                        lambda: performance_options(
+                            app.state.session_factory
+                        ),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "read cache warm refresh failed", exc_info=True
+                    )
+                await asyncio.sleep(30)
+
         async def rerank_warmup_loop() -> None:
             interval = max(
                 10.0,
@@ -1512,6 +1582,7 @@ def create_app(
             if not app.state.settings.disable_background_tasks:
                 await app.state.processing_event_server.start()
                 warm_task = asyncio.create_task(warm_processing_snapshots())
+                read_cache_task = asyncio.create_task(warm_read_caches())
                 if (
                     owns_session_factory
                     and app.state.settings.rag_coverage_warmup_enabled
@@ -1529,6 +1600,7 @@ def create_app(
         finally:
             for task in (
                 warm_task,
+                read_cache_task,
                 coverage_task,
                 staleness_task,
                 rerank_task,
@@ -2148,11 +2220,15 @@ def create_app(
             function="home_summary",
             params={},
         ):
-            payload = build_home_summary(
-                settings=runtime_settings(
-                    app.state.settings, app.state.session_factory
+            payload = endpoint_cache.get_or_build(
+                "home",
+                60.0,
+                lambda: build_home_summary(
+                    settings=runtime_settings(
+                        app.state.settings, app.state.session_factory
+                    ),
+                    session_factory=app.state.session_factory,
                 ),
-                session_factory=app.state.session_factory,
             )
             if _is_demo_visitor(request):
                 return sanitize_infrastructure(payload)
@@ -2166,7 +2242,9 @@ def create_app(
             function="status",
             params={},
         ):
-            payload = status_payload()
+            payload = endpoint_cache.get_or_build(
+                "status", 20.0, status_payload
+            )
             if _is_demo_visitor(request):
                 return sanitize_status_payload(payload)
             return payload
@@ -2811,9 +2889,13 @@ def create_app(
 
     @app.get("/api/updates/status")
     def updates_status() -> Dict[str, Any]:
-        return apply_live_judgment_pending(
-            update_status(app.state.session_factory),
-            app.state.settings,
+        return endpoint_cache.get_or_build(
+            "updates",
+            5.0,
+            lambda: apply_live_judgment_pending(
+                update_status(app.state.session_factory),
+                app.state.settings,
+            ),
         )
 
     @app.post("/api/updates/check")
@@ -3003,8 +3085,13 @@ def create_app(
 
     @app.get("/api/question-bank/stats")
     def question_bank_summary() -> Dict[str, Any]:
-        listing = list_items(app.state.session_factory, limit=1)
-        return listing["stats"]
+        return endpoint_cache.get_or_build(
+            "question-bank-stats",
+            30.0,
+            lambda: list_items(
+                app.state.session_factory, limit=1
+            )["stats"],
+        )
 
     @app.get("/api/question-bank/items")
     def question_bank_list(
@@ -3345,11 +3432,15 @@ def create_app(
             function="catalog",
             params={},
         ):
-            return build_catalog(
-                app.state.session_factory,
-                app.state.data_dir,
-                settings=settings,
-                judgment_law_list=settings.judgment_law_list,
+            return endpoint_cache.get_or_build(
+                "catalog",
+                60.0,
+                lambda: build_catalog(
+                    app.state.session_factory,
+                    app.state.data_dir,
+                    settings=settings,
+                    judgment_law_list=settings.judgment_law_list,
+                ),
             )
 
     @app.get("/api/judgment-stats")
@@ -3716,7 +3807,11 @@ def create_app(
 
     @app.get("/api/performance/options")
     def performance_filter_options() -> Dict[str, Any]:
-        return performance_options(app.state.session_factory)
+        return endpoint_cache.get_or_build(
+            "performance-options",
+            120.0,
+            lambda: performance_options(app.state.session_factory),
+        )
 
     @app.get("/api/performance")
     def performance_records(

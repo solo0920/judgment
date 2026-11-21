@@ -18,9 +18,11 @@ import {
   icon,
   notice,
   setBusy,
+  readLocalCache,
   statusBadge,
   statusMeta,
   toast,
+  writeLocalCache,
 } from "../utils.js";
 import { isSupported as indexedDbSupported, indexedDbStats } from "../store.js";
 import * as testsPage from "./tests.js";
@@ -51,6 +53,7 @@ const API_SOURCE_LABELS = {
 };
 
 const STATUS_WF_OPEN_STAGES = new Set();
+const STATUS_CACHE_KEY = "judgment.status.payload.v1";
 
 const DEMO_LOCKED_STATUS_TABS = new Set([
   "tests",
@@ -2628,6 +2631,7 @@ export async function render(root, ctx) {
           : latest.page_pipeline;
       initialStatusLoaded = true;
       latest = status;
+      writeLocalCache(STATUS_CACHE_KEY, status);
       paint();
       if (!quiet) toast("服務狀態已更新。", "ok", 2200);
     } catch (error) {
@@ -2842,7 +2846,15 @@ export async function render(root, ctx) {
     }
   });
 
-  await loadStatus({ quiet: true });
+  const cachedStatus = readLocalCache(STATUS_CACHE_KEY, 2 * 60 * 1000);
+  if (cachedStatus) {
+    latest = cachedStatus;
+    initialStatusLoaded = true;
+    paint();
+    void loadStatus({ quiet: true });
+  } else {
+    await loadStatus({ quiet: true });
+  }
   void loadIndexedDbInfo({ quiet: true });
 
   if (ctx && typeof ctx.setTitle === "function") {

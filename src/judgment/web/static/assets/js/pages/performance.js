@@ -11,9 +11,11 @@ import {
   formatNumber,
   icon,
   notice,
+  readLocalCache,
   setBusy,
   statusBadge,
   toast,
+  writeLocalCache,
 } from "../utils.js";
 import {
   exportCsv,
@@ -2939,6 +2941,19 @@ export async function render(root, ctx) {
   const runQuery = async (nextPage = page, { quiet = false } = {}) => {
     page = Math.max(1, Number(nextPage) || 1);
     filters = readFilterForm();
+    const cacheKey = `judgment.performance.result.v1:${JSON.stringify({
+      filters,
+      page,
+      pageSize,
+    })}`;
+    const cachedResult = readLocalCache(cacheKey, 2 * 60 * 1000);
+    if (cachedResult && page === 1) {
+      result = cachedResult;
+      reportBox.innerHTML = renderPerformanceReport(cachedResult);
+      metaBadge.textContent = `PERFORMANCE · ${formatNumber(
+        cachedResult.total,
+      )} 筆`;
+    }
     const existingCard = reportBox.querySelector(".report-card");
     const focusedPageSize = document.activeElement?.matches?.("[data-page-size]")
       ? document.activeElement.value
@@ -2958,6 +2973,7 @@ export async function render(root, ctx) {
       const response = await api.performance(filters, page, pageSize);
       if (disposed) return;
       result = response;
+      writeLocalCache(cacheKey, response);
       if (response.index_pipeline) {
         indexPipelineStats = response.index_pipeline;
         const runs = Array.isArray(indexPipelineStats.runs)
@@ -3000,8 +3016,26 @@ export async function render(root, ctx) {
   };
 
   const loadOptions = async () => {
+    const cachedOptions = readLocalCache(
+      "judgment.performance.options.v1",
+      5 * 60 * 1000,
+    );
+    if (cachedOptions) {
+      options = cachedOptions;
+      paintFilters();
+      void api
+        .performanceOptions()
+        .then((fresh) => {
+          options = fresh;
+          writeLocalCache("judgment.performance.options.v1", fresh);
+          paintFilters();
+        })
+        .catch(() => {});
+      return;
+    }
     try {
       options = await api.performanceOptions();
+      writeLocalCache("judgment.performance.options.v1", options);
     } catch (error) {
       options = { processes: [], modules: [], statuses: [], methods: [], models: [] };
     }

@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-06
 
-**Last Updated**: 2026-11-20
+**Last Updated**: 2026-11-21
 
 **Status**: Implemented · code-aligned 2026-11-16. 本規格以目前程式為唯一事實來源，涵蓋 `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests` 八個路由；首頁即時摘要（`/api/home`）、99 條金融法規 11 欄清單、首頁 Pipeline waterfall、服務總覽載入 Pipeline、前後端架構與 SVG 流程圖、資料版本（PostgreSQL／IndexedDB／Qdrant／Parquet）、FastAPI route table 動態 API 端點目錄、判決匯入 waterfall、Qdrant R／E 索引月份、RAG／reranker、題庫與 benchmark、SSE 即時更新、standalone `file://` 部署、設定 sidebar、明確 CORS、遠端管理權杖與 SSE ticket、llama-server host allowlist、Docker loopback 綁定與資料庫／Qdrant 憑證均已納入。
 
@@ -927,3 +927,17 @@ judgment-reranker:
 - **SC-014**: 以 `file://` 開啟時，主要頁面與查詢功能皆可透過可設定的 API Base 運作。
 - **SC-015**: Cloudflare Pages 的 HTTPS 前端可透過 cloudflared HTTPS 位址完成跨來源狀態與查詢請求。
 - **SC-016**: `CORS_ALLOW_ORIGINS` 可限制或開放指定前端來源，且測試涵蓋簡單請求與 preflight。
+
+
+### Addendum Requirements — Performance Caching
+
+- **FR-039**: 首頁、系統狀態、Catalog、效能篩選選項、更新狀態與題庫統計等唯讀聚合端點 MUST 使用 per-app TTL 快取（Home 60s、Status 20s、Catalog 60s、Performance options 120s、Updates 5s、Question-bank stats 30s），避免同一資料在短時間內重複掃描。
+- **FR-040**: 上述聚合端點 SHOULD 由背景 warmer 預熱；重啟後 first request 仍可 cold build，但後續請求 MUST 命中快取。
+- **FR-041**: 首頁、系統狀態、資料庫、資料品質、效能報表、資料處理頁 SHOULD 將最近一次成功 payload 快取在瀏覽器（Home 5 分鐘、Status 2 分鐘、Catalog 10 分鐘、Performance 2–5 分鐘、Quality 10 分鐘、Processing 10 分鐘），重開或切回路由時立即 first paint，再背景更新。
+- **FR-042**: 資料處理 first paint MUST 使用 `GET /api/processing?cached=1&slim=1`；資料品質 first paint MUST 使用 `GET /api/quality?cached=1`；完整 DB／DuckDB 掃描只保留給手動重新整理或執行操作後。
+- **FR-043**: 管理員 auth/demo 狀態 MAY 快取 5 分鐘；backend route policy 仍 MUST 是最終授權來源，前端快取不得繞過 API 權限檢查。
+
+### Addendum Success Criteria — Performance
+
+- **SC-017**: 同一 production 分頁重複切換主要頁面 SHOULD 在 1.5 秒內完成 first paint；Quality／Processing 使用 cached snapshot 時應低於 1 秒。
+- **SC-018**: 資料品質與資料處理頁不得因開啟頁面而執行 15–20 秒的完整 DB／DuckDB 掃描。

@@ -412,3 +412,27 @@ export function debounce(fn, delay = 200) {
     timer = window.setTimeout(() => fn(...args), delay);
   };
 }
+
+export function readLocalCache(key, ttlMs) {
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(key) || "null");
+    if (!cached || !Object.prototype.hasOwnProperty.call(cached, "value")) {
+      return null;
+    }
+    if (Date.now() - Number(cached.saved_at || 0) > ttlMs) return null;
+    return cached.value;
+  } catch (error) {
+    return null;
+  }
+}
+
+export function writeLocalCache(key, value) {
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({ value, saved_at: Date.now() }),
+    );
+  } catch (error) {
+    /* cache is best effort */
+  }
+}

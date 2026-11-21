@@ -8,10 +8,13 @@ import {
   formatDuration,
   formatNumber,
   icon,
+  readLocalCache,
+  writeLocalCache,
 } from "../utils.js";
 
 const LAW_COLUMNS = 11;
 const HOME_REFRESH_MIN_INTERVAL = 15000;
+const HOME_CACHE_KEY = "judgment.home.summary.v1";
 const HOME_WF_OPEN_STAGES = new Set();
 
 const SECTIONS = [
@@ -1054,6 +1057,7 @@ export async function render(root, ctx) {
       if (disposed || !root.isConnected) return;
       latestData = payload?.data || null;
       latestFinancialLaws = payload?.data?.financial_laws || null;
+      writeLocalCache(HOME_CACHE_KEY, payload);
       applySummary(root, payload, {
         clientMs: Math.round(performance.now() - started),
       });
@@ -1134,7 +1138,15 @@ export async function render(root, ctx) {
   resizeInput();
   input?.focus({ preventScroll: true });
 
-  await loadSummary();
+  const cachedSummary = readLocalCache(HOME_CACHE_KEY, 5 * 60 * 1000);
+  if (cachedSummary) {
+    latestData = cachedSummary?.data || null;
+    latestFinancialLaws = cachedSummary?.data?.financial_laws || null;
+    applySummary(root, cachedSummary, { clientMs: 0 });
+    void loadSummary({ quiet: true });
+  } else {
+    await loadSummary();
+  }
 
   if (!disposed) {
     try {

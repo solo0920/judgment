@@ -24,10 +24,12 @@ import {
   formatNumber,
   icon,
   notice,
+  readLocalCache,
   setBusy,
   statusBadge,
   statusMeta,
   toast,
+  writeLocalCache,
 } from "../utils.js";
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -2733,6 +2735,10 @@ export async function render(root, ctx) {
     refreshButton.disabled = true;
     setBusy(refreshButton, true, "整理中…");
     try {
+      const cachedCatalog = readLocalCache(
+        "judgment.catalog.v1",
+        10 * 60 * 1000,
+      );
       const [
         catalogResponse,
         lastCategory,
@@ -2740,13 +2746,14 @@ export async function render(root, ctx) {
         lastJudgmentDatabase,
         storedPageSize,
       ] = await Promise.all([
-        api.catalog(),
+        cachedCatalog ? Promise.resolve(cachedCatalog) : api.catalog(),
         getSetting("data.last_category", "law"),
         getSetting("data.last_database.law", "postgres"),
         getSetting("data.last_database.judgment", "postgres"),
         getSetting("data.page_size", 25),
       ]);
       if (disposed) return;
+      if (!cachedCatalog) writeLocalCache("judgment.catalog.v1", catalogResponse);
       catalog = catalogResponse;
       if (judgmentStatsRoot) {
         judgmentStatsRoot.innerHTML = judgmentStatsCardsMarkup(
