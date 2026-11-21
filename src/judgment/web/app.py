@@ -1825,7 +1825,7 @@ def create_app(
     )
     app.state.rag_executor = None
 
-    csp_report_only = (
+    csp_policy = (
         "default-src 'self'; "
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
@@ -4908,7 +4908,7 @@ def create_app(
             "geolocation=(), microphone=(), camera=()",
         )
         response.headers.setdefault(
-            "Content-Security-Policy-Report-Only", csp_report_only
+            "Content-Security-Policy", csp_policy
         )
         return response
 

@@ -74,7 +74,9 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 
 最後再決定是否停止 cloudflared tunnel；停止前確認沒有其他服務依賴它。
 
-## 4. CSP Report-Only／收集端點
+## 4. CSP 收集端點與 enforce 狀態
+
+> 2026-11-21：Cloudflare Web Analytics 已關閉並 purge；CSP 已從 Report-Only 切到 enforce。Enforce 後用 Chromium／WebKit／Firefox 跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出與各頁面，0 CSP violation、0 page error、下載正常。
 
 已加入公開 `POST /api/csp-report`：
 
@@ -84,33 +86,15 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 - 寫入 `.run/csp-report.log`（`0600`、1 MB 輪替、保留 3 份），不寫主資料庫。
 - API 與 Pages 的 CSP 都已加 `report-uri https://api-mbp.ragdemo.win/api/csp-report`。
 
-2026-11-21 手動 console 檢查（Playwright + Chrome，首頁／RAG／data／performance／processing／quality／status）：
+2026-11-21 檢查與處置：
 
-- 原本的 inline theme script 已搬到 `assets/js/boot.js`；inline violation 已消失。
-- 目前只剩 Cloudflare 自動注入的 `https://static.cloudflareinsights.com/beacon.min.js/...` 違反 `script-src 'self'`。
-- 沒有 page error；CSP report 有實際送到 `/api/csp-report` 並寫入日誌。
-
-2026-11-21 功能流程檢查（demo 開啟 2 小時，Chromium／WebKit／Firefox）：
-
-- RAG 提問與串流回答：成功，無 CSP violation。
-- 資料頁 PostgreSQL 查詢、Qdrant 查詢、JSON 匯出下載：成功；`blob:` 下載沒有被 CSP 擋。
-- performance／quality／processing／status／admin：無非 beacon 的 CSP violation。
-- Firefox 會對 `/api/csp-report` 顯示 `OpaqueResponseBlocking` warning；報告請求仍有到達 API，屬於 console 噪音，不是 CSP violation。
-- 測試完成後已立即關閉 demo。
-
-Cloudflare Web Analytics 的 beacon 同時出現在 `judgment.ragdemo.win` 與 `api-mbp.ragdemo.win`，是 zone 層級自動注入。目前 wrangler OAuth token 只有 `zone (read)`，**無法從 CLI/API 關閉**；需要在 Cloudflare dashboard 操作：
-
-1. `ragdemo.win` zone → Analytics → Web Analytics → Manage site → Advanced options → Disable automatic setup（或刪除 site）。
-2. Pages project `judgment` → Metrics → Web Analytics → 若有啟用也關閉。
-3. Caching → Configuration → Purge Everything（兩個 host 都會受影響）。
-4. 用全新的瀏覽器 profile 重跑 console；確認 beacon 不再出現。
-
-轉 enforce 前要決定 Cloudflare Web Analytics：
-
-- 若不需要：在 Cloudflare Pages 關掉 Web Analytics，讓 beacon 不再注入。
-- 若要保留：`script-src` 加 `https://static.cloudflareinsights.com`，`connect-src` 加 `https://cloudflareinsights.com`，並接受第三方 script 的供應鏈風險。
-- 決策後再跑一次 console；確認只剩預期項目，才把 header 從 `Content-Security-Policy-Report-Only` 改為 `Content-Security-Policy`。
+- 初次 Report-Only 檢查發現兩個違規：inline theme script 與 Cloudflare Web Analytics beacon。
+- inline theme script 已搬到 `assets/js/boot.js`；inline violation 消失。
+- Cloudflare Web Analytics 已由管理者關閉並 purge；beacon 在 `judgment.ragdemo.win` 與 `api-mbp.ragdemo.win` 都已消失。
+- Enforce 後用 Chromium／WebKit／Firefox 跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出與各頁面：0 CSP violation、0 page error、下載正常。
+- Firefox 曾對 `/api/csp-report` 顯示 `OpaqueResponseBlocking` warning；報告請求仍有到達 API，屬 console 噪音，不是 CSP violation。
 - `style-src 'unsafe-inline'` 目前保留（動態 style 屬性需要）。
+- 若日後重新啟用 Cloudflare Web Analytics，必須在 API 與 Pages 兩邊的 CSP 加 `https://static.cloudflareinsights.com`（`script-src`）與 `https://cloudflareinsights.com`（`connect-src`），或再次關閉 Web Analytics。
 
 ### CSP enforce 回滾
 
