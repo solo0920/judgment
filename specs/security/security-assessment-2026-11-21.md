@@ -87,7 +87,7 @@
 - **CSP 手動 console 檢查**：Playwright + Chrome／WebKit／Firefox，demo 開啟時跑 RAG 串流、Postgres／Qdrant 查詢、JSON 匯出、performance／quality／processing／status／admin；inline theme script 已移到 `assets/js/boot.js`。Cloudflare Web Analytics 已關閉並 purge，beacon 已消失。
 - **CSP enforce**：2026-11-21 已從 Report-Only 切到 `Content-Security-Policy`；enforce 後同一組跨瀏覽器功能測試 0 CSP violation、0 page error、下載正常。Demo 已再次關閉。
 - **TOKEN-01（部分）**：管理權杖改存 `sessionStorage`，舊 `localStorage` 權杖會自動遷移並刪除；Google session 驗證成功後會清掉 break-glass token。靜態長效權杖本身仍未輪替。
-- **SUP-01（部分）**：新增 GitHub Actions（pytest、ruff、frontend build、pip-audit、gitleaks、SBOM）、Dependabot、esbuild `0.28.2` pin、PostgreSQL／Qdrant digest pinning。pip-audit 目前對 pyarrow 18.1.0（PYSEC-2026-113）與 pytest 8.4.2（PYSEC-2026-1845）暫時 ignore，原因與升級條件記錄在 `specs/security/supply-chain.md`。
+- **SUP-01（CI／供應鏈）**：新增 GitHub Actions（pytest、ruff、frontend build、pip-audit、gitleaks push／PR 差異掃描、SBOM）、Dependabot、esbuild `0.28.2` pin、PostgreSQL／Qdrant digest pinning。依賴已升至 pyarrow 25.0.1、pytest 9.2.0；pip-audit 無已知 advisory，CI 不再使用 ignore。gitleaks 目前仍非全歷史掃描，HIST-01 未結案；詳見 `specs/security/supply-chain.md`。
 - **`SameSite=None`**：尚未改 Lax。
 - **備份加密／restore drill**：PostgreSQL dump 已改為 age 加密（`postgres/judgment.dump.age`），`.env` 不進備份；`BACKUP_REQUIRE_ENCRYPTION=1` 會 fail closed。2026-11-21 完整備份已寫入 `/Volumes/T500_2TB/judgment-backup-20261121-1846`（157 GB；data 114 GB、PG 13.7 GB age、Qdrant 29.4 GB／4,714,967 points）。`data/` 逐檔大小一致；安全退出重掛後 checksum OK；`pg_restore --list` rc=0、443 行。manifest 已移除 hostname、project_root 與 source 絕對路徑，沒有 password/token/secret。完整 150 GB＋Qdrant restore drill 尚未執行；subset drill 已通過。
 
@@ -788,7 +788,7 @@ docker exec judgment-postgres psql -U judgment -d judgment -tAc \
 | AUTH-01 | 部分完成；remote actor 固定為 `admin`，缺 audit |
 | AUTH-02 | 仍未完成；狀態機可直接寫 accepted |
 | DATA-01 | 仍未完成；90 天完整問答保留 |
-| SUP-01 | 已加入 CI／Dependabot／SBOM／pip-audit／gitleaks、esbuild 與 Docker digest pinning；pyarrow／pytest advisory 已記錄並暫時 ignore |
+| SUP-01 | 已加入 CI／Dependabot／SBOM／pip-audit／gitleaks 差異掃描、esbuild 與 Docker digest pinning；pyarrow 25.0.1、pytest 9.2.0，pip-audit 無 ignore；gitleaks 全歷史待補 |
 | HIST-01 | 仍為 partial；public repo 含主機／port，但無真實密鑰 |
 | CF-01/02 | 仍有效；docs/openapi 401 已再次確認 |
 | WEB-01/02/03 | 仍有效；但 CSRF-01 是 GET 路徑的新缺口 |

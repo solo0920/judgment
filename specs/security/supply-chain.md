@@ -10,7 +10,7 @@
   - ruff
   - frontend build（esbuild 固定 `0.28.2`）
   - pip-audit
-  - gitleaks 全歷史掃描
+  - gitleaks push／PR 差異掃描（全歷史掃描尚未完成；目前 action 只掃最後 1 個 commit，HIST-01 仍 open）
   - Syft SBOM（SPDX JSON artifact）
 - `.github/dependabot.yml`
   - pip／docker／github-actions 每週更新
@@ -18,28 +18,44 @@
   - `postgres:16-alpine@sha256:0cefaabd...`
   - `qdrant/qdrant:v1.19.1@sha256:12364fe...`
 - `scripts/build_frontend.py` 固定 esbuild `0.28.2`；若 PATH 中的版本不同，改用 `npx esbuild@0.28.2`。
+- Python 最低版本：`>=3.10`（pytest 9 與 pyarrow 25 都已不支援 Python 3.9；3.9 已 EOL）。
 
-## 已知且暫時接受的 pip-audit 風險
+## pip-audit 現況
 
-`pip-audit` 目前找到兩個問題，CI 以 `--ignore-vuln` 暫時排除，這裡記錄原因與後續條件：
+2026-11-21 升級後：
 
-| 套件 | 目前版本 | Advisory | 修正版本 | 為什麼暫不升級 |
-|---|---:|---|---:|---|
-| `pyarrow` | 18.1.0 | PYSEC-2026-113 | 23.0.1 | `pyproject.toml` 目前限制 `pyarrow>=15,<19`，且專案支援 Python 3.9；升級到 23.x 需要先確認 Python／Parquet／Arrow API 相容性與完整資料流程測試。 |
-| `pytest` | 8.4.2 | PYSEC-2026-1845 | 9.0.3 | 開發依賴目前限制 `pytest>=8,<9`；pytest 9 可能改變 plugin／fixture 行為，需單獨跑完整測試。 |
+| 套件 | 版本 | 狀態 |
+|---|---:|---|
+| `pyarrow` | 25.0.1 | 無已知 advisory |
+| `pytest` | 9.2.0 | 無已知 advisory |
 
-處理原則：
+CI 已移除 `--ignore-vuln`。若未來出現新的 advisory，security job 會 fail；例外必須先記錄在此文件並加上 `review_by`，不能直接永久 ignore。
 
-1. 每週 Dependabot 會嘗試更新；若 CI 的 pip-audit 出現**新的** advisory，會 fail。
-2. 升級 pyarrow 或 pytest 時，先移除對應的 `--ignore-vuln`，跑完整 `pytest`、`ruff`、資料匯入／查詢 smoke test。
-3. 不要把 ignore 當成永久豁免；在 `specs/security/security-acceptance-matrix.md` 的 `SUP-01` 更新狀態。
+### 為什麼可以升級
+
+- `PYSEC-2026-113`（pyarrow）：advisory 明文指出受影響的是 Arrow C++ 的 IPC file pre-buffering，且該功能未暴露在 Python／Ruby／C GLib bindings；本專案只用 `pyarrow.parquet`、`pyarrow.dataset`、`pyarrow.compute`，沒有 IPC／Feather／`pre_buffer` 路徑。
+- `PYSEC-2026-1845`（pytest）：pytest 9.0.3 已修正 tmpdir 處理；本專案只在開發與 CI 執行 pytest，展示站 runtime 不會載入。
+- pyarrow 25.0.1 與 pytest 9.2.0 都要求 Python `>=3.10`，因此同步把 `requires-python` 提高到 `>=3.10`。
+
+### 隔離驗證
+
+先在 temp venv 完成相容性測試；正式 `.venv` 同步後也重跑一次：
+
+- `pyarrow 25.0.1` + `pytest 9.2.0`：689 tests pass。
+- `pytest-cov 6.3.0` 可搭配 pytest 9.2.0，`--cov` 正常。
+- 法規 Parquet（1,351 rows／26 columns）與判決 Parquet（1,295 rows／18 columns）：pyarrow 18 與 25 的 schema、row count、前 100 筆 SHA-256 相同。
+- pyarrow 25 寫出的 ZSTD Parquet 可被 pyarrow 18 與 DuckDB 讀取；DuckDB 寫出的 Parquet 也可被 pyarrow 18 與 25 讀取。
+- `pip-audit` 在 pyarrow 25.0.1 + pytest 9.2.0 環境回報 no known vulnerabilities。
+
+正式環境升級仍應在備份完成、展示關閉時進行，並先跑一個月份的匯入與查詢 smoke test；不要只在測試套件通過後就直接切 production。
 
 ## 手動驗證
 
 ```bash
-uv run --with pip-audit pip-audit \
-  --ignore-vuln PYSEC-2026-113 \
-  --ignore-vuln PYSEC-2026-1845
+uv sync --extra dev
+uv run pytest -q
+uv run ruff check .
+uv run --with pip-audit pip-audit
 
 npx --yes esbuild@0.28.2 --version
 docker compose config

@@ -38,7 +38,7 @@
 
 ## 環境需求
 
-- 建議 Python 3.12（`.python-version` 已固定；`pyproject.toml` 宣告 `>=3.9`）
+- 建議 Python 3.12（`.python-version` 已固定；`pyproject.toml` 宣告 `>=3.10`）
 - [uv](https://docs.astral.sh/uv/)
 - PostgreSQL 16（本機可用 `docker compose` 啟動）
 

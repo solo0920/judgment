@@ -57,12 +57,10 @@ jobs:
       - name: Sync dependencies
         run: uv sync --extra dev
       - name: Dependency audit
-        # Known accepted risks are tracked in specs/security/supply-chain.md.
-        run: >
-          uv run --with pip-audit pip-audit
-          --ignore-vuln PYSEC-2026-113
-          --ignore-vuln PYSEC-2026-1845
-      - name: Secret scan (full history)
+        # Exceptions must be documented in specs/security/supply-chain.md.
+        run: uv run --with pip-audit pip-audit
+      - name: Secret scan (push/PR diff)
+        # Full-history scan is still pending; this action scans the pushed/PR range.
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
