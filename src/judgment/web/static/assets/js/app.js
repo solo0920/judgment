@@ -44,8 +44,15 @@ let routeToken = 0;
 
 function parseRoute() {
   try {
-    const question = new URLSearchParams(window.location.search).get("q");
-    if (question && question.trim()) return "rag";
+    const params = new URLSearchParams(window.location.search);
+    const question = params.get("q");
+    const shareToken = params.get("share");
+    if (
+      (question && question.trim()) ||
+      (shareToken && shareToken.trim())
+    ) {
+      return "rag";
+    }
   } catch (error) {
     /* fall through to the hash route */
   }

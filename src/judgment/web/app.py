@@ -9,13 +9,14 @@ import ipaddress
 import json
 import logging
 import os
+import secrets
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
 from urllib.parse import unquote, urlparse
@@ -23,6 +24,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from sqlalchemy import delete
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import (
@@ -66,6 +68,7 @@ from .auth import (
 from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
 from ..law_article_versions import check_law_version_status
+from ..models import RagShareSnapshot
 from ..observability import (
     clear_flow,
     current_flow,
@@ -297,6 +300,84 @@ class QueryRequest(BaseModel):
 
 class RagRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+
+
+class RagShareRequest(BaseModel):
+    title: str = Field(default="", max_length=200)
+    turns: List[Dict[str, Any]] = Field(min_length=1, max_length=30)
+
+
+_RAG_SHARE_TTL_HOURS = 24 * 7
+_RAG_SHARE_MAX_BYTES = 1_000_000
+_RAG_SHARE_PAYLOAD_KEYS = frozenset(
+    {
+        "status",
+        "answer",
+        "answer_source",
+        "notice",
+        "citations",
+        "judgments",
+        "reference_judgments",
+        "law_sources",
+        "matched_terms",
+        "law_answer",
+        "law_framework",
+        "llm_model",
+        "embedding_model",
+        "duration_ms",
+        "show_sources",
+        "retrieval",
+        "rerank_degraded",
+        "degraded_reason",
+    }
+)
+
+
+def _utc_aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _sanitize_rag_share_turns(
+    raw_turns: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    turns: List[Dict[str, Any]] = []
+    for raw in raw_turns:
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail="分享內容格式不正確。")
+        question = str(raw.get("question") or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="分享問題不能空白。")
+        payload = raw.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        cleaned = {
+            key: payload[key]
+            for key in _RAG_SHARE_PAYLOAD_KEYS
+            if key in payload
+        }
+        cleaned = sanitize_rag_result(cleaned)
+        cleaned["partial"] = False
+        cleaned["streaming"] = False
+        asked_at = str(raw.get("asked_at") or "").strip()[:64]
+        turns.append(
+            {
+                "question": question[:500],
+                "asked_at": asked_at or now_iso,
+                "payload": cleaned,
+            }
+        )
+    encoded = json.dumps(turns, ensure_ascii=False).encode("utf-8")
+    if len(encoded) > _RAG_SHARE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="分享內容過大，請分享較短的對話。",
+        )
+    return turns
 
 
 class DemoFeaturesRequest(BaseModel):
@@ -975,6 +1056,8 @@ API_ENDPOINT_LABELS = {
     "/api/performance": "效能報表",
     "/api/rag/query": "RAG 問答",
     "/api/rag/query/stream": "RAG 問答 SSE",
+    "/api/rag/share": "建立 RAG 分享連結",
+    "/api/rag/share/{share_id}": "讀取 RAG 分享對話",
     "/api/question-bank/stats": "題庫統計",
     "/api/question-bank/items": "題庫題目",
     "/api/question-bank/tags": "題庫標籤",
@@ -4204,6 +4287,74 @@ def create_app(
                 status_code=500,
                 detail=f"效能報表失敗：{exc.__class__.__name__}: {exc}",
             ) from exc
+
+    @app.post("/api/rag/share")
+    def rag_share_create(request: RagShareRequest) -> JSONResponse:
+        turns = _sanitize_rag_share_turns(request.turns)
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(hours=_RAG_SHARE_TTL_HOURS)
+        title = str(request.title or "").strip()[:200]
+        token = ""
+        with app.state.session_factory() as session:
+            session.execute(
+                delete(RagShareSnapshot).where(
+                    RagShareSnapshot.expires_at < now
+                )
+            )
+            for _ in range(5):
+                candidate = secrets.token_urlsafe(16)
+                if session.get(RagShareSnapshot, candidate) is None:
+                    token = candidate
+                    break
+            if not token:
+                raise HTTPException(
+                    status_code=503,
+                    detail="無法建立分享連結，請稍後再試。",
+                )
+            session.add(
+                RagShareSnapshot(
+                    token=token,
+                    title=title,
+                    turns=turns,
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+            )
+            session.commit()
+        return JSONResponse(
+            {
+                "id": token,
+                "expires_at": expires_at.isoformat(),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/rag/share/{share_id}")
+    def rag_share_get(share_id: str) -> JSONResponse:
+        share_id = str(share_id or "").strip()
+        if not share_id or len(share_id) > 64:
+            raise HTTPException(status_code=404, detail="分享連結不存在。")
+        now = datetime.now(timezone.utc)
+        with app.state.session_factory() as session:
+            row = session.get(RagShareSnapshot, share_id)
+            if row is None or (_utc_aware(row.expires_at) or now) <= now:
+                raise HTTPException(status_code=404, detail="分享連結不存在或已過期。")
+            payload = {
+                "id": row.token,
+                "title": row.title or "",
+                "turns": row.turns or [],
+                "created_at": (
+                    _utc_aware(row.created_at).isoformat()
+                    if _utc_aware(row.created_at)
+                    else None
+                ),
+                "expires_at": (
+                    _utc_aware(row.expires_at).isoformat()
+                    if _utc_aware(row.expires_at)
+                    else None
+                ),
+            }
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/rag/query")
     def rag_query(request: RagRequest, http_request: Request) -> Dict[str, Any]:

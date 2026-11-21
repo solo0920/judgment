@@ -792,6 +792,8 @@ def test_demo_route_feature_mapping_is_explicit() -> None:
     assert mapping["GET /api/status"] == "status"
     assert mapping["GET /api/processing"] == "processing"
     assert mapping["POST /api/rag/query"] == "rag"
+    assert mapping["POST /api/rag/share"] == "rag"
+    assert mapping["GET /api/rag/share/{share_id}"] == "rag"
     assert mapping["POST /api/query"] == "data"
     assert demo_feature_for("GET", "/api/status") == "status"
     assert demo_feature_for("GET", "/api/processing") == "processing"
@@ -816,10 +818,12 @@ def test_demo_visible_routes_are_explicitly_allowlisted() -> None:
         "GET /api/processing",
         "GET /api/quality",
         "GET /api/schema/suggest",
+        "GET /api/rag/share/{share_id}",
         "GET /api/status",
         "POST /api/query",
         "POST /api/rag/query",
         "POST /api/rag/query/stream",
+        "POST /api/rag/share",
     }
 
 

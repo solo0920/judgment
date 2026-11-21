@@ -41,7 +41,7 @@ CI 已移除 `--ignore-vuln`。若未來出現新的 advisory，security job 會
 
 先在 temp venv 完成相容性測試；正式 `.venv` 同步後也重跑一次：
 
-- `pyarrow 25.0.1` + `pytest 9.2.0`：695 tests pass。
+- `pyarrow 25.0.1` + `pytest 9.2.0`：697 tests pass。
 - `pytest-cov 6.3.0` 可搭配 pytest 9.2.0，`--cov` 正常。
 - 法規 Parquet（1,351 rows／26 columns）與判決 Parquet（1,295 rows／18 columns）：pyarrow 18 與 25 的 schema、row count、前 100 筆 SHA-256 相同。
 - pyarrow 25 寫出的 ZSTD Parquet 可被 pyarrow 18 與 DuckDB 讀取；DuckDB 寫出的 Parquet 也可被 pyarrow 18 與 25 讀取。

@@ -32,6 +32,7 @@ import {
 } from "../utils.js";
 
 const SHARE_QUESTION_PARAM = "q";
+const SHARE_TOKEN_PARAM = "share";
 
 const EXAMPLES = [
   "金融消費者保護法如何處理金融消費爭議？",
@@ -85,30 +86,50 @@ function turnMarkup(question, answerHtml, { complete = true } = {}) {
   </div>`;
 }
 
-function shareUrlFor(question) {
+function shareUrlFor(token, question) {
   const url = new URL(window.location.href);
   url.search = "";
   url.hash = "#/rag";
-  url.searchParams.set(SHARE_QUESTION_PARAM, question);
+  if (token) url.searchParams.set(SHARE_TOKEN_PARAM, token);
+  if (question) url.searchParams.set(SHARE_QUESTION_PARAM, question);
   return url.toString();
 }
 
-function takeSharedQuestion() {
+function replaceShareUrl({ keepToken = false, token = "" } = {}) {
   try {
     const url = new URL(window.location.href);
-    const question = String(
-      url.searchParams.get(SHARE_QUESTION_PARAM) || "",
-    ).trim();
-    if (!question) return "";
     url.searchParams.delete(SHARE_QUESTION_PARAM);
+    if (keepToken && token) {
+      url.searchParams.set(SHARE_TOKEN_PARAM, token);
+    } else {
+      url.searchParams.delete(SHARE_TOKEN_PARAM);
+    }
     window.history.replaceState(
       null,
       "",
       `${url.pathname}${url.search}${url.hash || "#/rag"}`,
     );
-    return question.slice(0, 500);
   } catch (error) {
-    return "";
+    /* URL cleanup is best effort. */
+  }
+}
+
+function takeShareRequest() {
+  try {
+    const url = new URL(window.location.href);
+    const token = String(
+      url.searchParams.get(SHARE_TOKEN_PARAM) || "",
+    ).trim();
+    const question = String(
+      url.searchParams.get(SHARE_QUESTION_PARAM) || "",
+    ).trim();
+    if (!token && !question) return null;
+    return {
+      token: token.slice(0, 64),
+      question: question.slice(0, 500),
+    };
+  } catch (error) {
+    return null;
   }
 }
 
@@ -124,19 +145,92 @@ function answerTextFor(turnElement) {
   return answer ? String(answer.innerText || "").trim() : "";
 }
 
-async function shareRagTurn(question, answer, title) {
-  const url = shareUrlFor(question);
-  const text = [question, answer].filter(Boolean).join("\n\n");
+function sharePayloadFor(payload) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  return {
+    status: source.status,
+    answer: source.answer,
+    answer_source: source.answer_source,
+    notice: source.notice,
+    citations: Array.isArray(source.citations) ? source.citations : [],
+    judgments: Array.isArray(source.judgments) ? source.judgments : [],
+    reference_judgments: Array.isArray(source.reference_judgments)
+      ? source.reference_judgments
+      : [],
+    law_sources: Array.isArray(source.law_sources) ? source.law_sources : [],
+    matched_terms: Array.isArray(source.matched_terms)
+      ? source.matched_terms
+      : [],
+    law_answer: source.law_answer,
+    law_framework: source.law_framework,
+    llm_model: source.llm_model,
+    embedding_model: source.embedding_model,
+    duration_ms: source.duration_ms,
+    show_sources: source.show_sources,
+    retrieval: source.retrieval,
+    rerank_degraded: source.rerank_degraded,
+    degraded_reason: source.degraded_reason,
+    partial: false,
+    streaming: false,
+  };
+}
+
+function shareTurnsText(turns) {
+  const chunks = (Array.isArray(turns) ? turns : [])
+    .filter((turn) => String(turn?.question || "").trim())
+    .map((turn) => {
+      const question = String(turn.question || "").trim();
+      const answer = String(turn.payload?.answer || "").trim();
+      return [question, answer || "（沒有回答內容）"].join("\n\n");
+    });
+  return chunks.join("\n\n---\n\n");
+}
+
+async function shareRagTurns(turns, fallbackQuestion, title) {
+  const sourceTurns = (Array.isArray(turns) ? turns : [])
+    .filter((turn) => String(turn?.question || "").trim())
+    .map((turn) => ({
+      question: String(turn.question || "").trim().slice(0, 500),
+      asked_at: String(turn.asked_at || ""),
+      payload: sharePayloadFor(turn.payload),
+    }));
+  const question = String(
+    fallbackQuestion || sourceTurns[0]?.question || "",
+  ).trim();
+  if (!sourceTurns.length && question) {
+    sourceTurns.push({
+      question,
+      asked_at: "",
+      payload: sharePayloadFor({}),
+    });
+  }
+  const text = shareTurnsText(sourceTurns);
+  let url = shareUrlFor("", question);
+  try {
+    const result = await api.ragShareCreate({
+      title: String(title || sourceTurns[0]?.question || "").slice(0, 200),
+      turns: sourceTurns,
+    });
+    if (result?.id) {
+      url = shareUrlFor(result.id, question);
+    }
+  } catch (error) {
+    /* A question-only replay link still works if snapshot storage fails. */
+  }
+  const shareText = [text, url].filter(Boolean).join("\n\n");
   if (typeof navigator.share === "function") {
     try {
-      await navigator.share({ title, text, url });
+      await navigator.share({ title, text: shareText });
       return;
     } catch (error) {
       if (error?.name === "AbortError") return;
     }
   }
-  const ok = await copyText(`${text}\n\n${url}`);
-  toast(ok ? "已複製問題、回答與分享連結。" : "無法分享。", ok ? "ok" : "danger");
+  const ok = await copyText(shareText);
+  toast(
+    ok ? "已複製對話與分享連結。" : "無法分享。",
+    ok ? "ok" : "danger",
+  );
 }
 
 function lookupWithTimeout(promise, timeoutMs) {
@@ -1394,7 +1488,9 @@ function renderProjects(projects, historyEntries, activeProjectId) {
 }
 
 export async function render(root) {
-  const sharedQuestion = takeSharedQuestion();
+  const sharedRequest = takeShareRequest();
+  if (sharedRequest && !sharedRequest.token) replaceShareUrl();
+  const turnPayloads = new WeakMap();
   let disposed = false;
   let historyEntries = [];
   let historyLoaded = false;
@@ -1610,6 +1706,92 @@ export async function render(root) {
           )
           .join("")
       : emptyConversationMarkup();
+    const elements = Array.from(turnsBox.querySelectorAll(".rag-turn"));
+    elements.forEach((element, index) => {
+      const payload = conversationTurns[index]?.payload;
+      if (payload) turnPayloads.set(element, payload);
+    });
+  };
+
+  const loadSharedConversation = async (token) => {
+    try {
+      const snapshot = await api.ragShareGet(token);
+      if (disposed) return false;
+      const turns = (Array.isArray(snapshot?.turns) ? snapshot.turns : [])
+        .map((turn) => ({
+          question: String(turn?.question || "").trim().slice(0, 500),
+          asked_at: String(turn?.asked_at || ""),
+          payload:
+            turn?.payload && typeof turn.payload === "object"
+              ? turn.payload
+              : {},
+        }))
+        .filter((turn) => turn.question);
+      if (!turns.length) throw new Error("分享內容是空的。");
+      currentConversationId = null;
+      conversationTurns = turns;
+      lastQuestion = turns[turns.length - 1]?.question || "";
+      setConversationMode(true);
+      renderStoredConversation();
+      showFollowup();
+      renderLibrary();
+      setBusy(submit, false);
+      setBusy(followupSubmit, false);
+      replaceShareUrl({ keepToken: true, token });
+      window.scrollTo({ top: 0, behavior: "auto" });
+      toast("已載入分享的對話。", "ok", 3200);
+      return true;
+    } catch (error) {
+      replaceShareUrl();
+      if (!disposed) {
+        toast("分享連結已失效，將重新檢索原問題。", "warn", 5200);
+      }
+      return false;
+    }
+  };
+
+  const turnsForShare = (turnElement, fallbackQuestion) => {
+    const elements = Array.from(turnsBox.querySelectorAll(".rag-turn"));
+    const endIndex = elements.indexOf(turnElement);
+    const limit = endIndex >= 0 ? endIndex + 1 : elements.length;
+    const turns = [];
+    for (let index = 0; index < limit; index += 1) {
+      const element = elements[index];
+      const stored = conversationTurns[index];
+      const question = String(
+        stored?.question ||
+          element?.querySelector(".rag-user-bubble")?.textContent ||
+          "",
+      ).trim();
+      if (!question) continue;
+      const payload =
+        stored?.payload ||
+        turnPayloads.get(element) ||
+        (index === endIndex
+          ? {
+              status: "operational",
+              answer: answerTextFor(element),
+              answer_source: "shared",
+            }
+          : {});
+      turns.push({
+        question,
+        asked_at: stored?.asked_at || "",
+        payload,
+      });
+    }
+    if (!turns.length && fallbackQuestion) {
+      turns.push({
+        question: fallbackQuestion,
+        asked_at: "",
+        payload: {
+          status: "operational",
+          answer: answerTextFor(turnElement),
+          answer_source: "shared",
+        },
+      });
+    }
+    return turns;
   };
 
   const openConversation = (entry) => {
@@ -1916,28 +2098,27 @@ export async function render(root) {
   };
 
   const shareHistory = async (entry) => {
-    const turns = Array.isArray(entry.turns) ? entry.turns : [];
-    const lines = [`# ${entry.title || "未命名對話"}`, ""];
-    if (turns.length) {
-      for (const turn of turns) {
-        lines.push("## 問題", "", turn.question || "", "");
-        lines.push("## 回答", "", turn.payload?.answer || "（沒有回答內容）", "");
-        const sources = Array.isArray(turn.payload?.law_sources)
-          ? turn.payload.law_sources
-              .map((source) => source.law_name)
-              .filter(Boolean)
-          : [];
-        if (sources.length) {
-          lines.push(`引用：${[...new Set(sources)].join("、")}`, "");
-        }
-      }
-    } else {
-      lines.push(entry.title || "");
+    const turns = (Array.isArray(entry.turns) ? entry.turns : []).map(
+      (turn) => ({
+        question: String(turn?.question || "").trim(),
+        asked_at: String(turn?.asked_at || ""),
+        payload:
+          turn?.payload && typeof turn.payload === "object"
+            ? turn.payload
+            : {},
+      }),
+    );
+    if (!turns.length) {
+      turns.push({
+        question: entry.title || "未命名對話",
+        asked_at: "",
+        payload: {},
+      });
     }
-    const ok = await copyText(lines.join("\n"));
-    toast(
-      ok ? "對話內容已複製，可直接貼上分享。" : "無法複製對話內容。",
-      ok ? "ok" : "warn",
+    await shareRagTurns(
+      turns,
+      entry.title || turns[turns.length - 1]?.question || "",
+      entry.title || "Judgment RAG 對話",
     );
   };
 
@@ -2832,6 +3013,7 @@ export async function render(root) {
       stopFlowUpdates();
       const processHtml = processController?.finish(true) || "";
       answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
+      if (turnElement) turnPayloads.set(turnElement, compactAnswerPayload(payload));
       turnElement?.classList.remove("is-pending");
       turnElement?.classList.add("is-complete");
       if (!payload.pipeline_flow) {
@@ -2933,9 +3115,9 @@ export async function render(root) {
         return;
       }
       if (action === "share") {
-        await shareRagTurn(
+        await shareRagTurns(
+          turnsForShare(turnElement, question),
           question,
-          answerTextFor(turnElement),
           questionAction ? "Judgment RAG 提問" : "Judgment RAG 回答",
         );
         return;
@@ -3058,32 +3240,41 @@ export async function render(root) {
   ]);
   await loadCurrentTestFlow();
 
-  let pendingQuestion = "";
-  let pendingSource = "home";
-  try {
-    pendingQuestion =
-      window.sessionStorage.getItem("judgment.pending_question") || "";
-    window.sessionStorage.removeItem("judgment.pending_question");
-  } catch (error) {
-    pendingQuestion = "";
+  let sharedLoaded = false;
+  if (sharedRequest?.token) {
+    sharedLoaded = await loadSharedConversation(sharedRequest.token);
   }
-  if (!pendingQuestion && typeof window.__judgmentPendingQuestion === "string") {
-    pendingQuestion = window.__judgmentPendingQuestion;
-  }
-  delete window.__judgmentPendingQuestion;
-  if (!pendingQuestion && sharedQuestion) {
-    pendingQuestion = sharedQuestion;
-    pendingSource = "share";
-  }
-  pendingQuestion = String(pendingQuestion || "").trim().slice(0, 500);
-  if (pendingQuestion && input) {
-    input.value = pendingQuestion;
-    resizeInput();
-    window.setTimeout(() => {
-      if (!disposed) {
-        runQuestion(pendingQuestion, { fresh: true, source: pendingSource });
-      }
-    }, 40);
+  if (!sharedLoaded) {
+    let pendingQuestion = "";
+    let pendingSource = "home";
+    try {
+      pendingQuestion =
+        window.sessionStorage.getItem("judgment.pending_question") || "";
+      window.sessionStorage.removeItem("judgment.pending_question");
+    } catch (error) {
+      pendingQuestion = "";
+    }
+    if (
+      !pendingQuestion &&
+      typeof window.__judgmentPendingQuestion === "string"
+    ) {
+      pendingQuestion = window.__judgmentPendingQuestion;
+    }
+    delete window.__judgmentPendingQuestion;
+    if (!pendingQuestion && sharedRequest?.question) {
+      pendingQuestion = sharedRequest.question;
+      pendingSource = "share";
+    }
+    pendingQuestion = String(pendingQuestion || "").trim().slice(0, 500);
+    if (pendingQuestion && input) {
+      input.value = pendingQuestion;
+      resizeInput();
+      window.setTimeout(() => {
+        if (!disposed) {
+          runQuestion(pendingQuestion, { fresh: true, source: pendingSource });
+        }
+      }, 40);
+    }
   }
 
   return () => {

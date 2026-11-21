@@ -9,7 +9,7 @@
 | Python | `>=3.10`；本機 `.python-version` 為 3.12 |
 | pyarrow | `25.0.1` |
 | pytest | `9.2.0` |
-| 測試 | `uv run pytest -q`：695 tests pass |
+| 測試 | `uv run pytest -q`：697 tests pass |
 | Lint | `uv run ruff check .`：clean |
 | CI | pytest、ruff、frontend build、pip-audit、gitleaks 全歷史、Syft SBOM |
 | pip-audit | 無已知 advisory，CI 無 `--ignore-vuln` |
@@ -42,7 +42,7 @@ CI 尚未完成：GitHub Actions commit SHA pinning、`persist-credentials: fals
 - DB 表：`demo_settings`；六個 feature flags：`rag`、`data`、`quality`、`performance`、`processing`、`status`；`home` 為隱含功能。
 - 目前執行狀態是動態的，存在 `demo_settings`；不要用文件硬編碼「開啟」或「關閉」。
 - 狀態 API：`GET /api/demo/status`；管理 API：`GET /api/admin/demo`、`PUT /api/admin/demo`、`POST /api/admin/demo/close`。
-- 訪客 route allowlist 以 `src/judgment/web/demo_policies.json` 為唯一來源，目前 15 條：
+- 訪客 route allowlist 以 `src/judgment/web/demo_policies.json` 為唯一來源，目前 17 條：
 
 ```text
 GET  /api/catalog
@@ -55,11 +55,13 @@ GET  /api/law
 GET  /api/performance
 GET  /api/processing
 GET  /api/quality
+GET  /api/rag/share/{share_id}
 GET  /api/schema/suggest
 GET  /api/status
 POST /api/query
 POST /api/rag/query
 POST /api/rag/query/stream
+POST /api/rag/share
 ```
 
 - `GET /api/question-bank/*`、`GET /api/performance/options`、`GET /api/processing/plan`、`GET /api/processing/active`、`GET /api/updates/status`、`GET /api/courts/check`、`GET /api/law-versions/check`、`GET /api/judgment-download/status` 都是 admin-only，不在 demo allowlist。
@@ -71,7 +73,7 @@ POST /api/rag/query/stream
 - 裸法規名稱或簡介問題（例如「證券交易法」、「刑法」、「介紹銀行法」）回傳結構化法規簡介：立法目的、主管機關、章節架構、核心條文；不呼叫 LLM，也不列判決。
 - 官方名稱有「中華民國」前綴時，支援常用簡稱（例如「刑法」→「中華民國刑法」）。
 - 判決 RAG 只處理與 `documents/金融法規.md` 的 99 項金融相關法規有關的問題。若問題與清單及金融詞彙無關，回傳 `answer_source=notice`、`retrieval.status=not_financial`，提示「本RAG提問功能主要以金融相關判決為主」，不生成判決回答。
-- RAG 回答完成後，問題泡泡與回答卡提供 hover／focus 操作工具列：問題可複製、分享、編輯、重新提問；回答可複製、分享、重新生成。觸控裝置固定顯示按鈕；編輯會帶入目前可見的提問輸入框（對話中為下方續問框）。分享內容包含原問題與目前回答；分享連結以 `?q=` 帶入原問題，開啟後優先導向 `#/rag` 並自動重新檢索。即使片段是 `#/home`，只要有非空 `?q=` 仍會回到 RAG 頁。
+- RAG 回答完成後，問題泡泡與回答卡提供 hover／focus 操作工具列：問題可複製、分享、編輯、重新提問；回答可複製、分享、重新生成。觸控裝置固定顯示按鈕；編輯會帶入目前可見的提問輸入框（對話中為下方續問框）。分享會先將目前對話（最多 30 輪、1 MB）寫入 PostgreSQL `rag_share_snapshots`，連結以 `?share=<token>&q=<最後問題>` 帶入；開啟後優先讀取快照並渲染完整對話，不重新呼叫 LLM。快照保留 7 天、回應 `Cache-Control: no-store`；若快照失效則以 `?q=` 重新檢索。即使片段是 `#/home`，只要有非空 `?share=` 或 `?q=` 仍會回到 RAG 頁。
 
 ## 5. Auth／security 現況
 

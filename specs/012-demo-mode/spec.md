@@ -120,7 +120,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 
 訪客可用端點以 `src/judgment/web/demo_policies.json` 為唯一來源，目前為：
 
-- RAG：`POST /api/rag/query`、`POST /api/rag/query/stream`
+- RAG：`POST /api/rag/query`、`POST /api/rag/query/stream`、`POST /api/rag/share`、`GET /api/rag/share/{share_id}`
 - 資料：`GET /api/catalog`、`POST /api/query`、`GET /api/data/suggest`、`GET /api/schema/suggest`、`GET /api/law`、`GET /api/judgment`
 - 品質：`GET /api/quality`（訪客使用最近一次快取掃描）、`GET /api/demo/quality`（訪客專用摘要）
 - 效能：`GET /api/performance`
@@ -130,7 +130,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 
 永遠 admin-only：
 
-- 所有寫入類 `POST/PATCH/DELETE`、workflow、index、host、model、benchmark、test mode；`POST /api/query`、`POST /api/rag/query`、`POST /api/rag/query/stream` 是 READ-ONLY DEMO_QUERY 例外。
+- 所有寫入類 `POST/PATCH/DELETE`、workflow、index、host、model、benchmark、test mode；`POST /api/query`、`POST /api/rag/query`、`POST /api/rag/query/stream` 是 READ-ONLY DEMO_QUERY 例外；`POST /api/rag/share` 只建立 7 天後到期的對話快照，屬受限 DEMO_QUERY 例外。
 - 題庫所有端點，包括 `GET /api/question-bank/stats`、`items`、`tags`、`export` 與 `POST/PATCH/DELETE`。
 - `GET /api/performance/options`、`GET /api/processing/plan`、`GET /api/processing/active`、`GET /api/updates/status`、`GET /api/courts/check`、`GET /api/law-versions/check`、`GET /api/judgment-download/status`。
 - `/api/docs`、`/api/openapi.json`。
@@ -145,7 +145,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
   - 原始 SQL、schema 內部細節、錯誤堆疊
   - admin email、token、session、ticket
   - 其他訪客的 IP／usage
-- `/api/status`、`/api/processing`、`/api/catalog`、`/api/query`、`/api/performance`、`/api/rag/query`、`/api/rag/query/stream` 對訪客 MUST 套用對應 sanitizer（`sanitize_status_payload`、`sanitize_processing_payload`、`sanitize_catalog_payload`、`sanitize_query_payload`、`sanitize_performance_payload`、`sanitize_rag_result`／SSE event sanitizer）；admin 版本不變。`/api/home` 使用 `sanitize_infrastructure`。
+- `/api/status`、`/api/processing`、`/api/catalog`、`/api/query`、`/api/performance`、`/api/rag/query`、`/api/rag/query/stream` 對訪客 MUST 套用對應 sanitizer（`sanitize_status_payload`、`sanitize_processing_payload`、`sanitize_catalog_payload`、`sanitize_query_payload`、`sanitize_performance_payload`、`sanitize_rag_result`／SSE event sanitizer）；admin 版本不變。`/api/home` 使用 `sanitize_infrastructure`。`POST /api/rag/share` 與 `GET /api/rag/share/{share_id}` MUST 使用 `sanitize_rag_result` 清理後再儲存／回傳，且回應 MUST 為 `Cache-Control: no-store`。
 - `/api/judgment`、`/api/law`、`/api/quality` 目前沒有經過 query sanitizer；其 payload 只包含判決／法規公開資料與品質統計（archive 名稱、計數），不得再加入 host、path、DSN、token 或內部 endpoint。若欄位變更，必須同步加 sanitizer 與測試。
 
 ### FR-010a 訪客處理頁效能
@@ -308,7 +308,7 @@ updated_at  TIMESTAMPTZ NOT NULL
 - [ ] `/api/status`、`/api/processing` 訪客版不含 host／IP／DSN／model path／error stack。
 - [ ] RAG 限流、每日 token 預算、資料／效能 timeout 與每日上限 code 已存在；端到端 429／串流併發／Cloudflare edge 規則待驗。
 - [x] 390px 無水平溢出；console error 0（Playwright 已驗證）。
-- [x] 全站 695 tests、ruff、frontend build 通過。
+- [x] 全站 697 tests、ruff、frontend build 通過。
 - [x] 不影響 v7 索引；v7 已完成並由 `judgments_v005` 提供，production 已重啟多次。
 
 **Revision**: 1.6（2026-11-21）與程式碼重新對照：訪客 route 以 `demo_policies.json` 為準、移除已改為 admin-only 的題庫／performance options、文件不再記錄 demo 開關狀態；資料品質頁 first paint 使用 cached snapshot，索引 coverage 共用 120 秒快取。

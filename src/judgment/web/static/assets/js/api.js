@@ -1326,6 +1326,22 @@ export const api = {
     });
   },
 
+  ragShareCreate(payload) {
+    return request("/api/rag/share", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  ragShareGet(shareId) {
+    return request(`/api/rag/share/${encodeURIComponent(shareId)}`, {
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
   async ragStream(
     question,
     {

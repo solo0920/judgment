@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -30,6 +30,7 @@ from judgment.models import (
     JudgmentDocumentVersion,
     JudgmentImportRun,
     JudgmentSnapshot,
+    RagShareSnapshot,
     LawArticleChangeEvent,
     LawArticleVersion,
     LawDatasetVersion,
@@ -2725,6 +2726,76 @@ def test_request_validation(web_client) -> None:
 
     rag = web_client.post("/api/rag/query", json={"question": ""})
     assert rag.status_code == 422
+
+
+def test_rag_share_snapshot_round_trip(web_client) -> None:
+    response = web_client.post(
+        "/api/rag/share",
+        json={
+            "title": "證券交易法內線交易",
+            "turns": [
+                {
+                    "question": "證券交易法對內線交易有什麼規範？",
+                    "asked_at": "2026-11-21T16:00:00+00:00",
+                    "payload": {
+                        "status": "operational",
+                        "answer": "證券交易法第 157-1 條禁止內線交易。",
+                        "answer_source": "llm",
+                        "judgments": [{"jid": "TPSM,101,台上,5924,20121122"}],
+                        "law_sources": [{"law_name": "證券交易法"}],
+                        "pipeline_flow": {"internal": "not shared"},
+                        "test_run": {"host": "not shared"},
+                    },
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    share = response.json()
+    assert share["id"]
+    assert share["expires_at"]
+
+    fetched = web_client.get(f"/api/rag/share/{share['id']}")
+    assert fetched.status_code == 200
+    assert fetched.headers["cache-control"] == "no-store"
+    snapshot = fetched.json()
+    assert snapshot["title"] == "證券交易法內線交易"
+    assert len(snapshot["turns"]) == 1
+    turn = snapshot["turns"][0]
+    assert turn["question"] == "證券交易法對內線交易有什麼規範？"
+    assert turn["payload"]["answer"] == "證券交易法第 157-1 條禁止內線交易。"
+    assert turn["payload"]["judgments"][0]["jid"] == (
+        "TPSM,101,台上,5924,20121122"
+    )
+    assert "pipeline_flow" not in turn["payload"]
+    assert "test_run" not in turn["payload"]
+
+    assert (
+        web_client.post(
+            "/api/rag/share",
+            json={"turns": [{"question": "   ", "payload": {}}]},
+        ).status_code
+        == 400
+    )
+
+
+def test_rag_share_snapshot_rejects_expired_links(web_client) -> None:
+    now = datetime.now(timezone.utc)
+    with web_client.app.state.session_factory() as session:
+        session.add(
+            RagShareSnapshot(
+                token="expired-share",
+                title="過期分享",
+                turns=[{"question": "過期問題", "payload": {}}],
+                created_at=now - timedelta(days=8),
+                expires_at=now - timedelta(days=1),
+            )
+        )
+        session.commit()
+
+    response = web_client.get("/api/rag/share/expired-share")
+    assert response.status_code == 404
 
 
 def test_settings_parse_cors_and_forwarded_ips(monkeypatch) -> None:

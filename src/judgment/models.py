@@ -938,3 +938,17 @@ class DemoUsageDaily(Base):
     updated_at = Column(
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
+
+
+class RagShareSnapshot(Base):
+    __tablename__ = "rag_share_snapshots"
+
+    token = Column(String(64), primary_key=True)
+    title = Column(String(200), nullable=False, default="")
+    turns = Column(JSON, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    expires_at = Column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
