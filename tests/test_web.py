@@ -2785,6 +2785,42 @@ def test_rag_share_snapshot_round_trip(web_client) -> None:
     )
 
 
+def test_rag_share_token_is_redacted_from_performance_telemetry(web_client) -> None:
+    created = web_client.post(
+        "/api/rag/share",
+        json={
+            "title": "telemetry redaction",
+            "turns": [
+                {
+                    "question": "測試分享 token 不進遙測",
+                    "payload": {
+                        "status": "operational",
+                        "answer": "測試回答",
+                        "answer_source": "llm",
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+    token = created.json()["id"]
+    assert token
+
+    assert web_client.get(f"/api/rag/share/{token}").status_code == 200
+    performance = web_client.get("/api/performance", params={"page_size": 100})
+    assert performance.status_code == 200
+    share_rows = [
+        row
+        for row in performance.json()["rows"]
+        if row.get("path") == "/api/rag/share/:share_id"
+    ]
+    assert share_rows
+    assert token not in json.dumps(share_rows, ensure_ascii=False)
+    assert "/api/rag/share/:share_id" in json.dumps(
+        share_rows, ensure_ascii=False
+    )
+
+
 def test_rag_share_snapshot_rejects_expired_links(web_client) -> None:
     now = datetime.now(timezone.utc)
     with web_client.app.state.session_factory() as session:

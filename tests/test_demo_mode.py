@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
-from judgment.models import Base
+from judgment.models import Base, LawDatasetVersion
 from judgment.observability import record_performance
 from judgment.web.app import create_app
 
@@ -509,6 +509,131 @@ def test_demo_performance_redacts_rag_question_and_answer(demo_client) -> None:
     )
     assert admin_row["flow"]["metadata"]["question"] == "測試機密問題"
     assert admin_row["flow"]["metadata"]["answer"] == "測試機密答案"
+
+
+def test_demo_performance_redacts_share_tokens(demo_client) -> None:
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    now = datetime.now(timezone.utc)
+    token = "legacy-share-token"
+    path = f"/api/rag/share/{token}"
+    record_performance(
+        app.state.session_factory,
+        process=path,
+        module=f"http{path}",
+        status="success",
+        started_at=now,
+        finished_at=now,
+        duration_ms=12,
+        method="GET",
+        path=path,
+        request_id="demo-share-token-regression",
+        flow={
+            "version": "1",
+            "request_id": "demo-share-token-regression",
+            "entrypoint": path,
+            "method": "GET",
+            "path": path,
+            "started_at": now.isoformat(),
+            "finished_at": now.isoformat(),
+            "total_ms": 12,
+            "status": "success",
+            "segments": [],
+        },
+    )
+
+    response = client.get("/api/performance", params={"page_size": 10})
+    assert response.status_code == 200
+    dumped = json.dumps(response.json(), ensure_ascii=False)
+    assert token not in dumped
+    assert "/api/rag/share/:share_id" in dumped
+    row = next(
+        item
+        for item in response.json()["rows"]
+        if item["request_id"] == "demo-share-token-regression"
+    )
+    assert token not in json.dumps(row, ensure_ascii=False)
+
+
+def test_demo_schema_suggest_blocks_sensitive_paths(
+    demo_client, tmp_path: Path
+) -> None:
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+    parquet_path = str(tmp_path / "secret-laws.parquet")
+    with app.state.session_factory() as session:
+        session.add(
+            LawDatasetVersion(
+                source_type="law",
+                source_url="https://example.test/law",
+                update_date="20261122",
+                version_code="202611220001",
+                content_sha256="a" * 64,
+                raw_json_sha256="b" * 64,
+                zip_sha256="c" * 64,
+                zip_path=str(tmp_path / "secret-laws.zip"),
+                parquet_path=parquet_path,
+                law_count=1,
+                article_count=2,
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    params = {
+        "database": "postgres",
+        "table": "law_dataset_versions",
+        "column": "parquet_path",
+    }
+    demo = client.get("/api/schema/suggest", params=params)
+    assert demo.status_code == 200
+    assert demo.json()["values"] == []
+    assert demo.json()["warnings"] == ["此欄位未開放展示。"]
+    assert str(tmp_path) not in demo.text
+
+    admin = client.get(
+        "/api/schema/suggest", params=params, headers=ADMIN_HEADERS
+    )
+    assert admin.status_code == 200
+    assert parquet_path in admin.json()["values"]
+
+    visible = client.get(
+        "/api/schema/suggest",
+        params={**params, "column": "id"},
+    )
+    assert visible.status_code == 200
+    assert visible.json()["values"] == ["1"]
 
 
 def test_sanitize_processing_payload_redacts_paths() -> None:

@@ -9,6 +9,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import threading
@@ -989,6 +990,24 @@ PERFORMANCE_TARGETS = {
     "/api/rag/query": ("RAG 問答", "judgment.rag.answer_question"),
     "/api/rag/query/stream": ("RAG 問答", "judgment.rag.answer_question"),
 }
+
+
+_DEMO_SCHEMA_BLOCKED_COLUMNS = {
+    "law_dataset_versions": frozenset({"parquet_path", "zip_path"}),
+    "download_runs": frozenset({"error_message"}),
+    "judgment_import_runs": frozenset({"error_message"}),
+}
+
+_RAG_SHARE_TELEMETRY_PATH = re.compile(r"^/api/rag/share/[^/]+$")
+
+
+def _telemetry_path(path: str) -> str:
+    """Keep capability tokens out of performance records and flow JSON."""
+
+    return _RAG_SHARE_TELEMETRY_PATH.sub(
+        "/api/rag/share/:share_id",
+        str(path or ""),
+    )
 
 
 def _performance_target(path: str) -> tuple[str, str]:
@@ -2460,6 +2479,7 @@ def create_app(
         if skipped:
             return await call_next(request)
 
+        path = _telemetry_path(path)
         started_at = datetime.now(timezone.utc)
         started = time.perf_counter()
         request_id = str(
@@ -4156,12 +4176,29 @@ def create_app(
 
     @app.get("/api/schema/suggest")
     def schema_suggest(
+        request: Request,
         database: str,
         table: str,
         column: str,
         q: str = "",
         limit: int = 1000,
     ) -> Dict[str, Any]:
+        demo_visitor = _is_demo_visitor(request)
+        if demo_visitor and column in _DEMO_SCHEMA_BLOCKED_COLUMNS.get(
+            table, frozenset()
+        ):
+            return {
+                "status": "ok",
+                "database": database,
+                "table": table,
+                "column": column,
+                "query": q,
+                "values": [],
+                "total": 0,
+                "truncated": False,
+                "warnings": ["此欄位未開放展示。"],
+                "duration_ms": 0,
+            }
         try:
             with trace_segment(
                 "api.endpoint",
@@ -4174,7 +4211,7 @@ def create_app(
                     "query_length": len(q or ""),
                 },
             ):
-                return schema_suggestions(
+                payload = schema_suggestions(
                     database=database,
                     table=table,
                     column=column,
@@ -4184,6 +4221,9 @@ def create_app(
                     data_dir=app.state.data_dir,
                     settings=settings,
                 )
+                if demo_visitor:
+                    return sanitize_query_payload(payload)
+                return payload
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
