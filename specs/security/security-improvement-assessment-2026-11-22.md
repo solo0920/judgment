@@ -362,12 +362,12 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **工時**：S
 - **關聯 ticket**：HDR-01
 
-#### OPS-02 — 完整 restore drill 尚未執行
+#### OPS-02 — 已修復（完整 restore drill）
 
-- **嚴重度**：Medium（可用性／營運）
-- **證據**：matrix `:33`，157 GB + Qdrant 完整還原未演練。
-- **建議**：排維護窗口與第二個 restore target，验证 checksum、筆數差異 0、Qdrant alias 與 vectors。
-- **工時**：L
+- **原問題**：matrix `:34`，157 GB + Qdrant 完整還原未演練。
+- **修復／驗證**：2026-11-22 在 production 不停機下完成隔離 drill：age checksum、PostgreSQL scratch DB、第二個 Qdrant container、data SHA-256 全部通過；核心 counts 0 差異、Qdrant 4,714,967 points、1,404 files SHA-256 相同。總計 47m48s（checksum→data SHA）。
+- **發現**：來源備份是 2026-11-21 舊快照，缺少 `rag_share_snapshots`、`security_audit_events` 與 5 個 trigram indexes；已重新建立最新備份。
+- **報告**：`specs/security/restore-drill-2026-11-22.md`
 - **關聯 ticket**：BAK-02
 
 #### OPS-03 — 限流仍為 in-process，且未經端到端／edge 驗證
@@ -558,6 +558,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **SSE**：正式站 ticket `expires_in=60`；第一次 stream 200，重播 401；access log 已遮蔽 `ticket=[redacted]`，日誌中找不到 ticket 值。
 - **Session 撤銷**：`tests/test_web.py::test_google_logout_clears_session` 驗證 logout 後 `revoked_session_jtis` 已寫入 DB，重播 token `authenticated=false`。
 - **備份機制**：`pg_dump --schema-only` → 建立 scratch DB → `pg_restore` 成功（33 張 public tables）→ drop；Qdrant API 以 `curl -K -` 驗證 200；`BACKUP_REQUIRE_ENCRYPTION=1` 缺 recipient 時 fail closed；`bash -n` 兩支腳本通過。2026-11-22 另跑 `backup.sh` 小規模 smoke：scratch DB → age 加密 dump → checksum 驗證 → age 解密 → 第二個 scratch DB `pg_restore`，34 tables 成功。
+- **完整 restore drill**：2026-11-22 隔離還原 2026-11-21 備份；PG 21m36s、Qdrant 3m51s、data 8m15s、data SHA 6m44s；核心 counts 0 差異、Qdrant 4,714,967 points、1,404 files SHA-256 相同。舊備份缺少 2 張新 table／5 個 trigram indexes，已建立最新備份 `/Volumes/T500_2TB/judgment-backup-20261122-1500`（157 GB；34 tables、PG/Qdrant checksum OK、data SHA 一致）。詳見 `restore-drill-2026-11-22.md`。
 - **Google 實機登入／管理頁**：使用者已在 `judgment.ragdemo.win` 完成 Google 登入。access log 顯示 `/api/auth/google/start` 302、callback 302、`/api/auth/me` 200，以及管理頁 `PUT /api/admin/demo`、`POST /api/admin/demo/close` 200。驗證期間發現 OAuth `code` 曾寫入 access log；已補 `code`／`state` 遮蔽，並清理舊 log。
 - **Access log 遮蔽**：新 log 對 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` 顯示 `[redacted]`；舊 `.run/web.log.*-pre-redaction` 已清理並維持 600。
 - **安全稽核**：正式站以 admin token 觸發 `auth.admin_token` 與 `admin.write`，`GET /api/admin/security-audit` 回傳事件；`security_audit_events` owner 為 `judgment_app`；回應不含 admin token／Bearer。Google login 成功／失敗事件由 pytest 覆蓋，下一次實際登入會寫入。
@@ -586,7 +587,8 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | AUDIT-01 初版：`security_audit_events`、`GET /api/admin/security-audit`、Google login／logout／admin token／admin write 事件；180 天保留；補 pytest。 |
 | 2026-11-22 | SESSION-01：session 加入 `sv` epoch、`POST /api/auth/logout-all`、TTL 縮短為 12 小時、無 `sv` 舊 token 拒絕；撤銷狀態讀取 fail closed；補 pytest。正式站 epoch 0→1，舊 cookie 立即失效。 |
 | 2026-11-22 | AUDIT-01 強化：未驗證失敗事件每 IP／每日上限、稽核建構／寫入失敗不阻塞請求、只記 path 不記 query string、前端 escape 測試；展示已關閉。 |
-| 2026-11-22 | 小規模備份演練：scratch DB schema → `backup.sh` → age 加解密 → checksum → 第二個 scratch DB `pg_restore`，34 tables 成功；完整 157 GB＋Qdrant drill 仍待維護窗口。 |
+| 2026-11-22 | 小規模備份演練：scratch DB schema → `backup.sh` → age 加解密 → checksum → 第二個 scratch DB `pg_restore`，34 tables 成功。 |
+| 2026-11-22 | 完整 restore drill：age checksum、PG scratch、Qdrant 4,714,967 points、data 1,404 files SHA-256 全部通過；發現舊備份缺少新 table／indexes，已建立並驗證最新備份 `/Volumes/T500_2TB/judgment-backup-20261122-1500`（157 GB）。 |
 | 2026-11-22 | SUP-01／OPS-04：Actions SHA pin、`persist-credentials: false`、`uv sync --frozen`、gitleaks 自訂規則與 negative control、main branch protection；本機全歷史掃描 305 commits、0 leaks。 |
 | 2026-11-22 | DATA-01：每日保留維護（performance 90 天、audit 180 天、分享快照 7 天），隱私文案與 `data-retention.md` 同步；備份 90 天輪替列為維運政策。 |
 | 2026-11-22 | Chrome／Safari 實機驗收：2 次 Google 登入、管理頁開／關、logout-all；最終 demo disabled，匿名 RAG／status 403。 |
