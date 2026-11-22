@@ -35,6 +35,7 @@ const SHARE_QUESTION_PARAM = "q";
 const SHARE_TOKEN_PARAM = "share";
 const SHARE_CONTENT_PARAM = "contentId";
 const SHARE_HASH_PATH = "rag/share";
+const FRIEND_SHARE_URL = "https://judgment.ragdemo.win";
 
 const EXAMPLES = [
   "金融消費者保護法如何處理金融消費爭議？",
@@ -1038,20 +1039,24 @@ function renderRagModeCard({
   text,
   modelSummary = [],
   refreshing = false,
+  expanded = false,
 }) {
   const toneClass =
     tone === "ok" ? "is-ok" : tone === "warn" ? "is-warn" : "is-info";
   const iconName = tone === "ok" ? "check" : tone === "warn" ? "alert" : "info";
   const badgeClass =
     tone === "ok" ? "badge-ok" : tone === "warn" ? "badge-warn" : "badge-info";
-  return `<section class="rag-mode-card ${toneClass}">
-    <div class="rag-mode-head">
+  return `<section class="rag-mode-card ${toneClass}${
+    expanded ? " is-expanded" : ""
+  }">
+    <div class="rag-mode-head" role="button" tabindex="0" aria-expanded="${expanded}">
       <span class="rag-mode-icon" aria-hidden="true">${icon(iconName, 14)}</span>
       <div class="rag-mode-copy">
         <strong>${escapeHtml(title)}</strong>
         <p>${escapeHtml(text)}</p>
       </div>
       <span class="badge ${badgeClass}">3 個模型</span>
+      <span class="rag-mode-chevron" aria-hidden="true">${icon("chevronDown", 14)}</span>
     </div>
     ${renderModelTable(modelSummary, refreshing)}
   </section>`;
@@ -1513,6 +1518,7 @@ export async function render(root) {
   let modeStatus = null;
   let modeError = null;
   let modeModelRefreshing = false;
+  let modeCardExpanded = false;
 
   root.innerHTML = `<section class="page rag-page">
     <div class="rag-layout">
@@ -1555,13 +1561,15 @@ export async function render(root) {
       </aside>
       <div class="rag-workspace">
         <div class="rag-workspace-toolbar">
-          <a class="rag-friend-link" href="https://judgment.ragdemo.win" target="_blank" rel="noopener noreferrer">${icon("gift", 14)}<span>分享給朋友</span></a>
+          <a class="rag-friend-link" href="https://judgment.ragdemo.win" target="_blank" rel="noopener noreferrer"
+            data-workspace-action="friend-share" aria-haspopup="menu" aria-expanded="false" aria-controls="rag-friend-menu">${icon("gift", 14)}<span>分享給朋友</span></a>
           <button class="rag-workspace-icon" type="button" data-workspace-action="menu"
             aria-haspopup="menu" aria-expanded="false" aria-controls="rag-workspace-menu"
             title="更多對話操作" aria-label="更多對話操作">${icon("more", 16)}</button>
           <button class="rag-workspace-icon" type="button" data-workspace-action="share"
             title="建立公開連結" aria-label="建立公開連結">${icon("share", 16)}</button>
           <div class="rag-history-menu rag-workspace-menu" id="rag-workspace-menu" role="menu" hidden></div>
+          <div class="rag-history-menu rag-workspace-menu rag-friend-menu" id="rag-friend-menu" role="menu" hidden></div>
         </div>
         <header class="rag-hero rag-hero-compact">
       <div id="rag-mode-notice">${notice({
@@ -1631,6 +1639,10 @@ export async function render(root) {
   const workspaceMenuTrigger = root.querySelector(
     '[data-workspace-action="menu"]',
   );
+  const friendMenu = root.querySelector("#rag-friend-menu");
+  const friendMenuTrigger = root.querySelector(
+    '[data-workspace-action="friend-share"]',
+  );
   const turnsBox = root.querySelector("#rag-turns");
   const followupForm = root.querySelector("#rag-followup-form");
   const followupInput = root.querySelector("#rag-followup-question");
@@ -1650,6 +1662,7 @@ export async function render(root) {
   const historyMenu = root.querySelector("#rag-history-menu");
   const judgmentDialog = root.querySelector("#rag-judgment-dialog");
   const lawDialog = root.querySelector("#rag-law-dialog");
+  const modeNotice = root.querySelector("#rag-mode-notice");
   const syncDialogScrollLock = () => {
     document.documentElement.classList.toggle(
       "dialog-open",
@@ -2200,6 +2213,35 @@ export async function render(root) {
     workspaceMenuTrigger?.setAttribute("aria-expanded", "false");
   };
 
+  const closeFriendMenu = () => {
+    if (!friendMenu) return;
+    friendMenu.hidden = true;
+    friendMenu.innerHTML = "";
+    friendMenuTrigger?.setAttribute("aria-expanded", "false");
+  };
+
+  const openFriendShareMenu = () => {
+    closeHistoryMenu();
+    closeWorkspaceMenu();
+    friendMenu.innerHTML = `
+      <div class="rag-history-menu-head">${icon("gift", 13)}<span>分享給朋友</span></div>
+      <div class="rag-share-link-url" title="${escapeHtml(
+        FRIEND_SHARE_URL,
+      )}">${escapeHtml(FRIEND_SHARE_URL)}</div>
+      <div class="rag-friend-menu-actions">
+        <button type="button" role="menuitem" data-friend-menu-action="copy">${icon(
+          "copy",
+          13,
+        )}<span>複製連結</span></button>
+        <button type="button" role="menuitem" data-friend-menu-action="open">${icon(
+          "external",
+          13,
+        )}<span>開啟連結</span></button>
+      </div>`;
+    friendMenu.hidden = false;
+    friendMenuTrigger?.setAttribute("aria-expanded", "true");
+  };
+
   const renderWorkspaceMenu = () => {
     const entry = currentWorkspaceEntry();
     const disabled = entry ? "" : " disabled";
@@ -2253,6 +2295,7 @@ export async function render(root) {
 
   const openWorkspaceMenu = () => {
     closeHistoryMenu();
+    closeFriendMenu();
     renderWorkspaceMenu();
     workspaceMenu.hidden = false;
     workspaceMenuTrigger?.setAttribute("aria-expanded", "true");
@@ -2333,12 +2376,23 @@ export async function render(root) {
         closeWorkspaceMenu();
       }
     }
+    if (!friendMenu.hidden) {
+      const insideFriend =
+        path.includes(friendMenu) || friendMenu.contains(event.target);
+      if (
+        !insideFriend &&
+        !event.target.closest('[data-workspace-action="friend-share"]')
+      ) {
+        closeFriendMenu();
+      }
+    }
   };
 
   const onDocumentKeydown = (event) => {
     if (event.key !== "Escape") return;
     closeHistoryMenu();
     closeWorkspaceMenu();
+    closeFriendMenu();
   };
 
   const onWindowScroll = (event) => {
@@ -2347,6 +2401,7 @@ export async function render(root) {
     }
     closeHistoryMenu();
     if (!workspaceMenu.hidden) closeWorkspaceMenu();
+    if (!friendMenu.hidden) closeFriendMenu();
   };
 
   const refreshHistory = async () => {
@@ -2445,6 +2500,7 @@ export async function render(root) {
         text: modeError.message || "請稍後再試，或前往系統狀態頁查看。",
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
       return;
     }
@@ -2461,6 +2517,7 @@ export async function render(root) {
         )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
     } else if (rag?.status === "degraded") {
       heroNotice.innerHTML = renderRagModeCard({
@@ -2469,6 +2526,7 @@ export async function render(root) {
         text: rag.detail || "RAG 會降級為只顯示檢索結果。",
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
     } else {
       heroNotice.innerHTML = renderRagModeCard({
@@ -2479,6 +2537,7 @@ export async function render(root) {
           "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
     }
   };
@@ -3352,10 +3411,35 @@ export async function render(root) {
     await createProject(form);
   });
 
+  modeNotice.addEventListener("click", (event) => {
+    const head = event.target.closest(".rag-mode-head");
+    if (!head || event.target.closest("button, a")) return;
+    modeCardExpanded = !modeCardExpanded;
+    head.closest(".rag-mode-card")?.classList.toggle(
+      "is-expanded",
+      modeCardExpanded,
+    );
+    head.setAttribute("aria-expanded", String(modeCardExpanded));
+  });
+
+  modeNotice.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const head = event.target.closest(".rag-mode-head");
+    if (!head) return;
+    event.preventDefault();
+    head.click();
+  });
+
   workspaceToolbar.addEventListener("click", async (event) => {
     const target = event.target.closest("[data-workspace-action]");
     if (!target) return;
     const action = target.dataset.workspaceAction;
+    if (action === "friend-share") {
+      event.preventDefault();
+      if (friendMenu.hidden) openFriendShareMenu();
+      else closeFriendMenu();
+      return;
+    }
     if (action === "menu") {
       if (workspaceMenu.hidden) openWorkspaceMenu();
       else closeWorkspaceMenu();
@@ -3403,6 +3487,22 @@ export async function render(root) {
       closeWorkspaceMenu();
       await assignProject(entry, button.dataset.projectId || "");
     }
+  });
+
+  friendMenu.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-friend-menu-action]");
+    if (!button) return;
+    const action = button.dataset.friendMenuAction;
+    if (action === "copy") {
+      const ok = await copyText(FRIEND_SHARE_URL);
+      toast(
+        ok ? "已複製網站連結。" : "無法複製網站連結。",
+        ok ? "ok" : "danger",
+      );
+    } else if (action === "open") {
+      window.open(FRIEND_SHARE_URL, "_blank", "noopener,noreferrer");
+    }
+    closeFriendMenu();
   });
 
   historyMenu.addEventListener("click", handleHistoryMenuClick);

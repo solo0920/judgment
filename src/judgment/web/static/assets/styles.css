@@ -4104,6 +4104,31 @@ button.chip:hover {
   flex-wrap: wrap;
   padding: 14px 16px;
   background: var(--accent-soft);
+  cursor: pointer;
+}
+
+.rag-mode-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.rag-mode-card:not(.is-expanded) .rag-mode-copy p {
+  display: none;
+}
+
+.rag-mode-card:not(.is-expanded) .rag-model-strip {
+  display: none;
+}
+
+.rag-mode-chevron {
+  flex: none;
+  margin-top: 3px;
+  color: var(--muted);
+  transition: transform 0.16s ease;
+}
+
+.rag-mode-card.is-expanded .rag-mode-chevron {
+  transform: rotate(180deg);
 }
 
 .rag-mode-card.is-ok .rag-mode-head {
@@ -4565,6 +4590,41 @@ button.chip:hover {
   right: 0;
   left: auto;
   min-width: 210px;
+}
+
+.rag-workspace-toolbar .rag-friend-menu {
+  min-width: 270px;
+}
+
+.rag-share-link-url {
+  margin: 2px 4px 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.rag-friend-menu-actions {
+  display: flex;
+  gap: 4px;
+  padding: 2px 4px 4px;
+}
+
+.rag-friend-menu-actions button {
+  flex: 1;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.rag-friend-menu-actions button:hover {
+  background: var(--surface-3);
 }
 
 .rag-page.is-shared-view .rag-workspace-toolbar {
