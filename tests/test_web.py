@@ -3044,6 +3044,28 @@ def test_sse_ticket_is_redacted_from_access_log() -> None:
     assert "secret-ticket" not in message
     assert "ticket=[redacted]" in message
 
+    oauth_record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "203.0.113.9:1234",
+            "GET",
+            "/api/auth/google/callback?state=secret-state&code=secret-code&x=1",
+            "1.1",
+            302,
+        ),
+        None,
+    )
+    assert _TicketRedactionFilter().filter(oauth_record) is True
+    oauth_message = oauth_record.getMessage()
+    assert "secret-state" not in oauth_message
+    assert "secret-code" not in oauth_message
+    assert "state=[redacted]" in oauth_message
+    assert "code=[redacted]" in oauth_message
+
 
 def test_sse_ticket_stream_is_single_use(web_client) -> None:
     settings = replace(

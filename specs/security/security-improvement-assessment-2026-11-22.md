@@ -533,7 +533,8 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **SSE**：正式站 ticket `expires_in=60`；第一次 stream 200，重播 401；access log 已遮蔽 `ticket=[redacted]`，日誌中找不到 ticket 值。
 - **Session 撤銷**：`tests/test_web.py::test_google_logout_clears_session` 驗證 logout 後 `revoked_session_jtis` 已寫入 DB，重播 token `authenticated=false`。
 - **備份機制**：`pg_dump --schema-only` → 建立 scratch DB → `pg_restore` 成功（33 張 public tables）→ drop；Qdrant API 以 `curl -K -` 驗證 200；`BACKUP_REQUIRE_ENCRYPTION=1` 缺 recipient 時 fail closed；`bash -n` 兩支腳本通過。
-- **Google 實機登入／管理頁瀏覽器關閉**：仍需使用者在 `judgment.ragdemo.win` 以 Google 帳號實際操作；本次無法代替輸入 Google 帳密／2FA。OAuth state／allowlist／callback 由既有 pytest 覆蓋。
+- **Google 實機登入／管理頁**：使用者已在 `judgment.ragdemo.win` 完成 Google 登入。access log 顯示 `/api/auth/google/start` 302、callback 302、`/api/auth/me` 200，以及管理頁 `PUT /api/admin/demo`、`POST /api/admin/demo/close` 200。驗證期間發現 OAuth `code` 曾寫入 access log；已補 `code`／`state` 遮蔽，並清理舊 log。
+- **Access log 遮蔽**：新 log 對 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` 顯示 `[redacted]`；舊 `.run/web.log.*-pre-redaction` 已清理並維持 600。
 - **pages.dev 預覽**：Lax 下預覽站與 API 不同 site，預覽登入會失效；已寫入 runbook，production 不受影響。
 
 #### 仍待處理
@@ -553,4 +554,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 修復 SEC-01（分享 token 遙測 redaction）與 SEC-02（demo schema suggest 敏感欄位／路徑封鎖），補回歸測試。 |
 | 2026-11-22 | 修復 SEC-03（分享 payload deep scrub）、SEC-04（索引與法規 metadata escape）、INFRA-01（下载档名 basename／archive path 限制），補回歸測試。 |
 | 2026-11-22 | 第二批：AUTH-01 demo DB session 隔離、AUTH-02 一次性 SSE ticket、AUTH-03 logout jti 撤銷、AUTH-04 SameSite／logout／admin-token Origin、INFRA-02 備份密碼不進 cmdline、INFRA-03 加密預設 fail-closed、INFRA-04 restore 不自動覆寫 `.env`。 |
-| 2026-11-22 | 驗證：demo_reader 負向測試、毒化主連線測試、admin token 關閉／重開、SSE 重播與日誌遮蔽、session 撤銷 DB 檢查、schema dump/restore、加密 fail-closed。Google 實機登入待人工。 |
+| 2026-11-22 | 驗證：demo_reader 負向測試、毒化主連線測試、admin token 關閉／重開、SSE 重播與日誌遮蔽、session 撤銷 DB 檢查、schema dump/restore、加密 fail-closed。Google 實機登入成功；另修補 OAuth code／state access-log 洩漏並清理舊 log。 |

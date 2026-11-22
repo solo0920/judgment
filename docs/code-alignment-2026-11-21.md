@@ -81,7 +81,7 @@ POST /api/rag/share
 - Session：HttpOnly signed cookie，TTL 7 天（`AUTH_SESSION_TTL_SECONDS=604800`），production `SameSite=Lax`；token 含 `jti`，logout 會寫入 server-side 撤銷清單，重播已登出 cookie 會失效；尚無全裝置撤銷與短 TTL。
 - `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET` 已於 2026-11-21 輪替；舊值失效。
 - 管理 token 存在瀏覽器 `sessionStorage`，舊 `localStorage` 值會遷移並刪除。
-- SSE ticket：60 秒、一次性 `jti`、綁 client IP（IPv6 /64）與 principal binding；access log 會將 `ticket` query 遮蔽為 `[redacted]`。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。
+- SSE ticket：60 秒、一次性 `jti`、綁 client IP（IPv6 /64）與 principal binding；access log 會將 `ticket`、OAuth `code`／`state` 等敏感 query 遮蔽為 `[redacted]`。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。
 - CSP 已 enforce；有 `X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`；`report-uri` 已接 `/api/csp-report`，`report-to` 尚未設定。CSP 仍允許 Google Fonts 與 production `connect-src` 的 localhost。
 - 未完成：SESSION-01 全裝置撤銷／短 TTL、AUDIT-01、HSTS 延長、`report-to`、PRIV-01、DB-ROLE-01 完整降權。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。

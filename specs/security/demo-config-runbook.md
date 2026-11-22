@@ -199,4 +199,4 @@ copy (select 1) to program 'id';        -- permission denied
 - `*.pages.dev` 預覽站與 `api-mbp.ragdemo.win` 屬不同 site；在 Lax 下預覽站無法維持登入狀態，這是預期取捨。需要預覽登入時，僅在該預覽環境設 `AUTH_COOKIE_SAMESITE=none`，不要改 production。
 - 完整備份 restore drill（DB＋Qdrant＋data）尚未執行；目前只有 subset restore。
 - `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。主應用仍使用 `judgment` superuser／createdb（APP-DB-01）。
-- SSE ticket 已改為 60 秒、一次性、client IP／principal binding；access log 會遮蔽 `ticket` query。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。AUDIT-01、PRIV-01（Google Fonts 自架）尚未完成。
+- SSE ticket 已改為 60 秒、一次性、client IP／principal binding；access log 會遮蔽 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` query。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。AUDIT-01、PRIV-01（Google Fonts 自架）尚未完成。

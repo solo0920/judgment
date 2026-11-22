@@ -934,33 +934,37 @@ def _resolve_principal(
     return anonymous_principal()
 
 
-_TICKET_QUERY_RE = re.compile(r"([?&]ticket=)[^&\s\"']+")
+_SENSITIVE_QUERY_RE = re.compile(
+    r"([?&](?:ticket|code|state|access_token|refresh_token|id_token)=)"
+    r"[^&\s\"']+",
+    re.IGNORECASE,
+)
 
 
-def _redact_ticket_query(value: str) -> str:
-    return _TICKET_QUERY_RE.sub(r"\1[redacted]", str(value or ""))
+def _redact_sensitive_query(value: str) -> str:
+    return _SENSITIVE_QUERY_RE.sub(r"\1[redacted]", str(value or ""))
 
 
 class _TicketRedactionFilter(logging.Filter):
-    """Keep SSE tickets out of uvicorn access logs."""
+    """Keep SSE tickets and OAuth credentials out of uvicorn access logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple):
             record.args = tuple(
-                _redact_ticket_query(item)
+                _redact_sensitive_query(item)
                 if isinstance(item, str)
                 else item
                 for item in record.args
             )
         elif isinstance(record.args, dict):
             record.args = {
-                key: _redact_ticket_query(item)
+                key: _redact_sensitive_query(item)
                 if isinstance(item, str)
                 else item
                 for key, item in record.args.items()
             }
         if isinstance(record.msg, str):
-            record.msg = _redact_ticket_query(record.msg)
+            record.msg = _redact_sensitive_query(record.msg)
         return True
 
 
