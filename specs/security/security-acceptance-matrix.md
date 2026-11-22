@@ -2,6 +2,7 @@
 
 - 日期：2026-11-18；2026-11-21 與程式碼重新對照
 - 對照基準：[`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md)；程式碼是唯一事實來源
+- 2026-11-22 提升評估：[`security-improvement-assessment-2026-11-22.md`](security-improvement-assessment-2026-11-22.md)（新發現與整改路線圖；不取代本矩阵的驗收狀態）
 - 原則：程式有防護不等於部署已驗收；每一列都要有可重現證據
 - 已確認的暴露與未完成：**x570 AI 服務區網存取**（UFW 已收斂，第二台設備待測）、**Logi Options+ `*:59869` 與 macOS firewall 關閉**、**主應用仍使用 PostgreSQL superuser `judgment`**。Cloudflare tunnel 已上線，`api-mbp.ragdemo.win` 的 Access application 已移除，改由 FastAPI 的 admin token／Google session 驗證；公開 origin 的受保護 API 無憑證時回 401。
 - 狀態定義：
