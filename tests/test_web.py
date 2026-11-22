@@ -3717,6 +3717,11 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
     assert "重新生成回答" in source_js
     assert "已複製公開連結" in source_js
     assert "分享給朋友" in source_js
+    model_font = re.compile(
+        r"\.rag-model-(?:strip|strip-title|strip-base|strip-current|table th|"
+        r"kind|name|note)\s*\{[^}]*?font-size:\s*12px",
+        re.S,
+    )
     for css in (source_css, bundle_css):
         assert ".rag-user-actions" in css
         assert ".rag-answer-actions" in css
@@ -3725,6 +3730,7 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert ".rag-workspace-toolbar" in css
         assert ".rag-workspace-menu" in css
         assert ".rag-mode-card:not(.is-expanded)" in css
+        assert len(model_font.findall(css)) >= 8
 
 
 def test_settings_sidebar_source_and_bundle_are_present() -> None:
