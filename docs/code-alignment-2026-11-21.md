@@ -73,7 +73,7 @@ POST /api/rag/share
 - 裸法規名稱或簡介問題（例如「證券交易法」、「刑法」、「介紹銀行法」）回傳結構化法規簡介：立法目的、主管機關、章節架構、核心條文；不呼叫 LLM，也不列判決。
 - 官方名稱有「中華民國」前綴時，支援常用簡稱（例如「刑法」→「中華民國刑法」）。
 - 判決 RAG 只處理與 `documents/金融法規.md` 的 99 項金融相關法規有關的問題。若問題與清單及金融詞彙無關，回傳 `answer_source=notice`、`retrieval.status=not_financial`，提示「本RAG提問功能主要以金融相關判決為主」，不生成判決回答。
-- RAG 回答完成後，問題泡泡與回答卡提供 hover／focus 操作工具列：問題可複製、分享、編輯、重新提問；回答可複製、分享、重新生成。觸控裝置固定顯示按鈕；編輯會帶入目前可見的提問輸入框（對話中為下方續問框）。分享會先將目前對話（最多 30 輪、1 MB）寫入 PostgreSQL `rag_share_snapshots`，連結以 `?share=<token>&q=<最後問題>` 帶入；開啟後優先讀取快照並渲染完整對話，不重新呼叫 LLM。分享頁加上 `.is-shared-view`，只顯示右側 `.rag-workspace`，以 `display:none` 隱藏 `.rag-library`；分享／複製完成後會釋放按鈕焦點。快照保留 7 天、回應 `Cache-Control: no-store`；若快照失效則以 `?q=` 重新檢索。即使片段是 `#/home`，只要有非空 `?share=` 或 `?q=`，首次載入仍會回到 RAG 頁。
+- RAG 回答完成後，問題泡泡與回答卡提供 hover／focus 操作工具列：問題可複製、分享、編輯、重新提問；回答可複製、分享、重新生成。觸控裝置固定顯示按鈕；編輯會帶入目前可見的提問輸入框（對話中為下方續問框）。分享會先將目前對話（最多 30 輪、1 MB）寫入 PostgreSQL `rag_share_snapshots`，直接複製專屬公開連結 `#/rag/share?contentId=<token>`；舊版 `?share=`／`?q=` 查詢參數仍可讀取，但新連結不再使用。開啟後優先讀取快照並渲染完整對話，不重新呼叫 LLM。分享頁加上 `.is-shared-view`，只顯示右側 `.rag-workspace`，以 `display:none` 隱藏 `.rag-library`；分享／複製完成後會釋放按鈕焦點並顯示「已複製公開連結」toast。快照保留 7 天、回應 `Cache-Control: no-store`。
 
 ## 5. Auth／security 現況
 

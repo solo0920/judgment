@@ -108,8 +108,13 @@ async function renderRoute() {
   const token = ++routeToken;
   setActiveNav(route);
 
-  if (window.location.hash !== `#/${route}`) {
-    window.history.replaceState(null, "", `#/${route}`);
+  const canonicalHash = `#/${route}`;
+  const currentHash = window.location.hash;
+  if (
+    currentHash !== canonicalHash &&
+    !currentHash.startsWith(`${canonicalHash}/`)
+  ) {
+    window.history.replaceState(null, "", canonicalHash);
   }
 
   if (typeof cleanup === "function") {

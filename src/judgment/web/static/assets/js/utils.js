@@ -365,15 +365,32 @@ export function setBusy(button, busy, label = "處理中…") {
   }
 }
 
-export function toast(message, tone = "info", timeout = 4200) {
+export function toast(
+  message,
+  tone = "info",
+  timeout = 4200,
+  options = {},
+) {
   const region = document.getElementById("toast-region");
   if (!region) return null;
+  const {
+    detail = "",
+    actionLabel = "",
+    onAction = null,
+  } = options && typeof options === "object" ? options : {};
   const marks = { info: "i", ok: "✓", warn: "!", danger: "×" };
   const element = document.createElement("div");
   element.className = `toast toast-${tone}`;
   element.setAttribute("role", tone === "danger" ? "alert" : "status");
   element.innerHTML = `<span class="toast-mark" aria-hidden="true">${marks[tone] || "i"}</span>
-    <div class="toast-body">${escapeHtml(message)}</div>
+    <div class="toast-body">${escapeHtml(message)}${
+      detail ? `<span class="toast-detail">${escapeHtml(detail)}</span>` : ""
+    }</div>
+    ${
+      actionLabel
+        ? `<button class="toast-action" type="button">${escapeHtml(actionLabel)}</button>`
+        : ""
+    }
     <button class="toast-close" type="button" aria-label="關閉通知">×</button>`;
   const dismiss = () => {
     if (!element.isConnected) return;
@@ -381,6 +398,14 @@ export function toast(message, tone = "info", timeout = 4200) {
     window.setTimeout(() => element.remove(), 190);
   };
   element.querySelector(".toast-close").addEventListener("click", dismiss);
+  const actionButton = element.querySelector(".toast-action");
+  if (actionButton && typeof onAction === "function") {
+    actionButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      onAction();
+      dismiss();
+    });
+  }
   region.appendChild(element);
   if (timeout > 0) window.setTimeout(dismiss, timeout);
   return element;

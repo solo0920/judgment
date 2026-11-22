@@ -33,6 +33,8 @@ import {
 
 const SHARE_QUESTION_PARAM = "q";
 const SHARE_TOKEN_PARAM = "share";
+const SHARE_CONTENT_PARAM = "contentId";
+const SHARE_HASH_PATH = "rag/share";
 
 const EXAMPLES = [
   "金融消費者保護法如何處理金融消費爭議？",
@@ -62,7 +64,7 @@ function answerActionsMarkup(question) {
   const safeQuestion = escapeHtml(question);
   return `<div class="rag-answer-actions" role="group" aria-label="回答操作">
     <button class="rag-answer-action" type="button" data-rag-answer-action="copy" data-question="${safeQuestion}" title="複製回答" aria-label="複製回答">${icon("copy", 15)}<span class="sr-only">複製回答</span></button>
-    <button class="rag-answer-action" type="button" data-rag-answer-action="share" data-question="${safeQuestion}" title="分享回答" aria-label="分享回答">${icon("share", 15)}<span class="sr-only">分享回答</span></button>
+    <button class="rag-answer-action" type="button" data-rag-answer-action="share" data-question="${safeQuestion}" title="建立公開連結" aria-label="建立公開連結">${icon("share", 15)}<span class="sr-only">建立公開連結</span></button>
     <button class="rag-answer-action" type="button" data-rag-answer-action="reask" data-question="${safeQuestion}" title="重新生成回答" aria-label="重新生成回答">${icon("refresh", 15)}<span class="sr-only">重新生成回答</span></button>
   </div>`;
 }
@@ -75,7 +77,7 @@ function turnMarkup(question, answerHtml, { complete = true } = {}) {
       <div class="rag-user-bubble">${safeQuestion}</div>
       <div class="rag-user-actions" role="group" aria-label="問題操作">
         <button class="rag-user-action" type="button" data-rag-question-action="copy" data-question="${safeQuestion}" title="複製問題" aria-label="複製問題">${icon("copy", 15)}<span class="sr-only">複製問題</span></button>
-        <button class="rag-user-action" type="button" data-rag-question-action="share" data-question="${safeQuestion}" title="分享問題" aria-label="分享問題">${icon("share", 15)}<span class="sr-only">分享問題</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="share" data-question="${safeQuestion}" title="建立公開連結" aria-label="建立公開連結">${icon("share", 15)}<span class="sr-only">建立公開連結</span></button>
         <button class="rag-user-action" type="button" data-rag-question-action="edit" data-question="${safeQuestion}" title="編輯問題" aria-label="編輯問題">${icon("edit", 15)}<span class="sr-only">編輯問題</span></button>
         <button class="rag-user-action" type="button" data-rag-question-action="reask" data-question="${safeQuestion}" title="重新提問" aria-label="重新提問">${icon("refresh", 15)}<span class="sr-only">重新提問</span></button>
       </div>
@@ -86,28 +88,48 @@ function turnMarkup(question, answerHtml, { complete = true } = {}) {
   </div>`;
 }
 
-function shareUrlFor(token, question) {
+function shareUrlFor(token) {
   const url = new URL(window.location.href);
   url.search = "";
-  url.hash = "#/rag";
-  if (token) url.searchParams.set(SHARE_TOKEN_PARAM, token);
-  if (question) url.searchParams.set(SHARE_QUESTION_PARAM, question);
+  url.hash = `#/${SHARE_HASH_PATH}?${SHARE_CONTENT_PARAM}=${encodeURIComponent(
+    token,
+  )}`;
   return url.toString();
+}
+
+function shareTokenFromHash() {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [pathPart, queryPart = ""] = raw.split("?");
+  const path = pathPart.replace(/\/+$/, "");
+  if (path === SHARE_HASH_PATH) {
+    return String(
+      new URLSearchParams(queryPart).get(SHARE_CONTENT_PARAM) || "",
+    ).trim();
+  }
+  const match = path.match(/^rag\/share\/([^/]+)$/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (error) {
+    return match[1];
+  }
 }
 
 function replaceShareUrl({ keepToken = false, token = "" } = {}) {
   try {
     const url = new URL(window.location.href);
     url.searchParams.delete(SHARE_QUESTION_PARAM);
-    if (keepToken && token) {
-      url.searchParams.set(SHARE_TOKEN_PARAM, token);
-    } else {
-      url.searchParams.delete(SHARE_TOKEN_PARAM);
-    }
+    url.searchParams.delete(SHARE_TOKEN_PARAM);
+    url.hash =
+      keepToken && token
+        ? `#/${SHARE_HASH_PATH}?${SHARE_CONTENT_PARAM}=${encodeURIComponent(
+            token,
+          )}`
+        : "#/rag";
     window.history.replaceState(
       null,
       "",
-      `${url.pathname}${url.search}${url.hash || "#/rag"}`,
+      `${url.pathname}${url.search}${url.hash}`,
     );
   } catch (error) {
     /* URL cleanup is best effort. */
@@ -117,9 +139,10 @@ function replaceShareUrl({ keepToken = false, token = "" } = {}) {
 function takeShareRequest() {
   try {
     const url = new URL(window.location.href);
-    const token = String(
+    const legacyToken = String(
       url.searchParams.get(SHARE_TOKEN_PARAM) || "",
     ).trim();
+    const token = shareTokenFromHash() || legacyToken;
     const question = String(
       url.searchParams.get(SHARE_QUESTION_PARAM) || "",
     ).trim();
@@ -175,18 +198,7 @@ function sharePayloadFor(payload) {
   };
 }
 
-function shareTurnsText(turns) {
-  const chunks = (Array.isArray(turns) ? turns : [])
-    .filter((turn) => String(turn?.question || "").trim())
-    .map((turn) => {
-      const question = String(turn.question || "").trim();
-      const answer = String(turn.payload?.answer || "").trim();
-      return [question, answer || "（沒有回答內容）"].join("\n\n");
-    });
-  return chunks.join("\n\n---\n\n");
-}
-
-async function shareRagTurns(turns, fallbackQuestion, title) {
+async function shareRagTurns(turns, title) {
   const sourceTurns = (Array.isArray(turns) ? turns : [])
     .filter((turn) => String(turn?.question || "").trim())
     .map((turn) => ({
@@ -194,43 +206,36 @@ async function shareRagTurns(turns, fallbackQuestion, title) {
       asked_at: String(turn.asked_at || ""),
       payload: sharePayloadFor(turn.payload),
     }));
-  const question = String(
-    fallbackQuestion || sourceTurns[0]?.question || "",
-  ).trim();
-  if (!sourceTurns.length && question) {
-    sourceTurns.push({
-      question,
-      asked_at: "",
-      payload: sharePayloadFor({}),
-    });
+  if (!sourceTurns.length) {
+    toast("沒有可建立公開連結的對話。", "warn");
+    return;
   }
-  const text = shareTurnsText(sourceTurns);
-  let url = shareUrlFor("", question);
+  let result = null;
   try {
-    const result = await api.ragShareCreate({
+    result = await api.ragShareCreate({
       title: String(title || sourceTurns[0]?.question || "").slice(0, 200),
       turns: sourceTurns,
     });
-    if (result?.id) {
-      url = shareUrlFor(result.id, question);
-    }
   } catch (error) {
-    /* A question-only replay link still works if snapshot storage fails. */
+    result = null;
   }
-  const shareText = [text, url].filter(Boolean).join("\n\n");
-  if (typeof navigator.share === "function") {
-    try {
-      await navigator.share({ title, text: shareText });
-      return;
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-    }
+  if (!result?.id) {
+    toast("無法建立公開連結，請稍後再試。", "danger", 6000);
+    return;
   }
-  const ok = await copyText(shareText);
-  toast(
-    ok ? "已複製對話與分享連結。" : "無法分享。",
-    ok ? "ok" : "danger",
-  );
+  const url = shareUrlFor(result.id);
+  const ok = await copyText(url);
+  if (!ok) {
+    toast("無法複製公開連結，請確認瀏覽器剪貼簿權限。", "danger", 6000);
+    return;
+  }
+  toast("已複製公開連結", "ok", 7000, {
+    detail: "任何擁有此連結的人都可以查看這段對話。",
+    actionLabel: "開啟連結",
+    onAction: () => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  });
 }
 
 function lookupWithTimeout(promise, timeoutMs) {
@@ -1745,7 +1750,7 @@ export async function render(root) {
     } catch (error) {
       replaceShareUrl();
       if (!disposed) {
-        toast("分享連結已失效，將重新檢索原問題。", "warn", 5200);
+        toast("分享連結已失效或無法載入。", "warn", 5200);
       }
       return false;
     }
@@ -2025,7 +2030,7 @@ export async function render(root) {
     historyMenu.innerHTML = `
       <button type="button" role="menuitem" data-menu-action="rename">${icon("edit", 13)}<span>重新命名</span></button>
       <button type="button" role="menuitem" data-menu-action="toggle-pin">${icon("pin", 13)}<span>${entry.pinned ? "取消釘選" : "釘選"}</span></button>
-      <button type="button" role="menuitem" data-menu-action="share">${icon("link", 13)}<span>分享</span></button>
+      <button type="button" role="menuitem" data-menu-action="share">${icon("link", 13)}<span>建立公開連結</span></button>
       <button type="button" role="menuitem" data-menu-action="move">${icon("folder", 13)}<span>移至專案</span></button>
       <div class="rag-history-menu-divider"></div>
       <button class="is-danger" type="button" role="menuitem" data-menu-action="delete">${icon("trash", 13)}<span>刪除</span></button>`;
@@ -2116,11 +2121,7 @@ export async function render(root) {
         payload: {},
       });
     }
-    await shareRagTurns(
-      turns,
-      entry.title || turns[turns.length - 1]?.question || "",
-      entry.title || "Judgment RAG 對話",
-    );
+    await shareRagTurns(turns, entry.title || "Judgment RAG 對話");
   };
 
   const deleteHistory = async (entry) => {
@@ -3128,10 +3129,10 @@ export async function render(root) {
         return;
       }
       if (action === "share") {
+        releaseActionFocus(true);
         try {
           await shareRagTurns(
             turnsForShare(turnElement, question),
-            question,
             questionAction ? "Judgment RAG 提問" : "Judgment RAG 回答",
           );
         } finally {
