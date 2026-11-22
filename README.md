@@ -550,6 +550,8 @@ uv run judgment-normalize-courts --all
 
 Header 品牌標誌以「天平＋電路節點」表達法律／判決與 RAG AI：天平代表法律與裁判，三個節點與連線代表檢索與 AI；字標使用襯線體 `JUDGMENT`，副標使用等寬體 `LEGAL RAG INTELLIGENCE`。品牌連結的無障礙名稱為「Judgment 金融法律判決智慧分析平台 首頁」，`favicon.svg` 使用相同圖形與 `#76b900` 品牌綠。
 
+RAG 工作區右上工具列的 DOM、視覺、分享給朋友、三點選單、公開連結快照、分享頁與隱私／無障礙契約，見 [`specs/004-web-console/rag-workspace-toolbar.md`](specs/004-web-console/rag-workspace-toolbar.md)。
+
 ### 頁面路由
 
 | 路由 | 頁面 | 功能 |
