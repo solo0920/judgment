@@ -97,7 +97,7 @@ POST /api/rag/share
 ## 7. 備份與資料庫角色
 
 - PostgreSQL dump 使用 age 加密（`postgres/judgment.dump.age`）；`.env` 不進備份；`data/` 與 Qdrant snapshot 仍為明文。
-- 已完成完整備份與 2026-11-22 完整隔離 restore drill：age checksum、PostgreSQL、Qdrant、data SHA-256 全部通過；最新備份 `/Volumes/T500_2TB/judgment-backup-20261122-1500`（157 GB）已建立並驗證。詳見 `specs/security/restore-drill-2026-11-22.md`。
+- 已完成完整備份與 2026-11-22 完整 restore drill：隔離 drill（age checksum、PostgreSQL、Qdrant、data SHA-256）與正式 `down.sh`→`restore.sh`→`up.sh` 全流程（28m23s）都通過；最新備份 `/Volumes/T500_2TB/judgment-backup-20261122-1500`（157 GB）已建立並驗證。詳見 `specs/security/restore-drill-2026-11-22.md`。
 - 主應用已改用 `judgment_app`：`rolsuper=f`、`rolcreatedb=f`、`rolcreaterole=f`，擁有 public tables／sequences；`judgment` superuser 僅保留給 break-glass／備份／初次建立。`demo_reader` 仍為受限角色。Provision／回滾見 `specs/security/app-db-role-runbook.md`。
 - age 私鑰：`~/.config/judgment/age.key`，權限 `600`，不可進 repo／備份。
 

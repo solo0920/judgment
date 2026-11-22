@@ -31,7 +31,7 @@
 | XSS-01 | 問題／案由／JID／LLM 答案 XSS | payload 不執行，URL 只允許 http(s) | 無頭瀏覽器注入測試、`safeUrl()` 測試 | `implemented`（`safeUrl()` 與 CSP enforce 已完成；Safari／完整注入測試待補） | Frontend |
 | HDR-01 | Security headers／CSP | 所有 HTML／API 回應有指定 headers；CSP 不破壞功能 | header curl、CSP enforce、瀏覽器 console 無違規 | `implemented`（CSP 已 enforce；XFO／Referrer／Permissions 已加；`report-to` 待補） | 工程 |
 | BAK-01 | 備份明文 | `.env` 不進備份；敏感資料加密 | 備份內容清單、age 加密檔、無明文 secrets | `implemented`（PG dump age 加密；`.env` 排除；`data/` 與 Qdrant snapshot 仍明文） | Infra |
-| BAK-02 | Restore drill | 可從加密備份完整還原並驗證 DB／Qdrant | 實際 restore 報告、checksum、資料筆數差異 0 | `verified`（2026-11-22 完整隔離 drill：age checksum OK、PG 21m36s、Qdrant 3m51s、data 8m15s；核心 corpus counts 0 差異、Qdrant 4,714,967 points、1,404 data files SHA-256 相同；詳見 `restore-drill-2026-11-22.md`。來源備份早於 2 張新 table／5 個 trigram indexes，已重新建立最新備份） | Infra |
+| BAK-02 | Restore drill | 可從加密備份完整還原並驗證 DB／Qdrant | 實際 restore 報告、checksum、資料筆數差異 0 | `verified`（2026-11-22 隔離 drill＋正式 `down.sh`→`restore.sh`→`up.sh`：PG 21m36s、Qdrant 3m51s、data 8m15s；正式全流程 28m23s；核心 counts 0 差異、Qdrant 4,714,967 points、1,404 data files SHA-256 相同；修正非 public schema 與 Bash brace bug；最新備份已建立並驗證。詳見 `restore-drill-2026-11-22.md`） | Infra |
 | ABUSE-01 | 昂貴 RAG 端點 | 無限制消耗被限制 | 429／Retry-After、併發測試 | `partial`（demo RAG／query／poll 限流與每日預算已實作；端到端 429／串流併發／Cloudflare edge 規則待驗） | 工程 |
 | AUTH-01 | Actor 身分可信 | actor 由驗證層產生，不信任使用者 header | 遠端／本機 actor 測試、audit log | `verified`（Google session 實機登入；admin token actor、admin write actor、Google login actor 寫入 `security_audit_events`；pytest 覆蓋） | 工程 |
 | AUTH-02 | 題庫狀態機 | 不可直接建立／更新為 accepted | 狀態轉換 API 測試、角色矩陣 | `not_started` | 工程／法律審閱 |

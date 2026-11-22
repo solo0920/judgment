@@ -197,6 +197,6 @@ copy (select 1) to program 'id';        -- permission denied
 - 管理權杖已改存 `sessionStorage`，且已於 2026-11-21 輪替；靜態 break-glass token 仍只能靠輪替撤銷。Google session 已支援單一 `jti` logout 與全裝置撤銷（SESSION-01）。
 - `AUTH_COOKIE_SAMESITE` 已改為 `lax`；logout 拒絕 cross-site，admin-token 寫入也檢查 Origin／Sec-Fetch-Site。
 - `*.pages.dev` 預覽站與 `api-mbp.ragdemo.win` 屬不同 site；在 Lax 下預覽站無法維持登入狀態，這是預期取捨。需要預覽登入時，僅在該預覽環境設 `AUTH_COOKIE_SAMESITE=none`，不要改 production。
-- 完整備份 restore drill（DB＋Qdrant＋data）尚未執行；目前只有 subset restore。
+- 完整備份 restore drill（DB＋Qdrant＋data）已於 2026-11-22 通過；正式 `down.sh`→`restore.sh`→`up.sh` 全流程 28m23s，報告見 `restore-drill-2026-11-22.md`。
 - `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。主應用已改用非 superuser `judgment_app`（DB-ROLE-01）。
 - SSE ticket 已改為 60 秒、一次性、client IP／principal binding；access log 會遮蔽 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` query。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。AUDIT-01 已完成；PRIV-01（Google Fonts 自架）尚未完成。

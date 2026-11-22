@@ -123,6 +123,8 @@ tmux new-session -d -s judgment-web -c "$PWD" \
 1. 在 destructive restore 前確認 `judgment_app` 存在；不存在就失敗，避免把 schema 清掉後才發現不能轉移。
 2. 還原後把 public tables／sequences／views ownership 轉移給 `judgment_app`，並重新 grant schema `USAGE, CREATE`。
 3. 提示操作員重新套用 `demo_reader` grants（依 `demo-config-runbook.md`）。
+4. Restore 前除了 `public`，也會 drop `legal_term_benchmark` 與 `legal_term_evidence`；新增其他非 `public` schema 時，必須同步加入 drop 清單，否則 `pg_restore` 會因 `CREATE SCHEMA ... already exists` 中止。
+5. `restore.sh`／`backup.sh` 的 shell 變數若緊接中文標點，必須使用 `${VAR}`；Bash 3.2 會把全形字元的第一個 byte 當成變數名稱的一部分。
 
 還原後請驗證：
 

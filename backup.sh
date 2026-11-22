@@ -197,7 +197,7 @@ elif [[ -f "$SOURCE_DIR/../pyproject.toml" && -d "$SOURCE_DIR/judgments" ]]; the
   PROJECT_ROOT="$(abs_path "$SOURCE_DIR/..")"
   echo "偵測到 data 目錄，專案根目錄為：$PROJECT_ROOT"
 else
-  die "來源目錄不像 Judgment 專案：$SOURCE_DIR（需含 pyproject.toml，或為含 judgments/ 的 data 目錄）"
+  die "來源目錄不像 Judgment 專案：${SOURCE_DIR}（需含 pyproject.toml，或為含 judgments/ 的 data 目錄）"
 fi
 
 cd "$PROJECT_ROOT"
@@ -289,7 +289,7 @@ for item in (data.get("result") or {}).get("aliases") or []:
     printf 'Alias %s -> %s\n' "$JUDGMENT_VECTOR_ALIAS" "$JUDGMENT_VECTOR_COLLECTION"
   fi
   qdrant_curl -fsS "$QDRANT_URL/collections/$JUDGMENT_VECTOR_COLLECTION" >/dev/null 2>&1 \
-    || die "找不到 Qdrant collection：$JUDGMENT_VECTOR_COLLECTION（尚未建立索引時可用 --skip-qdrant）"
+    || die "找不到 Qdrant collection：${JUDGMENT_VECTOR_COLLECTION}（尚未建立索引時可用 --skip-qdrant）"
 fi
 
 if [[ "$ALLOW_RUNNING" != "1" ]]; then
@@ -303,7 +303,7 @@ if [[ -e "$TARGET_DIR" && ! -d "$TARGET_DIR" ]]; then
   die "目標不是目錄：$TARGET_DIR"
 fi
 if [[ -d "$TARGET_DIR" && -n "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
-  die "備份目錄不是空的：$TARGET_DIR（請指定新的空目錄）"
+  die "備份目錄不是空的：${TARGET_DIR}（請指定新的空目錄）"
 fi
 mkdir -p "$TARGET_DIR"
 [[ -w "$TARGET_DIR" ]] || die "備份目錄不可寫入：$TARGET_DIR"
