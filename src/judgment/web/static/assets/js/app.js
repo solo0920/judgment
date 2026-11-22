@@ -43,22 +43,27 @@ let cleanup = null;
 let routeToken = 0;
 
 function parseRoute() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const question = params.get("q");
-    const shareToken = params.get("share");
-    if (
-      (question && question.trim()) ||
-      (shareToken && shareToken.trim())
-    ) {
-      return "rag";
-    }
-  } catch (error) {
-    /* fall through to the hash route */
-  }
   const raw = window.location.hash.replace(/^#\/?/, "").trim();
   const route = raw.split("/")[0] || DEFAULT_ROUTE;
   return Object.prototype.hasOwnProperty.call(ROUTES, route) ? route : DEFAULT_ROUTE;
+}
+
+function applySharedEntryRoute() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const hasShareEntry =
+      Boolean(params.get("q")?.trim()) ||
+      Boolean(params.get("share")?.trim());
+    if (!hasShareEntry) return;
+    if (parseRoute() === "rag") return;
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}#/rag`,
+    );
+  } catch (error) {
+    /* hash routing remains the fallback */
+  }
 }
 
 function setActiveNav(route) {
@@ -287,6 +292,7 @@ function demoContextChanged(before, after) {
 }
 
 async function boot() {
+  applySharedEntryRoute();
   const bootRoute = parseRoute();
   if (bootRoute === "processing") {
     // Start the cached bytes before auth/demo gating resolves.  The page's

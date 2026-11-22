@@ -4472,6 +4472,14 @@ button.chip:hover {
   align-items: start;
 }
 
+.rag-page.is-shared-view .rag-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rag-page.is-shared-view .rag-library {
+  display: none;
+}
+
 .rag-workspace {
   min-width: 0;
 }

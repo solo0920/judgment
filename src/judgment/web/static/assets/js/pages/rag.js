@@ -1611,6 +1611,7 @@ export async function render(root) {
   const input = root.querySelector("#rag-question");
   const submit = root.querySelector("#rag-submit");
   const page = root.querySelector(".rag-page");
+  page.classList.toggle("is-shared-view", Boolean(sharedRequest));
   const turnsBox = root.querySelector("#rag-turns");
   const followupForm = root.querySelector("#rag-followup-form");
   const followupInput = root.querySelector("#rag-followup-question");
@@ -3098,28 +3099,44 @@ export async function render(root) {
         ? questionAction.dataset.ragQuestionAction
         : answerAction.dataset.ragAnswerAction;
       const target = questionAction || answerAction;
+      const pointerActivated =
+        Number(event.detail || 0) > 0 ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      const releaseActionFocus = (force = false) => {
+        if ((force || pointerActivated) && document.activeElement === target) {
+          target.blur();
+        }
+      };
       const question = String(target?.dataset.question || "").trim();
       const turnElement = target?.closest(".rag-turn");
       if (!question || !turnElement) return;
       if (action === "copy") {
-        const text = questionAction ? question : answerTextFor(turnElement);
-        const ok = await copyText(text);
-        toast(
-          ok
-            ? questionAction
-              ? "已複製問題。"
-              : "已複製回答。"
-            : "無法複製。",
-          ok ? "ok" : "danger",
-        );
+        try {
+          const text = questionAction ? question : answerTextFor(turnElement);
+          const ok = await copyText(text);
+          toast(
+            ok
+              ? questionAction
+                ? "已複製問題。"
+                : "已複製回答。"
+              : "無法複製。",
+            ok ? "ok" : "danger",
+          );
+        } finally {
+          releaseActionFocus();
+        }
         return;
       }
       if (action === "share") {
-        await shareRagTurns(
-          turnsForShare(turnElement, question),
-          question,
-          questionAction ? "Judgment RAG 提問" : "Judgment RAG 回答",
-        );
+        try {
+          await shareRagTurns(
+            turnsForShare(turnElement, question),
+            question,
+            questionAction ? "Judgment RAG 提問" : "Judgment RAG 回答",
+          );
+        } finally {
+          releaseActionFocus(true);
+        }
         return;
       }
       if (action === "edit") {
