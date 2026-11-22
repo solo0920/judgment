@@ -487,7 +487,8 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 
 - `/api/data/suggest`、`/api/judgment`（postgres）、`/api/law`、`/api/schema/suggest` 對 demo visitor 改用 `app.state.demo_query_session_factory`。
 - 未設定時回 `403 demo_data_unavailable`，不 fallback 到主 superuser 連線。
-- `demo_reader` 對公開法規／判決內容表（`law_documents`、`judgment_documents`、`law_article_versions`、`law_article_change_events`）改為 table-level SELECT；版本／下載／匯入表仍維持 column-level，`law_dataset_versions` 查詢只 select 安全欄位。
+- `demo_reader` 對 `law_documents`、`law_article_versions`、`law_article_change_events` 為 table-level SELECT；`judgment_documents` 維持 column-level，公開全文／PDF／metadata 可讀，但 `source_archive`、`import_run_id`、snapshot 關聯欄位不授權。`law_dataset_versions`、`download_runs`、`judgment_import_runs` 維持 column-level，查詢會排除內部欄位。
+- 負向驗證已重跑：`parquet_path`、`zip_path`、`source_archive`、`import_run_id`、`error_message`、未授權表、`pg_read_file`、`COPY ... PROGRAM`、`CREATE TABLE` 全部失敗；`demo_reader` 不屬於任何 `pg_*_server_*` 角色。
 - 回歸測試：`tests/test_demo_mode.py::test_demo_data_endpoints_use_restricted_session_factory`；正式站已驗證 `/api/data/suggest`、`/api/law`、`/api/judgment` 正常。
 
 #### AUTH-02 — 已修復
@@ -523,9 +524,21 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 
 - `restore.sh` 不再自動覆寫 `.env`；若備份含 `config/.env`，只提示操作員人工比對並從密鑰管理器設定。
 
+#### 驗證結果（2026-11-22）
+
+- **Demo 資料隔離**：正式站 `/api/data/suggest`、`/api/law`、`/api/judgment`、`/api/query` 正常；`/api/judgment` 的 `source_archive`／`import_run_id` 對 demo 為 `None`；`/api/query` 的 `judgment_documents` columns 不含 `source_archive`。
+- **demo_reader 負向測試**：`parquet_path`、`zip_path`、`source_archive`、`import_run_id`、`error_message`、`question_bank_items`、`pg_read_file`、`COPY ... PROGRAM`、`CREATE TABLE` 全部以 InsufficientPrivilege／ReadOnly 失敗；`demo_reader` 無任何 role membership。
+- **毒化主連線測試**：`tests/test_demo_mode.py::test_demo_data_routes_do_not_touch_primary_session` 將主 session 換成一呼叫就丟例外的物件，四條 data 路由與 `/api/query` 仍成功。
+- **Admin token 關閉路徑**：無 Origin 的 curl `POST /api/admin/demo/close` → 200；關閉後 `/api/demo/status` false、`/api/rag/query` 403、`/api/status` 403；再以 admin token 無 Origin 開啟 → 200，6 個功能與 2 小時期限恢復。
+- **SSE**：正式站 ticket `expires_in=60`；第一次 stream 200，重播 401；access log 已遮蔽 `ticket=[redacted]`，日誌中找不到 ticket 值。
+- **Session 撤銷**：`tests/test_web.py::test_google_logout_clears_session` 驗證 logout 後 `revoked_session_jtis` 已寫入 DB，重播 token `authenticated=false`。
+- **備份機制**：`pg_dump --schema-only` → 建立 scratch DB → `pg_restore` 成功（33 張 public tables）→ drop；Qdrant API 以 `curl -K -` 驗證 200；`BACKUP_REQUIRE_ENCRYPTION=1` 缺 recipient 時 fail closed；`bash -n` 兩支腳本通過。
+- **Google 實機登入／管理頁瀏覽器關閉**：仍需使用者在 `judgment.ragdemo.win` 以 Google 帳號實際操作；本次無法代替輸入 Google 帳密／2FA。OAuth state／allowlist／callback 由既有 pytest 覆蓋。
+- **pages.dev 預覽**：Lax 下預覽站與 API 不同 site，預覽登入會失效；已寫入 runbook，production 不受影響。
+
 #### 仍待處理
 
-- **AUTH-03 完整版**：全裝置撤銷、短 TTL、session secret production fail-fast。
+- **AUTH-03 完整版**：全裝置撤銷、短 TTL、session secret production fail-fast。SSE `jti` 仍為 in-memory，重啟後最多重新開放 60 秒的 replay 窗口；每次簽發會清除過期項目。
 - **INFRA-05**：llama-server host probe 的 DNS rebinding／IP pinning；需要修改 transport，另開批次。
 - **INFRA-09**：主應用 DB role 降權；因 `judgment_raw_parquet.py` 使用 server-side `COPY ... TO file`，需同步改寫或分離 migration/export role，屬維護窗口工作。
 - AUTH-05～08、OPS-01～05 等見第 4 節路線圖。
@@ -540,3 +553,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 修復 SEC-01（分享 token 遙測 redaction）與 SEC-02（demo schema suggest 敏感欄位／路徑封鎖），補回歸測試。 |
 | 2026-11-22 | 修復 SEC-03（分享 payload deep scrub）、SEC-04（索引與法規 metadata escape）、INFRA-01（下载档名 basename／archive path 限制），補回歸測試。 |
 | 2026-11-22 | 第二批：AUTH-01 demo DB session 隔離、AUTH-02 一次性 SSE ticket、AUTH-03 logout jti 撤銷、AUTH-04 SameSite／logout／admin-token Origin、INFRA-02 備份密碼不進 cmdline、INFRA-03 加密預設 fail-closed、INFRA-04 restore 不自動覆寫 `.env`。 |
+| 2026-11-22 | 驗證：demo_reader 負向測試、毒化主連線測試、admin token 關閉／重開、SSE 重播與日誌遮蔽、session 撤銷 DB 檢查、schema dump/restore、加密 fail-closed。Google 實機登入待人工。 |

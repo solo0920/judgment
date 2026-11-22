@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import threading
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,7 +43,11 @@ from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
 from judgment.web import processing as processing_module
 from judgment.web.app import create_app, route_policy_guard
-from judgment.web.auth import make_session_token
+from judgment.web.auth import (
+    make_session_token,
+    session_secret,
+    verify_signed_token,
+)
 from judgment.web.principal import anonymous_principal
 from judgment.web.route_policy import (
     VALID_CATEGORIES,
@@ -2617,6 +2622,19 @@ def test_judgment_detail_returns_full_text_and_citations(web_client) -> None:
     assert payload["source_archive"] == "202601.rar"
 
 
+def test_judgment_detail_can_hide_internal_fields(web_client) -> None:
+    from judgment.web.query import get_judgment_detail
+
+    detail = get_judgment_detail(
+        session_factory=web_client.app.state.session_factory,
+        jid="TPDV,115,金訴,1,20260110,1",
+        include_internal_fields=False,
+    )
+    assert detail["source_archive"] is None
+    assert detail["import_run_id"] is None
+    assert "民法第184條" in detail["full_text"]
+
+
 def test_judgment_detail_returns_404_for_unknown_jid(web_client) -> None:
     response = web_client.get("/api/judgment", params={"jid": "missing"})
     assert response.status_code == 404
@@ -2967,7 +2985,7 @@ def test_local_write_requires_trusted_origin_or_no_browser_headers(
 def test_sse_ticket_is_one_time_and_bound_to_client_ip() -> None:
     from judgment.web.app import _make_sse_ticket, _valid_sse_ticket
 
-    store = {}
+    store = {"expired": (int(time.time()) - 1, "x", "y")}
     lock = threading.Lock()
     ticket = _make_sse_ticket(
         "sse-secret",
@@ -2976,6 +2994,7 @@ def test_sse_ticket_is_one_time_and_bound_to_client_ip() -> None:
         client_ip="203.0.113.9",
         binding="admin:test@example.com",
     )
+    assert "expired" not in store
     assert ticket
     assert not _valid_sse_ticket(
         ticket,
@@ -2998,6 +3017,32 @@ def test_sse_ticket_is_one_time_and_bound_to_client_ip() -> None:
         lock=lock,
         client_ip="203.0.113.9",
     )
+
+
+def test_sse_ticket_is_redacted_from_access_log() -> None:
+    import logging
+
+    from judgment.web.app import _TicketRedactionFilter
+
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "203.0.113.9:1234",
+            "GET",
+            "/api/events/stream?topic=status&ticket=secret-ticket&x=1",
+            "1.1",
+            200,
+        ),
+        None,
+    )
+    assert _TicketRedactionFilter().filter(record) is True
+    message = record.getMessage()
+    assert "secret-ticket" not in message
+    assert "ticket=[redacted]" in message
 
 
 def test_sse_ticket_stream_is_single_use(web_client) -> None:
@@ -3700,6 +3745,10 @@ def test_google_logout_clears_session(web_client) -> None:
         },
         settings,
     )
+    token_data = verify_signed_token(token, session_secret(settings))
+    assert token_data is not None
+    jti = str(token_data.get("jti") or "")
+    assert jti
     with TestClient(app) as client:
         client.cookies.set("judgment_session", token)
         assert client.get("/api/auth/me").json()["authenticated"] is True
@@ -3716,6 +3765,10 @@ def test_google_logout_clears_session(web_client) -> None:
         set_cookie = logout.headers.get("set-cookie", "")
         assert "judgment_session=" in set_cookie
         assert "Max-Age=0" in set_cookie
+        with app.state.session_factory() as session:
+            revoked = session.get(AppSetting, "revoked_session_jtis")
+            assert revoked is not None
+            assert jti in revoked.value
         client.cookies.set("judgment_session", token)
         assert client.get("/api/auth/me").json()["authenticated"] is False
 

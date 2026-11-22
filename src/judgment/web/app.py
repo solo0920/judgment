@@ -934,6 +934,36 @@ def _resolve_principal(
     return anonymous_principal()
 
 
+_TICKET_QUERY_RE = re.compile(r"([?&]ticket=)[^&\s\"']+")
+
+
+def _redact_ticket_query(value: str) -> str:
+    return _TICKET_QUERY_RE.sub(r"\1[redacted]", str(value or ""))
+
+
+class _TicketRedactionFilter(logging.Filter):
+    """Keep SSE tickets out of uvicorn access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _redact_ticket_query(item)
+                if isinstance(item, str)
+                else item
+                for item in record.args
+            )
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: _redact_ticket_query(item)
+                if isinstance(item, str)
+                else item
+                for key, item in record.args.items()
+            }
+        if isinstance(record.msg, str):
+            record.msg = _redact_ticket_query(record.msg)
+        return True
+
+
 def _sse_binding(value: str) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:32]
 
@@ -1051,6 +1081,7 @@ PERFORMANCE_TARGETS = {
 _DEMO_SCHEMA_BLOCKED_COLUMNS = {
     "law_dataset_versions": frozenset({"parquet_path", "zip_path"}),
     "download_runs": frozenset({"error_message"}),
+    "judgment_documents": frozenset({"source_archive"}),
     "judgment_import_runs": frozenset({"error_message"}),
 }
 
@@ -1971,6 +2002,12 @@ def create_app(
     app.state.csp_limiter = DemoRateLimiter()
     app.state.sse_tickets = {}
     app.state.sse_ticket_lock = threading.Lock()
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(
+        isinstance(item, _TicketRedactionFilter)
+        for item in access_logger.filters
+    ):
+        access_logger.addFilter(_TicketRedactionFilter())
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
         max_queue=settings.rag_admission_max_queue,
@@ -2307,7 +2344,7 @@ def create_app(
                 session_secret(current),
                 store=app.state.sse_tickets,
                 lock=app.state.sse_ticket_lock,
-                client_ip=effective_client_ip(request),
+                client_ip=client_ip_key(effective_client_ip(request)),
             ):
                 request.state.sse_ticket_valid = True
                 return await call_next(request)
@@ -2565,7 +2602,7 @@ def create_app(
             session_secret(app.state.settings),
             store=app.state.sse_tickets,
             lock=app.state.sse_ticket_lock,
-            client_ip=effective_client_ip(request),
+            client_ip=client_ip_key(effective_client_ip(request)),
             binding=_sse_principal_binding(principal),
         )
         return {
@@ -4164,6 +4201,7 @@ def create_app(
                 settings=runtime_settings(
                     app.state.settings, app.state.session_factory
                 ),
+                include_internal_columns=not demo_visitor,
             )
 
         try:
@@ -4241,6 +4279,7 @@ def create_app(
                 return get_judgment_detail(
                     session_factory=_query_session_factory(request),
                     jid=jid,
+                    include_internal_fields=not _is_demo_visitor(request),
                 )
         except HTTPException:
             raise

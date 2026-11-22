@@ -118,9 +118,10 @@ curl -sS https://api-mbp.ragdemo.win/api/demo/status
 - `NOSUPERUSER NOCREATEDB NOCREATEROLE`、`CONNECTION LIMIT 10`
 - `statement_timeout=10s`、`idle_in_transaction_session_timeout=15s`、`work_mem=16MB`
 - `default_transaction_read_only=on`、`search_path=public`
-- `law_documents`、`judgment_documents`、`law_article_versions`、`law_article_change_events` 為 **table-level SELECT**；這些是 demo 報表需要的公開法規／判決內容。
-- `law_dataset_versions`、`download_runs`、`judgment_import_runs` 維持 **column-level SELECT**；不授權 `parquet_path`、`zip_path`、`data_dir`、`law_list_path` 等內部欄位。
-- `/api/query` 只 select 授權欄位；`/api/schema/suggest` 對 demo visitor 另外封鎖敏感欄位並套用 `sanitize_query_payload()`。
+- `law_documents`、`law_article_versions`、`law_article_change_events` 為 **table-level SELECT**；這些是 demo 報表需要的公開法規內容。
+- `judgment_documents` 為 **column-level SELECT**：只授權公開判決內容與 metadata（`id, jid, jyear, jcase, jno, jdate, court, court_normalized, title, full_text, pdf_url, content_hash, matched_laws, matched_laws_text, citations, citation_count, full_text_length, created_at, updated_at, issue_month, is_current`）；不授權 `source_archive`、`import_run_id`、snapshot 關聯欄位。
+- `law_dataset_versions`、`download_runs`、`judgment_import_runs` 維持 **column-level SELECT**；不授權 `parquet_path`、`zip_path`、`error_message`、`data_dir`、`law_list_path` 等內部欄位。
+- `/api/query` 對 demo visitor 會排除 `DEMO_HIDDEN_QUERY_COLUMNS`；`/api/schema/suggest` 對 demo visitor 另外封鎖敏感欄位並套用 `sanitize_query_payload()`。
 - 已 `REVOKE CREATE ON SCHEMA public FROM PUBLIC`
 - `pg_hba.conf`：`local judgment demo_reader reject`、`samehost`／`samenet` 用 `scram-sha-256`、其他來源 `reject`。Docker Desktop 的 app 來源是 bridge gateway（實測 `192.168.107.1`），所以用 `samenet` 而不是只寫 `127.0.0.1`；DB port 仍只綁 host loopback。
 
@@ -137,6 +138,9 @@ select pdf_url from judgment_documents limit 1;   -- 成功（公開 PDF）
 select count(*) from law_article_versions; -- 成功（公開法規條文）
 select data_dir from judgment_import_runs limit 1; -- permission denied
 select parquet_path from law_dataset_versions limit 1; -- permission denied
+select source_archive from judgment_documents limit 1; -- permission denied
+select import_run_id from judgment_documents limit 1; -- permission denied
+select r.rolname from pg_auth_members m join pg_roles r on m.roleid=r.oid where m.member=(select oid from pg_roles where rolname=current_user); -- 空集合
 create table should_fail(id int);       -- permission denied
 select count(*) from question_bank_items; -- permission denied
 select pg_read_file('/etc/passwd');     -- permission denied
@@ -192,6 +196,7 @@ copy (select 1) to program 'id';        -- permission denied
 - CSP 已 enforce；`report-uri` 收集端點已上線；`report-to`／Reporting-Endpoints 尚未設定。
 - 管理權杖已改存 `sessionStorage`，且已於 2026-11-21 輪替；但仍是靜態長效權杖，沒有 server-side 撤銷（SESSION-01）。
 - `AUTH_COOKIE_SAMESITE` 已改為 `lax`；logout 拒絕 cross-site，admin-token 寫入也檢查 Origin／Sec-Fetch-Site。
+- `*.pages.dev` 預覽站與 `api-mbp.ragdemo.win` 屬不同 site；在 Lax 下預覽站無法維持登入狀態，這是預期取捨。需要預覽登入時，僅在該預覽環境設 `AUTH_COOKIE_SAMESITE=none`，不要改 production。
 - 完整備份 restore drill（DB＋Qdrant＋data）尚未執行；目前只有 subset restore。
 - `demo_reader` 已是 column-level SELECT；`pg_hba` 已收斂到 `samehost`／`samenet`。主應用仍使用 `judgment` superuser／createdb（APP-DB-01）。
-- AUDIT-01、SSE ticket 一次性／綁定、PRIV-01（Google Fonts 自架）尚未完成。
+- SSE ticket 已改為 60 秒、一次性、client IP／principal binding；access log 會遮蔽 `ticket` query。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。AUDIT-01、PRIV-01（Google Fonts 自架）尚未完成。

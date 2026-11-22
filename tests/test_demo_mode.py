@@ -12,7 +12,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
-from judgment.models import Base, LawDatasetVersion
+from judgment.models import (
+    Base,
+    JudgmentDocument,
+    LawDatasetVersion,
+    LawDocument,
+)
 from judgment.observability import record_performance
 from judgment.web.app import create_app
 
@@ -636,6 +641,19 @@ def test_demo_schema_suggest_blocks_sensitive_paths(
     assert visible.status_code == 200
     assert visible.json()["values"] == ["1"]
 
+    query = client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "law_dataset_versions"},
+            "page_size": 1,
+        },
+    )
+    assert query.status_code == 200
+    columns = {item["key"] for item in query.json()["columns"]}
+    assert "parquet_path" not in columns
+    assert "zip_path" not in columns
+
 
 def test_sanitize_processing_payload_redacts_paths() -> None:
     from judgment.web.demo_mode import sanitize_processing_payload
@@ -961,6 +979,10 @@ def test_demo_data_endpoints_use_restricted_session_factory(
     def spy(name):
         def capture(**kwargs):
             seen[name] = kwargs.get("session_factory") is sentinel
+            if name == "judgment":
+                seen["judgment_internal"] = kwargs.get(
+                    "include_internal_fields"
+                )
             return {"ok": True}
 
         return capture
@@ -990,9 +1012,127 @@ def test_demo_data_endpoints_use_restricted_session_factory(
     assert seen == {
         "data": True,
         "judgment": True,
+        "judgment_internal": False,
         "law": True,
         "schema": True,
     }
+
+
+def test_demo_data_routes_do_not_touch_primary_session(
+    demo_client, monkeypatch
+) -> None:
+    import importlib
+    from types import SimpleNamespace
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, app = demo_client
+    working = app.state.session_factory
+    with working() as session:
+        version = LawDatasetVersion(
+            source_type="law",
+            source_url="https://example.test/law",
+            update_date="20261122",
+            version_code="202611220002",
+            content_sha256="d" * 64,
+            raw_json_sha256="e" * 64,
+            zip_sha256="f" * 64,
+            zip_path="/tmp/demo.zip",
+            parquet_path="/tmp/demo.parquet",
+            law_count=1,
+            article_count=1,
+            is_current=True,
+        )
+        session.add(version)
+        session.flush()
+        session.add(
+            LawDocument(
+                source_type="law",
+                law_key="DEMO-LAW-1",
+                law_name="示範銀行法",
+                law_level="法律",
+                law_category="金融",
+                law_url="https://example.test/law/1",
+                law_modified_date="20261122",
+                article_count=1,
+                content_hash="a" * 64,
+                first_seen_version_id=version.id,
+                last_seen_version_id=version.id,
+                is_current=True,
+            )
+        )
+        session.add(
+            JudgmentDocument(
+                jid="DEMO,115,金訴,1,20260110,1",
+                jyear="115",
+                jcase="金訴",
+                jno="1",
+                jdate="20260110",
+                court="臺灣臺北地方法院",
+                court_normalized="臺灣臺北地方法院",
+                title="示範判決",
+                full_text="示範判決全文",
+                pdf_url="https://example.test/demo.pdf",
+                source_archive="202601.rar",
+                content_hash="b" * 64,
+                matched_laws=["示範銀行法"],
+                matched_laws_text="示範銀行法",
+                citations=[],
+                citation_count=0,
+                full_text_length=6,
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    app.state.demo_query_session_factory = working
+    monkeypatch.setattr(
+        app_module,
+        "load_demo_state",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            active=True, features=ALL_FEATURES
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "load_demo_usage",
+        lambda *_args, **_kwargs: {"tokens": 0, "requests": 0},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "runtime_settings",
+        lambda settings, *_args, **_kwargs: settings,
+    )
+
+    def poison(*_args, **_kwargs):
+        raise RuntimeError("primary session must not be used for demo data")
+
+    app.state.session_factory = poison
+
+    assert client.get(
+        "/api/data/suggest", params={"kind": "law", "query": "示範"}
+    ).status_code == 200
+    assert client.get(
+        "/api/law", params={"law_key": "DEMO-LAW-1"}
+    ).status_code == 200
+    assert client.get(
+        "/api/judgment", params={"jid": "DEMO,115,金訴,1,20260110,1"}
+    ).status_code == 200
+    assert client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "law_documents"},
+            "page_size": 1,
+        },
+    ).status_code == 200
 
 
 def test_demo_route_feature_mapping_is_explicit() -> None:
