@@ -107,10 +107,16 @@ load_env() {
 
 qdrant_curl() {
   if [[ -n "${QDRANT_API_KEY:-}" ]]; then
-    curl -H "api-key: ${QDRANT_API_KEY}" "$@"
+    curl -K - "$@" <<CURL_CONFIG
+header = "api-key: ${QDRANT_API_KEY}"
+CURL_CONFIG
   else
     curl "$@"
   fi
+}
+
+pg_compose_exec() {
+  PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" docker compose exec -T -e PGPASSWORD "$@"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -319,16 +325,12 @@ else
 fi
 
 info "還原設定"
-STAMP="$(date '+%Y%m%d-%H%M%S')"
 if [[ -f "$BACKUP_DIR/config/.env" ]]; then
-  if [[ -f "$PROJECT_DIR/.env" ]]; then
-    cp "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.before-restore.$STAMP"
-    echo "已保留舊 .env 為 .env.before-restore.$STAMP"
-  fi
-  cp "$BACKUP_DIR/config/.env" "$PROJECT_DIR/.env"
-  echo "已還原 .env；若新電腦路徑或主機不同，請先檢查內容。"
-elif [[ ! -f "$PROJECT_DIR/.env" ]]; then
-  echo "警告：備份未包含 .env。請先從密鑰管理器還原 .env，再啟動服務。" >&2
+  echo "備份內含 config/.env；為避免供應鏈風險，不自動覆寫目前 .env。" >&2
+  echo "請人工比對後，從密鑰管理器設定 .env 再啟動服務。" >&2
+fi
+if [[ ! -f "$PROJECT_DIR/.env" ]]; then
+  echo "警告：目前專案沒有 .env。請先從密鑰管理器還原 .env，再啟動服務。" >&2
 fi
 if [[ ! -f "$PROJECT_DIR/docker-compose.yml" && -f "$BACKUP_DIR/config/docker-compose.yml" ]]; then
   cp "$BACKUP_DIR/config/docker-compose.yml" "$PROJECT_DIR/docker-compose.yml"
@@ -347,8 +349,7 @@ info "啟動 PostgreSQL 與 Qdrant"
 docker compose up -d postgres qdrant
 
 for _ in {1..60}; do
-  if docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  if pg_compose_exec "$PG_SERVICE" \
     pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; then
     break
   fi
@@ -373,16 +374,13 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
       || die "age 解密 PostgreSQL dump 失敗"
     PG_RESTORE_FILE="$PG_RESTORE_TMP"
   fi
-  docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
     -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' >/dev/null
-  docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  pg_compose_exec "$PG_SERVICE" \
     pg_restore -U "$PG_USER" -d "$PG_DB" \
     --no-owner --no-privileges --exit-on-error < "$PG_RESTORE_FILE"
-  JUDGMENT_COUNT="$(docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  JUDGMENT_COUNT="$(pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -tAc \
     'select count(*) from judgment_documents;' 2>/dev/null || echo '?')"
   printf 'PostgreSQL judgment_documents：%s 筆\n' "$JUDGMENT_COUNT"

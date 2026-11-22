@@ -9,6 +9,7 @@ from .models import AppSetting
 
 TEST_MODE_KEY = "test_mode"
 LLM_MODEL_PREFERENCE_KEY = "llm_model_preference"
+REVOKED_SESSION_JTIS_KEY = "revoked_session_jtis"
 
 
 def get_app_setting(
@@ -65,6 +66,35 @@ def set_test_mode(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+def is_session_revoked(
+    session_factory: sessionmaker[Session], jti: str
+) -> bool:
+    value = str(jti or "").strip()
+    if not value:
+        return False
+    revoked = get_app_setting(session_factory, REVOKED_SESSION_JTIS_KEY, {})
+    return value in revoked
+
+
+def revoke_session(
+    session_factory: sessionmaker[Session],
+    jti: str,
+    expires_at: int,
+) -> None:
+    value = str(jti or "").strip()
+    if not value:
+        return
+    now = int(datetime.now(timezone.utc).timestamp())
+    revoked = get_app_setting(session_factory, REVOKED_SESSION_JTIS_KEY, {})
+    retained = {
+        str(key): int(exp)
+        for key, exp in revoked.items()
+        if str(key) and isinstance(exp, (int, float)) and int(exp) > now
+    }
+    retained[value] = max(now + 1, int(expires_at or now + 1))
+    set_app_setting(session_factory, REVOKED_SESSION_JTIS_KEY, retained)
 
 
 def get_llm_model_preference(

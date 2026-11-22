@@ -66,7 +66,7 @@ POST /api/rag/share
 
 - `GET /api/question-bank/*`、`GET /api/performance/options`、`GET /api/processing/plan`、`GET /api/processing/active`、`GET /api/updates/status`、`GET /api/courts/check`、`GET /api/law-versions/check`、`GET /api/judgment-download/status` 都是 admin-only，不在 demo allowlist。
 - Demo 限流預設：RAG 10/min、60/hour、200/day，另有每日 400 次與 1,000,000 token 預算；query 20/min、200/hour、500/day；poll 120/min、3,000/hour、20,000/day。設定在 `src/judgment/config.py`。
-- Demo visitors 目前多數 demo route 使用主 `judgment` 連線；只有 `POST /api/query?database=postgres` 使用 `demo_reader`。`demo_reader` 是 column-level SELECT、`NOSUPERUSER NOCREATEDB NOCREATEROLE`、`default_transaction_read_only=on`。
+- Demo visitors 的 `POST /api/query?database=postgres`、`GET /api/data/suggest`、`GET /api/judgment`（postgres）、`GET /api/law`、`GET /api/schema/suggest` 全部使用 `demo_reader`；未設定時 fail closed。`demo_reader` 為 `NOSUPERUSER NOCREATEDB NOCREATEROLE`、`default_transaction_read_only=on`；公開法規／判決表為 table-level SELECT，版本／下載／匯入表維持 column-level SELECT，不授權內部路徑欄位。
 
 ## 4. RAG 法規／判決範圍
 
@@ -78,11 +78,11 @@ POST /api/rag/share
 ## 5. Auth／security 現況
 
 - 管理員：`solo4study@gmail.com` Google session，或 `X-Judgment-Admin-Token` break-glass token。
-- Session：HttpOnly signed cookie，TTL 7 天（`AUTH_SESSION_TTL_SECONDS=604800`），`SameSite=None`；沒有 server-side session table／撤銷。
+- Session：HttpOnly signed cookie，TTL 7 天（`AUTH_SESSION_TTL_SECONDS=604800`），production `SameSite=Lax`；token 含 `jti`，logout 會寫入 server-side 撤銷清單，重播已登出 cookie 會失效；尚無全裝置撤銷與短 TTL。
 - `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET` 已於 2026-11-21 輪替；舊值失效。
 - 管理 token 存在瀏覽器 `sessionStorage`，舊 `localStorage` 值會遷移並刪除。
 - CSP 已 enforce；有 `X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`；`report-uri` 已接 `/api/csp-report`，`report-to` 尚未設定。CSP 仍允許 Google Fonts 與 production `connect-src` 的 localhost。
-- 未完成：SESSION-01、AUDIT-01、SameSite 改 Lax 的評估、SSE ticket 一次性／綁定、HSTS 延長。
+- 未完成：SESSION-01 全裝置撤銷／短 TTL、AUDIT-01、HSTS 延長、`report-to`、PRIV-01、DB-ROLE-01 完整降權。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。
 
 ## 6. 查詢索引

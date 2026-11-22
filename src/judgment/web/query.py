@@ -1483,8 +1483,15 @@ def get_law_detail(
                 else None,
             }
 
-            version_rows = session.scalars(
-                select(LawDatasetVersion)
+            version_rows = session.execute(
+                select(
+                    LawDatasetVersion.id,
+                    LawDatasetVersion.update_date,
+                    LawDatasetVersion.downloaded_at,
+                    LawDatasetVersion.is_current,
+                    LawDatasetVersion.law_count,
+                    LawDatasetVersion.article_count,
+                )
                 .where(LawDatasetVersion.source_type == record.source_type)
                 .order_by(LawDatasetVersion.id.desc())
             ).all()

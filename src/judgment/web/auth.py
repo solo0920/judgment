@@ -103,6 +103,7 @@ def make_session_token(user: Dict[str, Any], settings: Settings) -> str:
     return make_signed_token(
         {
             "purpose": "session",
+            "jti": secrets.token_urlsafe(18),
             "sub": str(user.get("sub") or ""),
             "email": str(user.get("email") or "").strip().lower(),
             "name": str(user.get("name") or ""),

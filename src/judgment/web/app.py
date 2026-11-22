@@ -174,6 +174,8 @@ from ..index_versions import (
 )
 from ..runtime_settings import (
     get_test_mode,
+    is_session_revoked,
+    revoke_session,
     set_llm_model_preference,
     set_test_mode,
 )
@@ -607,7 +609,7 @@ def _write_csp_report(summary: Dict[str, Any]) -> None:
 
 PUBLIC_POLICIES = {"PUBLIC_READ", "PUBLIC_QUERY", "PUBLIC_AUTH"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
-SSE_TICKET_TTL_SECONDS = 120
+SSE_TICKET_TTL_SECONDS = 60
 
 
 def _is_local_request(request: Request) -> bool:
@@ -782,12 +784,8 @@ def route_policy_guard(request: Request) -> None:
         principal = _resolve_principal(request, settings)
         request.state.principal = principal
     policy = _policy_for_matched_route(route, request.method)
-    if (
-        request.url.path == "/api/events/stream"
-        and _valid_sse_ticket(
-            str(request.query_params.get("ticket") or ""),
-            session_secret(settings),
-        )
+    if request.url.path == "/api/events/stream" and bool(
+        getattr(request.state, "sse_ticket_valid", False)
     ):
         return
     if policy in DEMO_POLICIES:
@@ -927,37 +925,94 @@ def _resolve_principal(
 
     session = read_session(request, settings)
     if session is not None:
+        jti = str(session.get("jti") or "").strip()
+        if jti and is_session_revoked(
+            request.app.state.session_factory, jti
+        ):
+            return anonymous_principal()
         return principal_from_session(session)
     return anonymous_principal()
 
 
-def _make_sse_ticket(secret: str) -> str:
+def _sse_binding(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:32]
+
+
+def _sse_principal_binding(principal: Any) -> str:
+    source = str(getattr(principal, "source", "") or "anonymous")
+    email = str(getattr(principal, "email", "") or "")
+    user_id = str(getattr(principal, "user_id", "") or "")
+    return f"{source}:{email or user_id}"
+
+
+def _make_sse_ticket(
+    secret: str,
+    *,
+    store: Dict[str, tuple[int, str, str]],
+    lock: threading.Lock,
+    client_ip: str,
+    binding: str,
+) -> str:
     if not secret:
         return ""
     expires = int(time.time()) + SSE_TICKET_TTL_SECONDS
-    nonce = uuid4().hex
-    payload = f"{expires}:{nonce}"
+    jti = uuid4().hex
+    ip_hash = _sse_binding(client_ip)
+    binding_hash = _sse_binding(binding)
+    payload = f"{expires}:{jti}:{ip_hash}:{binding_hash}"
     signature = hmac.new(
         secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
+    with lock:
+        now = int(time.time())
+        for key, entry in list(store.items()):
+            if entry[0] < now:
+                store.pop(key, None)
+        store[jti] = (expires, ip_hash, binding_hash)
     return f"{payload}:{signature}"
 
 
-def _valid_sse_ticket(ticket: str, secret: str) -> bool:
+def _valid_sse_ticket(
+    ticket: str,
+    secret: str,
+    *,
+    store: Dict[str, tuple[int, str, str]],
+    lock: threading.Lock,
+    client_ip: str,
+) -> bool:
     if not ticket or not secret:
         return False
     try:
-        expires_text, nonce, signature = str(ticket).split(":", 2)
+        expires_text, jti, ip_hash, binding_hash, signature = str(
+            ticket
+        ).split(":", 4)
         expires = int(expires_text)
     except (TypeError, ValueError):
         return False
-    if expires < int(time.time()) or not nonce or not signature:
+    if (
+        expires < int(time.time())
+        or not jti
+        or not ip_hash
+        or not binding_hash
+        or not signature
+    ):
         return False
-    payload = f"{expires}:{nonce}"
+    payload = f"{expires}:{jti}:{ip_hash}:{binding_hash}"
     expected = hmac.new(
         secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    if not hmac.compare_digest(signature, expected):
+        return False
+    if ip_hash != _sse_binding(client_ip):
+        return False
+    with lock:
+        entry = store.get(jti)
+        if entry is None:
+            return False
+        if entry != (expires, ip_hash, binding_hash):
+            return False
+        store.pop(jti, None)
+    return True
 
 
 def _cors_origins(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -1914,6 +1969,8 @@ def create_app(
     app.state.demo_limiter = DemoRateLimiter()
     app.state.auth_limiter = DemoRateLimiter()
     app.state.csp_limiter = DemoRateLimiter()
+    app.state.sse_tickets = {}
+    app.state.sse_ticket_lock = threading.Lock()
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
         max_queue=settings.rag_admission_max_queue,
@@ -2003,6 +2060,20 @@ def create_app(
         )
         payload["endpoints"] = _api_endpoint_catalog(app)
         return payload
+
+    def _query_session_factory(request: Request):
+        if not _is_demo_visitor(request):
+            return app.state.session_factory
+        factory = app.state.demo_query_session_factory
+        if factory is None:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "展示資料查詢未設定。",
+                    "code": "demo_data_unavailable",
+                },
+            )
+        return factory
 
     def _ollama_allowed_hosts() -> tuple[str, ...]:
         return allowed_hosts_from_settings(
@@ -2197,7 +2268,11 @@ def create_app(
                                 "detail": "跨站請求不可寫入本機管理 API。"
                             },
                         )
-                elif principal.source in {"google", "anonymous"}:
+                elif principal.source in {
+                    "google",
+                    "anonymous",
+                    "admin_token",
+                }:
                     if not origin_allowed(
                         request,
                         current,
@@ -2207,10 +2282,10 @@ def create_app(
                         return JSONResponse(
                             status_code=403,
                             content={
-                                "detail": "不允許的 Origin 對展示或登入工作階段寫入。"
+                                "detail": "不允許的 Origin 對展示、登入或管理權杖工作階段寫入。"
                             },
                         )
-                    if principal.source == "google":
+                    if principal.source in {"google", "admin_token"}:
                         sec_fetch_site = request.headers.get("Sec-Fetch-Site")
                         if sec_fetch_site is not None and sec_fetch_site not in {
                             "same-origin",
@@ -2227,7 +2302,14 @@ def create_app(
 
         if path == "/api/events/stream":
             ticket = str(request.query_params.get("ticket") or "")
-            if _valid_sse_ticket(ticket, session_secret(current)):
+            if _valid_sse_ticket(
+                ticket,
+                session_secret(current),
+                store=app.state.sse_tickets,
+                lock=app.state.sse_ticket_lock,
+                client_ip=effective_client_ip(request),
+            ):
+                request.state.sse_ticket_valid = True
                 return await call_next(request)
 
         admin_expected = str(current.admin_token or "")
@@ -2255,6 +2337,11 @@ def create_app(
         if principal is None:
             principal = _resolve_principal(request, current)
         session = read_session(request, current)
+        if session is not None and str(session.get("jti") or "").strip():
+            if is_session_revoked(
+                app.state.session_factory, str(session["jti"])
+            ):
+                session = None
         payload = {
             # Keep the existing auth/me contract: local bypass and admin
             # tokens are request credentials, not a browser login session.
@@ -2441,11 +2528,30 @@ def create_app(
     @app.post("/api/auth/logout")
     def auth_logout(request: Request) -> JSONResponse:
         current = app.state.settings
+        if request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "跨站請求不可登出。"},
+            )
         if not origin_allowed(request, current, cors_origins):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "不允許的 Origin。"},
             )
+        session = read_session(request, current)
+        if session is not None:
+            jti = str(session.get("jti") or "").strip()
+            if jti:
+                try:
+                    revoke_session(
+                        app.state.session_factory,
+                        jti,
+                        int(session.get("exp") or 0),
+                    )
+                except Exception:
+                    logger.warning(
+                        "failed to persist session revocation", exc_info=True
+                    )
         response = JSONResponse({"ok": True})
         clear_session_cookie(response)
         clear_oauth_state_cookie(response)
@@ -2453,8 +2559,15 @@ def create_app(
         return response
 
     @app.post("/api/auth/sse-ticket")
-    def sse_ticket() -> Dict[str, Any]:
-        ticket = _make_sse_ticket(session_secret(app.state.settings))
+    def sse_ticket(request: Request) -> Dict[str, Any]:
+        principal = getattr(request.state, "principal", None)
+        ticket = _make_sse_ticket(
+            session_secret(app.state.settings),
+            store=app.state.sse_tickets,
+            lock=app.state.sse_ticket_lock,
+            client_ip=effective_client_ip(request),
+            binding=_sse_principal_binding(principal),
+        )
         return {
             "ticket": ticket,
             "expires_in": SSE_TICKET_TTL_SECONDS if ticket else 0,
@@ -4093,6 +4206,7 @@ def create_app(
 
     @app.get("/api/data/suggest")
     def data_suggest(
+        request: Request,
         kind: str,
         query: str = "",
         limit: int = 12,
@@ -4102,13 +4216,15 @@ def create_app(
                 kind=kind,
                 query=query,
                 limit=limit,
-                session_factory=app.state.session_factory,
+                session_factory=_query_session_factory(request),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/judgment")
-    def judgment_detail(jid: str, source: str = "postgres") -> Dict[str, Any]:
+    def judgment_detail(
+        request: Request, jid: str, source: str = "postgres"
+    ) -> Dict[str, Any]:
         try:
             with trace_segment(
                 "api.endpoint",
@@ -4123,9 +4239,11 @@ def create_app(
                 if source not in {"", "postgres"}:
                     raise ValueError(f"不支援的判決來源：{source}")
                 return get_judgment_detail(
-                    session_factory=app.state.session_factory,
+                    session_factory=_query_session_factory(request),
                     jid=jid,
                 )
+        except HTTPException:
+            raise
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except LookupError as exc:
@@ -4140,6 +4258,7 @@ def create_app(
 
     @app.get("/api/law")
     def law_detail(
+        request: Request,
         law_key: str,
         source_type: Optional[str] = None,
         version_id: Optional[int] = None,
@@ -4158,13 +4277,15 @@ def create_app(
                 },
             ):
                 return get_law_detail(
-                    session_factory=app.state.session_factory,
+                    session_factory=_query_session_factory(request),
                     data_dir=app.state.data_dir,
                     law_key=law_key,
                     source_type=source_type,
                     version_id=version_id,
                     article_no=article_no,
                 )
+        except HTTPException:
+            raise
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -4218,13 +4339,15 @@ def create_app(
                     column=column,
                     query=q,
                     limit=limit,
-                    session_factory=app.state.session_factory,
+                    session_factory=_query_session_factory(request),
                     data_dir=app.state.data_dir,
                     settings=settings,
                 )
                 if demo_visitor:
                     return sanitize_query_payload(payload)
                 return payload
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:

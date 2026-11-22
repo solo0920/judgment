@@ -481,9 +481,54 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
   - `tests/test_judgment_download.py::test_probe_next_rejects_path_like_filenames`
   - `tests/test_judgment_download.py::test_load_manifest_sanitizes_archive_filenames`
 
-### 尚未處理
+### 第二批修復（AUTH／備份）
 
-下一批為 AUTH-01～AUTH-04、INFRA-02～INFRA-05、INFRA-09；見第 4 節路線圖。
+#### AUTH-01 — 已修復
+
+- `/api/data/suggest`、`/api/judgment`（postgres）、`/api/law`、`/api/schema/suggest` 對 demo visitor 改用 `app.state.demo_query_session_factory`。
+- 未設定時回 `403 demo_data_unavailable`，不 fallback 到主 superuser 連線。
+- `demo_reader` 對公開法規／判決內容表（`law_documents`、`judgment_documents`、`law_article_versions`、`law_article_change_events`）改為 table-level SELECT；版本／下載／匯入表仍維持 column-level，`law_dataset_versions` 查詢只 select 安全欄位。
+- 回歸測試：`tests/test_demo_mode.py::test_demo_data_endpoints_use_restricted_session_factory`；正式站已驗證 `/api/data/suggest`、`/api/law`、`/api/judgment` 正常。
+
+#### AUTH-02 — 已修復
+
+- SSE ticket 改為 60 秒、一次性 `jti`、綁定 client IP 與 principal binding；middleware 消費後以 `sse_ticket_valid` 讓 route guard 放行。
+- 重播同一 ticket 會失敗；前端每次重連會重新取得 ticket。
+- 回歸測試：
+  - `tests/test_web.py::test_sse_ticket_is_one_time_and_bound_to_client_ip`
+  - `tests/test_web.py::test_sse_ticket_stream_is_single_use`
+
+#### AUTH-03 — 部分修復
+
+- session token 新增 `jti`；logout 會將 `jti` 寫入既有 `AppSetting` 的撤銷清單，後續重播 cookie 會被拒絕。
+- 尚未完成「撤銷所有裝置」與縮短 7 天 TTL；`AUTH_SESSION_SECRET` 的 production fail-fast 仍在後續。
+- 回歸測試：`tests/test_web.py::test_google_logout_clears_session` 重播已登出 token。
+
+#### AUTH-04 — 已修復
+
+- production `.env` 改為 `AUTH_COOKIE_SAMESITE=lax`。
+- logout 拒絕 `Sec-Fetch-Site: cross-site`；admin-token 寫入也納入 Origin／Sec-Fetch-Site 檢查。
+- 回歸測試：logout cross-site 403、admin-token evil Origin 403。
+
+#### INFRA-02 — 已修復
+
+- `backup.sh`／`restore.sh` 的 PostgreSQL 密碼改由 `docker compose exec -e PGPASSWORD` 從 client 環境傳入，不再出現在 process arguments；Qdrant API key 改由 `curl -K -` stdin config 傳入。
+- `bash -n` 通過。
+
+#### INFRA-03 — 已修復
+
+- `BACKUP_REQUIRE_ENCRYPTION` 預設改為 `1`；新增 `--allow-unencrypted` 明確放行明文 dump。
+
+#### INFRA-04 — 已修復
+
+- `restore.sh` 不再自動覆寫 `.env`；若備份含 `config/.env`，只提示操作員人工比對並從密鑰管理器設定。
+
+#### 仍待處理
+
+- **AUTH-03 完整版**：全裝置撤銷、短 TTL、session secret production fail-fast。
+- **INFRA-05**：llama-server host probe 的 DNS rebinding／IP pinning；需要修改 transport，另開批次。
+- **INFRA-09**：主應用 DB role 降權；因 `judgment_raw_parquet.py` 使用 server-side `COPY ... TO file`，需同步改寫或分離 migration/export role，屬維護窗口工作。
+- AUTH-05～08、OPS-01～05 等見第 4 節路線圖。
 
 ---
 
@@ -494,3 +539,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 初次建立；4 面向程式碼審查＋正式站唯讀驗證；列出 2 項 High、12 項 Medium、10 項 Low 與已良好控制。 |
 | 2026-11-22 | 修復 SEC-01（分享 token 遙測 redaction）與 SEC-02（demo schema suggest 敏感欄位／路徑封鎖），補回歸測試。 |
 | 2026-11-22 | 修復 SEC-03（分享 payload deep scrub）、SEC-04（索引與法規 metadata escape）、INFRA-01（下载档名 basename／archive path 限制），補回歸測試。 |
+| 2026-11-22 | 第二批：AUTH-01 demo DB session 隔離、AUTH-02 一次性 SSE ticket、AUTH-03 logout jti 撤銷、AUTH-04 SameSite／logout／admin-token Origin、INFRA-02 備份密碼不進 cmdline、INFRA-03 加密預設 fail-closed、INFRA-04 restore 不自動覆寫 `.env`。 |

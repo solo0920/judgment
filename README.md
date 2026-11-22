@@ -165,7 +165,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 > PostgreSQL 的索引版本、`judgment_vector_index` 與 Qdrant collection 必須一起還原。若只還原 Qdrant，仍需有 PostgreSQL 的 `judgment_documents` 才能重新建立索引；若只還原 PostgreSQL，Qdrant 會是空的，且 `judgment_index_versions` 可能仍標示 active，索引器不一定會自動重建。還原時 `restore.sh` 會依 manifest 的 alias mapping 重建 `judgments_current`；若刻意只還原部分元件，應先清除或退役 `judgment_index_versions` 與 `judgment_vector_index` 的對應版本，再重新建立 collection 與 alias。
 
-以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設會用 age 加密成 `postgres/judgment.dump.age`；`BACKUP_REQUIRE_ENCRYPTION=1` 時未設定 recipient 會直接失敗，還原時需要對應的 `BACKUP_AGE_IDENTITY`。
+以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設要求 age 加密成 `postgres/judgment.dump.age`；未設定 `BACKUP_AGE_RECIPIENT` 會直接失敗，只有明確加 `--allow-unencrypted` 才能產生明文 dump。還原時需要對應的 `BACKUP_AGE_IDENTITY`，且 `restore.sh` 不會自動套用備份內的 `.env`。
 
 ## 設定
 
@@ -178,7 +178,7 @@ cd /Volumes/USB/judgment-backup-20261108
 | `JUDGMENT_PG_PASSWORD` | 空 | `backup.sh`／`restore.sh` 使用的 PostgreSQL 密碼；未設定時沿用 `POSTGRES_PASSWORD` |
 | `BACKUP_AGE_RECIPIENT` | 空 | age 公鑰；設定後 PostgreSQL dump 會加密成 `.age` |
 | `BACKUP_AGE_IDENTITY` | `~/.config/judgment/age.key` | `restore.sh` 解密用的 age 私鑰路徑 |
-| `BACKUP_REQUIRE_ENCRYPTION` | `0` | 設為 `1` 時，沒有 `BACKUP_AGE_RECIPIENT` 就拒絕備份 |
+| `BACKUP_REQUIRE_ENCRYPTION` | `1` | 沒有 `BACKUP_AGE_RECIPIENT` 就拒絕備份；只有 `--allow-unencrypted` 可明確放行明文 |
 | `LAW_DATA_DIR` | `/data/laws` | 法規產物根目錄（與判決資料 `/data/judgments` 分開）；`.env.example` 本機預設為 `./data/laws` |
 | `JUDGMENT_DATA_DIR` | `/data/judgments` | 判決資料根目錄；原始 `.rar` 可放在根目錄或 `raw_rar/` 子目錄。`.env.example` 本機預設為 `./data/judgments` |
 | `JUDGMENT_LAW_LIST` | `documents/金融法規.md` | 判決納入資料庫所依據的金融法規白名單 |
@@ -1142,8 +1142,9 @@ AUTH_COOKIE_SECURE=auto
 
 - `GOOGLE_ALLOWED_EMAILS` 是登入白名單；只有列出的電子郵件可以取得管理員工作階段。多個帳號以逗號分隔。
 - `GOOGLE_REDIRECT_URI` 留空時會由請求推導；正式環境建議明確設定，且必須與 Google Console 完全一致。
-- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；留空時會退回使用 `JUDGMENT_ADMIN_TOKEN`。
-- FastAPI 同源前端使用 `AUTH_COOKIE_SAMESITE=lax`。若前端部署在 Cloudflare Pages、後端是另一個網域，必須使用 HTTPS、把 Pages origin 加入 `CORS_ALLOW_ORIGINS`，並設 `AUTH_COOKIE_SAMESITE=none`。
+- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；正式環境 MUST 設定獨立值，留空時僅為本機開發退回使用 `JUDGMENT_ADMIN_TOKEN`。
+- 正式自訂網域（`judgment.ragdemo.win` → `api-mbp.ragdemo.win`）為同 site 的不同 origin，使用 `AUTH_COOKIE_SAMESITE=lax` 即可；`*.pages.dev` 預覽與 API 屬不同 site，若需要在預覽站登入，該預覽環境才需 `AUTH_COOKIE_SAMESITE=none` 並確認 HTTPS／CORS。
+- 工作階段 token 含 `jti`；登出會撤銷該 `jti`，即使 cookie 被重播也無法再使用。跨站 `POST /api/auth/logout` 會被拒絕。
 - 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie。
 - 未設定 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 時，header 仍會顯示登入按鈕，但會提示 Google 登入尚未設定；原有管理權杖與本機管理模式不受影響。
 

@@ -591,6 +591,7 @@ def test_demo_schema_suggest_blocks_sensitive_paths(
         ).status_code
         == 200
     )
+    app.state.demo_query_session_factory = app.state.session_factory
     parquet_path = str(tmp_path / "secret-laws.parquet")
     with app.state.session_factory() as session:
         session.add(
@@ -908,6 +909,90 @@ def test_demo_query_uses_readonly_session_factory(demo_client) -> None:
     )
     assert response.status_code == 200
     assert response.json()["database"] == "postgres"
+
+
+def test_demo_data_endpoints_use_restricted_session_factory(
+    demo_client, monkeypatch
+) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    app.state.demo_query_session_factory = None
+    assert client.get(
+        "/api/data/suggest", params={"kind": "law_name"}
+    ).status_code == 403
+    assert client.get(
+        "/api/judgment", params={"jid": "TEST", "source": "postgres"}
+    ).status_code == 403
+    assert client.get(
+        "/api/law", params={"law_key": "銀行法"}
+    ).status_code == 403
+    assert client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+        },
+    ).status_code == 403
+
+    sentinel = object()
+    app.state.demo_query_session_factory = sentinel
+    seen = {}
+
+    def spy(name):
+        def capture(**kwargs):
+            seen[name] = kwargs.get("session_factory") is sentinel
+            return {"ok": True}
+
+        return capture
+
+    monkeypatch.setattr(app_module, "data_suggestions", spy("data"))
+    monkeypatch.setattr(app_module, "get_judgment_detail", spy("judgment"))
+    monkeypatch.setattr(app_module, "get_law_detail", spy("law"))
+    monkeypatch.setattr(app_module, "schema_suggestions", spy("schema"))
+
+    assert client.get(
+        "/api/data/suggest", params={"kind": "law_name"}
+    ).status_code == 200
+    assert client.get(
+        "/api/judgment", params={"jid": "TEST", "source": "postgres"}
+    ).status_code == 200
+    assert client.get(
+        "/api/law", params={"law_key": "銀行法"}
+    ).status_code == 200
+    assert client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+        },
+    ).status_code == 200
+    assert seen == {
+        "data": True,
+        "judgment": True,
+        "law": True,
+        "schema": True,
+    }
 
 
 def test_demo_route_feature_mapping_is_explicit() -> None:

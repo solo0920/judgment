@@ -6,7 +6,7 @@
 
 **Last Updated**: 2026-11-21
 
-> **Postscript 2026-11-21**：production 已重啟；Google OAuth 實機登入、demo mode 與 v7 索引皆已完成。admin token／session secret 已輪替；`SameSite=None` 與 server-side session 撤銷仍是未完成項。以下保留 2026-11-19 的評估與當時待辦，目前狀態見 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md)。
+> **Postscript 2026-11-21**：production 已重啟；Google OAuth 實機登入、demo mode 與 v7 索引皆已完成。admin token／session secret 已輪替。2026-11-22 已改為 `SameSite=Lax`、logout 撤銷 `jti`；全裝置撤銷與短 TTL 仍是後續項。以下保留 2026-11-19 的評估與當時待辦，目前狀態見 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md)。
 
 **Applies To**: `#/home`、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、`#/tests`、Google OAuth、SSE、所有 `/api/*` 路由與前端 action 按鈕。
 

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import threading
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2963,6 +2964,88 @@ def test_local_write_requires_trusted_origin_or_no_browser_headers(
     assert same_origin_without_origin.status_code == 200
 
 
+def test_sse_ticket_is_one_time_and_bound_to_client_ip() -> None:
+    from judgment.web.app import _make_sse_ticket, _valid_sse_ticket
+
+    store = {}
+    lock = threading.Lock()
+    ticket = _make_sse_ticket(
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.9",
+        binding="admin:test@example.com",
+    )
+    assert ticket
+    assert not _valid_sse_ticket(
+        ticket,
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.10",
+    )
+    assert _valid_sse_ticket(
+        ticket,
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.9",
+    )
+    assert not _valid_sse_ticket(
+        ticket,
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.9",
+    )
+
+
+def test_sse_ticket_stream_is_single_use(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-sse-token",
+        allow_local_admin_bypass=False,
+        cors_allow_origins=("https://app.example",),
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app, client=("203.0.113.9", 50000)) as remote:
+        rejected = remote.post(
+            "/api/auth/sse-ticket",
+            headers={
+                "X-Judgment-Admin-Token": "secret-sse-token",
+                "Origin": "https://evil.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+        assert rejected.status_code == 403
+        issued = remote.post(
+            "/api/auth/sse-ticket",
+            headers={
+                "X-Judgment-Admin-Token": "secret-sse-token",
+                "Origin": "https://app.example",
+                "Sec-Fetch-Site": "same-site",
+            },
+        )
+        assert issued.status_code == 200
+        assert issued.json()["expires_in"] == 60
+        ticket = issued.json()["ticket"]
+        with remote.stream(
+            "GET", f"/api/events/stream?topic=status&ticket={ticket}"
+        ) as response:
+            assert response.status_code == 200
+            for line in response.iter_lines():
+                if line.startswith("data:"):
+                    break
+        replay = remote.get(
+            f"/api/events/stream?topic=status&ticket={ticket}"
+        )
+        assert replay.status_code in {401, 403}
+
+
 def test_trusted_host_accepts_allowed_hosts_with_ports(web_client) -> None:
     for host in ("127.0.0.1:9200", "localhost:9200", "testserver"):
         response = web_client.get(
@@ -3621,13 +3704,19 @@ def test_google_logout_clears_session(web_client) -> None:
         client.cookies.set("judgment_session", token)
         assert client.get("/api/auth/me").json()["authenticated"] is True
 
+        cross_site = client.post(
+            "/api/auth/logout",
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+        assert cross_site.status_code == 403
+
         logout = client.post("/api/auth/logout")
         assert logout.status_code == 200
         assert logout.json()["ok"] is True
         set_cookie = logout.headers.get("set-cookie", "")
         assert "judgment_session=" in set_cookie
         assert "Max-Age=0" in set_cookie
-        client.cookies.delete("judgment_session")
+        client.cookies.set("judgment_session", token)
         assert client.get("/api/auth/me").json()["authenticated"] is False
 
 
