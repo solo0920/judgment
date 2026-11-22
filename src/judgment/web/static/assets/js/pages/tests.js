@@ -15,7 +15,7 @@ import {
   testApiConnection,
 } from "../api.js";
 import {
-  SITE_DESCRIPTION,
+  SITE_TITLE,
   escapeHtml,
   formatDateTime,
   icon,
@@ -969,7 +969,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
   });
 
   if (!embedded && typeof ctx?.setTitle === "function") {
-    ctx.setTitle(SITE_DESCRIPTION);
+    ctx.setTitle(SITE_TITLE);
   }
 
   return () => {

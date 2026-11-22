@@ -3773,9 +3773,11 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
         "透過 AI 語意檢索與分析，協助快速查找相關案例、理解法律爭點，"
         "並提供具參考價值的判決分析。"
     )
+    title = "Judgment｜金融法律判決 RAG AI 智慧分析平台"
+    assert len(title) <= 35
     for page in (source_index, index):
         assert f'content="{description}"' in page
-        assert f"<title>{description}</title>" in page
+        assert f"<title>{title}</title>" in page
         assert 'property="og:description"' in page
         assert 'property="og:title"' in page
     assert re.search(
@@ -3803,8 +3805,8 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     app_js = (
         root / "src" / "judgment" / "web" / "static" / "assets" / "js" / "app.js"
     ).read_text(encoding="utf-8")
-    assert f'"{description}"' in utils_js
-    assert "document.title = SITE_DESCRIPTION" in app_js
+    assert f'"{title}"' in utils_js
+    assert "document.title = SITE_TITLE" in app_js
 
     bundle = frontend / "assets" / "js" / "app.js"
     assert bundle.is_file()

@@ -7,7 +7,7 @@ import {
 } from "../api.js";
 import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import {
-  SITE_DESCRIPTION,
+  SITE_TITLE,
   emptyState,
   escapeHtml,
   formatBytes,
@@ -2859,7 +2859,7 @@ export async function render(root, ctx) {
   void loadIndexedDbInfo({ quiet: true });
 
   if (ctx && typeof ctx.setTitle === "function") {
-    ctx.setTitle(SITE_DESCRIPTION);
+    ctx.setTitle(SITE_TITLE);
   }
 
   return () => {

@@ -2,7 +2,7 @@ import { api, subscribeRefresh } from "../api.js";
 import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import { createBenchmarkPanel } from "./benchmark_page.js";
 import {
-  SITE_DESCRIPTION,
+  SITE_TITLE,
   copyText,
   downloadText,
   emptyState,
@@ -3159,7 +3159,7 @@ export async function render(root, ctx) {
   }
 
   if (ctx && typeof ctx.setTitle === "function") {
-    ctx.setTitle(SITE_DESCRIPTION);
+    ctx.setTitle(SITE_TITLE);
   }
 
   return () => {

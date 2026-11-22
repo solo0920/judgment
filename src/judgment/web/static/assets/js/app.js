@@ -15,7 +15,7 @@ import {
   renderDemoLocked,
 } from "./demo.js";
 import {
-  SITE_DESCRIPTION,
+  SITE_TITLE,
   escapeHtml,
   icon,
   initScoreCells,
@@ -135,28 +135,28 @@ async function renderRoute() {
   applyDemoShell();
   if (!isAdmin()) {
     if (route === "admin") {
-      document.title = SITE_DESCRIPTION;
+      document.title = SITE_TITLE;
       main.innerHTML = demoAdminGuardMarkup();
       return;
     }
     if (route === "tests") {
-      document.title = SITE_DESCRIPTION;
+      document.title = SITE_TITLE;
       renderDemoLocked(main, route);
       return;
     }
     if (!demoActive()) {
-      document.title = SITE_DESCRIPTION;
+      document.title = SITE_TITLE;
       renderDemoClosed(main);
       return;
     }
     if (!demoFeature(route)) {
-      document.title = SITE_DESCRIPTION;
+      document.title = SITE_TITLE;
       renderDemoLocked(main, route);
       return;
     }
   }
 
-  document.title = SITE_DESCRIPTION;
+  document.title = SITE_TITLE;
 
   const context = {
     route,
@@ -164,7 +164,7 @@ async function renderRoute() {
       if (ROUTES[next]) window.location.hash = `#/${next}`;
     },
     setTitle() {
-      if (token === routeToken) document.title = SITE_DESCRIPTION;
+      if (token === routeToken) document.title = SITE_TITLE;
     },
   };
 

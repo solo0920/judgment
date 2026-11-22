@@ -13,7 +13,7 @@ import {
   storageMode,
 } from "../store.js";
 import {
-  SITE_DESCRIPTION,
+  SITE_TITLE,
   copyText,
   downloadText,
   emptyState,
@@ -3246,7 +3246,7 @@ export async function render(root, ctx) {
   await loadCatalog();
 
   if (ctx && typeof ctx.setTitle === "function") {
-    ctx.setTitle(SITE_DESCRIPTION);
+    ctx.setTitle(SITE_TITLE);
   }
 
   return () => {
