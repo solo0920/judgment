@@ -78,7 +78,7 @@ POST /api/rag/share
 ## 5. Auth／security 現況
 
 - 管理員：`solo4study@gmail.com` Google session，或 `X-Judgment-Admin-Token` break-glass token。
-- Session：HttpOnly signed cookie，絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`），production `SameSite=Lax`；token 含 `jti` 與 `sv`（session epoch）。logout 會撤銷單一 `jti`；「登出所有裝置」會推進該帳號 epoch，所有既有 cookie 立即失效。沒有 `sv` 的舊 token 一律拒絕。
+- Session：HttpOnly signed cookie，絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`），production `SameSite=Lax`；token 含 `jti` 與 `sv`（session epoch）。logout 會撤銷單一 `jti`；「登出所有裝置」會推進該帳號 epoch，所有既有 cookie 立即失效。沒有 `sv` 的舊 token 一律拒絕。production Google 登入要求至少 32 字元且不同於 admin token 的 `AUTH_SESSION_SECRET`，否則啟動與 `--check-config` fail fast。
 - `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET` 已於 2026-11-21 輪替；舊值失效。
 - 管理 token 存在瀏覽器 `sessionStorage`，舊 `localStorage` 值會遷移並刪除。
 - SSE ticket：60 秒、一次性 `jti`、綁 client IP（IPv6 /64）與 principal binding；access log 會將 `ticket`、OAuth `code`／`state` 等敏感 query 遮蔽為 `[redacted]`。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。

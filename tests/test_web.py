@@ -4645,6 +4645,7 @@ def test_google_start_uses_loopback_callback_for_local_console(web_client) -> No
         google_oauth_redirect_uri=(
             "https://api-mbp.ragdemo.win/api/auth/google/callback"
         ),
+        auth_session_secret="s" * 40,
         admin_token="test-secret",
     )
     app = create_app(

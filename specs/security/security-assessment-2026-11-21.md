@@ -644,7 +644,7 @@ docker exec judgment-postgres psql -U judgment -d judgment -tAc \
 
 ### P2-11 `SESSION-01`：7 天 stateless session，無撤銷與輪替
 
-> **2026-11-22 更新（已修復大部分）**：session 已加入 `jti`／`sv`、TTL 縮短為 12 小時、支援 `POST /api/auth/logout-all`，登入／登出與 admin 操作已寫入 `security_audit_events`。仍待辦：`AUTH_SESSION_SECRET` production fail-fast、異常頻率告警。以下為當時發現。
+> **2026-11-22 更新（已修復）**：session 已加入 `jti`／`sv`、TTL 縮短為 12 小時、支援 `POST /api/auth/logout-all`，登入／登出與 admin 操作已寫入 `security_audit_events`；production `AUTH_SESSION_SECRET` 已 fail-fast。僅剩異常頻率告警。以下為當時發現。
 
 **證據**
 
