@@ -83,7 +83,7 @@ POST /api/rag/share
 - 管理 token 存在瀏覽器 `sessionStorage`，舊 `localStorage` 值會遷移並刪除。
 - SSE ticket：60 秒、一次性 `jti`、綁 client IP（IPv6 /64）與 principal binding；access log 會將 `ticket`、OAuth `code`／`state` 等敏感 query 遮蔽為 `[redacted]`。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。
 - CSP 已 enforce；有 `X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`；`report-uri` 已接 `/api/csp-report`，`report-to` 尚未設定。CSP 仍允許 Google Fonts 與 production `connect-src` 的 localhost。
-- 未完成：SESSION-01 全裝置撤銷／短 TTL、AUDIT-01、HSTS 延長、`report-to`、PRIV-01、DB-ROLE-01 完整降權。
+- 未完成：SESSION-01 全裝置撤銷／短 TTL、AUDIT-01、HSTS 延長、`report-to`、PRIV-01。DB-ROLE-01 已完成主應用降權。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。
 
 ## 6. 查詢索引
@@ -96,7 +96,7 @@ POST /api/rag/share
 
 - PostgreSQL dump 使用 age 加密（`postgres/judgment.dump.age`）；`.env` 不進備份；`data/` 與 Qdrant snapshot 仍為明文。
 - 已完成完整備份與 subset restore；完整 157 GB＋Qdrant restore drill 尚未執行。
-- `demo_reader` 已建立並限制；主應用仍使用 `judgment`，目前 `rolsuper=t`、`rolcreatedb=t`。APP-DB-01 尚未完成。
+- 主應用已改用 `judgment_app`：`rolsuper=f`、`rolcreatedb=f`、`rolcreaterole=f`，擁有 public tables／sequences；`judgment` superuser 僅保留給 break-glass／備份／初次建立。`demo_reader` 仍為受限角色。Provision／回滾見 `specs/security/app-db-role-runbook.md`。
 - age 私鑰：`~/.config/judgment/age.key`，權限 `600`，不可進 repo／備份。
 
 ## 8. 文件狀態規則

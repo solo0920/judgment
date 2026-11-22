@@ -37,7 +37,7 @@
 | AUTH-02 | 題庫狀態機 | 不可直接建立／更新為 accepted | 狀態轉換 API 測試、角色矩陣 | `not_started` | 工程／法律審閱 |
 | AUTH-03 | Google 帳號登入 | 僅 allowlist 內且 email_verified 的 Google 帳號可取得管理員 session；state／CSRF／cookie 安全 | OAuth start／callback、allowlist 拒絕、HttpOnly／SameSite、remote session 測試 | `verified`（Google 實機登入、state／cookie、allowlist、remote session 已驗證） | 工程 |
 | TOKEN-01 | 管理權杖生命週期 | 靜態 token 可輪替；不因 XSS 長期取得管理權 | token 儲存位置、輪替、舊值失效、session 撤銷 | `partial`（sessionStorage、token／session secret 已輪替；session token 有 `jti`，logout 會撤銷；尚無全裝置撤銷與短 TTL） | 工程 |
-| DB-ROLE-01 | 主應用 PostgreSQL 權限 | 應用角色不得是 superuser／createdb | `rolsuper=f`、`rolcreatedb=f`、`COPY PROGRAM` 失敗 | `partial`（`demo_reader` 已受限；demo data endpoints 改用受限 session；主應用 `judgment` 仍 `rolsuper=t`、`rolcreatedb=t`） | 工程／DB |
+| DB-ROLE-01 | 主應用 PostgreSQL 權限 | 應用角色不得是 superuser／createdb | `rolsuper=f`、`rolcreatedb=f`、`COPY PROGRAM` 失敗 | `verified`（主應用改用 `judgment_app`：`rolsuper=f`、`rolcreatedb=f`、`rolcreaterole=f`；擁有 33 張 public tables；`COPY PROGRAM`／`pg_read_file`／`CREATE DATABASE` 失敗；`demo_reader` 仍受限。見 `app-db-role-runbook.md`） | 工程／DB |
 | DATA-01 | RAG 問題與答案保留 | 有保留天數與遮罩 | retention job／DB policy／備份清單 | `partial`（90 天 prune 存在，但每 200 次寫入才觸發；備份保留政策待定） | PM／工程 |
 | SUP-01 | 供應鏈 | 依賴與 image 可重現、無高風險 CVE | pip-audit、SBOM、digest pinning、npx 固定版 | `implemented`（CI／Dependabot／SBOM／digest／esbuild pin；pyarrow 25.0.1、pytest 9.2.0，pip-audit 無 ignore；gitleaks 全歷史 0 credential leaks；Actions SHA pin／frozen lock／branch protection 待補） | 工程 |
 | HIST-01 | Git history | push 前 history 搜不到公開網域與內部連接埠；不含憑證 | `git log -S`／`git log -p` 掃描；gitleaks 全歷史 0 credential leaks，但歷史仍有 host/ports | `partial` | 工程 |

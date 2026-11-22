@@ -165,7 +165,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 > PostgreSQL 的索引版本、`judgment_vector_index` 與 Qdrant collection 必須一起還原。若只還原 Qdrant，仍需有 PostgreSQL 的 `judgment_documents` 才能重新建立索引；若只還原 PostgreSQL，Qdrant 會是空的，且 `judgment_index_versions` 可能仍標示 active，索引器不一定會自動重建。還原時 `restore.sh` 會依 manifest 的 alias mapping 重建 `judgments_current`；若刻意只還原部分元件，應先清除或退役 `judgment_index_versions` 與 `judgment_vector_index` 的對應版本，再重新建立 collection 與 alias。
 
-以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設要求 age 加密成 `postgres/judgment.dump.age`；未設定 `BACKUP_AGE_RECIPIENT` 會直接失敗，只有明確加 `--allow-unencrypted` 才能產生明文 dump。還原時需要對應的 `BACKUP_AGE_IDENTITY`，且 `restore.sh` 不會自動套用備份內的 `.env`。
+以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設要求 age 加密成 `postgres/judgment.dump.age`；未設定 `BACKUP_AGE_RECIPIENT` 會直接失敗，只有明確加 `--allow-unencrypted` 才能產生明文 dump。還原時需要對應的 `BACKUP_AGE_IDENTITY`，且 `restore.sh` 不會自動套用備份內的 `.env`。`restore.sh` 會在清除 schema 前確認 `judgment_app` 存在，還原後把 public tables／sequences ownership 轉移給它；`demo_reader` grants 需依 demo runbook 重新套用。
 
 ## 設定
 
@@ -173,7 +173,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 | 環境變數 | 預設值 | 說明 |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql+psycopg://judgment:judgment@localhost:5432/judgment` | PostgreSQL 連線字串；正式環境請使用強密碼 |
+| `DATABASE_URL` | `postgresql+psycopg://judgment_app:<password>@localhost:5432/judgment` | 主應用連線字串；production 使用 `NOSUPERUSER/NOCREATEDB/NOCREATEROLE` 的 `judgment_app`，不要使用 superuser `judgment` |
 | `POSTGRES_PASSWORD` | `change-me` | Docker Compose 初始化 PostgreSQL 的密碼；`.env.example` 要求自行設定 |
 | `JUDGMENT_PG_PASSWORD` | 空 | `backup.sh`／`restore.sh` 使用的 PostgreSQL 密碼；未設定時沿用 `POSTGRES_PASSWORD` |
 | `BACKUP_AGE_RECIPIENT` | 空 | age 公鑰；設定後 PostgreSQL dump 會加密成 `.age` |
@@ -1148,7 +1148,7 @@ AUTH_COOKIE_SECURE=auto
 - 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie。
 - 未設定 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 時，header 仍會顯示登入按鈕，但會提示 Google 登入尚未設定；原有管理權杖與本機管理模式不受影響。
 
-目前程式與文件的對照基準見 [`docs/code-alignment-2026-11-21.md`](docs/code-alignment-2026-11-21.md)。安全驗收狀態與證據見 [`specs/security/security-acceptance-matrix.md`](specs/security/security-acceptance-matrix.md)；2026-11-22 的資安提升評估與整改路線圖見 [`specs/security/security-improvement-assessment-2026-11-22.md`](specs/security/security-improvement-assessment-2026-11-22.md)。未完成的部署項不會因程式測試通過而標成 verified。
+目前程式與文件的對照基準見 [`docs/code-alignment-2026-11-21.md`](docs/code-alignment-2026-11-21.md)。安全驗收狀態與證據見 [`specs/security/security-acceptance-matrix.md`](specs/security/security-acceptance-matrix.md)；2026-11-22 的資安提升評估與整改路線圖見 [`specs/security/security-improvement-assessment-2026-11-22.md`](specs/security/security-improvement-assessment-2026-11-22.md)；主應用 DB 角色 provision／回滾見 [`specs/security/app-db-role-runbook.md`](specs/security/app-db-role-runbook.md)。未完成的部署項不會因程式測試通過而標成 verified。
 
 每次開機或部署後可跑 listener 回歸檢查；`up.sh` 在啟動 web 前也會自動執行，失敗會拒絕啟動：
 

@@ -401,7 +401,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 階段 | 項目 | 驗收條件 |
 | --- | --- | --- |
 | **24h（最高優先）** | SEC-01、SEC-02、SEC-03、SEC-04、INFRA-01（已修復） | 分享後查 `/api/performance` 無 token；anonymous schema suggest 無絕對路徑；deep-scrub 測試通過；4 處 escape 測試通過；惡意 filename 無法寫出 raw_dir |
-| **1 週（P1）** | AUTH-01、AUTH-02、AUTH-04、INFRA-02、INFRA-03、INFRA-04、INFRA-05、INFRA-09 | demo endpoints 使用受限 DB；SSE ticket 一次性；SameSite=Lax；備份 secret 不進 cmdline；加密 fail-closed；restore 不自動覆寫 `.env`；DB role 降權 |
+| **1 週（P1）** | AUTH-01、AUTH-02、AUTH-04、INFRA-02、INFRA-03、INFRA-04、INFRA-09（已修復）；INFRA-05（後續） | demo endpoints 使用受限 DB；SSE ticket 一次性；SameSite=Lax；備份 secret 不進 cmdline；加密 fail-closed；restore 不自動覆寫 `.env`；DB role 降權完成 |
 | **下次展示前（P2）** | BAK-02、ABUSE-01、OPS-01、PRIV-01、NET-05、HIST-01、SEC-05、SEC-06 | 完整還原成功；429／edge 規則驗證；HSTS/report-to 補齊；字型自託管；防火牆開啟；HIST 決策簽核 |
 | **後續（P3）** | SESSION-01、AUDIT-01、AUTH-05、AUTH-06、OPS-04、INFRA-06/07/08/10 | session 可撤銷；安全稽核上線；CI 完全 pin |
 
@@ -524,6 +524,17 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 
 - `restore.sh` 不再自動覆寫 `.env`；若備份含 `config/.env`，只提示操作員人工比對並從密鑰管理器設定。
 
+#### INFRA-09 — 已修復
+
+- 建立 `judgment_app`：`NOSUPERUSER`、`NOCREATEDB`、`NOCREATEROLE`。
+- `public` schema `USAGE, CREATE`；33 張 public tables／sequences ownership 轉移給 `judgment_app`。
+- `DATABASE_URL` 已切換至 `judgment_app`；`judgment` superuser 僅保留給 break-glass／備份／初次建立，不再供 FastAPI 使用。
+- 驗證：`rolsuper=f`、`rolcreatedb=f`、`rolcreaterole=f`；`COPY PROGRAM`、`pg_read_file`、`CREATE DATABASE` 失敗；`ALTER TABLE`、`/api/home`、`/api/status`、`/api/query`、`/api/law`、`/api/judgment`、`/api/rag/share`、`PUT /api/admin/demo` 正常。
+- Restore ownership 演練：schema dump → scratch DB restore → ownership transfer，33/33 public tables 轉為 `judgment_app`，再 drop scratch DB。
+- `judgment_raw_parquet.py` 的 `COPY ... TO file` 是 DuckDB 在應用程式行程內寫檔，不是 PostgreSQL server-side COPY；不需要保留 `pg_write_server_files`。
+- `restore.sh` 在 destructive restore 前確認 `judgment_app` 存在，還原後將 public tables／sequences ownership 轉移給它；`pg_restore --no-privileges` 不會還原的 `demo_reader` grants 仍需依 demo runbook 重新套用。
+- Runbook：`specs/security/app-db-role-runbook.md`；回滾檔：`.run/env.before-db-role`（600）。
+
 #### 驗證結果（2026-11-22）
 
 - **Demo 資料隔離**：正式站 `/api/data/suggest`、`/api/law`、`/api/judgment`、`/api/query` 正常；`/api/judgment` 的 `source_archive`／`import_run_id` 對 demo 為 `None`；`/api/query` 的 `judgment_documents` columns 不含 `source_archive`。
@@ -541,7 +552,6 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 
 - **AUTH-03 完整版**：全裝置撤銷、短 TTL、session secret production fail-fast。SSE `jti` 仍為 in-memory，重啟後最多重新開放 60 秒的 replay 窗口；每次簽發會清除過期項目。
 - **INFRA-05**：llama-server host probe 的 DNS rebinding／IP pinning；需要修改 transport，另開批次。
-- **INFRA-09**：主應用 DB role 降權；因 `judgment_raw_parquet.py` 使用 server-side `COPY ... TO file`，需同步改寫或分離 migration/export role，屬維護窗口工作。
 - AUTH-05～08、OPS-01～05 等見第 4 節路線圖。
 
 ---
@@ -555,3 +565,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 修復 SEC-03（分享 payload deep scrub）、SEC-04（索引與法規 metadata escape）、INFRA-01（下载档名 basename／archive path 限制），補回歸測試。 |
 | 2026-11-22 | 第二批：AUTH-01 demo DB session 隔離、AUTH-02 一次性 SSE ticket、AUTH-03 logout jti 撤銷、AUTH-04 SameSite／logout／admin-token Origin、INFRA-02 備份密碼不進 cmdline、INFRA-03 加密預設 fail-closed、INFRA-04 restore 不自動覆寫 `.env`。 |
 | 2026-11-22 | 驗證：demo_reader 負向測試、毒化主連線測試、admin token 關閉／重開、SSE 重播與日誌遮蔽、session 撤銷 DB 檢查、schema dump/restore、加密 fail-closed。Google 實機登入成功；另修補 OAuth code／state access-log 洩漏並清理舊 log。 |
+| 2026-11-22 | INFRA-09：主應用改用 `judgment_app`（NOSUPERUSER/NOCREATEDB/NOCREATEROLE），ownership 轉移，完整讀寫與負向測試通過；新增 `app-db-role-runbook.md`。 |

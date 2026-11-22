@@ -374,12 +374,40 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
       || die "age 解密 PostgreSQL dump 失敗"
     PG_RESTORE_FILE="$PG_RESTORE_TMP"
   fi
+  APP_DB_ROLE="${JUDGMENT_APP_DB_ROLE:-judgment_app}"
+  [[ "$APP_DB_ROLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+    || die "JUDGMENT_APP_DB_ROLE 不是合法識別字：$APP_DB_ROLE"
+  ROLE_EXISTS="$(pg_compose_exec "$PG_SERVICE" \
+    psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "select 1 from pg_roles where rolname = '$APP_DB_ROLE';" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$ROLE_EXISTS" == "1" ]] \
+    || die "找不到 $APP_DB_ROLE；請先建立 NOSUPERUSER 應用角色再還原"
   pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
     -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' >/dev/null
   pg_compose_exec "$PG_SERVICE" \
     pg_restore -U "$PG_USER" -d "$PG_DB" \
     --no-owner --no-privileges --exit-on-error < "$PG_RESTORE_FILE"
+  pg_compose_exec "$PG_SERVICE" \
+    psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 <<SQL
+GRANT CONNECT ON DATABASE "$PG_DB" TO "$APP_DB_ROLE";
+GRANT USAGE, CREATE ON SCHEMA public TO "$APP_DB_ROLE";
+DO \$\$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO %I', r.tablename, '$APP_DB_ROLE');
+  END LOOP;
+  FOR r IN SELECT sequence_name FROM information_schema.sequences
+           WHERE sequence_schema='public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO %I', r.sequence_name, '$APP_DB_ROLE');
+  END LOOP;
+  FOR r IN SELECT viewname FROM pg_views WHERE schemaname='public' LOOP
+    EXECUTE format('ALTER VIEW public.%I OWNER TO %I', r.viewname, '$APP_DB_ROLE');
+  END LOOP;
+END \$\$;
+SQL
+  echo "已將 public tables／sequences 轉移給 $APP_DB_ROLE；pg_restore --no-privileges 不會還原 demo_reader grants，請依 demo-config-runbook.md 重新套用。" >&2
   JUDGMENT_COUNT="$(pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -tAc \
     'select count(*) from judgment_documents;' 2>/dev/null || echo '?')"
