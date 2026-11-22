@@ -546,6 +546,10 @@ uv run judgment-normalize-courts --all
 
 ## Web 主控台
 
+全站分頁標題（Chrome 分頁 hover 顯示）統一使用「Judgment｜金融法律判決智慧分析平台。整合金融法規與法院判決，透過 AI 語意檢索與分析，協助快速查找相關案例、理解法律爭點，並提供具參考價值的判決分析。」。路由切換、展示模式鎖定與頁面非同步更新都不會改成頁面名稱；靜態 `<title>`、`meta description` 與 Open Graph／Twitter 描述使用同一段文字。
+
+Header 品牌標誌以「天平＋電路節點」表達法律／判決與 RAG AI：天平代表法律與裁判，三個節點與連線代表檢索與 AI；字標使用襯線體 `JUDGMENT`，副標使用等寬體 `LEGAL RAG INTELLIGENCE`。品牌連結的無障礙名稱為「Judgment 金融法律判決智慧分析平台 首頁」，`favicon.svg` 使用相同圖形與 `#76b900` 品牌綠。
+
 ### 頁面路由
 
 | 路由 | 頁面 | 功能 |

@@ -259,8 +259,8 @@ body.settings-open .toast-region {
 }
 
 .brand-mark svg {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
 }
 
 .brand-copy {
@@ -270,19 +270,19 @@ body.settings-open .toast-region {
 }
 
 .brand-copy strong {
-  font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
+  font-family: "Noto Serif TC", "Songti TC", Georgia, serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
 }
 
 .brand-copy span {
   margin-top: 4px;
   color: var(--header-muted);
   font-family: var(--font-mono);
-  font-size: 8.5px;
+  font-size: 8px;
   font-weight: 500;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.16em;
 }
 
 .primary-nav {
@@ -1495,7 +1495,7 @@ body.settings-open .settings-sidebar {
 
 .footer-brand strong {
   color: var(--ink);
-  font-family: var(--font-display);
+  font-family: "Noto Serif TC", "Songti TC", Georgia, serif;
   font-size: 12px;
   letter-spacing: 0.06em;
 }
@@ -9598,7 +9598,13 @@ button.chip:hover {
   }
 
   .brand-copy strong {
-    font-size: 12.5px;
+    font-size: 13px;
+    letter-spacing: 0.11em;
+  }
+
+  .brand-copy span {
+    font-size: 7px;
+    letter-spacing: 0.12em;
   }
 
   .header-actions {

@@ -14,7 +14,13 @@ import {
   renderDemoClosed,
   renderDemoLocked,
 } from "./demo.js";
-import { escapeHtml, icon, initScoreCells, toast } from "./utils.js";
+import {
+  SITE_DESCRIPTION,
+  escapeHtml,
+  icon,
+  initScoreCells,
+  toast,
+} from "./utils.js";
 import * as adminPage from "./pages/admin.js";
 import * as homePage from "./pages/home.js";
 import * as ragPage from "./pages/rag.js";
@@ -27,15 +33,15 @@ import * as testsPage from "./pages/tests.js";
 
 const DEFAULT_ROUTE = "home";
 const ROUTES = {
-  home: { page: homePage, title: "Judgment RAG Console · 法規與判決檢索" },
-  rag: { page: ragPage, title: "RAG 提問 · Judgment RAG Console" },
-  data: { page: dataPage, title: "資料庫查詢 · Judgment RAG Console" },
-  quality: { page: qualityPage, title: "資料品質 · Judgment RAG Console" },
-  performance: { page: performancePage, title: "效能報表 · Judgment RAG Console" },
-  processing: { page: processingPage, title: "資料處理 · Judgment RAG Console" },
-  status: { page: statusPage, title: "系統狀態 · Judgment RAG Console" },
-  tests: { page: testsPage, title: "系統測試 · Judgment RAG Console" },
-  admin: { page: adminPage, title: "管理設定 · Judgment RAG Console" },
+  home: { page: homePage },
+  rag: { page: ragPage },
+  data: { page: dataPage },
+  quality: { page: qualityPage },
+  performance: { page: performancePage },
+  processing: { page: processingPage },
+  status: { page: statusPage },
+  tests: { page: testsPage },
+  admin: { page: adminPage },
 };
 
 const main = document.getElementById("app-main");
@@ -129,36 +135,36 @@ async function renderRoute() {
   applyDemoShell();
   if (!isAdmin()) {
     if (route === "admin") {
-      document.title = "管理設定 · Judgment RAG Console";
+      document.title = SITE_DESCRIPTION;
       main.innerHTML = demoAdminGuardMarkup();
       return;
     }
     if (route === "tests") {
-      document.title = "展示模式 · Judgment RAG Console";
+      document.title = SITE_DESCRIPTION;
       renderDemoLocked(main, route);
       return;
     }
     if (!demoActive()) {
-      document.title = "展示目前未開放 · Judgment RAG Console";
+      document.title = SITE_DESCRIPTION;
       renderDemoClosed(main);
       return;
     }
     if (!demoFeature(route)) {
-      document.title = "展示模式 · Judgment RAG Console";
+      document.title = SITE_DESCRIPTION;
       renderDemoLocked(main, route);
       return;
     }
   }
 
-  document.title = ROUTES[route].title;
+  document.title = SITE_DESCRIPTION;
 
   const context = {
     route,
     navigate(next) {
       if (ROUTES[next]) window.location.hash = `#/${next}`;
     },
-    setTitle(title) {
-      if (token === routeToken && title) document.title = title;
+    setTitle() {
+      if (token === routeToken) document.title = SITE_DESCRIPTION;
     },
   };
 

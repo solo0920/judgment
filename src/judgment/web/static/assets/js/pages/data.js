@@ -13,6 +13,7 @@ import {
   storageMode,
 } from "../store.js";
 import {
+  SITE_DESCRIPTION,
   copyText,
   downloadText,
   emptyState,
@@ -3245,7 +3246,7 @@ export async function render(root, ctx) {
   await loadCatalog();
 
   if (ctx && typeof ctx.setTitle === "function") {
-    ctx.setTitle("資料庫查詢 · Judgment RAG Console");
+    ctx.setTitle(SITE_DESCRIPTION);
   }
 
   return () => {

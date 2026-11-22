@@ -2,6 +2,7 @@ import { api, subscribeRefresh } from "../api.js";
 import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import { createBenchmarkPanel } from "./benchmark_page.js";
 import {
+  SITE_DESCRIPTION,
   copyText,
   downloadText,
   emptyState,
@@ -3158,7 +3159,7 @@ export async function render(root, ctx) {
   }
 
   if (ctx && typeof ctx.setTitle === "function") {
-    ctx.setTitle("效能報表 · Judgment RAG Console");
+    ctx.setTitle(SITE_DESCRIPTION);
   }
 
   return () => {

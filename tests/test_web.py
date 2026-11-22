@@ -516,6 +516,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "© 2026 Judgment RAG Console" in page.text
     assert 'data-route="performance"' in page.text
     assert 'data-route="quality"' in page.text
+    assert 'aria-label="Judgment 金融法律判決智慧分析平台 首頁"' in page.text
+    assert "LEGAL RAG INTELLIGENCE" in page.text
+    assert "M4.2 17.1a2.6 2.6 0 0 0 5.2 0" in page.text
 
     boot_js = web_client.get("/assets/js/boot.js")
     assert boot_js.status_code == 200
@@ -848,6 +851,8 @@ def test_static_console_is_served(web_client) -> None:
     favicon = web_client.get("/favicon.svg")
     assert favicon.status_code == 200
     assert favicon.headers["content-type"].startswith("image/svg")
+    assert 'fill="#76b900"' in favicon.text
+    assert "M4.2 17.1a2.6 2.6 0 0 0 5.2 0" in favicon.text
 
 
 def test_index_versions_endpoint_returns_alias(web_client) -> None:
@@ -3770,6 +3775,7 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     )
     for page in (source_index, index):
         assert f'content="{description}"' in page
+        assert f"<title>{description}</title>" in page
         assert 'property="og:description"' in page
         assert 'property="og:title"' in page
     assert re.search(
@@ -3790,6 +3796,15 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     config = (frontend / "config.js").read_text(encoding="utf-8")
     assert "window.JUDGMENT_CONFIG" in config
     assert "apiBase:" in config
+
+    utils_js = (
+        root / "src" / "judgment" / "web" / "static" / "assets" / "js" / "utils.js"
+    ).read_text(encoding="utf-8")
+    app_js = (
+        root / "src" / "judgment" / "web" / "static" / "assets" / "js" / "app.js"
+    ).read_text(encoding="utf-8")
+    assert f'"{description}"' in utils_js
+    assert "document.title = SITE_DESCRIPTION" in app_js
 
     bundle = frontend / "assets" / "js" / "app.js"
     assert bundle.is_file()

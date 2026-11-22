@@ -1,5 +1,8 @@
 /* Shared DOM, formatting and feedback helpers. */
 
+export const SITE_DESCRIPTION =
+  "Judgment｜金融法律判決智慧分析平台。整合金融法規與法院判決，透過 AI 語意檢索與分析，協助快速查找相關案例、理解法律爭點，並提供具參考價值的判決分析。";
+
 const ESCAPE_MAP = {
   "&": "&amp;",
   "<": "&lt;",

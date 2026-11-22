@@ -14,7 +14,14 @@ import {
   subscribeRefresh,
   testApiConnection,
 } from "../api.js";
-import { escapeHtml, formatDateTime, icon, setBusy, toast } from "../utils.js";
+import {
+  SITE_DESCRIPTION,
+  escapeHtml,
+  formatDateTime,
+  icon,
+  setBusy,
+  toast,
+} from "../utils.js";
 import { renderTestFlowPanel } from "./performance.js";
 
 const API_SOURCE_LABELS = {
@@ -962,7 +969,7 @@ export async function render(root, ctx, { embedded = false } = {}) {
   });
 
   if (!embedded && typeof ctx?.setTitle === "function") {
-    ctx.setTitle("系統測試 · Judgment RAG Console");
+    ctx.setTitle(SITE_DESCRIPTION);
   }
 
   return () => {
