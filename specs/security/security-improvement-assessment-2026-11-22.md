@@ -587,3 +587,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | AUDIT-01 強化：未驗證失敗事件每 IP／每日上限、稽核建構／寫入失敗不阻塞請求、只記 path 不記 query string、前端 escape 測試；展示已關閉。 |
 | 2026-11-22 | 小規模備份演練：scratch DB schema → `backup.sh` → age 加解密 → checksum → 第二個 scratch DB `pg_restore`，34 tables 成功；完整 157 GB＋Qdrant drill 仍待維護窗口。 |
 | 2026-11-22 | SUP-01／OPS-04：Actions SHA pin、`persist-credentials: false`、`uv sync --frozen`、gitleaks 自訂規則與 negative control、main branch protection；本機全歷史掃描 305 commits、0 leaks。 |
+| 2026-11-22 | DATA-01：每日保留維護（performance 90 天、audit 180 天、分享快照 7 天），隱私文案與 `data-retention.md` 同步；備份 90 天輪替列為維運政策。 |

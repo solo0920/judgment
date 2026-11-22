@@ -83,6 +83,7 @@ POST /api/rag/share
 - 管理 token 存在瀏覽器 `sessionStorage`，舊 `localStorage` 值會遷移並刪除。
 - SSE ticket：60 秒、一次性 `jti`、綁 client IP（IPv6 /64）與 principal binding；access log 會將 `ticket`、OAuth `code`／`state` 等敏感 query 遮蔽為 `[redacted]`。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。
 - 安全稽核：`security_audit_events` 記錄 Google login 成功／失敗、logout、admin token 使用與 admin write；`GET /api/admin/security-audit` 提供最近事件，保留 180 天。client IP 以 keyed hash 儲存，不記錄 token／OAuth code／state 或 query string；未驗證失敗事件有每 IP／每日上限，稽核寫入或建構失敗不阻塞請求。正式站已驗證事件寫入與 `judgment_app` table ownership。
+- 資料保留：每日背景維護清理 `performance_records`（90 天）、`security_audit_events`（180 天）與過期 `rag_share_snapshots`（7 天）；備份依 90 天輪替政策由維運刪除。完整矩陣見 `specs/security/data-retention.md`。
 - CSP 已 enforce；有 `X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`；`report-uri` 已接 `/api/csp-report`，`report-to` 尚未設定。CSP 仍允許 Google Fonts 與 production `connect-src` 的 localhost。
 - 未完成：AUTH-05～08、OPS-01～05、HSTS 延長、`report-to`、PRIV-01。SESSION-01、AUDIT-01、DB-ROLE-01 已完成。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。

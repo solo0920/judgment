@@ -1564,7 +1564,7 @@ export async function render(root) {
             <div class="rag-library-empty">讀取本機紀錄中…</div>
           </div>
           <div class="rag-library-foot" id="rag-storage-note">
-            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器會保留提問與回答文字 90 天用於效能與品質分析。
+            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答文字 90 天、安全稽核事件 180 天；備份依 90 天輪替政策由維運刪除，程式不自動刪除備份。
           </div>
         </section>
       </aside>
@@ -1591,7 +1591,7 @@ export async function render(root) {
         <textarea class="ask-input" id="rag-question" name="question" rows="3"
           maxlength="500" placeholder="例如：金融消費者保護法如何處理金融消費爭議？"
           aria-describedby="rag-input-help"></textarea>
-        <p class="ask-privacy-note">請勿輸入個人資料；提問與回答文字會保留 90 天用於效能與品質分析。</p>
+        <p class="ask-privacy-note">請勿輸入個人資料；提問與回答保留 90 天、安全稽核保留 180 天；備份依 90 天輪替政策管理。</p>
         <div class="ask-footer">
           <div class="ask-hints" id="rag-input-help">
             <span><kbd>Enter</kbd> 送出</span>
@@ -2374,7 +2374,7 @@ export async function render(root) {
       renderLibrary();
       storageNote.textContent =
         storageMode() === "indexeddb"
-          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案，伺服器會保留提問與回答文字 90 天用於效能與品質分析。"
+          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答文字 90 天、安全稽核事件 180 天；備份依 90 天輪替政策管理。"
           : "瀏覽器儲存不可用，提問紀錄只保留在本次工作階段。";
     } catch (error) {
       if (disposed) return;
