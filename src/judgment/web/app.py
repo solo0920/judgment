@@ -252,6 +252,7 @@ from .query import (
     run_query,
     schema_suggestions,
 )
+from .maintenance import run_retention_maintenance
 from .security_audit import (
     SECURITY_AUDIT_RETENTION_DAYS,
     list_security_events,
@@ -1724,6 +1725,7 @@ def create_app(
         coverage_task: Optional[asyncio.Task] = None
         staleness_task: Optional[asyncio.Task] = None
         rerank_task: Optional[asyncio.Task] = None
+        maintenance_task: Optional[asyncio.Task] = None
         rag_executor = ThreadPoolExecutor(
             max_workers=max(
                 1, int(app.state.settings.rag_stream_executor_workers)
@@ -1961,11 +1963,34 @@ def create_app(
                     )
                 await asyncio.sleep(interval)
 
+        async def retention_maintenance_loop() -> None:
+            while True:
+                try:
+                    result = await asyncio.to_thread(
+                        run_retention_maintenance,
+                        app.state.session_factory,
+                    )
+                    if any(result.values()):
+                        logger.info(
+                            "retention maintenance pruned: %s", result
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "retention maintenance failed", exc_info=True
+                    )
+                await asyncio.sleep(24 * 60 * 60)
+
         try:
             if not app.state.settings.disable_background_tasks:
                 await app.state.processing_event_server.start()
                 warm_task = asyncio.create_task(warm_processing_snapshots())
                 read_cache_task = asyncio.create_task(warm_read_caches())
+                if owns_session_factory:
+                    maintenance_task = asyncio.create_task(
+                        retention_maintenance_loop()
+                    )
                 if (
                     owns_session_factory
                     and app.state.settings.rag_coverage_warmup_enabled
@@ -1987,6 +2012,7 @@ def create_app(
                 coverage_task,
                 staleness_task,
                 rerank_task,
+                maintenance_task,
             ):
                 if task is not None:
                     task.cancel()

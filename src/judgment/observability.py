@@ -615,6 +615,38 @@ def _summary_flow(
     }
 
 
+def performance_retention_days() -> int:
+    try:
+        return max(1, int(os.getenv("PERFORMANCE_RETENTION_DAYS", "90")))
+    except (TypeError, ValueError):
+        return 90
+
+
+def prune_performance_records(
+    session_factory, *, retention_days: Optional[int] = None
+) -> int:
+    if session_factory is None:
+        return 0
+    days = (
+        max(1, int(retention_days))
+        if retention_days is not None
+        else performance_retention_days()
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        with session_factory() as session:
+            result = session.execute(
+                delete(PerformanceRecord).where(
+                    PerformanceRecord.started_at < cutoff
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+    except Exception as exc:  # pragma: no cover - maintenance only
+        logger.warning("failed to prune performance records: %s", exc)
+        return 0
+
+
 def record_performance(
     session_factory,
     *,
@@ -679,20 +711,7 @@ def record_performance(
         global _write_count
         _write_count += 1
         if _write_count % 200 == 0:
-            try:
-                days = max(
-                    1, int(os.getenv("PERFORMANCE_RETENTION_DAYS", "90"))
-                )
-                cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-                with session_factory() as session:
-                    session.execute(
-                        delete(PerformanceRecord).where(
-                            PerformanceRecord.started_at < cutoff
-                        )
-                    )
-                    session.commit()
-            except Exception as exc:  # pragma: no cover - maintenance only
-                logger.warning("failed to prune performance records: %s", exc)
+            prune_performance_records(session_factory)
         return record_id
     except Exception as exc:  # observability must never break the request
         logger.warning("failed to write performance record: %s", exc)
