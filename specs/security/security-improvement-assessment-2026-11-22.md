@@ -562,6 +562,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **Access log 遮蔽**：新 log 對 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` 顯示 `[redacted]`；舊 `.run/web.log.*-pre-redaction` 已清理並維持 600。
 - **安全稽核**：正式站以 admin token 觸發 `auth.admin_token` 與 `admin.write`，`GET /api/admin/security-audit` 回傳事件；`security_audit_events` owner 為 `judgment_app`；回應不含 admin token／Bearer。Google login 成功／失敗事件由 pytest 覆蓋，下一次實際登入會寫入。
 - **Session 撤銷**：正式站以兩個獨立 `jti` 驗證；`POST /api/auth/logout-all` 回 200／`revoked=all`，兩個舊 token 的 `/api/auth/me` 都變成 `authenticated=false`；無 session 時回 200／`revoked=none`；epoch 由 0 變 1，`auth.logout_all` 已寫入稽核。
+- **Chrome／Safari 實機驗收（2026-11-22）**：使用者分別在 Chrome 與 Safari 完成 Google 登入；`security_audit_events` 顯示 2 次 `auth.google_login` success（13:32、13:34 UTC，同一 allowlist 帳號），期間 `PUT /api/admin/demo` 與 `POST /api/admin/demo/close` 成功，並有 1 次 `auth.logout_all` success。最終 demo disabled，匿名 `/api/rag/query` 與 `/api/status` 均為 403。
 - **pages.dev 預覽**：Lax 下預覽站與 API 不同 site，預覽登入會失效；已寫入 runbook，production 不受影響。
 
 #### 仍待處理
@@ -588,3 +589,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 小規模備份演練：scratch DB schema → `backup.sh` → age 加解密 → checksum → 第二個 scratch DB `pg_restore`，34 tables 成功；完整 157 GB＋Qdrant drill 仍待維護窗口。 |
 | 2026-11-22 | SUP-01／OPS-04：Actions SHA pin、`persist-credentials: false`、`uv sync --frozen`、gitleaks 自訂規則與 negative control、main branch protection；本機全歷史掃描 305 commits、0 leaks。 |
 | 2026-11-22 | DATA-01：每日保留維護（performance 90 天、audit 180 天、分享快照 7 天），隱私文案與 `data-retention.md` 同步；備份 90 天輪替列為維運政策。 |
+| 2026-11-22 | Chrome／Safari 實機驗收：2 次 Google 登入、管理頁開／關、logout-all；最終 demo disabled，匿名 RAG／status 403。 |
