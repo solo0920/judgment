@@ -3703,11 +3703,11 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert "contentId" in script
         assert "rag-workspace-toolbar" in script
         assert "data-workspace-action" in script
-        assert "rag-friend-menu" in script
-        assert "data-friend-menu-action" in script
+        assert "navigator.share" in script
         assert "rag-mode-head" in script
         assert "is-expanded" in script
     assert "modeCardExpanded" in source_js
+    assert "FRIEND_SHARE_URL" in source_js
     assert "複製回答" in source_js
     assert "重新生成回答" in source_js
     assert "已複製公開連結" in source_js
@@ -3719,8 +3719,6 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert ".is-shared-view" in css
         assert ".rag-workspace-toolbar" in css
         assert ".rag-workspace-menu" in css
-        assert ".rag-friend-menu-actions" in css
-        assert ".rag-share-link-url" in css
         assert ".rag-mode-card:not(.is-expanded)" in css
 
 

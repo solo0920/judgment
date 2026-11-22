@@ -4592,41 +4592,6 @@ button.chip:hover {
   min-width: 210px;
 }
 
-.rag-workspace-toolbar .rag-friend-menu {
-  min-width: 270px;
-}
-
-.rag-share-link-url {
-  margin: 2px 4px 6px;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  background: var(--surface-2);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-
-.rag-friend-menu-actions {
-  display: flex;
-  gap: 4px;
-  padding: 2px 4px 4px;
-}
-
-.rag-friend-menu-actions button {
-  flex: 1;
-  justify-content: center;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-}
-
-.rag-friend-menu-actions button:hover {
-  background: var(--surface-3);
-}
-
 .rag-page.is-shared-view .rag-workspace-toolbar {
   display: none;
 }

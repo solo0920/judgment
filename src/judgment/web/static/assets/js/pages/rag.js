@@ -1562,14 +1562,13 @@ export async function render(root) {
       <div class="rag-workspace">
         <div class="rag-workspace-toolbar">
           <a class="rag-friend-link" href="https://judgment.ragdemo.win" target="_blank" rel="noopener noreferrer"
-            data-workspace-action="friend-share" aria-haspopup="menu" aria-expanded="false" aria-controls="rag-friend-menu">${icon("gift", 14)}<span>分享給朋友</span></a>
+            data-workspace-action="friend-share">${icon("gift", 14)}<span>分享給朋友</span></a>
           <button class="rag-workspace-icon" type="button" data-workspace-action="menu"
             aria-haspopup="menu" aria-expanded="false" aria-controls="rag-workspace-menu"
             title="更多對話操作" aria-label="更多對話操作">${icon("more", 16)}</button>
           <button class="rag-workspace-icon" type="button" data-workspace-action="share"
             title="建立公開連結" aria-label="建立公開連結">${icon("share", 16)}</button>
           <div class="rag-history-menu rag-workspace-menu" id="rag-workspace-menu" role="menu" hidden></div>
-          <div class="rag-history-menu rag-workspace-menu rag-friend-menu" id="rag-friend-menu" role="menu" hidden></div>
         </div>
         <header class="rag-hero rag-hero-compact">
       <div id="rag-mode-notice">${notice({
@@ -1638,10 +1637,6 @@ export async function render(root) {
   const workspaceMenu = root.querySelector("#rag-workspace-menu");
   const workspaceMenuTrigger = root.querySelector(
     '[data-workspace-action="menu"]',
-  );
-  const friendMenu = root.querySelector("#rag-friend-menu");
-  const friendMenuTrigger = root.querySelector(
-    '[data-workspace-action="friend-share"]',
   );
   const turnsBox = root.querySelector("#rag-turns");
   const followupForm = root.querySelector("#rag-followup-form");
@@ -2213,35 +2208,6 @@ export async function render(root) {
     workspaceMenuTrigger?.setAttribute("aria-expanded", "false");
   };
 
-  const closeFriendMenu = () => {
-    if (!friendMenu) return;
-    friendMenu.hidden = true;
-    friendMenu.innerHTML = "";
-    friendMenuTrigger?.setAttribute("aria-expanded", "false");
-  };
-
-  const openFriendShareMenu = () => {
-    closeHistoryMenu();
-    closeWorkspaceMenu();
-    friendMenu.innerHTML = `
-      <div class="rag-history-menu-head">${icon("gift", 13)}<span>分享給朋友</span></div>
-      <div class="rag-share-link-url" title="${escapeHtml(
-        FRIEND_SHARE_URL,
-      )}">${escapeHtml(FRIEND_SHARE_URL)}</div>
-      <div class="rag-friend-menu-actions">
-        <button type="button" role="menuitem" data-friend-menu-action="copy">${icon(
-          "copy",
-          13,
-        )}<span>複製連結</span></button>
-        <button type="button" role="menuitem" data-friend-menu-action="open">${icon(
-          "external",
-          13,
-        )}<span>開啟連結</span></button>
-      </div>`;
-    friendMenu.hidden = false;
-    friendMenuTrigger?.setAttribute("aria-expanded", "true");
-  };
-
   const renderWorkspaceMenu = () => {
     const entry = currentWorkspaceEntry();
     const disabled = entry ? "" : " disabled";
@@ -2295,7 +2261,6 @@ export async function render(root) {
 
   const openWorkspaceMenu = () => {
     closeHistoryMenu();
-    closeFriendMenu();
     renderWorkspaceMenu();
     workspaceMenu.hidden = false;
     workspaceMenuTrigger?.setAttribute("aria-expanded", "true");
@@ -2376,23 +2341,12 @@ export async function render(root) {
         closeWorkspaceMenu();
       }
     }
-    if (!friendMenu.hidden) {
-      const insideFriend =
-        path.includes(friendMenu) || friendMenu.contains(event.target);
-      if (
-        !insideFriend &&
-        !event.target.closest('[data-workspace-action="friend-share"]')
-      ) {
-        closeFriendMenu();
-      }
-    }
   };
 
   const onDocumentKeydown = (event) => {
     if (event.key !== "Escape") return;
     closeHistoryMenu();
     closeWorkspaceMenu();
-    closeFriendMenu();
   };
 
   const onWindowScroll = (event) => {
@@ -2401,7 +2355,6 @@ export async function render(root) {
     }
     closeHistoryMenu();
     if (!workspaceMenu.hidden) closeWorkspaceMenu();
-    if (!friendMenu.hidden) closeFriendMenu();
   };
 
   const refreshHistory = async () => {
@@ -3436,8 +3389,29 @@ export async function render(root) {
     const action = target.dataset.workspaceAction;
     if (action === "friend-share") {
       event.preventDefault();
-      if (friendMenu.hidden) openFriendShareMenu();
-      else closeFriendMenu();
+      const pointerActivated =
+        Number(event.detail || 0) > 0 ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      try {
+        if (typeof navigator.share === "function") {
+          try {
+            await navigator.share({
+              title: "Judgment RAG Console",
+              url: FRIEND_SHARE_URL,
+            });
+            return;
+          } catch (error) {
+            if (error?.name === "AbortError") return;
+          }
+        }
+        const ok = await copyText(FRIEND_SHARE_URL);
+        toast(
+          ok ? "已複製網站連結。" : "無法分享網站連結。",
+          ok ? "ok" : "danger",
+        );
+      } finally {
+        if (pointerActivated) target.blur();
+      }
       return;
     }
     if (action === "menu") {
@@ -3487,22 +3461,6 @@ export async function render(root) {
       closeWorkspaceMenu();
       await assignProject(entry, button.dataset.projectId || "");
     }
-  });
-
-  friendMenu.addEventListener("click", async (event) => {
-    const button = event.target.closest("[data-friend-menu-action]");
-    if (!button) return;
-    const action = button.dataset.friendMenuAction;
-    if (action === "copy") {
-      const ok = await copyText(FRIEND_SHARE_URL);
-      toast(
-        ok ? "已複製網站連結。" : "無法複製網站連結。",
-        ok ? "ok" : "danger",
-      );
-    } else if (action === "open") {
-      window.open(FRIEND_SHARE_URL, "_blank", "noopener,noreferrer");
-    }
-    closeFriendMenu();
   });
 
   historyMenu.addEventListener("click", handleHistoryMenuClick);
