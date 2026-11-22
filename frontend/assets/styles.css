@@ -4523,14 +4523,6 @@ button.chip:hover {
   align-items: start;
 }
 
-.rag-page.is-shared-view .rag-layout {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.rag-page.is-shared-view .rag-library {
-  display: none;
-}
-
 .rag-workspace {
   min-width: 0;
 }
@@ -4593,6 +4585,8 @@ button.chip:hover {
   min-width: 210px;
 }
 
+/* Shared conversations keep the normal RAG layout, including the local
+   history sidebar, but hide management actions that belong to the owner. */
 .rag-page.is-shared-view .rag-workspace-toolbar {
   display: none;
 }

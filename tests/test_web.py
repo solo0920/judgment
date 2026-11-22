@@ -3727,6 +3727,8 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert ".rag-answer-actions" in css
         assert ".rag-user-block" in css
         assert ".is-shared-view" in css
+        assert ".rag-page.is-shared-view .rag-workspace-toolbar" in css
+        assert ".rag-page.is-shared-view .rag-library" not in css
         assert ".rag-workspace-toolbar" in css
         assert ".rag-workspace-menu" in css
         assert ".rag-mode-card:not(.is-expanded)" in css

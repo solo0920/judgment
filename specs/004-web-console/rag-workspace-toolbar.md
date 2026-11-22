@@ -41,7 +41,8 @@
   - hover 背景 MUST 為 `var(--surface-2)`。
 - 鍵盤聚焦時 MUST 顯示 `2px solid var(--accent)` 的 `focus-visible` 外框，offset `2px`。
 - 三點選單 MUST 使用 `.rag-history-menu.rag-workspace-menu`，絕對定位在工具列下方 `6px`、右緣對齊，最小寬度 `210px`。
-- 分享檢視 `.rag-page.is-shared-view` MUST 以 `display:none` 隱藏整個 `.rag-workspace-toolbar`；分享頁不得出現任何工作區操作。
+- 分享檢視 `.rag-page.is-shared-view` MUST 保留一般 RAG 頁面的雙欄版面與左側 `.rag-library`，讓被分享者看到與正常 RAG 頁一致的畫面；左側顯示被分享者自己的本機歷史／專案（可能為空）。
+- 分享檢視 `.rag-page.is-shared-view` MUST 以 `display:none` 隱藏整個 `.rag-workspace-toolbar`；分享頁不得出現任何工作區管理操作。
 
 ## 3. Canonical DOM
 
@@ -274,8 +275,9 @@ https://judgment.ragdemo.win/#/rag/share?contentId=abc123
   - 保留原本的 citations、judgments、law sources、status 與 notice。
   - 將 URL canonicalize 為 `#/rag/share?contentId=<token>`。
   - 加上 `.rag-page.is-shared-view`。
-  - 以 `display:none` 隱藏 `.rag-library` 與 `.rag-workspace-toolbar`。
-  - 保留右側 `.rag-workspace` 內容；分享頁不得顯示左側歷史側欄或任何工作區操作按鈕。
+  - 保留一般 RAG 雙欄版面與左側 `.rag-library`；`.rag-library` MUST NOT 為 `display:none`。
+  - 以 `display:none` 隱藏 `.rag-workspace-toolbar`。
+  - 保留右側 `.rag-workspace` 內容；左側顯示被分享者自己的本機歷史／專案（可能為空），版面與一般 RAG 頁一致；工作區管理按鈕仍 MUST 隱藏。
   - 顯示 `已載入分享的對話。` ok toast，約 3.2 秒。
 - 重新整理相同有效連結 MUST 仍能載入相同快照。
 - 分享檢視後以 hash 導覽至 `#/home`、`#/data` 等其他頁面 MUST 正常切換，不得殘留 `.is-shared-view` 或隱藏中的工具列。
@@ -318,7 +320,7 @@ https://judgment.ragdemo.win/#/rag/share?contentId=abc123
 - 「分享給朋友」文字 MUST 保持顯示；不得因寬度不足而只留下 icon。
 - 兩個圖示按鈕 MUST 維持 36×36。
 - 三點選單開啟時 MUST 保持在 viewport 內；必要時向左延伸，不得造成水平捲動。
-- 分享檢視在 390px 時 MUST 隱藏左側對話庫與工具列，只顯示右側對話內容。
+- 分享檢視在 390px 時 MUST 保留左側對話庫，並依一般 RAG 頁的響應式規則堆疊；`.rag-workspace-toolbar` 仍 MUST 隱藏。
 
 ## 9. 驗收情境
 
@@ -327,7 +329,7 @@ https://judgment.ragdemo.win/#/rag/share?contentId=abc123
 - **SC-TB-03**：點擊三點按鈕 MUST 顯示且只顯示「重新命名」「釘選對話」「刪除」「移至專案」；MUST NOT 顯示分享。無對話時四個項目 MUST 停用並顯示 `目前沒有可管理的對話。`；點擊外部或 Escape MUST 關閉。
 - **SC-TB-04**：完成兩輪對話後點擊工作區分享按鈕，MUST 建立包含兩輪的公開快照，只將 `#/rag/share?contentId=<token>` 複製到剪貼簿，並顯示主文字 `已複製公開連結`、詳細文字 `任何擁有此連結的人都可以查看這段對話。`、動作 `開啟連結` 與關閉 `×`。
 - **SC-TB-05**：分享按鈕完成後 MUST 沒有可見焦點外框；API 失敗或剪貼簿失敗時也 MUST 釋放焦點並顯示對應 danger toast。
-- **SC-TB-06**：在 demo 開放且 RAG feature 啟用時，於全新瀏覽器開啟有效公開連結 MUST 還原完整多輪對話與引用，MUST NOT 呼叫 `/api/rag/query` 或 LLM；重新整理 MUST 仍可載入；`.rag-library` 與 `.rag-workspace-toolbar` 的 computed `display` MUST 為 `none`。
+- **SC-TB-06**：在 demo 開放且 RAG feature 啟用時，於全新瀏覽器開啟有效公開連結 MUST 還原完整多輪對話與引用，MUST NOT 呼叫 `/api/rag/query` 或 LLM；重新整理 MUST 仍可載入；`.rag-library` MUST 顯示且 computed `display` MUST NOT 為 `none`，`.rag-workspace-toolbar` 的 computed `display` MUST 為 `none`；桌面雙欄與 390px 堆疊版面 MUST 與一般 RAG 頁一致。
 - **SC-TB-07**：公開連結過期或不存在時 MUST 顯示 `分享連結已失效或無法載入。`，不得顯示其他對話或生成替代答案。
 - **SC-TB-08**：問題泡泡分享 MUST 分享至該輪次為止；回答卡分享 MUST 分享至該回答為止；工作區分享 MUST 分享全部輪次。三者 MUST 使用相同成功／失敗文案。
 - **SC-TB-09**：分享快照 MUST 不包含 `pipeline_flow`、`test_run`、模型端點或主機 URL；API 回應 MUST 為 `Cache-Control: no-store`，7 天後 GET MUST 回 `404`。
