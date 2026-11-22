@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 
 LOOPBACK_HOSTS = frozenset(
@@ -67,4 +68,39 @@ def validate_runtime_security(
         raise RuntimeError(
             "JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS=1 requires a loopback bind; "
             "refusing to expose a local admin bypass on a public interface."
+        )
+
+
+def validate_auth_security(settings) -> None:
+    """Reject production Google login with a blank or reused session secret."""
+
+    if not (
+        str(getattr(settings, "google_oauth_client_id", "") or "").strip()
+        and str(getattr(settings, "google_oauth_client_secret", "") or "").strip()
+    ):
+        return
+    redirect_uri = str(
+        getattr(settings, "google_oauth_redirect_uri", "") or ""
+    ).strip().lower()
+    production = (
+        str(getattr(settings, "auth_cookie_secure", "") or "").strip().lower()
+        == "true"
+        or redirect_uri.startswith("https://")
+    )
+    if not production:
+        return
+    secret = str(getattr(settings, "auth_session_secret", "") or "").strip()
+    admin_token = str(getattr(settings, "admin_token", "") or "").strip()
+    if not secret:
+        raise RuntimeError(
+            "AUTH_SESSION_SECRET must be explicitly set in production; "
+            "refusing to fall back to JUDGMENT_ADMIN_TOKEN."
+        )
+    if len(secret) < 32:
+        raise RuntimeError(
+            "AUTH_SESSION_SECRET must be at least 32 characters in production."
+        )
+    if admin_token and hmac.compare_digest(secret, admin_token):
+        raise RuntimeError(
+            "AUTH_SESSION_SECRET must differ from JUDGMENT_ADMIN_TOKEN."
         )

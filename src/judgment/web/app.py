@@ -242,6 +242,7 @@ from .route_policy import (
 )
 from .runtime_security import (
     server_bind_allowed,
+    validate_auth_security,
     validate_forwarded_allow_ips,
     validate_runtime_security,
 )
@@ -1665,6 +1666,7 @@ def create_app(
     settings = settings or Settings.from_env()
     endpoint_cache = _TTLCache()
     validate_forwarded_allow_ips(settings.forwarded_allow_ips)
+    validate_auth_security(settings)
     resolved_data_dir = Path(data_dir or settings.law_data_dir).expanduser().resolve()
     owns_session_factory = session_factory is None
 

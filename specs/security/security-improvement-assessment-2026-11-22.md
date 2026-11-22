@@ -504,8 +504,8 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - `POST /api/auth/logout-all` 推進該帳號的 session epoch，所有裝置的既有 cookie 立即失效（包含目前裝置）。
 - 絕對 TTL 由 7 天縮短為 12 小時；沒有 `sv` 的舊 token 一律拒絕，部署後需重新登入。
 - 撤銷狀態讀取失敗時 fail closed（不因 DB 錯誤接受 session）。
-- 尚未完成：`AUTH_SESSION_SECRET` 的 production fail-fast；目前仍允許 fallback 到 admin token。
-- 回歸測試：`test_google_logout_clears_session`、`test_logout_all_revokes_every_session`、`test_session_without_version_is_rejected`。
+- Production Google 登入 fail-fast：`AUTH_COOKIE_SECURE=true` 或 HTTPS redirect 時，`AUTH_SESSION_SECRET` 必須至少 32 字元、不得等於 `JUDGMENT_ADMIN_TOKEN`，且不可留空 fallback；可在啟動與 `--check-config` 時攔截。
+- 回歸測試：`test_google_logout_clears_session`、`test_logout_all_revokes_every_session`、`test_session_without_version_is_rejected`、`test_runtime_security.py` 的 auth secret 測試。
 
 #### AUTH-04 — 已修復
 
@@ -567,7 +567,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 
 #### 仍待處理
 
-- **AUTH-03 剩餘**：`AUTH_SESSION_SECRET` 的 production fail-fast；目前仍允許 fallback 到 admin token。SSE `jti` 仍為 in-memory，重啟後最多重新開放 60 秒的 replay 窗口；每次簽發會清除過期項目。
+- **SSE**：ticket `jti` 仍為 in-memory，重啟後最多重新開放 60 秒的 replay 窗口；每次簽發會清除過期項目。
 - **INFRA-05**：llama-server host probe 的 DNS rebinding／IP pinning；需要修改 transport，另開批次。
 - AUTH-05～08、OPS-01～05 等見第 4 節路線圖。
 
@@ -590,3 +590,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | SUP-01／OPS-04：Actions SHA pin、`persist-credentials: false`、`uv sync --frozen`、gitleaks 自訂規則與 negative control、main branch protection；本機全歷史掃描 305 commits、0 leaks。 |
 | 2026-11-22 | DATA-01：每日保留維護（performance 90 天、audit 180 天、分享快照 7 天），隱私文案與 `data-retention.md` 同步；備份 90 天輪替列為維運政策。 |
 | 2026-11-22 | Chrome／Safari 實機驗收：2 次 Google 登入、管理頁開／關、logout-all；最終 demo disabled，匿名 RAG／status 403。 |
+| 2026-11-22 | AUTH-03 收尾：production `AUTH_SESSION_SECRET` fail-fast（至少 32 字元、不得等於 admin token、不可空 fallback）；`--check-config` 與啟動皆驗證。 |

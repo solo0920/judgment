@@ -1143,7 +1143,7 @@ AUTH_COOKIE_SECURE=auto
 
 - `GOOGLE_ALLOWED_EMAILS` 是登入白名單；只有列出的電子郵件可以取得管理員工作階段。多個帳號以逗號分隔。
 - `GOOGLE_REDIRECT_URI` 留空時會由請求推導；正式環境建議明確設定，且必須與 Google Console 完全一致。
-- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；正式環境 MUST 設定獨立值，留空時僅為本機開發退回使用 `JUDGMENT_ADMIN_TOKEN`。
+- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；正式環境 MUST 設定至少 32 字元且不同於 `JUDGMENT_ADMIN_TOKEN` 的獨立值。當 `AUTH_COOKIE_SECURE=true` 或 redirect URI 為 HTTPS 時，啟動與 `--check-config` 會 fail fast；留空 fallback 僅供本機開發。
 - 正式自訂網域（`judgment.ragdemo.win` → `api-mbp.ragdemo.win`）為同 site 的不同 origin，使用 `AUTH_COOKIE_SAMESITE=lax` 即可；`*.pages.dev` 預覽與 API 屬不同 site，若需要在預覽站登入，該預覽環境才需 `AUTH_COOKIE_SAMESITE=none` 並確認 HTTPS／CORS。
 - 工作階段 token 含 `jti` 與 `sv`（session epoch）；絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`）。登出會撤銷該 `jti`；「登出所有裝置」會推進該帳號的 epoch，讓所有既有 cookie 立即失效。部署 SESSION-01 前簽發、沒有 `sv` 的舊 token 一律視為無效。跨站 `POST /api/auth/logout`／`logout-all` 會被拒絕。
 - 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie，`POST /api/auth/logout-all` 會撤銷該帳號所有裝置的工作階段。
