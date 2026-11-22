@@ -17,7 +17,7 @@
 | esbuild | `0.28.2` |
 | Docker images | PostgreSQL 16.15、Qdrant 1.19.1，皆以 digest 固定 |
 
-CI 尚未完成：GitHub Actions commit SHA pinning、`persist-credentials: false`、`uv sync --frozen`、`main` branch protection。詳見 `specs/security/supply-chain.md`。
+CI 已完成：GitHub Actions commit SHA pinning、`persist-credentials: false`、`uv sync --frozen`、gitleaks 自訂規則與 negative control、`main` branch protection。詳見 `specs/security/supply-chain.md`。
 
 ## 2. 目前資料快照
 

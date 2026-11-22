@@ -378,12 +378,11 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **工時**：M
 - **關聯 ticket**：ABUSE-01、RS-05
 
-#### OPS-04 — CI 供應鏈尚有硬化空間
+#### OPS-04 — 已修復（2026-11-22）
 
-- **嚴重度**：Low
-- **證據**：`.github/workflows/ci.yml` 使用 `@v4/@v5` tags、未 `persist-credentials: false`、`uv sync` 未 `--frozen`、無 branch protection。pip-audit / gitleaks / SBOM / esbuild pin 已具備。
-- **建議**：Actions 改 commit SHA pin；`uv sync --frozen`；`persist-credentials: false`；開啟 main branch protection。
-- **工時**：M
+- **原問題**：`.github/workflows/ci.yml` 使用 `@v4/@v5` tags、未 `persist-credentials: false`、`uv sync` 未 `--frozen`、無 branch protection。
+- **修復**：Actions 全部改 commit SHA pin（checkout／setup-python／setup-node／setup-uv v7、sbom-action v0）；checkout `persist-credentials: false`；`uv sync --frozen --extra dev`；新增 `.gitleaks.toml` 自訂規則與 `scripts/gitleaks_selftest.sh` 負向／正向對照；`main` 啟用 required checks、PR、禁止 force push／刪除與管理員強制套用。
+- **驗證**：本機 gitleaks 305 commits、45.7 MB、0 leaks；自訂規則 negative control exit 2、placeholder exit 0；branch protection API 回應已啟用。
 - **關聯 ticket**：SUP-01
 
 #### OPS-05 — Git history 仍有內部 host／port
@@ -587,3 +586,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | SESSION-01：session 加入 `sv` epoch、`POST /api/auth/logout-all`、TTL 縮短為 12 小時、無 `sv` 舊 token 拒絕；撤銷狀態讀取 fail closed；補 pytest。正式站 epoch 0→1，舊 cookie 立即失效。 |
 | 2026-11-22 | AUDIT-01 強化：未驗證失敗事件每 IP／每日上限、稽核建構／寫入失敗不阻塞請求、只記 path 不記 query string、前端 escape 測試；展示已關閉。 |
 | 2026-11-22 | 小規模備份演練：scratch DB schema → `backup.sh` → age 加解密 → checksum → 第二個 scratch DB `pg_restore`，34 tables 成功；完整 157 GB＋Qdrant drill 仍待維護窗口。 |
+| 2026-11-22 | SUP-01／OPS-04：Actions SHA pin、`persist-credentials: false`、`uv sync --frozen`、gitleaks 自訂規則與 negative control、main branch protection；本機全歷史掃描 305 commits、0 leaks。 |

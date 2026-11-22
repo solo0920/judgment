@@ -1,0 +1,28 @@
+title = "Judgment secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "judgment-env-token"
+description = "Judgment environment token or secret assignment"
+regex = '''(?i)(?:JUDGMENT_ADMIN_TOKEN|AUTH_SESSION_SECRET|QDRANT_API_KEY|CLOUDFLARE_API_TOKEN|CF_API_TOKEN)[ \t]*[:=][ \t]*["']?[A-Za-z0-9_\-]{24,}'''
+keywords = [
+  "judgment_admin_token",
+  "auth_session_secret",
+  "qdrant_api_key",
+  "cloudflare_api_token",
+  "cf_api_token",
+]
+
+[[rules]]
+id = "judgment-postgres-dsn"
+description = "PostgreSQL connection string with a non-placeholder password"
+regex = '''postgres(?:ql)?(?:\+psycopg)?://[A-Za-z0-9_.-]+:[^@\s]{12,}@[^\s"']+'''
+keywords = ["postgresql://", "postgres://"]
+
+[[rules]]
+id = "age-secret-key"
+description = "age private identity"
+regex = '''AGE-SECRET-KEY-1[0-9A-Z]{20,}'''
+keywords = ["age-secret-key-1"]
