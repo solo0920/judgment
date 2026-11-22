@@ -3701,14 +3701,19 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert "is-shared-view" in script
         assert "rag/share" in script
         assert "contentId" in script
+        assert "rag-workspace-toolbar" in script
+        assert "data-workspace-action" in script
     assert "複製回答" in source_js
     assert "重新生成回答" in source_js
     assert "已複製公開連結" in source_js
+    assert "分享給朋友" in source_js
     for css in (source_css, bundle_css):
         assert ".rag-user-actions" in css
         assert ".rag-answer-actions" in css
         assert ".rag-user-block" in css
         assert ".is-shared-view" in css
+        assert ".rag-workspace-toolbar" in css
+        assert ".rag-workspace-menu" in css
 
 
 def test_settings_sidebar_source_and_bundle_are_present() -> None:

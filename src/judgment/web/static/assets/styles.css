@@ -4509,6 +4509,68 @@ button.chip:hover {
   min-width: 0;
 }
 
+.rag-workspace-toolbar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 2px 0 0;
+}
+
+.rag-friend-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.rag-friend-link:hover {
+  background: var(--accent-soft);
+}
+
+.rag-friend-link:focus-visible,
+.rag-workspace-icon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rag-workspace-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.rag-workspace-icon:hover {
+  background: var(--surface-2);
+}
+
+.rag-workspace-toolbar .rag-workspace-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  min-width: 210px;
+}
+
+.rag-page.is-shared-view .rag-workspace-toolbar {
+  display: none;
+}
+
 .rag-library {
   position: sticky;
   top: 86px;
@@ -4922,6 +4984,15 @@ button.chip:hover {
 
 .rag-history-menu button:hover {
   background: var(--surface-2);
+}
+
+.rag-history-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rag-history-menu button:disabled:hover {
+  background: transparent;
 }
 
 .rag-history-menu button svg {

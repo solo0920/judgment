@@ -1554,6 +1554,15 @@ export async function render(root) {
         </section>
       </aside>
       <div class="rag-workspace">
+        <div class="rag-workspace-toolbar">
+          <a class="rag-friend-link" href="https://judgment.ragdemo.win" target="_blank" rel="noopener noreferrer">${icon("gift", 14)}<span>分享給朋友</span></a>
+          <button class="rag-workspace-icon" type="button" data-workspace-action="menu"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="rag-workspace-menu"
+            title="更多對話操作" aria-label="更多對話操作">${icon("more", 16)}</button>
+          <button class="rag-workspace-icon" type="button" data-workspace-action="share"
+            title="建立公開連結" aria-label="建立公開連結">${icon("share", 16)}</button>
+          <div class="rag-history-menu rag-workspace-menu" id="rag-workspace-menu" role="menu" hidden></div>
+        </div>
         <header class="rag-hero rag-hero-compact">
       <div id="rag-mode-notice">${notice({
         tone: "info",
@@ -1617,6 +1626,11 @@ export async function render(root) {
   const submit = root.querySelector("#rag-submit");
   const page = root.querySelector(".rag-page");
   page.classList.toggle("is-shared-view", Boolean(sharedRequest));
+  const workspaceToolbar = root.querySelector(".rag-workspace-toolbar");
+  const workspaceMenu = root.querySelector("#rag-workspace-menu");
+  const workspaceMenuTrigger = root.querySelector(
+    '[data-workspace-action="menu"]',
+  );
   const turnsBox = root.querySelector("#rag-turns");
   const followupForm = root.querySelector("#rag-followup-form");
   const followupInput = root.querySelector("#rag-followup-question");
@@ -1803,6 +1817,7 @@ export async function render(root) {
   const openConversation = (entry) => {
     const turns = Array.isArray(entry.turns) ? entry.turns : [];
     if (!turns.length) return false;
+    closeWorkspaceMenu();
     requestSeq += 1;
     stopFlowUpdates();
     paintTestFlow(null);
@@ -1989,6 +2004,7 @@ export async function render(root) {
   };
 
   const newChat = () => {
+    closeWorkspaceMenu();
     requestSeq += 1;
     stopFlowUpdates();
     paintTestFlow(null);
@@ -2170,6 +2186,95 @@ export async function render(root) {
     );
   };
 
+  const currentWorkspaceEntry = () =>
+    historyEntries.find(
+      (item) =>
+        currentConversationId !== null &&
+        String(item.id) === String(currentConversationId),
+    ) || null;
+
+  const closeWorkspaceMenu = () => {
+    if (!workspaceMenu) return;
+    workspaceMenu.hidden = true;
+    workspaceMenu.innerHTML = "";
+    workspaceMenuTrigger?.setAttribute("aria-expanded", "false");
+  };
+
+  const renderWorkspaceMenu = () => {
+    const entry = currentWorkspaceEntry();
+    const disabled = entry ? "" : " disabled";
+    workspaceMenu.innerHTML = `
+      <button type="button" role="menuitem" data-workspace-menu-action="rename"${disabled}>${icon("edit", 13)}<span>重新命名</span></button>
+      <button type="button" role="menuitem" data-workspace-menu-action="pin"${disabled}>${icon("pin", 13)}<span>${entry?.pinned ? "取消釘選" : "釘選對話"}</span></button>
+      <div class="rag-history-menu-divider"></div>
+      <button class="is-danger" type="button" role="menuitem" data-workspace-menu-action="delete"${disabled}>${icon("trash", 13)}<span>刪除</span></button>
+      <div class="rag-history-menu-divider"></div>
+      <button type="button" role="menuitem" data-workspace-menu-action="move"${disabled}>${icon("folder", 13)}<span>移至專案</span></button>
+      ${
+        entry
+          ? ""
+          : `<div class="rag-history-menu-note">目前沒有可管理的對話。</div>`
+      }`;
+  };
+
+  const renderWorkspaceMoveMenu = (entry) => {
+    const current = String(entry.project_id || "");
+    const options = [
+      { id: "", name: "未分類" },
+      ...projects.map((project) => ({
+        id: String(project.id),
+        name: project.name,
+      })),
+    ];
+    workspaceMenu.innerHTML = `
+      <div class="rag-history-menu-head">${icon("folder", 13)}<span>移至專案</span></div>
+      ${options
+        .map(
+          (option) => `<button type="button" role="menuitem"
+            data-workspace-menu-action="assign-project" data-project-id="${escapeHtml(option.id)}">
+            <span class="rag-history-menu-check">${
+              current === option.id ? icon("check", 12) : ""
+            }</span>
+            <span>${escapeHtml(option.name)}</span>
+          </button>`,
+        )
+        .join("")}
+      ${
+        projects.length
+          ? ""
+          : `<div class="rag-history-menu-note">尚未建立專案，可先從左側建立。</div>`
+      }
+      <div class="rag-history-menu-divider"></div>
+      <button type="button" role="menuitem" data-workspace-menu-action="back">${icon(
+        "chevronLeft",
+        13,
+      )}<span>返回</span></button>`;
+  };
+
+  const openWorkspaceMenu = () => {
+    closeHistoryMenu();
+    renderWorkspaceMenu();
+    workspaceMenu.hidden = false;
+    workspaceMenuTrigger?.setAttribute("aria-expanded", "true");
+  };
+
+  const shareCurrentConversation = async () => {
+    const entry = currentWorkspaceEntry();
+    let turns = conversationTurns.map((turn) => ({
+      question: turn.question,
+      asked_at: turn.asked_at || "",
+      payload: turn.payload || {},
+    }));
+    if (!turns.length && Array.isArray(entry?.turns)) {
+      turns = entry.turns.map((turn) => ({ ...turn }));
+    }
+    if (!turns.length) {
+      toast("目前沒有可建立公開連結的對話。", "warn");
+      return;
+    }
+    await shareRagTurns(turns, entry?.title || "Judgment RAG 對話");
+  };
+
   const handleHistoryMenuClick = async (event) => {
     const button = event.target.closest("[data-menu-action]");
     if (!button) return;
@@ -2206,18 +2311,34 @@ export async function render(root) {
   };
 
   const onDocumentClick = (event) => {
-    if (historyMenu.hidden) return;
     const path =
       typeof event.composedPath === "function" ? event.composedPath() : [];
-    if (path.includes(historyMenu) || historyMenu.contains(event.target)) {
-      return;
+    if (!historyMenu.hidden) {
+      const insideHistory =
+        path.includes(historyMenu) || historyMenu.contains(event.target);
+      if (
+        !insideHistory &&
+        !event.target.closest('[data-rag-action="open-history-menu"]')
+      ) {
+        closeHistoryMenu();
+      }
     }
-    if (event.target.closest('[data-rag-action="open-history-menu"]')) return;
-    closeHistoryMenu();
+    if (!workspaceMenu.hidden) {
+      const insideWorkspace =
+        path.includes(workspaceMenu) || workspaceMenu.contains(event.target);
+      if (
+        !insideWorkspace &&
+        !event.target.closest('[data-workspace-action="menu"]')
+      ) {
+        closeWorkspaceMenu();
+      }
+    }
   };
 
   const onDocumentKeydown = (event) => {
-    if (event.key === "Escape") closeHistoryMenu();
+    if (event.key !== "Escape") return;
+    closeHistoryMenu();
+    closeWorkspaceMenu();
   };
 
   const onWindowScroll = (event) => {
@@ -2225,6 +2346,7 @@ export async function render(root) {
       return;
     }
     closeHistoryMenu();
+    if (!workspaceMenu.hidden) closeWorkspaceMenu();
   };
 
   const refreshHistory = async () => {
@@ -2917,6 +3039,7 @@ export async function render(root) {
       (source === "followup" ? followupInput : input).focus();
       return;
     }
+    closeWorkspaceMenu();
     if (fresh || !conversationActive) {
       currentConversationId = null;
       conversationTurns = [];
@@ -3227,6 +3350,59 @@ export async function render(root) {
     if (!form) return;
     event.preventDefault();
     await createProject(form);
+  });
+
+  workspaceToolbar.addEventListener("click", async (event) => {
+    const target = event.target.closest("[data-workspace-action]");
+    if (!target) return;
+    const action = target.dataset.workspaceAction;
+    if (action === "menu") {
+      if (workspaceMenu.hidden) openWorkspaceMenu();
+      else closeWorkspaceMenu();
+      return;
+    }
+    if (action === "share") {
+      const pointerActivated =
+        Number(event.detail || 0) > 0 ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      if (pointerActivated) target.blur();
+      try {
+        await shareCurrentConversation();
+      } finally {
+        if (pointerActivated) target.blur();
+      }
+    }
+  });
+
+  workspaceMenu.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-workspace-menu-action]");
+    if (!button) return;
+    const action = button.dataset.workspaceMenuAction;
+    if (action === "back") {
+      renderWorkspaceMenu();
+      return;
+    }
+    const entry = currentWorkspaceEntry();
+    if (!entry) {
+      closeWorkspaceMenu();
+      toast("目前沒有可管理的對話。", "warn");
+      return;
+    }
+    if (action === "rename") {
+      closeWorkspaceMenu();
+      await renameHistory(entry);
+    } else if (action === "pin") {
+      closeWorkspaceMenu();
+      await togglePin(entry.id);
+    } else if (action === "delete") {
+      closeWorkspaceMenu();
+      await deleteHistory(entry);
+    } else if (action === "move") {
+      renderWorkspaceMoveMenu(entry);
+    } else if (action === "assign-project") {
+      closeWorkspaceMenu();
+      await assignProject(entry, button.dataset.projectId || "");
+    }
   });
 
   historyMenu.addEventListener("click", handleHistoryMenuClick);
