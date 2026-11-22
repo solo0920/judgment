@@ -536,6 +536,14 @@ body.settings-open .toast-region {
   background: var(--surface-2);
 }
 
+.auth-menu-item-danger {
+  color: var(--danger);
+}
+
+.auth-menu-item-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .auth-menu-item:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -19491,6 +19499,35 @@ body.is-demo-visitor #rag-test-flow {
   font-size: 11px;
 }
 
+.security-audit-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.security-audit-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.3fr)
+    minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+.security-audit-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.security-audit-row span,
+.security-audit-row small {
+  color: var(--faint);
+}
+
 @media (max-width: 760px) {
   .demo-split {
     grid-template-columns: 1fr;
@@ -19515,6 +19552,15 @@ body.is-demo-visitor #rag-test-flow {
 
   .demo-audit-row small {
     grid-column: 1 / -1;
+  }
+
+  .security-audit-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .security-audit-row small {
+    grid-column: auto;
   }
 }
 
