@@ -78,13 +78,13 @@ POST /api/rag/share
 ## 5. Auth／security 現況
 
 - 管理員：`solo4study@gmail.com` Google session，或 `X-Judgment-Admin-Token` break-glass token。
-- Session：HttpOnly signed cookie，TTL 7 天（`AUTH_SESSION_TTL_SECONDS=604800`），production `SameSite=Lax`；token 含 `jti`，logout 會寫入 server-side 撤銷清單，重播已登出 cookie 會失效；尚無全裝置撤銷與短 TTL。
+- Session：HttpOnly signed cookie，絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`），production `SameSite=Lax`；token 含 `jti` 與 `sv`（session epoch）。logout 會撤銷單一 `jti`；「登出所有裝置」會推進該帳號 epoch，所有既有 cookie 立即失效。沒有 `sv` 的舊 token 一律拒絕。
 - `JUDGMENT_ADMIN_TOKEN` 與 `AUTH_SESSION_SECRET` 已於 2026-11-21 輪替；舊值失效。
 - 管理 token 存在瀏覽器 `sessionStorage`，舊 `localStorage` 值會遷移並刪除。
 - SSE ticket：60 秒、一次性 `jti`、綁 client IP（IPv6 /64）與 principal binding；access log 會將 `ticket`、OAuth `code`／`state` 等敏感 query 遮蔽為 `[redacted]`。ticket store 在記憶體，重啟後最多重新開放 60 秒 replay 窗口。
 - 安全稽核：`security_audit_events` 記錄 Google login 成功／失敗、logout、admin token 使用與 admin write；`GET /api/admin/security-audit` 提供最近事件，保留 180 天。client IP 以 keyed hash 儲存，不記錄 token／OAuth code／state。正式站已驗證事件寫入與 `judgment_app` table ownership。
 - CSP 已 enforce；有 `X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`；`report-uri` 已接 `/api/csp-report`，`report-to` 尚未設定。CSP 仍允許 Google Fonts 與 production `connect-src` 的 localhost。
-- 未完成：SESSION-01 全裝置撤銷／短 TTL、AUDIT-01、HSTS 延長、`report-to`、PRIV-01。DB-ROLE-01 已完成主應用降權。
+- 未完成：AUTH-05～08、OPS-01～05、HSTS 延長、`report-to`、PRIV-01。SESSION-01、AUDIT-01、DB-ROLE-01 已完成。
 - HIST-01：gitleaks 全歷史 0 credential leaks；但 public history 仍有主機名稱／port。
 
 ## 6. 查詢索引

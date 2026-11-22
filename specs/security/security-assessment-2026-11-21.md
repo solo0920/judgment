@@ -6,7 +6,7 @@
 - 定位：補充 `specs/security/security-acceptance-matrix.md`，只列「本次新發現」與「尚未關閉的既有項目」
 - 測試原則：只做唯讀驗證與程式碼追蹤；未執行破壞性測試、未取得或輸出任何真實密鑰
 
-> **現況對照（2026-11-21 後續更新）**：本文件保留發現與修復歷程；目前控制狀態以 [`security-acceptance-matrix.md`](security-acceptance-matrix.md) 與 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md) 為準。CSP 已 enforce、admin token／session secret 已輪替、gitleaks 已做全歷史掃描、pyarrow／pytest 已升級。仍未完成：SESSION-01、AUDIT-01、APP-DB-01、SSE-01、PRIV-01、完整 restore drill、SameSite 評估、HIST-01 歷史清理。以下「當時」段落與 P1/P2 建議不應直接當成目前待辦。
+> **現況對照（2026-11-22 後續更新）**：本文件保留發現與修復歷程；目前控制狀態以 [`security-acceptance-matrix.md`](security-acceptance-matrix.md) 與 [`../../docs/code-alignment-2026-11-21.md`](../../docs/code-alignment-2026-11-21.md) 為準。CSP 已 enforce、admin token／session secret 已輪替、gitleaks 已做全歷史掃描、pyarrow／pytest 已升級；INFRA-09、AUDIT-01、SESSION-01 已完成，主應用已改用非 superuser 角色。仍未完成：APP-DB-01 剩餘項目、PRIV-01、完整 restore drill、HIST-01 歷史清理等。以下「當時」段落與 P1/P2 建議不應直接當成目前待辦。
 
 ## 0. 摘要
 
@@ -52,7 +52,7 @@
 
 當時驗證：677 tests pass、ruff clean；Pages 部署 `2f8362be`；後端重啟後匿名複驗 performance 無已知問答、processing 無 `/Users/`、已移除的 demo 路由回 401、API/PAGES 均有 CSP Report-Only。目前為 697 tests pass、CSP enforce。
 
-尚未完成：DB-ROLE-01（已做 column-level demo role）、TOKEN-01（admin token 與 session secret 已於 2026-11-21 輪替，仍為靜態長效、缺 server-side 撤銷）、SESSION-01、AUDIT-01、完整 restore drill、AUTH-02、PRIV-01、SSE-01、HIST-01 全歷史掃描，以及第 8 節外部項目。
+尚未完成：完整 restore drill、AUTH-02、PRIV-01、HIST-01 全歷史清理，以及第 8 節外部項目。TOKEN-01（admin token 與 session secret 已於 2026-11-21 輪替）、SESSION-01（12 小時 TTL、全裝置撤銷）、AUDIT-01、DB-ROLE-01、SSE-01 已完成。
 
 ### 0.3 匿名查詢邊界測試（2026-11-21）
 
@@ -643,6 +643,8 @@ docker exec judgment-postgres psql -U judgment -d judgment -tAc \
 ---
 
 ### P2-11 `SESSION-01`：7 天 stateless session，無撤銷與輪替
+
+> **2026-11-22 更新（已修復大部分）**：session 已加入 `jti`／`sv`、TTL 縮短為 12 小時、支援 `POST /api/auth/logout-all`，登入／登出與 admin 操作已寫入 `security_audit_events`。仍待辦：`AUTH_SESSION_SECRET` production fail-fast、異常頻率告警。以下為當時發現。
 
 **證據**
 

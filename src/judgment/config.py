@@ -89,7 +89,7 @@ class Settings:
     google_oauth_redirect_uri: str = ""
     google_allowed_emails: tuple[str, ...] = ("solo4study@gmail.com",)
     auth_session_secret: str = ""
-    auth_session_ttl_seconds: int = 60 * 60 * 24 * 7
+    auth_session_ttl_seconds: int = 60 * 60 * 12
     auth_cookie_samesite: str = "lax"
     auth_cookie_secure: str = "auto"
     ollama_allowed_hosts: tuple[str, ...] = ()
@@ -313,7 +313,7 @@ class Settings:
             ),
             auth_session_secret=os.getenv("AUTH_SESSION_SECRET", "").strip(),
             auth_session_ttl_seconds=_env_int(
-                "AUTH_SESSION_TTL_SECONDS", 60 * 60 * 24 * 7
+                "AUTH_SESSION_TTL_SECONDS", 60 * 60 * 12
             ),
             auth_cookie_samesite=(
                 os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower() or "lax"

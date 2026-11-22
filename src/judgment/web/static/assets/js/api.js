@@ -592,6 +592,14 @@ export const api = {
     });
   },
 
+  authLogoutAll() {
+    return request("/api/auth/logout-all", {
+      method: "POST",
+      base: getAuthApiBase(),
+      trackClient: false,
+    });
+  },
+
   demoStatus() {
     return request("/api/demo/status", {
       timeout: 15000,

@@ -27,7 +27,7 @@
 | **P1** | INFRA-01 | 下载档案名来自上游 header 且未轉為 basename | 路徑遍歷／任意檔案寫入 | 程式碼可重現 |
 | **P1** | AUTH-01 | Demo data endpoints 仍走主 DB superuser 連線 | 防禦縱深失效，放大其他洩漏 | 已追蹤 APP-DB-01 |
 | **P2** | AUTH-02 | SSE ticket 可重播、未綁 session/IP | 120 秒內可訂閱管理事件流 | 已追蹤 SSE-01 |
-| **P2** | AUTH-03 | 7 天無狀態 session、無撤銷、secret 可能共用 admin token | 竊取 cookie 後 7 天內無法撤銷 | 已追蹤 SESSION-01 |
+| **P2** | AUTH-03 | 7 天無狀態 session、無撤銷、secret 可能共用 admin token | 竊取 cookie 後 7 天內無法撤銷 | 已修復（SESSION-01：12 小時 TTL、全裝置撤銷） |
 | **P2** | INFRA-02 | 備份脚本把 Qdrant/DB 密碼放在 process command line | 本機其他使用者可讀取憑證 | 新發現 |
 | **P2** | OPS-01 | 備份加密預設失敗開放、restore 會信任備份內 `.env` | 明文備份／設定被替換 | 新發現 |
 
@@ -46,7 +46,7 @@
 1. **24 小時內**：SEC-01、SEC-02、SEC-03、SEC-04、INFRA-01
 2. **一週內**：AUTH-01～AUTH-05、INFRA-02～INFRA-04、OPS-01～OPS-02
 3. **下次公開展示前**：完成 BAK-02 完整還原演練、ABUSE-01 端到端驗證、HDR-01 `report-to`、PRIV-01 自託管字型、NET-05、HIST-01 決策
-4. **後續**：SESSION-01、AUTH-05～08、OPS-04 等
+4. **後續**：AUTH-05～08、OPS-04 等
 
 ---
 
@@ -403,7 +403,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | **24h（最高優先）** | SEC-01、SEC-02、SEC-03、SEC-04、INFRA-01（已修復） | 分享後查 `/api/performance` 無 token；anonymous schema suggest 無絕對路徑；deep-scrub 測試通過；4 處 escape 測試通過；惡意 filename 無法寫出 raw_dir |
 | **1 週（P1）** | AUTH-01、AUTH-02、AUTH-04、INFRA-02、INFRA-03、INFRA-04、INFRA-09（已修復）；INFRA-05（後續） | demo endpoints 使用受限 DB；SSE ticket 一次性；SameSite=Lax；備份 secret 不進 cmdline；加密 fail-closed；restore 不自動覆寫 `.env`；DB role 降權完成 |
 | **下次展示前（P2）** | BAK-02、ABUSE-01、OPS-01、PRIV-01、NET-05、HIST-01、SEC-05、SEC-06 | 完整還原成功；429／edge 規則驗證；HSTS/report-to 補齊；字型自託管；防火牆開啟；HIST 決策簽核 |
-| **後續（P3）** | SESSION-01、AUTH-05、AUTH-06、OPS-04、INFRA-06/07/08/10 | session 可撤銷；CI 完全 pin |
+| **後續（P3）** | AUTH-05、AUTH-06、OPS-04、INFRA-06/07/08/10 | CI 完全 pin；其餘縱深防禦 |
 
 ---
 
@@ -499,11 +499,14 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
   - `tests/test_web.py::test_sse_ticket_is_one_time_and_bound_to_client_ip`
   - `tests/test_web.py::test_sse_ticket_stream_is_single_use`
 
-#### AUTH-03 — 部分修復
+#### AUTH-03 — 已修復（session 生命週期；SESSION-01）
 
-- session token 新增 `jti`；logout 會將 `jti` 寫入既有 `AppSetting` 的撤銷清單，後續重播 cookie 會被拒絕。
-- 尚未完成「撤銷所有裝置」與縮短 7 天 TTL；`AUTH_SESSION_SECRET` 的 production fail-fast 仍在後續。
-- 回歸測試：`tests/test_web.py::test_google_logout_clears_session` 重播已登出 token。
+- session token 含 `jti` 與 `sv`；logout 撤銷單一 `jti`。
+- `POST /api/auth/logout-all` 推進該帳號的 session epoch，所有裝置的既有 cookie 立即失效（包含目前裝置）。
+- 絕對 TTL 由 7 天縮短為 12 小時；沒有 `sv` 的舊 token 一律拒絕，部署後需重新登入。
+- 撤銷狀態讀取失敗時 fail closed（不因 DB 錯誤接受 session）。
+- 尚未完成：`AUTH_SESSION_SECRET` 的 production fail-fast；目前仍允許 fallback 到 admin token。
+- 回歸測試：`test_google_logout_clears_session`、`test_logout_all_revokes_every_session`、`test_session_without_version_is_rejected`。
 
 #### AUTH-04 — 已修復
 
@@ -557,11 +560,12 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **Google 實機登入／管理頁**：使用者已在 `judgment.ragdemo.win` 完成 Google 登入。access log 顯示 `/api/auth/google/start` 302、callback 302、`/api/auth/me` 200，以及管理頁 `PUT /api/admin/demo`、`POST /api/admin/demo/close` 200。驗證期間發現 OAuth `code` 曾寫入 access log；已補 `code`／`state` 遮蔽，並清理舊 log。
 - **Access log 遮蔽**：新 log 對 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` 顯示 `[redacted]`；舊 `.run/web.log.*-pre-redaction` 已清理並維持 600。
 - **安全稽核**：正式站以 admin token 觸發 `auth.admin_token` 與 `admin.write`，`GET /api/admin/security-audit` 回傳事件；`security_audit_events` owner 為 `judgment_app`；回應不含 admin token／Bearer。Google login 成功／失敗事件由 pytest 覆蓋，下一次實際登入會寫入。
+- **Session 撤銷**：正式站以兩個獨立 `jti` 驗證；`POST /api/auth/logout-all` 回 200／`revoked=all`，兩個舊 token 的 `/api/auth/me` 都變成 `authenticated=false`；無 session 時回 200／`revoked=none`；epoch 由 0 變 1，`auth.logout_all` 已寫入稽核。
 - **pages.dev 預覽**：Lax 下預覽站與 API 不同 site，預覽登入會失效；已寫入 runbook，production 不受影響。
 
 #### 仍待處理
 
-- **AUTH-03 完整版**：全裝置撤銷、短 TTL、session secret production fail-fast。SSE `jti` 仍為 in-memory，重啟後最多重新開放 60 秒的 replay 窗口；每次簽發會清除過期項目。
+- **AUTH-03 剩餘**：`AUTH_SESSION_SECRET` 的 production fail-fast；目前仍允許 fallback 到 admin token。SSE `jti` 仍為 in-memory，重啟後最多重新開放 60 秒的 replay 窗口；每次簽發會清除過期項目。
 - **INFRA-05**：llama-server host probe 的 DNS rebinding／IP pinning；需要修改 transport，另開批次。
 - AUTH-05～08、OPS-01～05 等見第 4 節路線圖。
 
@@ -578,3 +582,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 驗證：demo_reader 負向測試、毒化主連線測試、admin token 關閉／重開、SSE 重播與日誌遮蔽、session 撤銷 DB 檢查、schema dump/restore、加密 fail-closed。Google 實機登入成功；另修補 OAuth code／state access-log 洩漏並清理舊 log。 |
 | 2026-11-22 | INFRA-09：主應用改用 `judgment_app`（NOSUPERUSER/NOCREATEDB/NOCREATEROLE），ownership 轉移，完整讀寫與負向測試通過；新增 `app-db-role-runbook.md`。 |
 | 2026-11-22 | AUDIT-01 初版：`security_audit_events`、`GET /api/admin/security-audit`、Google login／logout／admin token／admin write 事件；180 天保留；補 pytest。 |
+| 2026-11-22 | SESSION-01：session 加入 `sv` epoch、`POST /api/auth/logout-all`、TTL 縮短為 12 小時、無 `sv` 舊 token 拒絕；撤銷狀態讀取 fail closed；補 pytest。正式站 epoch 0→1，舊 cookie 立即失效。 |

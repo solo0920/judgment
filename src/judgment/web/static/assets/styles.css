@@ -536,6 +536,14 @@ body.settings-open .toast-region {
   background: var(--surface-2);
 }
 
+.auth-menu-item-danger {
+  color: var(--danger);
+}
+
+.auth-menu-item-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .auth-menu-item:disabled {
   opacity: 0.6;
   cursor: wait;

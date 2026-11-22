@@ -46,6 +46,7 @@ from judgment.web import processing as processing_module
 from judgment.web.app import create_app, route_policy_guard
 from judgment.web.auth import (
     make_session_token,
+    make_signed_token,
     session_secret,
     verify_signed_token,
 )
@@ -3814,6 +3815,118 @@ def test_security_audit_records_admin_auth_and_writes(web_client) -> None:
         ).all()
     assert rows
     assert all(row.actor != "security-audit-token" for row in rows)
+
+
+def test_logout_all_revokes_every_session(web_client, monkeypatch) -> None:
+    async def fake_exchange_google_code(**_kwargs):
+        return {
+            "sub": "google-sub-multi",
+            "email": "admin@example.com",
+            "email_verified": True,
+            "name": "Admin User",
+            "picture": "",
+        }
+
+    monkeypatch.setattr(
+        sys.modules["judgment.web.app"],
+        "exchange_google_code",
+        fake_exchange_google_code,
+    )
+    app = _oauth_app(web_client)
+
+    def use_session(client, token: str) -> None:
+        client.cookies.clear()
+        client.cookies.set("judgment_session", token)
+
+    def login(client):
+        client.cookies.clear()
+        start = client.get(
+            "/api/auth/google/start?next=" + quote("/#/rag", safe=""),
+            follow_redirects=False,
+        )
+        assert start.status_code == 302
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        callback = client.get(
+            f"/api/auth/google/callback?state={state}&code=fake",
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        token = str(client.cookies.get("judgment_session") or "")
+        data = verify_signed_token(token, session_secret(app.state.settings))
+        assert data is not None
+        assert "sv" in data
+        return token, data
+
+    with TestClient(app) as client:
+        first_token, first = login(client)
+        second_token, second = login(client)
+        assert first["jti"] != second["jti"]
+        assert first["sv"] == second["sv"] == 0
+
+        use_session(client, first_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+        use_session(client, second_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        cross_site = client.post(
+            "/api/auth/logout-all",
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+        assert cross_site.status_code == 403
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        revoked = client.post("/api/auth/logout-all")
+        assert revoked.status_code == 200
+        assert revoked.json() == {"ok": True, "revoked": "all"}
+        assert "Max-Age=0" in revoked.headers.get("set-cookie", "")
+
+        use_session(client, first_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+        use_session(client, second_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+
+        _, third = login(client)
+        assert third["sv"] == 1
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        client.cookies.clear()
+        no_session = client.post("/api/auth/logout-all")
+        assert no_session.status_code == 200
+        assert no_session.json() == {"ok": True, "revoked": "none"}
+
+    with app.state.session_factory() as session:
+        rows = session.scalars(
+            select(SecurityAuditEvent).where(
+                SecurityAuditEvent.event_type == "auth.logout_all"
+            )
+        ).all()
+    assert any(
+        row.outcome == "success" and row.actor == "admin@example.com"
+        for row in rows
+    )
+
+
+def test_session_without_version_is_rejected(web_client) -> None:
+    settings = _oauth_settings(web_client)
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    legacy = make_signed_token(
+        {
+            "purpose": "session",
+            "jti": "legacy-session",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        session_secret(settings),
+        3600,
+    )
+    with TestClient(app) as client:
+        client.cookies.set("judgment_session", legacy)
+        payload = client.get("/api/auth/me").json()
+        assert payload["authenticated"] is False
 
 
 def test_google_logout_clears_session(web_client) -> None:

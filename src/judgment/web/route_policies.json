@@ -85,6 +85,7 @@
     "PATCH /api/question-bank/items/{item_id}": "ADMIN_WRITE",
     "POST /api/admin/demo/close": "ADMIN_ONLY",
     "POST /api/auth/logout": "PUBLIC_AUTH",
+    "POST /api/auth/logout-all": "PUBLIC_AUTH",
     "POST /api/auth/sse-ticket": "AUTH_READ",
     "POST /api/benchmark/results/{result_id}/review": "ADMIN_ONLY",
     "POST /api/benchmark/runs": "ADMIN_ONLY",

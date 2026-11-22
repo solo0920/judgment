@@ -173,8 +173,10 @@ from ..index_versions import (
     validate_version,
 )
 from ..runtime_settings import (
+    get_session_epoch,
     get_test_mode,
     is_session_revoked,
+    revoke_all_sessions,
     revoke_session,
     set_llm_model_preference,
     set_test_mode,
@@ -905,6 +907,26 @@ def _demo_error(
     )
 
 
+def _session_is_active(session_factory: Any, session: Any) -> bool:
+    if not isinstance(session, dict):
+        return False
+    jti = str(session.get("jti") or "").strip()
+    if not jti or "sv" not in session:
+        # Tokens issued before SESSION-01 lack sv and must not outlive the
+        # deployment of all-device revocation.
+        return False
+    try:
+        session_version = max(0, int(session.get("sv") or 0))
+    except (TypeError, ValueError):
+        return False
+    return not is_session_revoked(
+        session_factory,
+        jti,
+        email=str(session.get("email") or ""),
+        session_version=session_version,
+    )
+
+
 def _resolve_principal(
     request: Request, settings: Settings
 ) -> Principal:
@@ -938,12 +960,9 @@ def _resolve_principal(
         return admin_token_principal()
 
     session = read_session(request, settings)
-    if session is not None:
-        jti = str(session.get("jti") or "").strip()
-        if jti and is_session_revoked(
-            request.app.state.session_factory, jti
-        ):
-            return anonymous_principal()
+    if session is not None and _session_is_active(
+        request.app.state.session_factory, session
+    ):
         return principal_from_session(session)
     return anonymous_principal()
 
@@ -2411,11 +2430,10 @@ def create_app(
         if principal is None:
             principal = _resolve_principal(request, current)
         session = read_session(request, current)
-        if session is not None and str(session.get("jti") or "").strip():
-            if is_session_revoked(
-                app.state.session_factory, str(session["jti"])
-            ):
-                session = None
+        if session is not None and not _session_is_active(
+            app.state.session_factory, session
+        ):
+            session = None
         payload = {
             # Keep the existing auth/me contract: local bypass and admin
             # tokens are request credentials, not a browser login session.
@@ -2659,7 +2677,14 @@ def create_app(
             return response
 
         try:
-            token = make_session_token(user, current)
+            session_version = get_session_epoch(
+                app.state.session_factory, email
+            )
+            token = make_session_token(
+                user,
+                current,
+                session_version=session_version,
+            )
         except ValueError:
             logger.exception("Google login session secret is not configured")
             audit_auth(
@@ -2728,6 +2753,59 @@ def create_app(
             detail={"had_session": session is not None},
         )
         response = JSONResponse({"ok": True})
+        clear_session_cookie(response)
+        clear_oauth_state_cookie(response)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/api/auth/logout-all")
+    def auth_logout_all(request: Request) -> JSONResponse:
+        current = app.state.settings
+        if request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "跨站請求不可登出。"},
+            )
+        if not origin_allowed(request, current, cors_origins):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "不允許的 Origin。"},
+            )
+        session = read_session(request, current)
+        if session is None or not _session_is_active(
+            app.state.session_factory, session
+        ):
+            response = JSONResponse({"ok": True, "revoked": "none"})
+            clear_session_cookie(response)
+            clear_oauth_state_cookie(response)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        email = str(session.get("email") or "").strip().lower()
+        if not email:
+            response = JSONResponse({"ok": True, "revoked": "none"})
+            clear_session_cookie(response)
+            clear_oauth_state_cookie(response)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        try:
+            epoch = revoke_all_sessions(app.state.session_factory, email)
+        except Exception:
+            logger.exception("failed to revoke all sessions")
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "無法撤銷工作階段，請稍後再試。"},
+            )
+        record_security_event(
+            app.state.session_factory,
+            current,
+            event_type="auth.logout_all",
+            outcome="success",
+            actor=email,
+            source="google",
+            request=request,
+            detail={"epoch": int(epoch)},
+        )
+        response = JSONResponse({"ok": True, "revoked": "all"})
         clear_session_cookie(response)
         clear_oauth_state_cookie(response)
         response.headers["Cache-Control"] = "no-store"
