@@ -1,19 +1,25 @@
 # Supply Chain／CI 現況
 
-- 日期：2026-11-21
+- 日期：2026-11-22
 - 目的：把建置、依賴與秘密掃描變成可重複的 CI 檢查
 
 ## 已加入
 
 - `.github/workflows/ci.yml`
-  - pytest
-  - ruff
-  - frontend build（esbuild 固定 `0.28.2`）
-  - pip-audit
-  - gitleaks 全歷史掃描（CLI 8.24.3；binary 以 version＋SHA-256 固定；本機掃描 273 commits、CI 掃描 285 commits，約 40 MB，0 credential leaks）
-  - Syft SBOM（SPDX JSON artifact）
+  - pytest／ruff／frontend build／pip-audit／Syft SBOM。
+  - GitHub Actions 全部以 commit SHA 固定：`actions/checkout`、`actions/setup-python`、`actions/setup-node`、`astral-sh/setup-uv` 為 major v7，`anchore/sbom-action` 為 v0；註解保留可讀版本。
+  - `actions/checkout` 設 `persist-credentials: false`，避免 checkout token 留在 workspace。
+  - `uv sync --frozen --extra dev`，lockfile 過期時 CI 直接失敗。
+  - gitleaks CLI 8.24.3；binary 以 version＋SHA-256 固定；全歷史掃描 305 commits、約 45.7 MB，0 credential leaks。
+  - `.gitleaks.toml` 自訂規則：Judgment token／secret assignment、PostgreSQL DSN、age identity；分隔符只允許同行的空白，避免把下一個變數名稱誤判為 secret。
+  - `scripts/gitleaks_selftest.sh` 負向／正向對照：假 token 必須被偵測（exit 2），placeholder 必須乾淨（exit 0）。
 - `.github/dependabot.yml`
-  - pip／docker／github-actions 每週更新
+  - pip／docker／github-actions 每週更新。
+- `main` branch protection（2026-11-22 設定）：
+  - required checks：`test`、`frontend`、`security`
+  - 需要 PR、分支需為最新、conversation 需 resolved
+  - 禁止 force push／刪除；`enforce_admins=true`
+  - 核准數 0，適合單人 repo；仍保留 PR 與 CI 關卡
 - Docker image digest pinning：
   - `postgres:16-alpine@sha256:0cefaabd...`
   - `qdrant/qdrant:v1.19.1@sha256:12364fe...`
@@ -51,15 +57,14 @@ CI 已移除 `--ignore-vuln`。若未來出現新的 advisory，security job 會
 
 ## 尚未完成的 CI 硬化
 
-- GitHub Actions 仍使用 `@v4`／`@v5` 等 tag，尚未以 commit SHA 固定。
-- `actions/checkout` 尚未設 `persist-credentials: false`。
-- CI 仍是 `uv sync --extra dev`，尚未加 `--frozen`／`uv lock --check`；Dependabot PR 也不一定同步更新 `uv.lock`。
-- `main` 尚未設定 branch protection；目前可直接 push。
+- Dependabot 的 pip major PR（FastAPI、uvicorn、ruff、pyarrow、pytest 等）仍待逐一評估；`uv.lock` 需與 `pyproject.toml` 同步更新後再合併。
+- Actions 目前已 pin 到 v7／v0 的 commit SHA；未來 Dependabot 更新時需保持 SHA pin 與版本註解，不接受只改 tag。
+- `uv sync --frozen` 已進 CI；可再視需要加 `uv lock --check` 作為獨立步驟。
 
 ## 手動驗證
 
 ```bash
-uv sync --extra dev
+uv sync --frozen --extra dev
 uv run pytest -q
 uv run ruff check .
 uv run --with pip-audit pip-audit
@@ -68,8 +73,10 @@ npx --yes esbuild@0.28.2 --version
 docker compose config
 ```
 
-若本機已安裝 gitleaks，可重跑全歷史掃描：
+若本機已安裝 gitleaks，先跑自訂規則的負向／正向對照，再跑全歷史掃描：
 
 ```bash
-gitleaks detect --source . --log-opts=--all --redact -v --exit-code=2
+bash scripts/gitleaks_selftest.sh
+gitleaks detect --source . --config .gitleaks.toml \
+  --log-opts=--all --redact -v --exit-code=2
 ```
