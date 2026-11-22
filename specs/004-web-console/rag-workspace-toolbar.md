@@ -214,8 +214,9 @@ navigator.share({
 - `turns` MUST 至少 1 輪、最多 30 輪；空問題 MUST 被拒絕。
 - 快照 JSON MUST 不超過 1,000,000 bytes；超過時 API MUST 回 `413`。
 - 標題 MUST 最多 200 字元；問題 MUST 最多 500 字元。
-- `payload` MUST 只保留允許清單欄位，並經 `sanitize_rag_result()` 清理：
+- `payload` MUST 只保留允許清單欄位，並經 `sanitize_rag_result()` 與 `sanitize_query_payload()` 深度清理：
   - MUST NOT 保存 `pipeline_flow`、`test_run`、內部主機、模型端點或其他基礎設施細節。
+  - `notice`、`degraded_reason`、`judgments`、`law_sources`、`citations`、`law_framework` 等巢狀物件與自由文字 MUST 遞迴清除 absolute paths 與 internal endpoints。
   - `retrieval` MUST 經 `sanitize_infrastructure()` 清理後才保存。
   - `partial` 與 `streaming` MUST 強制為 `false`，避免分享頁重播串流狀態。
 - 快照 MUST 寫入 PostgreSQL `rag_share_snapshots`。

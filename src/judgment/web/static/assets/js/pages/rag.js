@@ -624,6 +624,11 @@ function citationUsageLabel(item) {
   return "";
 }
 
+function safeIndex(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function judgmentCard(judgment, index) {
   const score =
     judgment.score === null || judgment.score === undefined
@@ -669,7 +674,7 @@ function judgmentCard(judgment, index) {
       )}</a>`
     : "";
   return `<article class="citation">
-    <span class="citation-index">[${judgment.index ?? index + 1}]</span>
+    <span class="citation-index">[${safeIndex(judgment.index, index + 1)}]</span>
     <div class="citation-body">
       <div class="citation-head"${headAttributes}>
         <h4 class="citation-name">${escapeHtml(judgment.jid || "未知案號")}</h4>
@@ -766,7 +771,9 @@ function citationCard(citation, index) {
         aria-label="開啟 ${escapeHtml(citation.law_name || "法規")} 原始條文"`
     : "";
   return `<article class="citation">
-    <span class="citation-index">${String(citation.index ?? index + 1).padStart(2, "0")}</span>
+    <span class="citation-index">${String(
+      safeIndex(citation.index, index + 1),
+    ).padStart(2, "0")}</span>
     <div class="citation-body"${bodyAttributes}>
       <h4 class="citation-name">${escapeHtml(citation.law_name || "未命名法規")}</h4>
       <div class="citation-meta">${meta || "<span>法規 metadata</span>"}</div>
@@ -786,8 +793,8 @@ function lawSourceCard(source, index) {
     source.law_level && source.law_level !== sourceLabel ? source.law_level : "";
   const meta = [
     `<span class="badge ${source.source_type === "order" ? "badge-warn" : "badge-info"}">${escapeHtml(sourceLabel)}</span>`,
-    level,
-    source.law_category,
+    level ? escapeHtml(level) : "",
+    source.law_category ? escapeHtml(source.law_category) : "",
     source.article_count ? `${formatNumber(source.article_count)} 條` : "",
     source.law_modified_date ? `異動 ${formatDate(source.law_modified_date)}` : "",
     citationUsageLabel(source),
@@ -849,7 +856,9 @@ function lawSourceCard(source, index) {
         aria-label="開啟 ${escapeHtml(source.law_name || "法規")} 原始條文"`
     : "";
   return `<article class="citation law-source">
-    <span class="citation-index">${String(source.index ?? index + 1).padStart(2, "0")}</span>
+    <span class="citation-index">${String(
+      safeIndex(source.index, index + 1),
+    ).padStart(2, "0")}</span>
     <div class="citation-body"${bodyAttributes}>
       <h4 class="citation-name">${escapeHtml(source.law_name || "未命名法規")}</h4>
       <div class="citation-meta">${meta}</div>

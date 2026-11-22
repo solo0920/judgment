@@ -2746,8 +2746,26 @@ def test_rag_share_snapshot_round_trip(web_client) -> None:
                         "status": "operational",
                         "answer": "證券交易法第 157-1 條禁止內線交易。",
                         "answer_source": "llm",
-                        "judgments": [{"jid": "TPSM,101,台上,5924,20121122"}],
-                        "law_sources": [{"law_name": "證券交易法"}],
+                        "notice": (
+                            "failed http://internal:11434 "
+                            "/Users/alice/secret"
+                        ),
+                        "degraded_reason": "see /Users/alice/run.log",
+                        "judgments": [
+                            {
+                                "jid": "TPSM,101,台上,5924,20121122",
+                                "host": "10.0.0.5",
+                                "url": "http://127.0.0.1:9200",
+                                "error_message": "/Users/alice/secret",
+                            }
+                        ],
+                        "law_sources": [
+                            {
+                                "law_name": "證券交易法",
+                                "path": "/Users/alice/law.parquet",
+                                "host": "internal",
+                            }
+                        ],
                         "pipeline_flow": {"internal": "not shared"},
                         "test_run": {"host": "not shared"},
                     },
@@ -2775,6 +2793,17 @@ def test_rag_share_snapshot_round_trip(web_client) -> None:
     )
     assert "pipeline_flow" not in turn["payload"]
     assert "test_run" not in turn["payload"]
+    serialized = json.dumps(turn["payload"], ensure_ascii=False)
+    for leaked in (
+        "internal:11434",
+        "/Users/alice",
+        "10.0.0.5",
+        "127.0.0.1:9200",
+    ):
+        assert leaked not in serialized
+    assert turn["payload"]["judgments"][0]["jid"] == (
+        "TPSM,101,台上,5924,20121122"
+    )
 
     assert (
         web_client.post(
@@ -3769,6 +3798,35 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
         assert ".rag-workspace-menu" in css
         assert ".rag-mode-card:not(.is-expanded)" in css
         assert len(model_font.findall(css)) >= 8
+
+
+def test_rag_shared_render_escapes_indexes_and_law_metadata() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source_js = (
+        root
+        / "src"
+        / "judgment"
+        / "web"
+        / "static"
+        / "assets"
+        / "js"
+        / "pages"
+        / "rag.js"
+    ).read_text(encoding="utf-8")
+    assert "function safeIndex(value, fallback)" in source_js
+    assert "safeIndex(judgment.index, index + 1)" in source_js
+    assert "safeIndex(citation.index, index + 1)" in source_js
+    assert "safeIndex(source.index, index + 1)" in source_js
+    assert "escapeHtml(level)" in source_js
+    assert "escapeHtml(source.law_category)" in source_js
+    for unsafe in (
+        '<span class="citation-index">[${judgment.index',
+        "String(citation.index ?? index + 1).padStart",
+        "String(source.index ?? index + 1).padStart",
+        "${level}",
+        "${source.law_category}",
+    ):
+        assert unsafe not in source_js
 
 
 def test_settings_sidebar_source_and_bundle_are_present() -> None:

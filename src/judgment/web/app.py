@@ -362,6 +362,7 @@ def _sanitize_rag_share_turns(
             if key in payload
         }
         cleaned = sanitize_rag_result(cleaned)
+        cleaned = sanitize_query_payload(cleaned)
         cleaned["partial"] = False
         cleaned["streaming"] = False
         asked_at = str(raw.get("asked_at") or "").strip()[:64]

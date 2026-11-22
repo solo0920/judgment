@@ -400,7 +400,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 
 | 階段 | 項目 | 驗收條件 |
 | --- | --- | --- |
-| **24h（最高優先）** | SEC-01、SEC-02（已修復）；SEC-03、SEC-04、INFRA-01（下一批） | 分享後查 `/api/performance` 無 token；anonymous schema suggest 無絕對路徑；deep-scrub 測試通過；4 處 escape 測試通過；惡意 filename 無法寫出 raw_dir |
+| **24h（最高優先）** | SEC-01、SEC-02、SEC-03、SEC-04、INFRA-01（已修復） | 分享後查 `/api/performance` 無 token；anonymous schema suggest 無絕對路徑；deep-scrub 測試通過；4 處 escape 測試通過；惡意 filename 無法寫出 raw_dir |
 | **1 週（P1）** | AUTH-01、AUTH-02、AUTH-04、INFRA-02、INFRA-03、INFRA-04、INFRA-05、INFRA-09 | demo endpoints 使用受限 DB；SSE ticket 一次性；SameSite=Lax；備份 secret 不進 cmdline；加密 fail-closed；restore 不自動覆寫 `.env`；DB role 降權 |
 | **下次展示前（P2）** | BAK-02、ABUSE-01、OPS-01、PRIV-01、NET-05、HIST-01、SEC-05、SEC-06 | 完整還原成功；429／edge 規則驗證；HSTS/report-to 補齊；字型自託管；防火牆開啟；HIST 決策簽核 |
 | **後續（P3）** | SESSION-01、AUDIT-01、AUTH-05、AUTH-06、OPS-04、INFRA-06/07/08/10 | session 可撤銷；安全稽核上線；CI 完全 pin |
@@ -459,9 +459,31 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - Admin 請求仍可取得完整欄位，不影響管理頁。
 - 回歸測試：`tests/test_demo_mode.py::test_demo_schema_suggest_blocks_sensitive_paths`。
 
+### SEC-03 — 已修復
+
+- `_sanitize_rag_share_turns()` 在 allowlist 後對整包 payload 套用 `sanitize_query_payload()`，遞迴清除內部 host、URL、絕對路徑、error 與基礎設施欄位。
+- 回歸測試：`tests/test_web.py::test_rag_share_snapshot_round_trip` 新增 nested `judgments`／`law_sources`／`notice`／`degraded_reason` 洩漏斷言。
+
+### SEC-04 — 已修復
+
+- `rag.js` 新增 `safeIndex()`，citation／law source 索引只允許有限數字，不再直接插值 attacker-controlled 字串。
+- `law_level`、`law_category` 改為 `escapeHtml()` 後才放入 meta。
+- 回歸測試：`tests/test_web.py::test_rag_shared_render_escapes_indexes_and_law_metadata`。
+
+### INFRA-01 — 已修復
+
+- `_filename_from_headers()` 與 `_probe_next()` 一律取 basename 並套用 `_safe_filename()`。
+- `_load_manifest()` 載入時清理 `files`／`history_files` 的 filename。
+- 新增 `_archive_path()`，所有 archive 讀寫／prune 路徑都限制在 `raw_rar` 內；`Content-Disposition` 使用 `quote(..., safe="")`。
+- 回歸測試：
+  - `tests/test_judgment_download.py::test_download_filename_headers_are_reduced_to_safe_basename`
+  - `tests/test_judgment_download.py::test_archive_path_never_escapes_raw_rar`
+  - `tests/test_judgment_download.py::test_probe_next_rejects_path_like_filenames`
+  - `tests/test_judgment_download.py::test_load_manifest_sanitizes_archive_filenames`
+
 ### 尚未處理
 
-SEC-03、SEC-04、INFRA-01 仍待修復；它們不在本次兩項 P0 範圍內。
+下一批為 AUTH-01～AUTH-04、INFRA-02～INFRA-05、INFRA-09；見第 4 節路線圖。
 
 ---
 
@@ -471,3 +493,4 @@ SEC-03、SEC-04、INFRA-01 仍待修復；它們不在本次兩項 P0 範圍內�
 | --- | --- |
 | 2026-11-22 | 初次建立；4 面向程式碼審查＋正式站唯讀驗證；列出 2 項 High、12 項 Medium、10 項 Low 與已良好控制。 |
 | 2026-11-22 | 修復 SEC-01（分享 token 遙測 redaction）與 SEC-02（demo schema suggest 敏感欄位／路徑封鎖），補回歸測試。 |
+| 2026-11-22 | 修復 SEC-03（分享 payload deep scrub）、SEC-04（索引與法規 metadata escape）、INFRA-01（下载档名 basename／archive path 限制），補回歸測試。 |
