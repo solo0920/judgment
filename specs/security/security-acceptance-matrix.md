@@ -33,8 +33,9 @@
 | BAK-01 | 備份明文 | `.env` 不進備份；敏感資料加密 | 備份內容清單、age 加密檔、無明文 secrets | `implemented`（PG dump age 加密；`.env` 排除；`data/` 與 Qdrant snapshot 仍明文） | Infra |
 | BAK-02 | Restore drill | 可從加密備份完整還原並驗證 DB／Qdrant | 實際 restore 報告、checksum、資料筆數差異 0 | `partial`（subset restore 已通過；完整 157 GB＋Qdrant drill 尚未執行） | Infra |
 | ABUSE-01 | 昂貴 RAG 端點 | 無限制消耗被限制 | 429／Retry-After、併發測試 | `partial`（demo RAG／query／poll 限流與每日預算已實作；端到端 429／串流併發／Cloudflare edge 規則待驗） | 工程 |
-| AUTH-01 | Actor 身分可信 | actor 由驗證層產生，不信任使用者 header | 遠端／本機 actor 測試、audit log | `partial`（Google session actor email 已實機驗證；admin token actor 與 audit 待補） | 工程 |
+| AUTH-01 | Actor 身分可信 | actor 由驗證層產生，不信任使用者 header | 遠端／本機 actor 測試、audit log | `verified`（Google session 實機登入；admin token actor、admin write actor、Google login actor 寫入 `security_audit_events`；pytest 覆蓋） | 工程 |
 | AUTH-02 | 題庫狀態機 | 不可直接建立／更新為 accepted | 狀態轉換 API 測試、角色矩陣 | `not_started` | 工程／法律審閱 |
+| AUDIT-01 | 安全稽核 | 登入／登出／admin token／admin write 有結構化紀錄與讀取 API | table、事件、API、保留期限、測試 | `verified`（`security_audit_events` + `GET /api/admin/security-audit`；180 天清理；正式站已產生 `auth.admin_token`／`admin.write`；Google login／logout 事件由 pytest 覆蓋） | 工程 |
 | AUTH-03 | Google 帳號登入 | 僅 allowlist 內且 email_verified 的 Google 帳號可取得管理員 session；state／CSRF／cookie 安全 | OAuth start／callback、allowlist 拒絕、HttpOnly／SameSite、remote session 測試 | `verified`（Google 實機登入、state／cookie、allowlist、remote session 已驗證） | 工程 |
 | TOKEN-01 | 管理權杖生命週期 | 靜態 token 可輪替；不因 XSS 長期取得管理權 | token 儲存位置、輪替、舊值失效、session 撤銷 | `partial`（sessionStorage、token／session secret 已輪替；session token 有 `jti`，logout 會撤銷；尚無全裝置撤銷與短 TTL） | 工程 |
 | DB-ROLE-01 | 主應用 PostgreSQL 權限 | 應用角色不得是 superuser／createdb | `rolsuper=f`、`rolcreatedb=f`、`COPY PROGRAM` 失敗 | `verified`（主應用改用 `judgment_app`：`rolsuper=f`、`rolcreatedb=f`、`rolcreaterole=f`；擁有 33 張 public tables；`COPY PROGRAM`／`pg_read_file`／`CREATE DATABASE` 失敗；`demo_reader` 仍受限。見 `app-db-role-runbook.md`） | 工程／DB |

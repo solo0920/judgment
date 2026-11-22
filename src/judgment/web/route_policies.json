@@ -9,6 +9,7 @@
     "GET /": "PUBLIC_READ",
     "GET /api/admin/demo": "ADMIN_ONLY",
     "GET /api/admin/demo/audit": "ADMIN_ONLY",
+    "GET /api/admin/security-audit": "ADMIN_ONLY",
     "GET /api/auth/google/callback": "PUBLIC_AUTH",
     "GET /api/auth/google/start": "PUBLIC_AUTH",
     "GET /api/auth/me": "PUBLIC_READ",

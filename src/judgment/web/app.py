@@ -250,6 +250,11 @@ from .query import (
     run_query,
     schema_suggestions,
 )
+from .security_audit import (
+    SECURITY_AUDIT_RETENTION_DAYS,
+    list_security_events,
+    record_security_event,
+)
 from .status import build_status, rerank_status
 from .system_usage import build_system_usage
 
@@ -921,6 +926,15 @@ def _resolve_principal(
         and provided
         and hmac.compare_digest(provided, admin_expected)
     ):
+        record_security_event(
+            request.app.state.session_factory,
+            settings,
+            event_type="auth.admin_token",
+            outcome="success",
+            actor="admin_token",
+            source="admin_token",
+            request=request,
+        )
         return admin_token_principal()
 
     session = read_session(request, settings)
@@ -2339,7 +2353,26 @@ def create_app(
                                     "detail": "跨站請求不可寫入管理 API。"
                                 },
                             )
-            return await call_next(request)
+            response = await call_next(request)
+            if (
+                principal.is_admin
+                and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and not path.startswith("/api/auth/")
+            ):
+                await asyncio.to_thread(
+                    record_security_event,
+                    app.state.session_factory,
+                    current,
+                    event_type="admin.write",
+                    outcome=(
+                        "success" if response.status_code < 400 else "failure"
+                    ),
+                    actor=str(getattr(principal, "email", "") or ""),
+                    source=str(getattr(principal, "source", "") or ""),
+                    request=request,
+                    detail={"status_code": int(response.status_code)},
+                )
+            return response
 
         if path == "/api/events/stream":
             ticket = str(request.query_params.get("ticket") or "")
@@ -2482,11 +2515,48 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/admin/security-audit")
+    def admin_security_audit(limit: int = 100) -> JSONResponse:
+        return JSONResponse(
+            content={
+                "events": list_security_events(
+                    app.state.session_factory, limit=limit
+                ),
+                "retention_days": SECURITY_AUDIT_RETENTION_DAYS,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    def audit_auth(
+        request: Request,
+        *,
+        event_type: str,
+        outcome: str,
+        actor: str = "",
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        record_security_event(
+            app.state.session_factory,
+            app.state.settings,
+            event_type=event_type,
+            outcome=outcome,
+            actor=actor,
+            source="google",
+            request=request,
+            detail=detail,
+        )
+
     @app.get("/api/auth/google/start", name="google_start")
     def google_start(request: Request) -> RedirectResponse:
         current = app.state.settings
         target = safe_next_url(request.query_params.get("next"), request, current)
         if not google_login_enabled(current):
+            audit_auth(
+                request,
+                event_type="auth.google_start",
+                outcome="failure",
+                detail={"reason": "google_not_configured"},
+            )
             return redirect_with_auth(target, error="google_not_configured")
         state = new_oauth_state()
         state_token = make_oauth_state_token(state, target, current)
@@ -2511,18 +2581,36 @@ def create_app(
         if not state_data or not hmac.compare_digest(
             str(state_data.get("state") or ""), state
         ):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "state_mismatch"},
+            )
             response = redirect_with_auth("/", error="state_mismatch")
             clear_oauth_state_cookie(response)
             return response
 
         target = safe_next_url(state_data.get("next"), request, current)
         if request.query_params.get("error"):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "access_denied"},
+            )
             response = redirect_with_auth(target, error="access_denied")
             clear_oauth_state_cookie(response)
             return response
 
         code = str(request.query_params.get("code") or "")
         if not code or not google_login_enabled(current):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "oauth_failed"},
+            )
             response = redirect_with_auth(target, error="oauth_failed")
             clear_oauth_state_cookie(response)
             return response
@@ -2537,17 +2625,35 @@ def create_app(
             )
         except Exception:
             logger.exception("Google OAuth code exchange failed")
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "oauth_exchange_failed"},
+            )
             response = redirect_with_auth(target, error="oauth_failed")
             clear_oauth_state_cookie(response)
             return response
 
         if not email_verified(user):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "email_unverified"},
+            )
             response = redirect_with_auth(target, error="email_unverified")
             clear_oauth_state_cookie(response)
             return response
 
         email = str(user.get("email") or "").strip().lower()
         if not allowed_email(email, current):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="denied",
+                detail={"reason": "not_allowed", "email": email[:320]},
+            )
             response = redirect_with_auth(target, error="not_allowed")
             clear_oauth_state_cookie(response)
             return response
@@ -2556,10 +2662,23 @@ def create_app(
             token = make_session_token(user, current)
         except ValueError:
             logger.exception("Google login session secret is not configured")
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "session_secret_missing"},
+            )
             response = redirect_with_auth(target, error="oauth_failed")
             clear_oauth_state_cookie(response)
             return response
 
+        audit_auth(
+            request,
+            event_type="auth.google_login",
+            outcome="success",
+            actor=email,
+            detail={"email": email[:320]},
+        )
         response = redirect_with_auth(target, ok=True)
         set_session_cookie(response, request, current, token)
         clear_oauth_state_cookie(response)
@@ -2593,6 +2712,21 @@ def create_app(
                     logger.warning(
                         "failed to persist session revocation", exc_info=True
                     )
+        principal = getattr(request.state, "principal", None)
+        record_security_event(
+            app.state.session_factory,
+            current,
+            event_type="auth.logout",
+            outcome="success",
+            actor=str((session or {}).get("email") or ""),
+            source=(
+                "google"
+                if session is not None
+                else str(getattr(principal, "source", "") or "")
+            ),
+            request=request,
+            detail={"had_session": session is not None},
+        )
         response = JSONResponse({"ok": True})
         clear_session_cookie(response)
         clear_oauth_state_cookie(response)

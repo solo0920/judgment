@@ -38,6 +38,7 @@ from judgment.models import (
     LawDatasetVersion,
     LawDocument,
     OllamaHost,
+    SecurityAuditEvent,
 )
 from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
@@ -3330,7 +3331,8 @@ def test_google_callback_creates_session(web_client, monkeypatch) -> None:
         "exchange_google_code",
         fake_exchange_google_code,
     )
-    with TestClient(_oauth_app(web_client)) as client:
+    oauth_app = _oauth_app(web_client)
+    with TestClient(oauth_app) as client:
         start = client.get(
             "/api/auth/google/start?next=" + quote("/#/rag", safe=""),
             follow_redirects=False,
@@ -3350,6 +3352,17 @@ def test_google_callback_creates_session(web_client, monkeypatch) -> None:
         assert me.json()["authenticated"] is True
         assert me.json()["email"] == "admin@example.com"
         assert me.json()["admin"] is True
+
+    with oauth_app.state.session_factory() as session:
+        audit = session.scalars(
+            select(SecurityAuditEvent).where(
+                SecurityAuditEvent.event_type == "auth.google_login"
+            )
+        ).all()
+    assert any(
+        row.outcome == "success" and row.actor == "admin@example.com"
+        for row in audit
+    )
 
 
 def test_google_callback_allows_configured_frontend_next(
@@ -3750,6 +3763,57 @@ def test_remote_google_session_authorizes_and_rejects_bad_origin(web_client) -> 
         )
         assert good_origin.status_code == 200
         assert good_origin.json()["ticket"]
+
+
+def test_security_audit_records_admin_auth_and_writes(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="security-audit-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    headers = {"X-Judgment-Admin-Token": "security-audit-token"}
+    with TestClient(app, client=("203.0.113.9", 50000)) as client:
+        written = client.post(
+            "/api/test-mode", json={"enabled": False}, headers=headers
+        )
+        assert written.status_code == 200
+        response = client.get(
+            "/api/admin/security-audit", headers=headers
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["retention_days"] == 180
+        events = payload["events"]
+        assert any(
+            event["event_type"] == "auth.admin_token"
+            and event["outcome"] == "success"
+            and event["source"] == "admin_token"
+            for event in events
+        )
+        assert any(
+            event["event_type"] == "admin.write"
+            and event["outcome"] == "success"
+            and event["path"] == "/api/test-mode"
+            and event["method"] == "POST"
+            for event in events
+        )
+        assert "security-audit-token" not in json.dumps(
+            events, ensure_ascii=False
+        )
+
+    with app.state.session_factory() as session:
+        rows = session.scalars(
+            select(SecurityAuditEvent).order_by(
+                SecurityAuditEvent.id.desc()
+            )
+        ).all()
+    assert rows
+    assert all(row.actor != "security-audit-token" for row in rows)
 
 
 def test_google_logout_clears_session(web_client) -> None:

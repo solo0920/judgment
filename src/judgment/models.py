@@ -929,6 +929,29 @@ class DemoModeAudit(Base):
     )
 
 
+class SecurityAuditEvent(Base):
+    __tablename__ = "security_audit_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    event_type = Column(String(64), nullable=False, index=True)
+    outcome = Column(String(16), nullable=False, default="success", index=True)
+    actor = Column(String(320), nullable=False, default="")
+    source = Column(String(32), nullable=False, default="")
+    client_ip_hash = Column(String(64), nullable=False, default="")
+    request_id = Column(String(64), nullable=False, default="")
+    method = Column(String(16), nullable=False, default="")
+    path = Column(String(300), nullable=False, default="")
+    detail = Column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("ix_security_audit_event_created", "event_type", "created_at"),
+        Index("ix_security_audit_outcome_created", "outcome", "created_at"),
+    )
+
+
 class DemoUsageDaily(Base):
     __tablename__ = "demo_usage_daily"
 

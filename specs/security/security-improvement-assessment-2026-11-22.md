@@ -46,7 +46,7 @@
 1. **24 小時內**：SEC-01、SEC-02、SEC-03、SEC-04、INFRA-01
 2. **一週內**：AUTH-01～AUTH-05、INFRA-02～INFRA-04、OPS-01～OPS-02
 3. **下次公開展示前**：完成 BAK-02 完整還原演練、ABUSE-01 端到端驗證、HDR-01 `report-to`、PRIV-01 自託管字型、NET-05、HIST-01 決策
-4. **後續**：SESSION-01、AUDIT-01、APP-DB-01 完整整改
+4. **後續**：SESSION-01、AUTH-05～08、OPS-04 等
 
 ---
 
@@ -403,7 +403,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | **24h（最高優先）** | SEC-01、SEC-02、SEC-03、SEC-04、INFRA-01（已修復） | 分享後查 `/api/performance` 無 token；anonymous schema suggest 無絕對路徑；deep-scrub 測試通過；4 處 escape 測試通過；惡意 filename 無法寫出 raw_dir |
 | **1 週（P1）** | AUTH-01、AUTH-02、AUTH-04、INFRA-02、INFRA-03、INFRA-04、INFRA-09（已修復）；INFRA-05（後續） | demo endpoints 使用受限 DB；SSE ticket 一次性；SameSite=Lax；備份 secret 不進 cmdline；加密 fail-closed；restore 不自動覆寫 `.env`；DB role 降權完成 |
 | **下次展示前（P2）** | BAK-02、ABUSE-01、OPS-01、PRIV-01、NET-05、HIST-01、SEC-05、SEC-06 | 完整還原成功；429／edge 規則驗證；HSTS/report-to 補齊；字型自託管；防火牆開啟；HIST 決策簽核 |
-| **後續（P3）** | SESSION-01、AUDIT-01、AUTH-05、AUTH-06、OPS-04、INFRA-06/07/08/10 | session 可撤銷；安全稽核上線；CI 完全 pin |
+| **後續（P3）** | SESSION-01、AUTH-05、AUTH-06、OPS-04、INFRA-06/07/08/10 | session 可撤銷；CI 完全 pin |
 
 ---
 
@@ -535,6 +535,16 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - `restore.sh` 在 destructive restore 前確認 `judgment_app` 存在，還原後將 public tables／sequences ownership 轉移給它；`pg_restore --no-privileges` 不會還原的 `demo_reader` grants 仍需依 demo runbook 重新套用。
 - Runbook：`specs/security/app-db-role-runbook.md`；回滾檔：`.run/env.before-db-role`（600）。
 
+#### AUDIT-01 — 已修復（初版）
+
+- 新增 `security_audit_events`：event type、outcome、actor、source、client IP hash、request id、method、path、detail、created_at。
+- 新增 `record_security_event()` 與 `list_security_events()`；180 天保留，每 200 次寫入清理。
+- 新增 `GET /api/admin/security-audit?limit=...`（ADMIN_ONLY、`Cache-Control: no-store`）。
+- 已接線：Google login 成功／失敗、logout、admin token 使用、admin write（含 status code）。
+- 不記錄 token、OAuth code／state、密碼或 cookie；client IP 只存 keyed hash。
+- 回歸測試：`tests/test_web.py::test_security_audit_records_admin_auth_and_writes`、`test_google_callback_creates_session`。
+- 尚未完成：外部告警／dashboard、401/403 burst 偵測；目前提供結構化資料與讀取 API。
+
 #### 驗證結果（2026-11-22）
 
 - **Demo 資料隔離**：正式站 `/api/data/suggest`、`/api/law`、`/api/judgment`、`/api/query` 正常；`/api/judgment` 的 `source_archive`／`import_run_id` 對 demo 為 `None`；`/api/query` 的 `judgment_documents` columns 不含 `source_archive`。
@@ -546,6 +556,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **備份機制**：`pg_dump --schema-only` → 建立 scratch DB → `pg_restore` 成功（33 張 public tables）→ drop；Qdrant API 以 `curl -K -` 驗證 200；`BACKUP_REQUIRE_ENCRYPTION=1` 缺 recipient 時 fail closed；`bash -n` 兩支腳本通過。
 - **Google 實機登入／管理頁**：使用者已在 `judgment.ragdemo.win` 完成 Google 登入。access log 顯示 `/api/auth/google/start` 302、callback 302、`/api/auth/me` 200，以及管理頁 `PUT /api/admin/demo`、`POST /api/admin/demo/close` 200。驗證期間發現 OAuth `code` 曾寫入 access log；已補 `code`／`state` 遮蔽，並清理舊 log。
 - **Access log 遮蔽**：新 log 對 `ticket`、`code`、`state`、`access_token`、`refresh_token`、`id_token` 顯示 `[redacted]`；舊 `.run/web.log.*-pre-redaction` 已清理並維持 600。
+- **安全稽核**：正式站以 admin token 觸發 `auth.admin_token` 與 `admin.write`，`GET /api/admin/security-audit` 回傳事件；`security_audit_events` owner 為 `judgment_app`；回應不含 admin token／Bearer。Google login 成功／失敗事件由 pytest 覆蓋，下一次實際登入會寫入。
 - **pages.dev 預覽**：Lax 下預覽站與 API 不同 site，預覽登入會失效；已寫入 runbook，production 不受影響。
 
 #### 仍待處理
@@ -566,3 +577,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | 第二批：AUTH-01 demo DB session 隔離、AUTH-02 一次性 SSE ticket、AUTH-03 logout jti 撤銷、AUTH-04 SameSite／logout／admin-token Origin、INFRA-02 備份密碼不進 cmdline、INFRA-03 加密預設 fail-closed、INFRA-04 restore 不自動覆寫 `.env`。 |
 | 2026-11-22 | 驗證：demo_reader 負向測試、毒化主連線測試、admin token 關閉／重開、SSE 重播與日誌遮蔽、session 撤銷 DB 檢查、schema dump/restore、加密 fail-closed。Google 實機登入成功；另修補 OAuth code／state access-log 洩漏並清理舊 log。 |
 | 2026-11-22 | INFRA-09：主應用改用 `judgment_app`（NOSUPERUSER/NOCREATEDB/NOCREATEROLE），ownership 轉移，完整讀寫與負向測試通過；新增 `app-db-role-runbook.md`。 |
+| 2026-11-22 | AUDIT-01 初版：`security_audit_events`、`GET /api/admin/security-audit`、Google login／logout／admin token／admin write 事件；180 天保留；補 pytest。 |

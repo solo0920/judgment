@@ -615,6 +615,16 @@ export const api = {
     });
   },
 
+  adminSecurityAudit(limit = 20) {
+    return request(
+      `/api/admin/security-audit?limit=${encodeURIComponent(limit)}`,
+      {
+        timeout: 15000,
+        trackClient: false,
+      },
+    );
+  },
+
   closeDemo() {
     return request("/api/admin/demo/close", {
       method: "POST",
