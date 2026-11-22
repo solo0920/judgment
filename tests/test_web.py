@@ -58,6 +58,7 @@ from judgment.web.route_policy import (
     registered_route_keys,
     validate_route_policies,
 )
+from judgment.web.security_audit import record_security_event
 
 
 def _seed(session_factory) -> None:
@@ -3815,6 +3816,165 @@ def test_security_audit_records_admin_auth_and_writes(web_client) -> None:
         ).all()
     assert rows
     assert all(row.actor != "security-audit-token" for row in rows)
+
+
+def test_security_audit_failures_are_non_blocking(web_client, monkeypatch) -> None:
+    import judgment.web.security_audit as audit
+
+    monkeypatch.setattr(audit.logger, "warning", lambda *args, **kwargs: None)
+
+    class BrokenFactory:
+        def __call__(self):
+            raise RuntimeError("audit database unavailable")
+
+    class ExplodingDetail:
+        def __str__(self):
+            raise RuntimeError("cannot stringify detail")
+
+    settings = web_client.app.state.settings
+    record_security_event(
+        BrokenFactory(),
+        settings,
+        event_type="auth.google_login",
+        outcome="failure",
+        detail={"reason": "write_failure"},
+    )
+    record_security_event(
+        web_client.app.state.session_factory,
+        settings,
+        event_type="auth.google_login",
+        outcome="failure",
+        detail={"bad": ExplodingDetail()},
+    )
+
+
+def test_security_audit_caps_unauthenticated_failure_events(
+    web_client, monkeypatch
+) -> None:
+    import judgment.web.security_audit as audit
+
+    monkeypatch.setattr(
+        audit, "_AUDIT_DAILY_LIMITS", {"auth.google_login": (3, 5)}
+    )
+    monkeypatch.setattr(audit, "_DAILY_DAY", None)
+    monkeypatch.setattr(audit, "_DAILY_IP_COUNTS", {})
+    monkeypatch.setattr(audit, "_DAILY_TOTAL_COUNTS", {})
+    factory = web_client.app.state.session_factory
+    settings = web_client.app.state.settings
+    for _ in range(10):
+        record_security_event(
+            factory,
+            settings,
+            event_type="auth.google_login",
+            outcome="failure",
+            detail={"reason": "flood"},
+        )
+    record_security_event(
+        factory,
+        settings,
+        event_type="auth.google_login",
+        outcome="success",
+        actor="admin@example.com",
+    )
+    with factory() as session:
+        rows = session.scalars(select(SecurityAuditEvent)).all()
+    assert len(rows) == 4
+    assert sum(row.outcome == "failure" for row in rows) == 3
+    assert sum(row.outcome == "success" for row in rows) == 1
+
+
+def test_security_audit_does_not_store_query_string(web_client) -> None:
+    settings = replace(
+        _oauth_settings(web_client),
+        admin_token="audit-query-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    headers = {"X-Judgment-Admin-Token": "audit-query-token"}
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/demo?access_token=do-not-store&code=oauth-code",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        payload = client.get(
+            "/api/admin/security-audit", headers=headers
+        ).json()
+    blob = json.dumps(payload, ensure_ascii=False)
+    assert "do-not-store" not in blob
+    assert "oauth-code" not in blob
+    assert any(
+        event["path"] == "/api/admin/demo"
+        for event in payload["events"]
+    )
+
+
+def test_admin_token_ignores_stale_session_epoch(web_client) -> None:
+    settings = replace(
+        _oauth_settings(web_client),
+        admin_token="admin-fallback-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    stale = make_session_token(
+        {
+            "sub": "google-sub-stale",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        settings,
+        session_version=999,
+    )
+    with TestClient(app) as client:
+        client.cookies.set("judgment_session", stale)
+        assert client.post(
+            "/api/test-mode", json={"enabled": False}
+        ).status_code in {401, 403}
+        allowed = client.post(
+            "/api/test-mode",
+            json={"enabled": False},
+            headers={"X-Judgment-Admin-Token": "admin-fallback-token"},
+        )
+        assert allowed.status_code == 200
+
+
+def test_logout_revocation_survives_app_restart(web_client) -> None:
+    settings = _oauth_settings(web_client)
+    token = make_session_token(
+        {
+            "sub": "google-sub-restart",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        settings,
+    )
+    app_one = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app_one) as client:
+        client.cookies.set("judgment_session", token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+        assert client.post("/api/auth/logout").status_code == 200
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+
+    app_two = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app_two) as client:
+        client.cookies.set("judgment_session", token)
+        assert client.get("/api/auth/me").json()["authenticated"] is False
 
 
 def test_logout_all_revokes_every_session(web_client, monkeypatch) -> None:

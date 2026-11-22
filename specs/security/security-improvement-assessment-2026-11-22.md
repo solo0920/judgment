@@ -538,14 +538,16 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - `restore.sh` 在 destructive restore 前確認 `judgment_app` 存在，還原後將 public tables／sequences ownership 轉移給它；`pg_restore --no-privileges` 不會還原的 `demo_reader` grants 仍需依 demo runbook 重新套用。
 - Runbook：`specs/security/app-db-role-runbook.md`；回滾檔：`.run/env.before-db-role`（600）。
 
-#### AUDIT-01 — 已修復（初版）
+#### AUDIT-01 — 已修復
 
 - 新增 `security_audit_events`：event type、outcome、actor、source、client IP hash、request id、method、path、detail、created_at。
 - 新增 `record_security_event()` 與 `list_security_events()`；180 天保留，每 200 次寫入清理。
 - 新增 `GET /api/admin/security-audit?limit=...`（ADMIN_ONLY、`Cache-Control: no-store`）。
-- 已接線：Google login 成功／失敗、logout、admin token 使用、admin write（含 status code）。
-- 不記錄 token、OAuth code／state、密碼或 cookie；client IP 只存 keyed hash。
-- 回歸測試：`tests/test_web.py::test_security_audit_records_admin_auth_and_writes`、`test_google_callback_creates_session`。
+- 已接線：Google login 成功／失敗、logout、logout-all、admin token 使用、admin write（含 status code）。
+- 不記錄 token、OAuth code／state、密碼、cookie 或 query string；client IP 只存 keyed hash。
+- 未驗證失敗事件（`auth.google_start`、`auth.google_login`）有每 IP／每日與全域每日上限，避免匿名流量灌大表格。
+- 稽核事件建構或寫入失敗只記 warning，不阻塞原本的管理請求；admin token 路徑不讀取 session epoch。
+- 回歸測試：`test_security_audit_records_admin_auth_and_writes`、`test_security_audit_failures_are_non_blocking`、`test_security_audit_caps_unauthenticated_failure_events`、`test_security_audit_does_not_store_query_string`、`test_admin_token_ignores_stale_session_epoch`、`tests/frontend_security.test.mjs`。
 - 尚未完成：外部告警／dashboard、401/403 burst 偵測；目前提供結構化資料與讀取 API。
 
 #### 驗證結果（2026-11-22）
@@ -553,7 +555,7 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 - **Demo 資料隔離**：正式站 `/api/data/suggest`、`/api/law`、`/api/judgment`、`/api/query` 正常；`/api/judgment` 的 `source_archive`／`import_run_id` 對 demo 為 `None`；`/api/query` 的 `judgment_documents` columns 不含 `source_archive`。
 - **demo_reader 負向測試**：`parquet_path`、`zip_path`、`source_archive`、`import_run_id`、`error_message`、`question_bank_items`、`pg_read_file`、`COPY ... PROGRAM`、`CREATE TABLE` 全部以 InsufficientPrivilege／ReadOnly 失敗；`demo_reader` 無任何 role membership。
 - **毒化主連線測試**：`tests/test_demo_mode.py::test_demo_data_routes_do_not_touch_primary_session` 將主 session 換成一呼叫就丟例外的物件，四條 data 路由與 `/api/query` 仍成功。
-- **Admin token 關閉路徑**：無 Origin 的 curl `POST /api/admin/demo/close` → 200；關閉後 `/api/demo/status` false、`/api/rag/query` 403、`/api/status` 403；再以 admin token 無 Origin 開啟 → 200，6 個功能與 2 小時期限恢復。
+- **Admin token 關閉路徑**：無 Origin 的 curl `POST /api/admin/demo/close` → 200；關閉後 `/api/demo/status` false、`/api/rag/query` 403、`/api/status` 403；再以 admin token 無 Origin 開啟 → 200，6 個功能與 2 小時期限恢復。2026-11-22 晚間已再次關閉展示，`/api/rag/query` 與 `/api/status` 均為 403，admin token 仍可讀取設定。
 - **SSE**：正式站 ticket `expires_in=60`；第一次 stream 200，重播 401；access log 已遮蔽 `ticket=[redacted]`，日誌中找不到 ticket 值。
 - **Session 撤銷**：`tests/test_web.py::test_google_logout_clears_session` 驗證 logout 後 `revoked_session_jtis` 已寫入 DB，重播 token `authenticated=false`。
 - **備份機制**：`pg_dump --schema-only` → 建立 scratch DB → `pg_restore` 成功（33 張 public tables）→ drop；Qdrant API 以 `curl -K -` 驗證 200；`BACKUP_REQUIRE_ENCRYPTION=1` 缺 recipient 時 fail closed；`bash -n` 兩支腳本通過。
@@ -583,3 +585,4 @@ CI gitleaks full history → 0 credential leaks（HIST-01 仍為 host/port 揭�
 | 2026-11-22 | INFRA-09：主應用改用 `judgment_app`（NOSUPERUSER/NOCREATEDB/NOCREATEROLE），ownership 轉移，完整讀寫與負向測試通過；新增 `app-db-role-runbook.md`。 |
 | 2026-11-22 | AUDIT-01 初版：`security_audit_events`、`GET /api/admin/security-audit`、Google login／logout／admin token／admin write 事件；180 天保留；補 pytest。 |
 | 2026-11-22 | SESSION-01：session 加入 `sv` epoch、`POST /api/auth/logout-all`、TTL 縮短為 12 小時、無 `sv` 舊 token 拒絕；撤銷狀態讀取 fail closed；補 pytest。正式站 epoch 0→1，舊 cookie 立即失效。 |
+| 2026-11-22 | AUDIT-01 強化：未驗證失敗事件每 IP／每日上限、稽核建構／寫入失敗不阻塞請求、只記 path 不記 query string、前端 escape 測試；展示已關閉。 |

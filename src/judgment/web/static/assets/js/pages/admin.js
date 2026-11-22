@@ -42,7 +42,7 @@ function auditRows(items) {
     .join("")}</div>`;
 }
 
-function securityAuditRows(items) {
+export function securityAuditRows(items) {
   if (!items?.length) {
     return `<div class="demo-empty">尚無安全稽核事件。</div>`;
   }

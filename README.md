@@ -1147,6 +1147,7 @@ AUTH_COOKIE_SECURE=auto
 - 正式自訂網域（`judgment.ragdemo.win` → `api-mbp.ragdemo.win`）為同 site 的不同 origin，使用 `AUTH_COOKIE_SAMESITE=lax` 即可；`*.pages.dev` 預覽與 API 屬不同 site，若需要在預覽站登入，該預覽環境才需 `AUTH_COOKIE_SAMESITE=none` 並確認 HTTPS／CORS。
 - 工作階段 token 含 `jti` 與 `sv`（session epoch）；絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`）。登出會撤銷該 `jti`；「登出所有裝置」會推進該帳號的 epoch，讓所有既有 cookie 立即失效。部署 SESSION-01 前簽發、沒有 `sv` 的舊 token 一律視為無效。跨站 `POST /api/auth/logout`／`logout-all` 會被拒絕。
 - 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie，`POST /api/auth/logout-all` 會撤銷該帳號所有裝置的工作階段。
+- 安全稽核寫入 `security_audit_events`，涵蓋 Google 登入成功／失敗、logout、logout-all、admin token 與 admin 寫入；`GET /api/admin/security-audit` 可讀取最近事件。事件保留 180 天，只記 path 不記 query string；未驗證失敗事件有每日上限，稽核失敗不會阻擋原請求。
 - 未設定 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 時，header 仍會顯示登入按鈕，但會提示 Google 登入尚未設定；原有管理權杖與本機管理模式不受影響。
 
 目前程式與文件的對照基準見 [`docs/code-alignment-2026-11-21.md`](docs/code-alignment-2026-11-21.md)。安全驗收狀態與證據見 [`specs/security/security-acceptance-matrix.md`](specs/security/security-acceptance-matrix.md)；2026-11-22 的資安提升評估與整改路線圖見 [`specs/security/security-improvement-assessment-2026-11-22.md`](specs/security/security-improvement-assessment-2026-11-22.md)；主應用 DB 角色 provision／回滾見 [`specs/security/app-db-role-runbook.md`](specs/security/app-db-role-runbook.md)。未完成的部署項不會因程式測試通過而標成 verified。
