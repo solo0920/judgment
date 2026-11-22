@@ -3757,8 +3757,21 @@ def test_settings_sidebar_source_and_bundle_are_present() -> None:
 
 
 def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
-    frontend = Path(__file__).resolve().parents[1] / "frontend"
+    root = Path(__file__).resolve().parents[1]
+    frontend = root / "frontend"
     index = (frontend / "index.html").read_text(encoding="utf-8")
+    source_index = (
+        root / "src" / "judgment" / "web" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+    description = (
+        "Judgment｜金融法律判決智慧分析平台。整合金融法規與法院判決，"
+        "透過 AI 語意檢索與分析，協助快速查找相關案例、理解法律爭點，"
+        "並提供具參考價值的判決分析。"
+    )
+    for page in (source_index, index):
+        assert f'content="{description}"' in page
+        assert 'property="og:description"' in page
+        assert 'property="og:title"' in page
     assert re.search(
         r'<script src="\./config\.js(?:\?v=\d+)?"></script>', index
     )
