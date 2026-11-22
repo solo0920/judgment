@@ -592,6 +592,14 @@ export const api = {
     });
   },
 
+  authLogoutAll() {
+    return request("/api/auth/logout-all", {
+      method: "POST",
+      base: getAuthApiBase(),
+      trackClient: false,
+    });
+  },
+
   demoStatus() {
     return request("/api/demo/status", {
       timeout: 15000,
@@ -613,6 +621,16 @@ export const api = {
       timeout: 30000,
       trackClient: false,
     });
+  },
+
+  adminSecurityAudit(limit = 20) {
+    return request(
+      `/api/admin/security-audit?limit=${encodeURIComponent(limit)}`,
+      {
+        timeout: 15000,
+        trackClient: false,
+      },
+    );
   },
 
   closeDemo() {
@@ -1323,6 +1341,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ question }),
       timeout: options.testMode ? 0 : RAG_TIMEOUT,
+    });
+  },
+
+  ragShareCreate(payload) {
+    return request("/api/rag/share", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  ragShareGet(shareId) {
+    return request(`/api/rag/share/${encodeURIComponent(shareId)}`, {
+      timeout: 30000,
+      trackClient: false,
     });
   },
 

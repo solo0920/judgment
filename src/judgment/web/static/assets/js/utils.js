@@ -1,5 +1,8 @@
 /* Shared DOM, formatting and feedback helpers. */
 
+export const SITE_TITLE =
+  "Judgment｜金融法律判決 RAG AI 智慧分析平台";
+
 const ESCAPE_MAP = {
   "&": "&amp;",
   "<": "&lt;",
@@ -56,6 +59,10 @@ const ICONS = {
     '<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 4v5.5H15"/>',
   copy:
     '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  share:
+    '<path d="M12 16V4"/><path d="m8 8 4-4 4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
+  gift:
+    '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/><path d="M12 8H7.5a2.5 2.5 0 1 1 0-5H12"/><path d="M12 8h4.5a2.5 2.5 0 1 0 0-5H12"/>',
   check: '<path d="m5 12 4.2 4.2L19 6.5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m13.5 7.5 3 3"/>',
@@ -363,15 +370,32 @@ export function setBusy(button, busy, label = "處理中…") {
   }
 }
 
-export function toast(message, tone = "info", timeout = 4200) {
+export function toast(
+  message,
+  tone = "info",
+  timeout = 4200,
+  options = {},
+) {
   const region = document.getElementById("toast-region");
   if (!region) return null;
+  const {
+    detail = "",
+    actionLabel = "",
+    onAction = null,
+  } = options && typeof options === "object" ? options : {};
   const marks = { info: "i", ok: "✓", warn: "!", danger: "×" };
   const element = document.createElement("div");
   element.className = `toast toast-${tone}`;
   element.setAttribute("role", tone === "danger" ? "alert" : "status");
   element.innerHTML = `<span class="toast-mark" aria-hidden="true">${marks[tone] || "i"}</span>
-    <div class="toast-body">${escapeHtml(message)}</div>
+    <div class="toast-body">${escapeHtml(message)}${
+      detail ? `<span class="toast-detail">${escapeHtml(detail)}</span>` : ""
+    }</div>
+    ${
+      actionLabel
+        ? `<button class="toast-action" type="button">${escapeHtml(actionLabel)}</button>`
+        : ""
+    }
     <button class="toast-close" type="button" aria-label="關閉通知">×</button>`;
   const dismiss = () => {
     if (!element.isConnected) return;
@@ -379,6 +403,14 @@ export function toast(message, tone = "info", timeout = 4200) {
     window.setTimeout(() => element.remove(), 190);
   };
   element.querySelector(".toast-close").addEventListener("click", dismiss);
+  const actionButton = element.querySelector(".toast-action");
+  if (actionButton && typeof onAction === "function") {
+    actionButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      onAction();
+      dismiss();
+    });
+  }
   region.appendChild(element);
   if (timeout > 0) window.setTimeout(dismiss, timeout);
   return element;

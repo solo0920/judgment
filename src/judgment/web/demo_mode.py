@@ -21,6 +21,7 @@ _INTERNAL_ENDPOINT = re.compile(
     r"|\bport\s+\d{2,5}\b",
     re.IGNORECASE,
 )
+_SHARE_PATH = re.compile(r"/api/rag/share/[A-Za-z0-9_-]+")
 
 FEATURES: Tuple[str, ...] = (
     "rag",
@@ -384,6 +385,18 @@ def _scrub_performance_segment_details(value: Any) -> Any:
     return value
 
 
+def _scrub_share_paths(value: Any) -> Any:
+    """Redact RAG share capability tokens from telemetry strings."""
+
+    if isinstance(value, dict):
+        return {key: _scrub_share_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scrub_share_paths(item) for item in value]
+    if isinstance(value, str):
+        return _SHARE_PATH.sub("/api/rag/share/:share_id", value)
+    return value
+
+
 def sanitize_performance_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     """Remove visitor text from the public performance report.
 
@@ -393,7 +406,9 @@ def sanitize_performance_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     client breadcrumbs) must be removed while timing and status fields remain.
     """
 
-    result = _scrub_absolute_paths(sanitize_infrastructure(dict(payload)))
+    result = _scrub_share_paths(
+        _scrub_absolute_paths(sanitize_infrastructure(dict(payload)))
+    )
     rows = result.get("rows")
     if not isinstance(rows, list):
         return result

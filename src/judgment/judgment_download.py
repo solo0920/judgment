@@ -96,7 +96,9 @@ def _filename_from_headers(headers: httpx.Headers) -> str:
     )
     if not match:
         return ""
-    return unquote((match.group(1) or match.group(2) or "").strip())
+    return _safe_filename(
+        unquote((match.group(1) or match.group(2) or "").strip())
+    )
 
 
 def _part_path(destination: Path) -> Path:
@@ -516,8 +518,24 @@ def _archive_entries(resources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _safe_filename(value: str) -> str:
-    text = re.sub(r"[\x00-\x1f/\\:*?\"<>|]+", "_", str(value or "").strip())
+    text = str(value or "").strip()
+    if text:
+        # Never trust a catalog/header/manifest value as a path. Keep only the
+        # basename before replacing filesystem metacharacters.
+        text = Path(text).name
+    text = re.sub(r"[\x00-\x1f/\\:*?\"<>|]+", "_", text)
     return text[:180] or "judgment_archive"
+
+
+def _archive_path(raw_dir: Path, filename: str) -> Path:
+    """Return a path strictly inside raw_rar for an archive filename."""
+
+    name = _safe_filename(filename)
+    candidate = (raw_dir / name).resolve()
+    root = raw_dir.resolve()
+    if candidate.parent != root:
+        raise JudgmentDownloadError("判決壓縮檔名不合法。")
+    return candidate
 
 
 def _latest_per_month(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -570,7 +588,7 @@ def _build_month_status(
         month = _month_key(entry["resource_description"])
         if not month:
             continue
-        local_path = raw_dir / entry["filename"]
+        local_path = _archive_path(raw_dir, entry["filename"])
         if not local_path.is_file():
             continue
         current = local_by_month.get(month)
@@ -585,7 +603,9 @@ def _build_month_status(
             str(info.get("resource_description") or info.get("filename") or "")
         )
         filename = str(info.get("filename") or "")
-        if not month or not filename or not (raw_dir / filename).is_file():
+        if not month or not filename or not _archive_path(
+            raw_dir, filename
+        ).is_file():
             continue
         current = local_by_month.get(month)
         if current is None or fileset_id > int(current["fileset_id"]):
@@ -1201,7 +1221,7 @@ def _prune_month_versions(
     month = _month_key(entry.get("resource_description") or entry.get("filename") or "")
     if not month:
         return []
-    keep_name = entry["filename"]
+    keep_name = _safe_filename(entry["filename"])
     removed: List[str] = []
     history_dir = raw_dir / "history"
 
@@ -1249,8 +1269,8 @@ def _prune_month_versions(
         )
         if other_month != month:
             continue
-        filename = str(info.get("filename") or "")
-        path = raw_dir / filename
+        filename = _safe_filename(str(info.get("filename") or ""))
+        path = _archive_path(raw_dir, filename)
         archive_or_remove(path, info, history_key=key)
         files_map.pop(key, None)
     pattern = re.compile(
@@ -1282,6 +1302,13 @@ def _load_manifest(path: Path) -> Dict[str, Any]:
         return {"version": 1, "files": {}}
     payload.setdefault("version", 1)
     payload.setdefault("files", {})
+    for group in ("files", "history_files"):
+        rows = payload.get(group)
+        if not isinstance(rows, dict):
+            continue
+        for info in rows.values():
+            if isinstance(info, dict) and info.get("filename"):
+                info["filename"] = _safe_filename(info["filename"])
     return payload
 
 
@@ -1336,7 +1363,7 @@ def _probe_next(
     if metadata is None:
         _log(f"fileset {next_id} 不存在，沒有更新的判決檔。")
         return None
-    filename = metadata.get("filename") or ""
+    filename = _safe_filename(metadata.get("filename") or "")
     if re.match(r"^\d{6}.*\.(rar|7z|zip)$", filename, re.IGNORECASE):
         _log(f"在 fileset {next_id} 發現新的判決壓縮檔：{filename}")
         extension = filename.rsplit(".", 1)[-1].lower()
@@ -1446,7 +1473,7 @@ def file_response_headers(
     filename = str(metadata.get("filename") or f"fileset_{fileset_id}.rar")
     headers = {
         "Content-Disposition": (
-            "attachment; filename*=UTF-8''" + quote(filename)
+            "attachment; filename*=UTF-8''" + quote(filename, safe="")
         )
     }
     if metadata.get("content_length") is not None:
@@ -1753,7 +1780,7 @@ def run_download(
         local_entries = [
             entry
             for entry in entries
-            if (raw_dir / entry["filename"]).is_file()
+            if _archive_path(raw_dir, entry["filename"]).is_file()
         ]
         latest_local = max(
             (int(entry["fileset_id"]) for entry in local_entries), default=0
@@ -1768,7 +1795,7 @@ def run_download(
         for baseline_id in (start, known_latest):
             entry = by_id.get(baseline_id)
             present = bool(
-                entry and (raw_dir / entry["filename"]).is_file()
+                entry and _archive_path(raw_dir, entry["filename"]).is_file()
             )
             baseline.append(
                 {
@@ -1907,7 +1934,7 @@ def run_download(
             if not off_hours_allowed and not window_is_open(current_time()):
                 return "window_closed", None
             fileset_id = int(entry["fileset_id"])
-            local_path = raw_dir / entry["filename"]
+            local_path = _archive_path(raw_dir, entry["filename"])
             progress.checking_file(
                 entry,
                 index=position,
@@ -2111,7 +2138,7 @@ def run_download(
             selected = [
                 entry
                 for entry in entries
-                if (raw_dir / entry["filename"]).is_file()
+                if _archive_path(raw_dir, entry["filename"]).is_file()
                 or int(entry["fileset_id"]) > latest_local
                 or int(entry["fileset_id"]) in {start, known_latest}
             ]
@@ -2192,7 +2219,7 @@ def run_download(
                     try:
                         plan_resume_offsets[fileset_id] = (
                             _part_resume_offset(
-                                raw_dir / entry["filename"],
+                                _archive_path(raw_dir, entry["filename"]),
                                 fileset_id,
                                 remote,
                             )
@@ -2504,7 +2531,7 @@ def run_download(
         local_entries = [
             entry
             for entry in entries
-            if (raw_dir / entry["filename"]).is_file()
+            if _archive_path(raw_dir, entry["filename"]).is_file()
         ]
         latest_local = max(
             (int(entry["fileset_id"]) for entry in local_entries), default=0

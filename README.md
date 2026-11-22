@@ -165,7 +165,7 @@ cd /Volumes/USB/judgment-backup-20261108
 
 > PostgreSQL 的索引版本、`judgment_vector_index` 與 Qdrant collection 必須一起還原。若只還原 Qdrant，仍需有 PostgreSQL 的 `judgment_documents` 才能重新建立索引；若只還原 PostgreSQL，Qdrant 會是空的，且 `judgment_index_versions` 可能仍標示 active，索引器不一定會自動重建。還原時 `restore.sh` 會依 manifest 的 alias mapping 重建 `judgments_current`；若刻意只還原部分元件，應先清除或退役 `judgment_index_versions` 與 `judgment_vector_index` 的對應版本，再重新建立 collection 與 alias。
 
-以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設會用 age 加密成 `postgres/judgment.dump.age`；`BACKUP_REQUIRE_ENCRYPTION=1` 時未設定 recipient 會直接失敗，還原時需要對應的 `BACKUP_AGE_IDENTITY`。
+以目前資料量估算，完整備份至少約 150 GB 以上（`data/` 約 115 GB、PostgreSQL 約 36 GB、Qdrant snapshot 另計）；建議使用 256 GB 以上的磁碟，並保持整顆磁碟加密。備份不會包含 `.env`；secrets 請另存於 1Password／Keychain 或加密 vault，還原前再放回。PostgreSQL dump 預設要求 age 加密成 `postgres/judgment.dump.age`；未設定 `BACKUP_AGE_RECIPIENT` 會直接失敗，只有明確加 `--allow-unencrypted` 才能產生明文 dump。還原時需要對應的 `BACKUP_AGE_IDENTITY`，且 `restore.sh` 不會自動套用備份內的 `.env`。`restore.sh` 會在清除 schema 前確認 `judgment_app` 存在，還原後把 public tables／sequences ownership 轉移給它；`demo_reader` grants 需依 demo runbook 重新套用。
 
 ## 設定
 
@@ -173,12 +173,12 @@ cd /Volumes/USB/judgment-backup-20261108
 
 | 環境變數 | 預設值 | 說明 |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql+psycopg://judgment:judgment@localhost:5432/judgment` | PostgreSQL 連線字串；正式環境請使用強密碼 |
+| `DATABASE_URL` | `postgresql+psycopg://judgment_app:<password>@localhost:5432/judgment` | 主應用連線字串；production 使用 `NOSUPERUSER/NOCREATEDB/NOCREATEROLE` 的 `judgment_app`，不要使用 superuser `judgment` |
 | `POSTGRES_PASSWORD` | `change-me` | Docker Compose 初始化 PostgreSQL 的密碼；`.env.example` 要求自行設定 |
 | `JUDGMENT_PG_PASSWORD` | 空 | `backup.sh`／`restore.sh` 使用的 PostgreSQL 密碼；未設定時沿用 `POSTGRES_PASSWORD` |
 | `BACKUP_AGE_RECIPIENT` | 空 | age 公鑰；設定後 PostgreSQL dump 會加密成 `.age` |
 | `BACKUP_AGE_IDENTITY` | `~/.config/judgment/age.key` | `restore.sh` 解密用的 age 私鑰路徑 |
-| `BACKUP_REQUIRE_ENCRYPTION` | `0` | 設為 `1` 時，沒有 `BACKUP_AGE_RECIPIENT` 就拒絕備份 |
+| `BACKUP_REQUIRE_ENCRYPTION` | `1` | 沒有 `BACKUP_AGE_RECIPIENT` 就拒絕備份；只有 `--allow-unencrypted` 可明確放行明文 |
 | `LAW_DATA_DIR` | `/data/laws` | 法規產物根目錄（與判決資料 `/data/judgments` 分開）；`.env.example` 本機預設為 `./data/laws` |
 | `JUDGMENT_DATA_DIR` | `/data/judgments` | 判決資料根目錄；原始 `.rar` 可放在根目錄或 `raw_rar/` 子目錄。`.env.example` 本機預設為 `./data/judgments` |
 | `JUDGMENT_LAW_LIST` | `documents/金融法規.md` | 判決納入資料庫所依據的金融法規白名單 |
@@ -546,12 +546,18 @@ uv run judgment-normalize-courts --all
 
 ## Web 主控台
 
+全站分頁標題（Chrome 分頁 hover 顯示）統一使用短版「Judgment｜金融法律判決 RAG AI 智慧分析平台」，含英文品牌名稱且 29 字元，可完整放入瀏覽器 hover 浮窗。路由切換、展示模式鎖定與頁面非同步更新都不會改成頁面名稱；靜態 `<title>` 使用相同短版，`meta description` 與 Open Graph／Twitter 描述則保留完整站點簡介。
+
+Header 品牌標誌以「天平＋電路節點」表達法律／判決與 RAG AI：天平代表法律與裁判，三個節點與連線代表檢索與 AI；字標使用襯線體 `JUDGMENT`，副標使用等寬體 `LEGAL RAG INTELLIGENCE`。品牌連結的無障礙名稱為「Judgment 金融法律判決智慧分析平台 首頁」，`favicon.svg` 使用相同圖形與 `#76b900` 品牌綠。
+
+RAG 工作區右上工具列的 DOM、視覺、分享給朋友、三點選單、公開連結快照、分享頁與隱私／無障礙契約，見 [`specs/004-web-console/rag-workspace-toolbar.md`](specs/004-web-console/rag-workspace-toolbar.md)。
+
 ### 頁面路由
 
 | 路由 | 頁面 | 功能 |
 | --- | --- | --- |
 | `#/home` | 首頁 | 預設入口。主視覺與可直接輸入問題的提問框；即時資料卡顯示法規／命令、金融判決、裁判年份與判決向量索引；重要數據卡與資料庫、處理總覽、系統狀態使用相同後端定義；RAG 能力區顯示判決／法規索引、Embedding／LLM／Reranker 與判決、法規引用追溯路徑；來源區連結司法院 OpenData、全國法規資料庫與可收合的 99 條金融法規清單（11 欄 × 9 列，可下載原始 `.md`）；下方以共用 `.rag-wf-*` waterfall 顯示本次 `GET /api/home` 的實際階段計時與最慢 bottleneck，並列出七個分頁功能卡與完整頁尾。資料由 `/api/home` 取得，`processing` SSE 更新時自動重新整理。輸入問題按 Enter 會帶著題目前往 `#/rag` 並自動送出。品牌標誌固定返回首頁。 |
-| `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、可選 BGE reranker 精排、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。狀態卡彙整所有可用主機已確認支援 chat 的模型按鈕（以「主機:模型」顯示，例如 `mbp:gemma3:4b`、`x570:gemma3:4b`；綠色可切換，下一次提問生效），並可手動重新檢查所有主機的模型能力；另列 Rerank models，顯示主要與 fallback reranker 的可用狀態，離線或未啟用時以灰色呈現。每次回答最下方會嵌入與效能報表相同規格的 RAG Pipeline waterfall，依執行順序接續顯示 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 的 Token、TTFT、主機／模型與引用數；Embedding／LLM 的 bar 以藍色前段標示 Model Load，後段為推論；展開後分成兩個明細區塊，各自顯示正確的開始／結束時間與耗時，載入結束時間等於推論開始時間；後端處理流程與測試 Flow 也使用同一套 waterfall。 |
+| `#/rag` | RAG 提問 | 問題輸入、Qdrant 判決向量檢索、可選 BGE reranker 精排、LLM 引用回答、索引覆蓋率、判決引用、瀏覽器端提問紀錄，以及可展開的即時後端處理流程。回答完成後，問題泡泡與回答卡會顯示 hover／focus 操作工具列：問題可複製、分享、編輯、重新提問；回答可複製、分享、重新生成；觸控裝置固定顯示操作按鈕。分享會將目前對話快照寫入 `rag_share_snapshots`，並直接複製專屬公開連結 `#/rag/share?contentId=<token>` 到剪貼簿；不再開啟系統分享面板或複製整段問答文字。開啟連結後直接還原完整對話，不重新呼叫 LLM，快照保留 7 天。分享頁保留一般 RAG 雙欄版面與左側對話庫／歷史記錄，讓被分享者看到與正常 `#/rag` 一致的畫面；只隱藏右上工作區工具列。分享與複製操作完成後會釋放按鈕焦點，不留下外框。成功時顯示「已複製公開連結」與「任何擁有此連結的人都可以查看這段對話。」RAG 工作區右上方另有「分享給朋友」按鈕（點擊以 Web Share API 開啟系統分享選單並帶入 `https://judgment.ragdemo.win`；不支援時複製連結並顯示 toast）、三點對話選單（重新命名、釘選對話、刪除、移至專案）與建立公開連結按鈕；分享檢視會隱藏此工具列。RAG 檢索狀態卡預設收合為單行（綠色勾勾、檢索與回答就緒、3 個模型與展開箭頭），點擊或按 Enter／Space 才展開說明與模型表；模型表文字固定 12px，Chat／Embedding／Rerank 皆以 x570 為使用中、MBP 為 Fallback，優先順序為 x570 > MBP。狀態卡彙整所有可用主機已確認支援 chat 的模型按鈕（以「主機:模型」顯示，例如 `mbp:gemma3:4b`、`x570:gemma3:4b`；綠色可切換，下一次提問生效），並可手動重新檢查所有主機的模型能力；另列 Rerank models，顯示主要與 fallback reranker 的可用狀態，離線或未啟用時以灰色呈現。每次回答最下方會嵌入與效能報表相同規格的 RAG Pipeline waterfall，依執行順序接續顯示 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 的 Token、TTFT、主機／模型與引用數；Embedding／LLM 的 bar 以藍色前段標示 Model Load，後段為推論；展開後分成兩個明細區塊，各自顯示正確的開始／結束時間與耗時，載入結束時間等於推論開始時間；後端處理流程與測試 Flow 也使用同一套 waterfall。 |
 | `#/data` | 資料庫查詢 | 左側 sidebar：查詢法規命令、查詢判決、資料庫 Schema。法規命令與判決查詢支援 fuzzy 多條件（AND）與 suggestion，選取後立即查詢；可展開進階 metadata 條件。Schema 模式可切換法規命令／判決與資料庫，列出資料表，點選後在右側預覽欄位名稱、前 10 筆資料與總筆數，支援分頁與 CSV／JSON 匯出。 |
 | `#/quality` | 資料品質 | 左側 sidebar：品質總覽、題庫新增、題庫管理、Benchmark 題庫、題庫人工驗收批注。品質總覽以 DuckDB 直接掃描最新原始判決 Parquet：案號重複／缺少、全文為空或過短、法院／日期／案由缺漏、引用欄位一致性、重複內容、archive 明細、法院／年份／法規／案由分布，以及 PostgreSQL／向量索引覆蓋。題庫工作區支援法規／條文／判決驗證、版本、JSON 匯入匯出、suite 凍結與人工批注。 |
 | `#/performance` | 效能報表 | 左側 sidebar：效能總覽、RAG Pipeline、RAG Benchmark。效能總覽保留測試流程、索引效能與完整 Flow；RAG Pipeline 依執行順序接續繪製 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response waterfall，上一階段結束位置即下一階段開始位置；顯示各 span 的開始／結束時間、Token、TTFT、模型與來源數量，滑鼠移到 bar 上會顯示該 span 的詳細資訊；使用模型的階段會標註「主機:模型」，Embedding／LLM bar 的藍色前段為 Model Load，後段為扣除載入後的推論時間，展開明細會分成兩段並各自顯示開始／結束時間；RAG Benchmark 可選擇題庫、embedding／LLM／judge model、Top K、threshold、重複次數與法規檢索開關，顯示逐題結果、LLM judge、人工評分、同題 fingerprint 歷史與延遲／檢索召回率。 |
@@ -649,6 +655,8 @@ uv run judgment-normalize-courts --all
 | `GET` | `/api/versioning/audit` | 供 IndexedDB 增量同步的 events、snapshots、deltas 與 `latest_event_id`。 |
 | `POST` | `/api/rag/query` | 以 Qdrant 檢索判決並由 LLM 產生有引用編號的回答；問題上限 500 字，服務未就緒時降級。 |
 | `POST` | `/api/rag/query/stream` | 與 `/api/rag/query` 相同，但以 SSE 逐段回傳 `step`、`partial`、`token`、`token_reset`、`result`、`error`；RAG 頁用來即時顯示後端處理流程、先顯示法規結果，再逐 token 顯示 LLM 回答。 |
+| `POST` | `/api/rag/share` | 將目前 RAG 對話（最多 30 輪、1 MB）寫入 `rag_share_snapshots`，回傳 `id` 與 7 天後到期的 `expires_at`。 |
+| `GET` | `/api/rag/share/{share_id}` | 依分享 token 讀取對話快照；過期或不存在時回 404，回應使用 `Cache-Control: no-store`。 |
 | `GET` | `/api/docs` | Swagger UI 互動式 API 文件。 |
 | `GET` | `/api/openapi.json` | OpenAPI schema。 |
 
@@ -1128,18 +1136,21 @@ GOOGLE_CLIENT_SECRET=<Google OAuth client secret>
 GOOGLE_REDIRECT_URI=https://<實際後端網域>/api/auth/google/callback
 GOOGLE_ALLOWED_EMAILS=solo4study@gmail.com
 AUTH_SESSION_SECRET=<python -c "import secrets; print(secrets.token_urlsafe(32))" 產生>
+AUTH_SESSION_TTL_SECONDS=43200
 AUTH_COOKIE_SAMESITE=lax
 AUTH_COOKIE_SECURE=auto
 ```
 
 - `GOOGLE_ALLOWED_EMAILS` 是登入白名單；只有列出的電子郵件可以取得管理員工作階段。多個帳號以逗號分隔。
 - `GOOGLE_REDIRECT_URI` 留空時會由請求推導；正式環境建議明確設定，且必須與 Google Console 完全一致。
-- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；留空時會退回使用 `JUDGMENT_ADMIN_TOKEN`。
-- FastAPI 同源前端使用 `AUTH_COOKIE_SAMESITE=lax`。若前端部署在 Cloudflare Pages、後端是另一個網域，必須使用 HTTPS、把 Pages origin 加入 `CORS_ALLOW_ORIGINS`，並設 `AUTH_COOKIE_SAMESITE=none`。
-- 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie。
+- `AUTH_SESSION_SECRET` 用於簽署 HttpOnly 工作階段 cookie；正式環境 MUST 設定獨立值，留空時僅為本機開發退回使用 `JUDGMENT_ADMIN_TOKEN`。
+- 正式自訂網域（`judgment.ragdemo.win` → `api-mbp.ragdemo.win`）為同 site 的不同 origin，使用 `AUTH_COOKIE_SAMESITE=lax` 即可；`*.pages.dev` 預覽與 API 屬不同 site，若需要在預覽站登入，該預覽環境才需 `AUTH_COOKIE_SAMESITE=none` 並確認 HTTPS／CORS。
+- 工作階段 token 含 `jti` 與 `sv`（session epoch）；絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`）。登出會撤銷該 `jti`；「登出所有裝置」會推進該帳號的 epoch，讓所有既有 cookie 立即失效。部署 SESSION-01 前簽發、沒有 `sv` 的舊 token 一律視為無效。跨站 `POST /api/auth/logout`／`logout-all` 會被拒絕。
+- 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie，`POST /api/auth/logout-all` 會撤銷該帳號所有裝置的工作階段。
+- 安全稽核寫入 `security_audit_events`，涵蓋 Google 登入成功／失敗、logout、logout-all、admin token 與 admin 寫入；`GET /api/admin/security-audit` 可讀取最近事件。事件保留 180 天，只記 path 不記 query string；未驗證失敗事件有每日上限，稽核失敗不會阻擋原請求。
 - 未設定 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 時，header 仍會顯示登入按鈕，但會提示 Google 登入尚未設定；原有管理權杖與本機管理模式不受影響。
 
-目前程式與文件的對照基準見 [`docs/code-alignment-2026-11-21.md`](docs/code-alignment-2026-11-21.md)。安全驗收狀態與證據見 `specs/security/security-acceptance-matrix.md`；未完成的部署項不會因程式測試通過而標成 verified。
+目前程式與文件的對照基準見 [`docs/code-alignment-2026-11-21.md`](docs/code-alignment-2026-11-21.md)。安全驗收狀態與證據見 [`specs/security/security-acceptance-matrix.md`](specs/security/security-acceptance-matrix.md)；2026-11-22 的資安提升評估與整改路線圖見 [`specs/security/security-improvement-assessment-2026-11-22.md`](specs/security/security-improvement-assessment-2026-11-22.md)；主應用 DB 角色 provision／回滾見 [`specs/security/app-db-role-runbook.md`](specs/security/app-db-role-runbook.md)。未完成的部署項不會因程式測試通過而標成 verified。
 
 每次開機或部署後可跑 listener 回歸檢查；`up.sh` 在啟動 web 前也會自動執行，失敗會拒絕啟動：
 
@@ -2055,7 +2066,7 @@ bash scripts/deploy_web_macos.sh --uninstall
 
 ### 本階段驗證
 
-- `uv run pytest`：694 tests pass（含靜態資源、首頁即時摘要 API／99 條金融法規 11 欄列表／首頁 Pipeline waterfall／管理權杖與 CORS／Ollama SSRF allowlist／Docker loopback 綁定、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／Reranker 服務測試與 test-mode Reranker 階段／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
+- `uv run pytest`：697 tests pass（含靜態資源、首頁即時摘要 API／99 條金融法規 11 欄列表／首頁 Pipeline waterfall／管理權杖與 CORS／Ollama SSRF allowlist／Docker loopback 綁定、設定選項 sidebar／字型大小控制與 standalone bundle、通用 SSE refresh stream 初始事件與變更推送／DB 聚合簽章、processing SSE 初始完整 snapshot／後續 state-driven live payload／importer Unix socket progress event／金融案件累計數與佔比／首頁與資料庫／處理總覽判決金融覆蓋統計／判決向量索引 Pipeline host/model 與階段耗時／索引 workflow waterfall 與目前月份／active collection 月份覆蓋合併／續跑索引逐月份合併先前 run 的 R/E 計數（含 live payload）／Reranker 服務測試與 test-mode Reranker 階段／法規命令 D／P／I 索引版本時間表／法院名稱正規化待更新 badge／法院歷史機關名稱與 JID 行政訴訟代碼正規化／法規索引與完整更新套用 UI embedding 主機模型／更新 notice 來源與機制／workflow 執行中按鈕停用與進度表保留／RAG 列表查詢資料庫提示／filter 命中訊息清理／SQLite WAL journal／Phase 1 JSONL 遷移／Last-Event-ID replay／SQLite WAL state checkpoint 與 JSON 遷移／shared journal tailer 多 instance fan-out／event idempotency 與 schema validation／importer journal fallback／state/event DB 權限 0600／event metrics endpoint／snapshot bootstrap cache／前端 rAF 批次／filter 與 PostgreSQL 階段訊息及月份進度／準備階段不提前移動月份圈選、Phase 4 法規索引 freshness／判決 stale 偵測／RAG regression gate、處理總覽法規／命令／判決三張四階段月份時間表／下載時間版本編號／Embedding 主機模型選擇器／法規索引即時進度與累計平均速率／判決匯入 archive 進度百分比／workflow 流程進度百分比與累計平均速率／判決匯入月份圈選維持最高已啟動月份不前後跳動／處理中月份與外框月份分離時保留實際階段／可沿用 Parquet 備份時 RAR 與備份階段維持綠色不重設／啟動時一次掃描 raw manifest 並批次跳過已備份 archive／下載檔案變更時使舊 manifest 失效／prefetched 備份不提前移動目前匯入外框／原始 Parquet 備份建立與沿用訊息／篩選與 PostgreSQL 月份 archive 訊息／舊 run 階段名稱沿用目前 catalog 顯示名稱／失敗原因與解法 tooltip、服務狀態、系統資源使用、Qdrant 容器掛載與 volume、索引版本與 alias、Ollama 主機探測／優先順序持久化／多主機 embedding 備援／chat model 切換偏好／測試失敗狀態、RAG Pipeline span 時間與 Token／TTFT、BGE reranker 排序／主備切換／degraded fallback／Flow metadata、法規優先題型／related-laws 誤判／銀行法從業人員條文選擇／law-first citation 順序、判決引用條號與項次擷取／條號「之」與連字號正規化、法規條文向量索引全量／增量／alias 狀態／章節標題排除／embedding 批次自動拆分／dense+BM25 融合／法規 rerank／向量缺失 fallback、索引 run 的 `ollama`／`qdrant`／`validate` 階段與月份檔案進度、active collection 月份覆蓋 fallback、判決匯入月份時間表／有更新判定、法院名稱檢查月份表、條文歷史狀態月份表、索引進度條、embedding fallback、法規／判決 catalog、PostgreSQL／Parquet／Qdrant 查詢、判決篩選匯入、判決下載與月份狀態、待補齊續傳／驗證游標／失敗重試／Range 續傳／validator 變更／非時段下載／proxy 單一下載鎖／部分完成結束碼、混合版本備份／snapshot／舊版全文／Parquet delta／Qdrant history collection／舊 DB migration／dry-run 無副作用／current 查詢排除歷史、法規／命令線上更新檢查／指定來源檢查／更新紀錄表／下載日期資料夾／錯誤保留更新狀態、workflow 各階段進度與整體加總、DuckDB 原始 Parquet 品質統計、法規條文版本與變更事件、法院正規化與回填、判決向量索引、索引效能統計與圖表資料、索引進度條 10×100 格渲染、資料處理工作流程 catalog 與啟動 endpoint、法規概念展開／條號 regex／BM25 條文排序、題庫版本／人工驗收／stale 驗證／benchmark suite、RAG benchmark 指標、RAG 串流處理流程與逐步輸出、RAG 引用驗證、效能 Flow 與 client timing、測試模式與測試 Flow、判決 Parquet 匯出與原判決讀取、單一法規報表、單一條文篩選、判決原文報表、電源控制器、request validation、CORS 設定與 standalone frontend）。
 - pytest 效能：macOS 對未解析的 `.test` 主機每次 `getaddrinfo` 會等待約 30 秒，原本 4 個 Ollama 主機測試因此佔用約 210 秒；`tests/conftest.py` 將 `.test` 解析為 loopback 後，全套由約 226 秒降至約 17 秒。IP 字面位址與真實主機名稱仍使用系統解析器，並保留 hostname 解析到 metadata IP 時阻擋的測試。
 - P0 安全驗證（demo 關閉時）：`Origin: https://evil.example` 不回傳 CORS 允許；非 loopback 未帶權杖回 401、正確權杖回 200；Qdrant 未帶 key 回 401、帶 key 回 200；Docker ports 僅 `127.0.0.1`；PostgreSQL 只綁 loopback，連線密碼由環境設定提供；`file:///…/frontend/index.html#/home` 與 `#/tests` 正常載入，390px 無水平溢出，console error 為 0。
 - `uv run ruff check .`：clean。

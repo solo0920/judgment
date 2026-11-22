@@ -7,6 +7,7 @@ import {
 } from "../api.js";
 import { demoLockMarkup, isDemoVisitor } from "../demo.js";
 import {
+  SITE_TITLE,
   emptyState,
   escapeHtml,
   formatBytes,
@@ -2858,7 +2859,7 @@ export async function render(root, ctx) {
   void loadIndexedDbInfo({ quiet: true });
 
   if (ctx && typeof ctx.setTitle === "function") {
-    ctx.setTitle("系統狀態 · Judgment RAG Console");
+    ctx.setTitle(SITE_TITLE);
   }
 
   return () => {

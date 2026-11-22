@@ -4,8 +4,10 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -30,17 +32,24 @@ from judgment.models import (
     JudgmentDocumentVersion,
     JudgmentImportRun,
     JudgmentSnapshot,
+    RagShareSnapshot,
     LawArticleChangeEvent,
     LawArticleVersion,
     LawDatasetVersion,
     LawDocument,
     OllamaHost,
+    SecurityAuditEvent,
 )
 from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
 from judgment.web import processing as processing_module
 from judgment.web.app import create_app, route_policy_guard
-from judgment.web.auth import make_session_token
+from judgment.web.auth import (
+    make_session_token,
+    make_signed_token,
+    session_secret,
+    verify_signed_token,
+)
 from judgment.web.principal import anonymous_principal
 from judgment.web.route_policy import (
     VALID_CATEGORIES,
@@ -49,6 +58,7 @@ from judgment.web.route_policy import (
     registered_route_keys,
     validate_route_policies,
 )
+from judgment.web.security_audit import record_security_event
 
 
 def _seed(session_factory) -> None:
@@ -515,6 +525,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "© 2026 Judgment RAG Console" in page.text
     assert 'data-route="performance"' in page.text
     assert 'data-route="quality"' in page.text
+    assert 'aria-label="Judgment 金融法律判決智慧分析平台 首頁"' in page.text
+    assert "LEGAL RAG INTELLIGENCE" in page.text
+    assert "M4.2 17.1a2.6 2.6 0 0 0 5.2 0" in page.text
 
     boot_js = web_client.get("/assets/js/boot.js")
     assert boot_js.status_code == 200
@@ -847,6 +860,8 @@ def test_static_console_is_served(web_client) -> None:
     favicon = web_client.get("/favicon.svg")
     assert favicon.status_code == 200
     assert favicon.headers["content-type"].startswith("image/svg")
+    assert 'fill="#76b900"' in favicon.text
+    assert "M4.2 17.1a2.6 2.6 0 0 0 5.2 0" in favicon.text
 
 
 def test_index_versions_endpoint_returns_alias(web_client) -> None:
@@ -2610,6 +2625,19 @@ def test_judgment_detail_returns_full_text_and_citations(web_client) -> None:
     assert payload["source_archive"] == "202601.rar"
 
 
+def test_judgment_detail_can_hide_internal_fields(web_client) -> None:
+    from judgment.web.query import get_judgment_detail
+
+    detail = get_judgment_detail(
+        session_factory=web_client.app.state.session_factory,
+        jid="TPDV,115,金訴,1,20260110,1",
+        include_internal_fields=False,
+    )
+    assert detail["source_archive"] is None
+    assert detail["import_run_id"] is None
+    assert "民法第184條" in detail["full_text"]
+
+
 def test_judgment_detail_returns_404_for_unknown_jid(web_client) -> None:
     response = web_client.get("/api/judgment", params={"jid": "missing"})
     assert response.status_code == 404
@@ -2727,6 +2755,141 @@ def test_request_validation(web_client) -> None:
     assert rag.status_code == 422
 
 
+def test_rag_share_snapshot_round_trip(web_client) -> None:
+    response = web_client.post(
+        "/api/rag/share",
+        json={
+            "title": "證券交易法內線交易",
+            "turns": [
+                {
+                    "question": "證券交易法對內線交易有什麼規範？",
+                    "asked_at": "2026-11-21T16:00:00+00:00",
+                    "payload": {
+                        "status": "operational",
+                        "answer": "證券交易法第 157-1 條禁止內線交易。",
+                        "answer_source": "llm",
+                        "notice": (
+                            "failed http://internal:11434 "
+                            "/Users/alice/secret"
+                        ),
+                        "degraded_reason": "see /Users/alice/run.log",
+                        "judgments": [
+                            {
+                                "jid": "TPSM,101,台上,5924,20121122",
+                                "host": "10.0.0.5",
+                                "url": "http://127.0.0.1:9200",
+                                "error_message": "/Users/alice/secret",
+                            }
+                        ],
+                        "law_sources": [
+                            {
+                                "law_name": "證券交易法",
+                                "path": "/Users/alice/law.parquet",
+                                "host": "internal",
+                            }
+                        ],
+                        "pipeline_flow": {"internal": "not shared"},
+                        "test_run": {"host": "not shared"},
+                    },
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    share = response.json()
+    assert share["id"]
+    assert share["expires_at"]
+
+    fetched = web_client.get(f"/api/rag/share/{share['id']}")
+    assert fetched.status_code == 200
+    assert fetched.headers["cache-control"] == "no-store"
+    snapshot = fetched.json()
+    assert snapshot["title"] == "證券交易法內線交易"
+    assert len(snapshot["turns"]) == 1
+    turn = snapshot["turns"][0]
+    assert turn["question"] == "證券交易法對內線交易有什麼規範？"
+    assert turn["payload"]["answer"] == "證券交易法第 157-1 條禁止內線交易。"
+    assert turn["payload"]["judgments"][0]["jid"] == (
+        "TPSM,101,台上,5924,20121122"
+    )
+    assert "pipeline_flow" not in turn["payload"]
+    assert "test_run" not in turn["payload"]
+    serialized = json.dumps(turn["payload"], ensure_ascii=False)
+    for leaked in (
+        "internal:11434",
+        "/Users/alice",
+        "10.0.0.5",
+        "127.0.0.1:9200",
+    ):
+        assert leaked not in serialized
+    assert turn["payload"]["judgments"][0]["jid"] == (
+        "TPSM,101,台上,5924,20121122"
+    )
+
+    assert (
+        web_client.post(
+            "/api/rag/share",
+            json={"turns": [{"question": "   ", "payload": {}}]},
+        ).status_code
+        == 400
+    )
+
+
+def test_rag_share_token_is_redacted_from_performance_telemetry(web_client) -> None:
+    created = web_client.post(
+        "/api/rag/share",
+        json={
+            "title": "telemetry redaction",
+            "turns": [
+                {
+                    "question": "測試分享 token 不進遙測",
+                    "payload": {
+                        "status": "operational",
+                        "answer": "測試回答",
+                        "answer_source": "llm",
+                    },
+                }
+            ],
+        },
+    )
+    assert created.status_code == 200
+    token = created.json()["id"]
+    assert token
+
+    assert web_client.get(f"/api/rag/share/{token}").status_code == 200
+    performance = web_client.get("/api/performance", params={"page_size": 100})
+    assert performance.status_code == 200
+    share_rows = [
+        row
+        for row in performance.json()["rows"]
+        if row.get("path") == "/api/rag/share/:share_id"
+    ]
+    assert share_rows
+    assert token not in json.dumps(share_rows, ensure_ascii=False)
+    assert "/api/rag/share/:share_id" in json.dumps(
+        share_rows, ensure_ascii=False
+    )
+
+
+def test_rag_share_snapshot_rejects_expired_links(web_client) -> None:
+    now = datetime.now(timezone.utc)
+    with web_client.app.state.session_factory() as session:
+        session.add(
+            RagShareSnapshot(
+                token="expired-share",
+                title="過期分享",
+                turns=[{"question": "過期問題", "payload": {}}],
+                created_at=now - timedelta(days=8),
+                expires_at=now - timedelta(days=1),
+            )
+        )
+        session.commit()
+
+    response = web_client.get("/api/rag/share/expired-share")
+    assert response.status_code == 404
+
+
 def test_settings_parse_cors_and_forwarded_ips(monkeypatch) -> None:
     monkeypatch.setenv(
         "CORS_ALLOW_ORIGINS",
@@ -2820,6 +2983,137 @@ def test_local_write_requires_trusted_origin_or_no_browser_headers(
         headers={"Sec-Fetch-Site": "same-origin"},
     )
     assert same_origin_without_origin.status_code == 200
+
+
+def test_sse_ticket_is_one_time_and_bound_to_client_ip() -> None:
+    from judgment.web.app import _make_sse_ticket, _valid_sse_ticket
+
+    store = {"expired": (int(time.time()) - 1, "x", "y")}
+    lock = threading.Lock()
+    ticket = _make_sse_ticket(
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.9",
+        binding="admin:test@example.com",
+    )
+    assert "expired" not in store
+    assert ticket
+    assert not _valid_sse_ticket(
+        ticket,
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.10",
+    )
+    assert _valid_sse_ticket(
+        ticket,
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.9",
+    )
+    assert not _valid_sse_ticket(
+        ticket,
+        "sse-secret",
+        store=store,
+        lock=lock,
+        client_ip="203.0.113.9",
+    )
+
+
+def test_sse_ticket_is_redacted_from_access_log() -> None:
+    import logging
+
+    from judgment.web.app import _TicketRedactionFilter
+
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "203.0.113.9:1234",
+            "GET",
+            "/api/events/stream?topic=status&ticket=secret-ticket&x=1",
+            "1.1",
+            200,
+        ),
+        None,
+    )
+    assert _TicketRedactionFilter().filter(record) is True
+    message = record.getMessage()
+    assert "secret-ticket" not in message
+    assert "ticket=[redacted]" in message
+
+    oauth_record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "203.0.113.9:1234",
+            "GET",
+            "/api/auth/google/callback?state=secret-state&code=secret-code&x=1",
+            "1.1",
+            302,
+        ),
+        None,
+    )
+    assert _TicketRedactionFilter().filter(oauth_record) is True
+    oauth_message = oauth_record.getMessage()
+    assert "secret-state" not in oauth_message
+    assert "secret-code" not in oauth_message
+    assert "state=[redacted]" in oauth_message
+    assert "code=[redacted]" in oauth_message
+
+
+def test_sse_ticket_stream_is_single_use(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="secret-sse-token",
+        allow_local_admin_bypass=False,
+        cors_allow_origins=("https://app.example",),
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app, client=("203.0.113.9", 50000)) as remote:
+        rejected = remote.post(
+            "/api/auth/sse-ticket",
+            headers={
+                "X-Judgment-Admin-Token": "secret-sse-token",
+                "Origin": "https://evil.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+        assert rejected.status_code == 403
+        issued = remote.post(
+            "/api/auth/sse-ticket",
+            headers={
+                "X-Judgment-Admin-Token": "secret-sse-token",
+                "Origin": "https://app.example",
+                "Sec-Fetch-Site": "same-site",
+            },
+        )
+        assert issued.status_code == 200
+        assert issued.json()["expires_in"] == 60
+        ticket = issued.json()["ticket"]
+        with remote.stream(
+            "GET", f"/api/events/stream?topic=status&ticket={ticket}"
+        ) as response:
+            assert response.status_code == 200
+            for line in response.iter_lines():
+                if line.startswith("data:"):
+                    break
+        replay = remote.get(
+            f"/api/events/stream?topic=status&ticket={ticket}"
+        )
+        assert replay.status_code in {401, 403}
 
 
 def test_trusted_host_accepts_allowed_hosts_with_ports(web_client) -> None:
@@ -3039,7 +3333,8 @@ def test_google_callback_creates_session(web_client, monkeypatch) -> None:
         "exchange_google_code",
         fake_exchange_google_code,
     )
-    with TestClient(_oauth_app(web_client)) as client:
+    oauth_app = _oauth_app(web_client)
+    with TestClient(oauth_app) as client:
         start = client.get(
             "/api/auth/google/start?next=" + quote("/#/rag", safe=""),
             follow_redirects=False,
@@ -3059,6 +3354,17 @@ def test_google_callback_creates_session(web_client, monkeypatch) -> None:
         assert me.json()["authenticated"] is True
         assert me.json()["email"] == "admin@example.com"
         assert me.json()["admin"] is True
+
+    with oauth_app.state.session_factory() as session:
+        audit = session.scalars(
+            select(SecurityAuditEvent).where(
+                SecurityAuditEvent.event_type == "auth.google_login"
+            )
+        ).all()
+    assert any(
+        row.outcome == "success" and row.actor == "admin@example.com"
+        for row in audit
+    )
 
 
 def test_google_callback_allows_configured_frontend_next(
@@ -3461,6 +3767,328 @@ def test_remote_google_session_authorizes_and_rejects_bad_origin(web_client) -> 
         assert good_origin.json()["ticket"]
 
 
+def test_security_audit_records_admin_auth_and_writes(web_client) -> None:
+    settings = replace(
+        web_client.app.state.settings,
+        admin_token="security-audit-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    headers = {"X-Judgment-Admin-Token": "security-audit-token"}
+    with TestClient(app, client=("203.0.113.9", 50000)) as client:
+        written = client.post(
+            "/api/test-mode", json={"enabled": False}, headers=headers
+        )
+        assert written.status_code == 200
+        response = client.get(
+            "/api/admin/security-audit", headers=headers
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["retention_days"] == 180
+        events = payload["events"]
+        assert any(
+            event["event_type"] == "auth.admin_token"
+            and event["outcome"] == "success"
+            and event["source"] == "admin_token"
+            for event in events
+        )
+        assert any(
+            event["event_type"] == "admin.write"
+            and event["outcome"] == "success"
+            and event["path"] == "/api/test-mode"
+            and event["method"] == "POST"
+            for event in events
+        )
+        assert "security-audit-token" not in json.dumps(
+            events, ensure_ascii=False
+        )
+
+    with app.state.session_factory() as session:
+        rows = session.scalars(
+            select(SecurityAuditEvent).order_by(
+                SecurityAuditEvent.id.desc()
+            )
+        ).all()
+    assert rows
+    assert all(row.actor != "security-audit-token" for row in rows)
+
+
+def test_security_audit_failures_are_non_blocking(web_client, monkeypatch) -> None:
+    import judgment.web.security_audit as audit
+
+    monkeypatch.setattr(audit.logger, "warning", lambda *args, **kwargs: None)
+
+    class BrokenFactory:
+        def __call__(self):
+            raise RuntimeError("audit database unavailable")
+
+    class ExplodingDetail:
+        def __str__(self):
+            raise RuntimeError("cannot stringify detail")
+
+    settings = web_client.app.state.settings
+    record_security_event(
+        BrokenFactory(),
+        settings,
+        event_type="auth.google_login",
+        outcome="failure",
+        detail={"reason": "write_failure"},
+    )
+    record_security_event(
+        web_client.app.state.session_factory,
+        settings,
+        event_type="auth.google_login",
+        outcome="failure",
+        detail={"bad": ExplodingDetail()},
+    )
+
+
+def test_security_audit_caps_unauthenticated_failure_events(
+    web_client, monkeypatch
+) -> None:
+    import judgment.web.security_audit as audit
+
+    monkeypatch.setattr(
+        audit, "_AUDIT_DAILY_LIMITS", {"auth.google_login": (3, 5)}
+    )
+    monkeypatch.setattr(audit, "_DAILY_DAY", None)
+    monkeypatch.setattr(audit, "_DAILY_IP_COUNTS", {})
+    monkeypatch.setattr(audit, "_DAILY_TOTAL_COUNTS", {})
+    factory = web_client.app.state.session_factory
+    settings = web_client.app.state.settings
+    for _ in range(10):
+        record_security_event(
+            factory,
+            settings,
+            event_type="auth.google_login",
+            outcome="failure",
+            detail={"reason": "flood"},
+        )
+    record_security_event(
+        factory,
+        settings,
+        event_type="auth.google_login",
+        outcome="success",
+        actor="admin@example.com",
+    )
+    with factory() as session:
+        rows = session.scalars(select(SecurityAuditEvent)).all()
+    assert len(rows) == 4
+    assert sum(row.outcome == "failure" for row in rows) == 3
+    assert sum(row.outcome == "success" for row in rows) == 1
+
+
+def test_security_audit_does_not_store_query_string(web_client) -> None:
+    settings = replace(
+        _oauth_settings(web_client),
+        admin_token="audit-query-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    headers = {"X-Judgment-Admin-Token": "audit-query-token"}
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/demo?access_token=do-not-store&code=oauth-code",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        payload = client.get(
+            "/api/admin/security-audit", headers=headers
+        ).json()
+    blob = json.dumps(payload, ensure_ascii=False)
+    assert "do-not-store" not in blob
+    assert "oauth-code" not in blob
+    assert any(
+        event["path"] == "/api/admin/demo"
+        for event in payload["events"]
+    )
+
+
+def test_admin_token_ignores_stale_session_epoch(web_client) -> None:
+    settings = replace(
+        _oauth_settings(web_client),
+        admin_token="admin-fallback-token",
+        allow_local_admin_bypass=False,
+    )
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    stale = make_session_token(
+        {
+            "sub": "google-sub-stale",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        settings,
+        session_version=999,
+    )
+    with TestClient(app) as client:
+        client.cookies.set("judgment_session", stale)
+        assert client.post(
+            "/api/test-mode", json={"enabled": False}
+        ).status_code in {401, 403}
+        allowed = client.post(
+            "/api/test-mode",
+            json={"enabled": False},
+            headers={"X-Judgment-Admin-Token": "admin-fallback-token"},
+        )
+        assert allowed.status_code == 200
+
+
+def test_logout_revocation_survives_app_restart(web_client) -> None:
+    settings = _oauth_settings(web_client)
+    token = make_session_token(
+        {
+            "sub": "google-sub-restart",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        settings,
+    )
+    app_one = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app_one) as client:
+        client.cookies.set("judgment_session", token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+        assert client.post("/api/auth/logout").status_code == 200
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+
+    app_two = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    with TestClient(app_two) as client:
+        client.cookies.set("judgment_session", token)
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+
+
+def test_logout_all_revokes_every_session(web_client, monkeypatch) -> None:
+    async def fake_exchange_google_code(**_kwargs):
+        return {
+            "sub": "google-sub-multi",
+            "email": "admin@example.com",
+            "email_verified": True,
+            "name": "Admin User",
+            "picture": "",
+        }
+
+    monkeypatch.setattr(
+        sys.modules["judgment.web.app"],
+        "exchange_google_code",
+        fake_exchange_google_code,
+    )
+    app = _oauth_app(web_client)
+
+    def use_session(client, token: str) -> None:
+        client.cookies.clear()
+        client.cookies.set("judgment_session", token)
+
+    def login(client):
+        client.cookies.clear()
+        start = client.get(
+            "/api/auth/google/start?next=" + quote("/#/rag", safe=""),
+            follow_redirects=False,
+        )
+        assert start.status_code == 302
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        callback = client.get(
+            f"/api/auth/google/callback?state={state}&code=fake",
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        token = str(client.cookies.get("judgment_session") or "")
+        data = verify_signed_token(token, session_secret(app.state.settings))
+        assert data is not None
+        assert "sv" in data
+        return token, data
+
+    with TestClient(app) as client:
+        first_token, first = login(client)
+        second_token, second = login(client)
+        assert first["jti"] != second["jti"]
+        assert first["sv"] == second["sv"] == 0
+
+        use_session(client, first_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+        use_session(client, second_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        cross_site = client.post(
+            "/api/auth/logout-all",
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+        assert cross_site.status_code == 403
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        revoked = client.post("/api/auth/logout-all")
+        assert revoked.status_code == 200
+        assert revoked.json() == {"ok": True, "revoked": "all"}
+        assert "Max-Age=0" in revoked.headers.get("set-cookie", "")
+
+        use_session(client, first_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+        use_session(client, second_token)
+        assert client.get("/api/auth/me").json()["authenticated"] is False
+
+        _, third = login(client)
+        assert third["sv"] == 1
+        assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        client.cookies.clear()
+        no_session = client.post("/api/auth/logout-all")
+        assert no_session.status_code == 200
+        assert no_session.json() == {"ok": True, "revoked": "none"}
+
+    with app.state.session_factory() as session:
+        rows = session.scalars(
+            select(SecurityAuditEvent).where(
+                SecurityAuditEvent.event_type == "auth.logout_all"
+            )
+        ).all()
+    assert any(
+        row.outcome == "success" and row.actor == "admin@example.com"
+        for row in rows
+    )
+
+
+def test_session_without_version_is_rejected(web_client) -> None:
+    settings = _oauth_settings(web_client)
+    app = create_app(
+        settings=settings,
+        session_factory=web_client.app.state.session_factory,
+        data_dir=web_client.app.state.data_dir,
+    )
+    legacy = make_signed_token(
+        {
+            "purpose": "session",
+            "jti": "legacy-session",
+            "email": "admin@example.com",
+            "name": "Admin User",
+        },
+        session_secret(settings),
+        3600,
+    )
+    with TestClient(app) as client:
+        client.cookies.set("judgment_session", legacy)
+        payload = client.get("/api/auth/me").json()
+        assert payload["authenticated"] is False
+
+
 def test_google_logout_clears_session(web_client) -> None:
     settings = _oauth_settings(web_client)
     app = create_app(
@@ -3476,9 +4104,19 @@ def test_google_logout_clears_session(web_client) -> None:
         },
         settings,
     )
+    token_data = verify_signed_token(token, session_secret(settings))
+    assert token_data is not None
+    jti = str(token_data.get("jti") or "")
+    assert jti
     with TestClient(app) as client:
         client.cookies.set("judgment_session", token)
         assert client.get("/api/auth/me").json()["authenticated"] is True
+
+        cross_site = client.post(
+            "/api/auth/logout",
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+        assert cross_site.status_code == 403
 
         logout = client.post("/api/auth/logout")
         assert logout.status_code == 200
@@ -3486,7 +4124,11 @@ def test_google_logout_clears_session(web_client) -> None:
         set_cookie = logout.headers.get("set-cookie", "")
         assert "judgment_session=" in set_cookie
         assert "Max-Age=0" in set_cookie
-        client.cookies.delete("judgment_session")
+        with app.state.session_factory() as session:
+            revoked = session.get(AppSetting, "revoked_session_jtis")
+            assert revoked is not None
+            assert jti in revoked.value
+        client.cookies.set("judgment_session", token)
         assert client.get("/api/auth/me").json()["authenticated"] is False
 
 
@@ -3609,6 +4251,85 @@ def test_console_assets_avoid_flicker_prone_effects() -> None:
         assert "is-quiet" not in script
 
 
+def test_rag_question_and_answer_actions_are_bundled() -> None:
+    root = Path(__file__).resolve().parents[1]
+    static_assets = root / "src" / "judgment" / "web" / "static" / "assets"
+    source_js = (static_assets / "js" / "pages" / "rag.js").read_text(
+        encoding="utf-8"
+    )
+    source_css = (static_assets / "styles.css").read_text(encoding="utf-8")
+    bundle_js = (root / "frontend" / "assets" / "js" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    bundle_css = (root / "frontend" / "assets" / "styles.css").read_text(
+        encoding="utf-8"
+    )
+    for script in (source_js, bundle_js):
+        assert "data-rag-question-action" in script
+        assert "data-rag-answer-action" in script
+        assert "rag-user-actions" in script
+        assert "rag-answer-actions" in script
+        assert "is-shared-view" in script
+        assert "rag/share" in script
+        assert "contentId" in script
+        assert "rag-workspace-toolbar" in script
+        assert "data-workspace-action" in script
+        assert "navigator.share" in script
+        assert "rag-mode-head" in script
+        assert "is-expanded" in script
+    assert "modeCardExpanded" in source_js
+    assert "FRIEND_SHARE_URL" in source_js
+    assert "複製回答" in source_js
+    assert "重新生成回答" in source_js
+    assert "已複製公開連結" in source_js
+    assert "分享給朋友" in source_js
+    model_font = re.compile(
+        r"\.rag-model-(?:strip|strip-title|strip-base|strip-current|table th|"
+        r"kind|name|note)\s*\{[^}]*?font-size:\s*12px",
+        re.S,
+    )
+    for css in (source_css, bundle_css):
+        assert ".rag-user-actions" in css
+        assert ".rag-answer-actions" in css
+        assert ".rag-user-block" in css
+        assert ".is-shared-view" in css
+        assert ".rag-page.is-shared-view .rag-workspace-toolbar" in css
+        assert ".rag-page.is-shared-view .rag-library" not in css
+        assert ".rag-workspace-toolbar" in css
+        assert ".rag-workspace-menu" in css
+        assert ".rag-mode-card:not(.is-expanded)" in css
+        assert len(model_font.findall(css)) >= 8
+
+
+def test_rag_shared_render_escapes_indexes_and_law_metadata() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source_js = (
+        root
+        / "src"
+        / "judgment"
+        / "web"
+        / "static"
+        / "assets"
+        / "js"
+        / "pages"
+        / "rag.js"
+    ).read_text(encoding="utf-8")
+    assert "function safeIndex(value, fallback)" in source_js
+    assert "safeIndex(judgment.index, index + 1)" in source_js
+    assert "safeIndex(citation.index, index + 1)" in source_js
+    assert "safeIndex(source.index, index + 1)" in source_js
+    assert "escapeHtml(level)" in source_js
+    assert "escapeHtml(source.law_category)" in source_js
+    for unsafe in (
+        '<span class="citation-index">[${judgment.index',
+        "String(citation.index ?? index + 1).padStart",
+        "String(source.index ?? index + 1).padStart",
+        "${level}",
+        "${source.law_category}",
+    ):
+        assert unsafe not in source_js
+
+
 def test_settings_sidebar_source_and_bundle_are_present() -> None:
     root = Path(__file__).resolve().parents[1]
     static_assets = root / "src" / "judgment" / "web" / "static" / "assets"
@@ -3644,8 +4365,24 @@ def test_settings_sidebar_source_and_bundle_are_present() -> None:
 
 
 def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
-    frontend = Path(__file__).resolve().parents[1] / "frontend"
+    root = Path(__file__).resolve().parents[1]
+    frontend = root / "frontend"
     index = (frontend / "index.html").read_text(encoding="utf-8")
+    source_index = (
+        root / "src" / "judgment" / "web" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+    description = (
+        "Judgment｜金融法律判決智慧分析平台。整合金融法規與法院判決，"
+        "透過 AI 語意檢索與分析，協助快速查找相關案例、理解法律爭點，"
+        "並提供具參考價值的判決分析。"
+    )
+    title = "Judgment｜金融法律判決 RAG AI 智慧分析平台"
+    assert len(title) <= 35
+    for page in (source_index, index):
+        assert f'content="{description}"' in page
+        assert f"<title>{title}</title>" in page
+        assert 'property="og:description"' in page
+        assert 'property="og:title"' in page
     assert re.search(
         r'<script src="\./config\.js(?:\?v=\d+)?"></script>', index
     )
@@ -3664,6 +4401,15 @@ def test_standalone_frontend_artifact_is_relative_and_bundled() -> None:
     config = (frontend / "config.js").read_text(encoding="utf-8")
     assert "window.JUDGMENT_CONFIG" in config
     assert "apiBase:" in config
+
+    utils_js = (
+        root / "src" / "judgment" / "web" / "static" / "assets" / "js" / "utils.js"
+    ).read_text(encoding="utf-8")
+    app_js = (
+        root / "src" / "judgment" / "web" / "static" / "assets" / "js" / "app.js"
+    ).read_text(encoding="utf-8")
+    assert f'"{title}"' in utils_js
+    assert "document.title = SITE_TITLE" in app_js
 
     bundle = frontend / "assets" / "js" / "app.js"
     assert bundle.is_file()

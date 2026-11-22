@@ -121,6 +121,9 @@ function renderLoggedIn(user) {
         <button type="button" class="auth-menu-item" id="auth-logout" role="menuitem">
           登出
         </button>
+        <button type="button" class="auth-menu-item auth-menu-item-danger" id="auth-logout-all" role="menuitem">
+          登出所有裝置
+        </button>
       </div>
     </div>`;
 
@@ -135,6 +138,29 @@ function renderLoggedIn(user) {
 
   slot.querySelector("#auth-admin-settings")?.addEventListener("click", () => {
     closeMenu();
+  });
+
+  slot.querySelector("#auth-logout-all")?.addEventListener("click", async (event) => {
+    if (
+      !window.confirm(
+        "這會讓所有裝置上的 Google 登入立即失效，包含目前這台裝置。確定要繼續嗎？",
+      )
+    ) {
+      return;
+    }
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "登出所有裝置中…";
+    try {
+      await api.authLogoutAll();
+      toast("已登出所有裝置。", "ok", 3000);
+      await refreshAuth();
+      window.dispatchEvent(new CustomEvent("judgment:auth-changed"));
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "登出所有裝置";
+      toast(error.message || "登出所有裝置失敗。", "danger", 5200);
+    }
   });
 
   slot.querySelector("#auth-logout")?.addEventListener("click", async (event) => {

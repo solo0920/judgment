@@ -259,8 +259,8 @@ body.settings-open .toast-region {
 }
 
 .brand-mark svg {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
 }
 
 .brand-copy {
@@ -270,19 +270,19 @@ body.settings-open .toast-region {
 }
 
 .brand-copy strong {
-  font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
+  font-family: "Noto Serif TC", "Songti TC", Georgia, serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
 }
 
 .brand-copy span {
   margin-top: 4px;
   color: var(--header-muted);
   font-family: var(--font-mono);
-  font-size: 8.5px;
+  font-size: 8px;
   font-weight: 500;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.16em;
 }
 
 .primary-nav {
@@ -534,6 +534,14 @@ body.settings-open .toast-region {
 
 .auth-menu-item:hover {
   background: var(--surface-2);
+}
+
+.auth-menu-item-danger {
+  color: var(--danger);
+}
+
+.auth-menu-item-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .auth-menu-item:disabled {
@@ -1495,7 +1503,7 @@ body.settings-open .settings-sidebar {
 
 .footer-brand strong {
   color: var(--ink);
-  font-family: var(--font-display);
+  font-family: "Noto Serif TC", "Songti TC", Georgia, serif;
   font-size: 12px;
   letter-spacing: 0.06em;
 }
@@ -2357,6 +2365,31 @@ button.chip:hover {
 .toast-body {
   min-width: 0;
   flex: 1;
+}
+
+.toast-detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.toast-action {
+  flex: none;
+  align-self: center;
+  padding: 5px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--surface-3);
 }
 
 .toast-close {
@@ -4079,6 +4112,31 @@ button.chip:hover {
   flex-wrap: wrap;
   padding: 14px 16px;
   background: var(--accent-soft);
+  cursor: pointer;
+}
+
+.rag-mode-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.rag-mode-card:not(.is-expanded) .rag-mode-copy p {
+  display: none;
+}
+
+.rag-mode-card:not(.is-expanded) .rag-model-strip {
+  display: none;
+}
+
+.rag-mode-chevron {
+  flex: none;
+  margin-top: 3px;
+  color: var(--muted);
+  transition: transform 0.16s ease;
+}
+
+.rag-mode-card.is-expanded .rag-mode-chevron {
+  transform: rotate(180deg);
 }
 
 .rag-mode-card.is-ok .rag-mode-head {
@@ -4136,6 +4194,7 @@ button.chip:hover {
 
 .rag-model-strip {
   padding: 12px 16px 14px;
+  font-size: 12px;
 }
 
 .rag-model-strip-head {
@@ -4151,7 +4210,7 @@ button.chip:hover {
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -4159,7 +4218,7 @@ button.chip:hover {
   max-width: 220px;
   overflow: hidden;
   color: var(--faint);
-  font-size: 8.5px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4167,7 +4226,7 @@ button.chip:hover {
 .rag-model-strip-current {
   margin-left: auto;
   color: var(--faint);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .rag-model-strip-current strong {
@@ -4190,7 +4249,7 @@ button.chip:hover {
   padding: 0 8px 5px 0;
   border-bottom: 1px solid var(--line);
   color: var(--faint);
-  font-size: 8.5px;
+  font-size: 12px;
   font-weight: 650;
   text-align: left;
 }
@@ -4217,7 +4276,7 @@ button.chip:hover {
 
 .rag-model-kind {
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -4234,7 +4293,7 @@ button.chip:hover {
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4247,7 +4306,7 @@ button.chip:hover {
 .rag-model-note {
   flex: none;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -4474,6 +4533,70 @@ button.chip:hover {
 
 .rag-workspace {
   min-width: 0;
+}
+
+.rag-workspace-toolbar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 2px 0 0;
+}
+
+.rag-friend-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.rag-friend-link:hover {
+  background: var(--accent-soft);
+}
+
+.rag-friend-link:focus-visible,
+.rag-workspace-icon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rag-workspace-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.rag-workspace-icon:hover {
+  background: var(--surface-2);
+}
+
+.rag-workspace-toolbar .rag-workspace-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  min-width: 210px;
+}
+
+/* Shared conversations keep the normal RAG layout, including the local
+   history sidebar, but hide management actions that belong to the owner. */
+.rag-page.is-shared-view .rag-workspace-toolbar {
+  display: none;
 }
 
 .rag-library {
@@ -4891,6 +5014,15 @@ button.chip:hover {
   background: var(--surface-2);
 }
 
+.rag-history-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rag-history-menu button:disabled:hover {
+  background: transparent;
+}
+
 .rag-history-menu button svg {
   flex: none;
   color: var(--faint);
@@ -5071,6 +5203,16 @@ button.chip:hover {
   scroll-margin-top: calc(var(--header-height) + 18px);
 }
 
+.rag-user-block {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: min(720px, 82%);
+  min-width: 0;
+}
+
 .rag-user-bubble {
   align-self: flex-end;
   max-width: min(720px, 82%);
@@ -5083,6 +5225,82 @@ button.chip:hover {
   line-height: 1.65;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.rag-user-block .rag-user-bubble {
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.rag-user-actions,
+.rag-answer-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.rag-user-actions {
+  justify-content: flex-end;
+}
+
+.rag-answer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.rag-answer-actions {
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
+.rag-turn.is-complete .rag-user-block:hover .rag-user-actions,
+.rag-turn.is-complete .rag-user-block:focus-within .rag-user-actions,
+.rag-turn.is-complete .rag-answer-block:hover .rag-answer-actions,
+.rag-turn.is-complete .rag-answer-block:focus-within .rag-answer-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.rag-user-action,
+.rag-answer-action {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.rag-user-action:hover,
+.rag-answer-action:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.rag-user-action:focus-visible,
+.rag-answer-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .rag-user-actions,
+  .rag-answer-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
 }
 
 .rag-assistant-turn {
@@ -9383,7 +9601,13 @@ button.chip:hover {
   }
 
   .brand-copy strong {
-    font-size: 12.5px;
+    font-size: 13px;
+    letter-spacing: 0.11em;
+  }
+
+  .brand-copy span {
+    font-size: 7px;
+    letter-spacing: 0.12em;
   }
 
   .header-actions {
@@ -9447,8 +9671,13 @@ button.chip:hover {
     width: 100%;
   }
 
-  .rag-user-bubble {
+  .rag-user-block {
     max-width: 92%;
+  }
+
+  .rag-user-block .rag-user-bubble,
+  .rag-user-bubble {
+    max-width: 100%;
   }
 
   .db-options {
@@ -19270,6 +19499,35 @@ body.is-demo-visitor #rag-test-flow {
   font-size: 11px;
 }
 
+.security-audit-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.security-audit-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.3fr)
+    minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+.security-audit-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.security-audit-row span,
+.security-audit-row small {
+  color: var(--faint);
+}
+
 @media (max-width: 760px) {
   .demo-split {
     grid-template-columns: 1fr;
@@ -19294,6 +19552,15 @@ body.is-demo-visitor #rag-test-flow {
 
   .demo-audit-row small {
     grid-column: 1 / -1;
+  }
+
+  .security-audit-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .security-audit-row small {
+    grid-column: auto;
   }
 }
 

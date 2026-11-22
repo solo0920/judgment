@@ -21,7 +21,7 @@ SKIP_QDRANT=0
 ALLOW_RUNNING=0
 DRY_RUN=0
 BACKUP_AGE_RECIPIENT="${BACKUP_AGE_RECIPIENT:-}"
-BACKUP_REQUIRE_ENCRYPTION="${BACKUP_REQUIRE_ENCRYPTION:-0}"
+BACKUP_REQUIRE_ENCRYPTION="${BACKUP_REQUIRE_ENCRYPTION:-1}"
 
 usage() {
   cat <<'EOF'
@@ -35,6 +35,7 @@ usage() {
   --skip-data          不複製 data/
   --skip-postgres      不匯出 PostgreSQL
   --skip-qdrant        不匯出 Qdrant snapshot
+  --allow-unencrypted  允許未加密的 PostgreSQL dump（預設要求 age 加密）
   --allow-running      允許在資料處理程序執行中備份（不建議）
   --dry-run            只檢查環境並顯示計畫，不寫入備份
   -h, --help           顯示說明
@@ -100,10 +101,16 @@ load_env() {
 
 qdrant_curl() {
   if [[ -n "${QDRANT_API_KEY:-}" ]]; then
-    curl -H "api-key: ${QDRANT_API_KEY}" "$@"
+    curl -K - "$@" <<CURL_CONFIG
+header = "api-key: ${QDRANT_API_KEY}"
+CURL_CONFIG
   else
     curl "$@"
   fi
+}
+
+pg_compose_exec() {
+  PGPASSWORD="${JUDGMENT_PG_PASSWORD:-}" docker compose exec -T -e PGPASSWORD "$@"
 }
 
 copy_tree() {
@@ -143,6 +150,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-qdrant)
       SKIP_QDRANT=1
+      shift
+      ;;
+    --allow-unencrypted)
+      BACKUP_REQUIRE_ENCRYPTION=0
       shift
       ;;
     --allow-running)
@@ -241,20 +252,17 @@ fi
 
 if [[ "$SKIP_POSTGRES" != "1" ]]; then
   for _ in {1..60}; do
-    if docker compose exec -T "$JUDGMENT_PG_SERVICE" \
-      env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+    if pg_compose_exec "$JUDGMENT_PG_SERVICE" \
       pg_isready -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
-  if ! docker compose exec -T "$JUDGMENT_PG_SERVICE" \
-    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+  if ! pg_compose_exec "$JUDGMENT_PG_SERVICE" \
     pg_isready -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" >/dev/null 2>&1; then
     die "PostgreSQL 未就緒"
   fi
-  docker compose exec -T "$JUDGMENT_PG_SERVICE" \
-    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+  pg_compose_exec "$JUDGMENT_PG_SERVICE" \
     psql -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" -tAc \
     'select 1 from judgment_documents limit 1;' >/dev/null 2>&1 \
     || die "PostgreSQL 沒有可用的 judgment_documents 資料表"
@@ -305,8 +313,7 @@ LAW_BYTES="$(dir_size "$LAW_DATA_ABS")"
 TOTAL_BYTES=$((JUDGMENT_BYTES + LAW_BYTES))
 PG_BYTES=0
 if [[ "$SKIP_POSTGRES" != "1" ]]; then
-  PG_BYTES="$(docker compose exec -T "$JUDGMENT_PG_SERVICE" \
-    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+  PG_BYTES="$(pg_compose_exec "$JUDGMENT_PG_SERVICE" \
     psql -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" -tAc \
     "select pg_database_size(current_database());" 2>/dev/null \
     | tr -d '[:space:]' || true)"
@@ -365,8 +372,7 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
     need age
   fi
   PG_DUMP_REL="postgres/judgment.dump"
-  if ! docker compose exec -T "$JUDGMENT_PG_SERVICE" \
-    env PGPASSWORD="$JUDGMENT_PG_PASSWORD" \
+  if ! pg_compose_exec "$JUDGMENT_PG_SERVICE" \
     pg_dump -U "$JUDGMENT_PG_USER" -d "$JUDGMENT_PG_DB" -Fc \
     > "$TARGET_DIR/$PG_DUMP_REL"; then
     rm -f "$TARGET_DIR/$PG_DUMP_REL"

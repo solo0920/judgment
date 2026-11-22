@@ -31,6 +31,12 @@ import {
   toast,
 } from "../utils.js";
 
+const SHARE_QUESTION_PARAM = "q";
+const SHARE_TOKEN_PARAM = "share";
+const SHARE_CONTENT_PARAM = "contentId";
+const SHARE_HASH_PATH = "rag/share";
+const FRIEND_SHARE_URL = "https://judgment.ragdemo.win";
+
 const EXAMPLES = [
   "金融消費者保護法如何處理金融消費爭議？",
   "證券交易法對內線交易有什麼規範？",
@@ -55,11 +61,182 @@ function emptyConversationMarkup() {
   return `<section class="card answer-card rag-empty-answer">${answerPlaceholder()}</section>`;
 }
 
-function turnMarkup(question, answerHtml) {
-  return `<div class="rag-turn">
-    <div class="rag-user-bubble">${escapeHtml(question)}</div>
-    <section class="card rag-assistant-turn" data-rag-answer>${answerHtml}</section>
+function answerActionsMarkup(question) {
+  const safeQuestion = escapeHtml(question);
+  return `<div class="rag-answer-actions" role="group" aria-label="回答操作">
+    <button class="rag-answer-action" type="button" data-rag-answer-action="copy" data-question="${safeQuestion}" title="複製回答" aria-label="複製回答">${icon("copy", 15)}<span class="sr-only">複製回答</span></button>
+    <button class="rag-answer-action" type="button" data-rag-answer-action="share" data-question="${safeQuestion}" title="建立公開連結" aria-label="建立公開連結">${icon("share", 15)}<span class="sr-only">建立公開連結</span></button>
+    <button class="rag-answer-action" type="button" data-rag-answer-action="reask" data-question="${safeQuestion}" title="重新生成回答" aria-label="重新生成回答">${icon("refresh", 15)}<span class="sr-only">重新生成回答</span></button>
   </div>`;
+}
+
+function turnMarkup(question, answerHtml, { complete = true } = {}) {
+  const safeQuestion = escapeHtml(question);
+  const stateClass = complete ? " is-complete" : " is-pending";
+  return `<div class="rag-turn${stateClass}">
+    <div class="rag-user-block">
+      <div class="rag-user-bubble">${safeQuestion}</div>
+      <div class="rag-user-actions" role="group" aria-label="問題操作">
+        <button class="rag-user-action" type="button" data-rag-question-action="copy" data-question="${safeQuestion}" title="複製問題" aria-label="複製問題">${icon("copy", 15)}<span class="sr-only">複製問題</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="share" data-question="${safeQuestion}" title="建立公開連結" aria-label="建立公開連結">${icon("share", 15)}<span class="sr-only">建立公開連結</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="edit" data-question="${safeQuestion}" title="編輯問題" aria-label="編輯問題">${icon("edit", 15)}<span class="sr-only">編輯問題</span></button>
+        <button class="rag-user-action" type="button" data-rag-question-action="reask" data-question="${safeQuestion}" title="重新提問" aria-label="重新提問">${icon("refresh", 15)}<span class="sr-only">重新提問</span></button>
+      </div>
+    </div>
+    <div class="rag-answer-block">
+      <section class="card rag-assistant-turn" data-rag-answer>${answerHtml}</section>
+    </div>
+  </div>`;
+}
+
+function shareUrlFor(token) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = `#/${SHARE_HASH_PATH}?${SHARE_CONTENT_PARAM}=${encodeURIComponent(
+    token,
+  )}`;
+  return url.toString();
+}
+
+function shareTokenFromHash() {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [pathPart, queryPart = ""] = raw.split("?");
+  const path = pathPart.replace(/\/+$/, "");
+  if (path === SHARE_HASH_PATH) {
+    return String(
+      new URLSearchParams(queryPart).get(SHARE_CONTENT_PARAM) || "",
+    ).trim();
+  }
+  const match = path.match(/^rag\/share\/([^/]+)$/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (error) {
+    return match[1];
+  }
+}
+
+function replaceShareUrl({ keepToken = false, token = "" } = {}) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete(SHARE_QUESTION_PARAM);
+    url.searchParams.delete(SHARE_TOKEN_PARAM);
+    url.hash =
+      keepToken && token
+        ? `#/${SHARE_HASH_PATH}?${SHARE_CONTENT_PARAM}=${encodeURIComponent(
+            token,
+          )}`
+        : "#/rag";
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  } catch (error) {
+    /* URL cleanup is best effort. */
+  }
+}
+
+function takeShareRequest() {
+  try {
+    const url = new URL(window.location.href);
+    const legacyToken = String(
+      url.searchParams.get(SHARE_TOKEN_PARAM) || "",
+    ).trim();
+    const token = shareTokenFromHash() || legacyToken;
+    const question = String(
+      url.searchParams.get(SHARE_QUESTION_PARAM) || "",
+    ).trim();
+    if (!token && !question) return null;
+    return {
+      token: token.slice(0, 64),
+      question: question.slice(0, 500),
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function answerTextFor(turnElement) {
+  if (!turnElement) return "";
+  const parts = Array.from(
+    turnElement.querySelectorAll("[data-rag-answer] .answer-text"),
+  )
+    .map((element) => String(element.textContent || "").trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join("\n\n");
+  const answer = turnElement.querySelector("[data-rag-answer]");
+  return answer ? String(answer.innerText || "").trim() : "";
+}
+
+function sharePayloadFor(payload) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  return {
+    status: source.status,
+    answer: source.answer,
+    answer_source: source.answer_source,
+    notice: source.notice,
+    citations: Array.isArray(source.citations) ? source.citations : [],
+    judgments: Array.isArray(source.judgments) ? source.judgments : [],
+    reference_judgments: Array.isArray(source.reference_judgments)
+      ? source.reference_judgments
+      : [],
+    law_sources: Array.isArray(source.law_sources) ? source.law_sources : [],
+    matched_terms: Array.isArray(source.matched_terms)
+      ? source.matched_terms
+      : [],
+    law_answer: source.law_answer,
+    law_framework: source.law_framework,
+    llm_model: source.llm_model,
+    embedding_model: source.embedding_model,
+    duration_ms: source.duration_ms,
+    show_sources: source.show_sources,
+    retrieval: source.retrieval,
+    rerank_degraded: source.rerank_degraded,
+    degraded_reason: source.degraded_reason,
+    partial: false,
+    streaming: false,
+  };
+}
+
+async function shareRagTurns(turns, title) {
+  const sourceTurns = (Array.isArray(turns) ? turns : [])
+    .filter((turn) => String(turn?.question || "").trim())
+    .map((turn) => ({
+      question: String(turn.question || "").trim().slice(0, 500),
+      asked_at: String(turn.asked_at || ""),
+      payload: sharePayloadFor(turn.payload),
+    }));
+  if (!sourceTurns.length) {
+    toast("沒有可建立公開連結的對話。", "warn");
+    return;
+  }
+  let result = null;
+  try {
+    result = await api.ragShareCreate({
+      title: String(title || sourceTurns[0]?.question || "").slice(0, 200),
+      turns: sourceTurns,
+    });
+  } catch (error) {
+    result = null;
+  }
+  if (!result?.id) {
+    toast("無法建立公開連結，請稍後再試。", "danger", 6000);
+    return;
+  }
+  const url = shareUrlFor(result.id);
+  const ok = await copyText(url);
+  if (!ok) {
+    toast("無法複製公開連結，請確認瀏覽器剪貼簿權限。", "danger", 6000);
+    return;
+  }
+  toast("已複製公開連結", "ok", 7000, {
+    detail: "任何擁有此連結的人都可以查看這段對話。",
+    actionLabel: "開啟連結",
+    onAction: () => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  });
 }
 
 function lookupWithTimeout(promise, timeoutMs) {
@@ -447,6 +624,11 @@ function citationUsageLabel(item) {
   return "";
 }
 
+function safeIndex(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function judgmentCard(judgment, index) {
   const score =
     judgment.score === null || judgment.score === undefined
@@ -492,7 +674,7 @@ function judgmentCard(judgment, index) {
       )}</a>`
     : "";
   return `<article class="citation">
-    <span class="citation-index">[${judgment.index ?? index + 1}]</span>
+    <span class="citation-index">[${safeIndex(judgment.index, index + 1)}]</span>
     <div class="citation-body">
       <div class="citation-head"${headAttributes}>
         <h4 class="citation-name">${escapeHtml(judgment.jid || "未知案號")}</h4>
@@ -589,7 +771,9 @@ function citationCard(citation, index) {
         aria-label="開啟 ${escapeHtml(citation.law_name || "法規")} 原始條文"`
     : "";
   return `<article class="citation">
-    <span class="citation-index">${String(citation.index ?? index + 1).padStart(2, "0")}</span>
+    <span class="citation-index">${String(
+      safeIndex(citation.index, index + 1),
+    ).padStart(2, "0")}</span>
     <div class="citation-body"${bodyAttributes}>
       <h4 class="citation-name">${escapeHtml(citation.law_name || "未命名法規")}</h4>
       <div class="citation-meta">${meta || "<span>法規 metadata</span>"}</div>
@@ -609,8 +793,8 @@ function lawSourceCard(source, index) {
     source.law_level && source.law_level !== sourceLabel ? source.law_level : "";
   const meta = [
     `<span class="badge ${source.source_type === "order" ? "badge-warn" : "badge-info"}">${escapeHtml(sourceLabel)}</span>`,
-    level,
-    source.law_category,
+    level ? escapeHtml(level) : "",
+    source.law_category ? escapeHtml(source.law_category) : "",
     source.article_count ? `${formatNumber(source.article_count)} 條` : "",
     source.law_modified_date ? `異動 ${formatDate(source.law_modified_date)}` : "",
     citationUsageLabel(source),
@@ -672,7 +856,9 @@ function lawSourceCard(source, index) {
         aria-label="開啟 ${escapeHtml(source.law_name || "法規")} 原始條文"`
     : "";
   return `<article class="citation law-source">
-    <span class="citation-index">${String(source.index ?? index + 1).padStart(2, "0")}</span>
+    <span class="citation-index">${String(
+      safeIndex(source.index, index + 1),
+    ).padStart(2, "0")}</span>
     <div class="citation-body"${bodyAttributes}>
       <h4 class="citation-name">${escapeHtml(source.law_name || "未命名法規")}</h4>
       <div class="citation-meta">${meta}</div>
@@ -862,26 +1048,30 @@ function renderRagModeCard({
   text,
   modelSummary = [],
   refreshing = false,
+  expanded = false,
 }) {
   const toneClass =
     tone === "ok" ? "is-ok" : tone === "warn" ? "is-warn" : "is-info";
   const iconName = tone === "ok" ? "check" : tone === "warn" ? "alert" : "info";
   const badgeClass =
     tone === "ok" ? "badge-ok" : tone === "warn" ? "badge-warn" : "badge-info";
-  return `<section class="rag-mode-card ${toneClass}">
-    <div class="rag-mode-head">
+  return `<section class="rag-mode-card ${toneClass}${
+    expanded ? " is-expanded" : ""
+  }">
+    <div class="rag-mode-head" role="button" tabindex="0" aria-expanded="${expanded}">
       <span class="rag-mode-icon" aria-hidden="true">${icon(iconName, 14)}</span>
       <div class="rag-mode-copy">
         <strong>${escapeHtml(title)}</strong>
         <p>${escapeHtml(text)}</p>
       </div>
       <span class="badge ${badgeClass}">3 個模型</span>
+      <span class="rag-mode-chevron" aria-hidden="true">${icon("chevronDown", 14)}</span>
     </div>
     ${renderModelTable(modelSummary, refreshing)}
   </section>`;
 }
 
-function renderAnswerBody(payload) {
+function renderAnswerBody(payload, actionsHtml = "") {
   const citations = Array.isArray(payload.citations) ? payload.citations : [];
   const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
   const referenceJudgments = Array.isArray(payload.reference_judgments)
@@ -1133,6 +1323,7 @@ function renderAnswerBody(payload) {
           answerContent,
         )}</p>
       </div>
+      ${actionsHtml}
       ${
         rerankDegraded
           ? `<div class="answer-notice" data-rerank-degraded="true">排序精簡模式：本次部分 rerank 逾時或降級，來源可能以向量順序顯示。</div>`
@@ -1198,10 +1389,13 @@ function renderAnswer(question, payload, processHtml = "") {
       </div>
       ${processHtml}
     </div>
-    <div class="answer-body">${renderAnswerBody(payload)}</div>`;
+    <div class="answer-body">${renderAnswerBody(
+      payload,
+      answerActionsMarkup(question),
+    )}</div>`;
 }
 
-function renderAnswerError(error, processHtml = "") {
+function renderAnswerError(error, processHtml = "", question = "") {
   return `<div class="answer-head">
       <div class="answer-head-left">${icon("alert", 16)}
         <span class="answer-head-title">無法完成檢索</span>
@@ -1214,6 +1408,7 @@ function renderAnswerError(error, processHtml = "") {
         title: "請求失敗",
         text: escapeHtml(error.message || "請稍後再試。"),
       })}
+      ${question ? answerActionsMarkup(question) : ""}
     </div>`;
 }
 
@@ -1312,6 +1507,9 @@ function renderProjects(projects, historyEntries, activeProjectId) {
 }
 
 export async function render(root) {
+  const sharedRequest = takeShareRequest();
+  if (sharedRequest && !sharedRequest.token) replaceShareUrl();
+  const turnPayloads = new WeakMap();
   let disposed = false;
   let historyEntries = [];
   let historyLoaded = false;
@@ -1329,6 +1527,7 @@ export async function render(root) {
   let modeStatus = null;
   let modeError = null;
   let modeModelRefreshing = false;
+  let modeCardExpanded = false;
 
   root.innerHTML = `<section class="page rag-page">
     <div class="rag-layout">
@@ -1370,6 +1569,16 @@ export async function render(root) {
         </section>
       </aside>
       <div class="rag-workspace">
+        <div class="rag-workspace-toolbar">
+          <a class="rag-friend-link" href="https://judgment.ragdemo.win" target="_blank" rel="noopener noreferrer"
+            data-workspace-action="friend-share">${icon("gift", 14)}<span>分享給朋友</span></a>
+          <button class="rag-workspace-icon" type="button" data-workspace-action="menu"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="rag-workspace-menu"
+            title="更多對話操作" aria-label="更多對話操作">${icon("more", 16)}</button>
+          <button class="rag-workspace-icon" type="button" data-workspace-action="share"
+            title="建立公開連結" aria-label="建立公開連結">${icon("share", 16)}</button>
+          <div class="rag-history-menu rag-workspace-menu" id="rag-workspace-menu" role="menu" hidden></div>
+        </div>
         <header class="rag-hero rag-hero-compact">
       <div id="rag-mode-notice">${notice({
         tone: "info",
@@ -1432,6 +1641,12 @@ export async function render(root) {
   const input = root.querySelector("#rag-question");
   const submit = root.querySelector("#rag-submit");
   const page = root.querySelector(".rag-page");
+  page.classList.toggle("is-shared-view", Boolean(sharedRequest));
+  const workspaceToolbar = root.querySelector(".rag-workspace-toolbar");
+  const workspaceMenu = root.querySelector("#rag-workspace-menu");
+  const workspaceMenuTrigger = root.querySelector(
+    '[data-workspace-action="menu"]',
+  );
   const turnsBox = root.querySelector("#rag-turns");
   const followupForm = root.querySelector("#rag-followup-form");
   const followupInput = root.querySelector("#rag-followup-question");
@@ -1451,6 +1666,7 @@ export async function render(root) {
   const historyMenu = root.querySelector("#rag-history-menu");
   const judgmentDialog = root.querySelector("#rag-judgment-dialog");
   const lawDialog = root.querySelector("#rag-law-dialog");
+  const modeNotice = root.querySelector("#rag-mode-notice");
   const syncDialogScrollLock = () => {
     document.documentElement.classList.toggle(
       "dialog-open",
@@ -1504,7 +1720,10 @@ export async function render(root) {
   const appendConversationTurn = (question, answerHtml) => {
     const placeholder = turnsBox.querySelector(".rag-empty-answer");
     if (placeholder) placeholder.remove();
-    turnsBox.insertAdjacentHTML("beforeend", turnMarkup(question, answerHtml));
+    turnsBox.insertAdjacentHTML(
+      "beforeend",
+      turnMarkup(question, answerHtml, { complete: false }),
+    );
     const turnElement = turnsBox.lastElementChild;
     const answerElement = turnElement?.querySelector("[data-rag-answer]");
     window.requestAnimationFrame(() => {
@@ -1524,11 +1743,98 @@ export async function render(root) {
           )
           .join("")
       : emptyConversationMarkup();
+    const elements = Array.from(turnsBox.querySelectorAll(".rag-turn"));
+    elements.forEach((element, index) => {
+      const payload = conversationTurns[index]?.payload;
+      if (payload) turnPayloads.set(element, payload);
+    });
+  };
+
+  const loadSharedConversation = async (token) => {
+    try {
+      const snapshot = await api.ragShareGet(token);
+      if (disposed) return false;
+      const turns = (Array.isArray(snapshot?.turns) ? snapshot.turns : [])
+        .map((turn) => ({
+          question: String(turn?.question || "").trim().slice(0, 500),
+          asked_at: String(turn?.asked_at || ""),
+          payload:
+            turn?.payload && typeof turn.payload === "object"
+              ? turn.payload
+              : {},
+        }))
+        .filter((turn) => turn.question);
+      if (!turns.length) throw new Error("分享內容是空的。");
+      currentConversationId = null;
+      conversationTurns = turns;
+      lastQuestion = turns[turns.length - 1]?.question || "";
+      setConversationMode(true);
+      renderStoredConversation();
+      showFollowup();
+      renderLibrary();
+      setBusy(submit, false);
+      setBusy(followupSubmit, false);
+      replaceShareUrl({ keepToken: true, token });
+      window.scrollTo({ top: 0, behavior: "auto" });
+      toast("已載入分享的對話。", "ok", 3200);
+      return true;
+    } catch (error) {
+      replaceShareUrl();
+      if (!disposed) {
+        toast("分享連結已失效或無法載入。", "warn", 5200);
+      }
+      return false;
+    }
+  };
+
+  const turnsForShare = (turnElement, fallbackQuestion) => {
+    const elements = Array.from(turnsBox.querySelectorAll(".rag-turn"));
+    const endIndex = elements.indexOf(turnElement);
+    const limit = endIndex >= 0 ? endIndex + 1 : elements.length;
+    const turns = [];
+    for (let index = 0; index < limit; index += 1) {
+      const element = elements[index];
+      const stored = conversationTurns[index];
+      const question = String(
+        stored?.question ||
+          element?.querySelector(".rag-user-bubble")?.textContent ||
+          "",
+      ).trim();
+      if (!question) continue;
+      const payload =
+        stored?.payload ||
+        turnPayloads.get(element) ||
+        (index === endIndex
+          ? {
+              status: "operational",
+              answer: answerTextFor(element),
+              answer_source: "shared",
+            }
+          : {});
+      turns.push({
+        question,
+        asked_at: stored?.asked_at || "",
+        payload,
+      });
+    }
+    if (!turns.length && fallbackQuestion) {
+      turns.push({
+        question: fallbackQuestion,
+        asked_at: "",
+        payload: {
+          status: "operational",
+          answer: answerTextFor(turnElement),
+          answer_source: "shared",
+        },
+      });
+    }
+    return turns;
   };
 
   const openConversation = (entry) => {
     const turns = Array.isArray(entry.turns) ? entry.turns : [];
     if (!turns.length) return false;
+    closeWorkspaceMenu();
     requestSeq += 1;
     stopFlowUpdates();
     paintTestFlow(null);
@@ -1715,6 +2021,7 @@ export async function render(root) {
   };
 
   const newChat = () => {
+    closeWorkspaceMenu();
     requestSeq += 1;
     stopFlowUpdates();
     paintTestFlow(null);
@@ -1756,7 +2063,7 @@ export async function render(root) {
     historyMenu.innerHTML = `
       <button type="button" role="menuitem" data-menu-action="rename">${icon("edit", 13)}<span>重新命名</span></button>
       <button type="button" role="menuitem" data-menu-action="toggle-pin">${icon("pin", 13)}<span>${entry.pinned ? "取消釘選" : "釘選"}</span></button>
-      <button type="button" role="menuitem" data-menu-action="share">${icon("link", 13)}<span>分享</span></button>
+      <button type="button" role="menuitem" data-menu-action="share">${icon("link", 13)}<span>建立公開連結</span></button>
       <button type="button" role="menuitem" data-menu-action="move">${icon("folder", 13)}<span>移至專案</span></button>
       <div class="rag-history-menu-divider"></div>
       <button class="is-danger" type="button" role="menuitem" data-menu-action="delete">${icon("trash", 13)}<span>刪除</span></button>`;
@@ -1830,29 +2137,24 @@ export async function render(root) {
   };
 
   const shareHistory = async (entry) => {
-    const turns = Array.isArray(entry.turns) ? entry.turns : [];
-    const lines = [`# ${entry.title || "未命名對話"}`, ""];
-    if (turns.length) {
-      for (const turn of turns) {
-        lines.push("## 問題", "", turn.question || "", "");
-        lines.push("## 回答", "", turn.payload?.answer || "（沒有回答內容）", "");
-        const sources = Array.isArray(turn.payload?.law_sources)
-          ? turn.payload.law_sources
-              .map((source) => source.law_name)
-              .filter(Boolean)
-          : [];
-        if (sources.length) {
-          lines.push(`引用：${[...new Set(sources)].join("、")}`, "");
-        }
-      }
-    } else {
-      lines.push(entry.title || "");
-    }
-    const ok = await copyText(lines.join("\n"));
-    toast(
-      ok ? "對話內容已複製，可直接貼上分享。" : "無法複製對話內容。",
-      ok ? "ok" : "warn",
+    const turns = (Array.isArray(entry.turns) ? entry.turns : []).map(
+      (turn) => ({
+        question: String(turn?.question || "").trim(),
+        asked_at: String(turn?.asked_at || ""),
+        payload:
+          turn?.payload && typeof turn.payload === "object"
+            ? turn.payload
+            : {},
+      }),
     );
+    if (!turns.length) {
+      turns.push({
+        question: entry.title || "未命名對話",
+        asked_at: "",
+        payload: {},
+      });
+    }
+    await shareRagTurns(turns, entry.title || "Judgment RAG 對話");
   };
 
   const deleteHistory = async (entry) => {
@@ -1901,6 +2203,95 @@ export async function render(root) {
     );
   };
 
+  const currentWorkspaceEntry = () =>
+    historyEntries.find(
+      (item) =>
+        currentConversationId !== null &&
+        String(item.id) === String(currentConversationId),
+    ) || null;
+
+  const closeWorkspaceMenu = () => {
+    if (!workspaceMenu) return;
+    workspaceMenu.hidden = true;
+    workspaceMenu.innerHTML = "";
+    workspaceMenuTrigger?.setAttribute("aria-expanded", "false");
+  };
+
+  const renderWorkspaceMenu = () => {
+    const entry = currentWorkspaceEntry();
+    const disabled = entry ? "" : " disabled";
+    workspaceMenu.innerHTML = `
+      <button type="button" role="menuitem" data-workspace-menu-action="rename"${disabled}>${icon("edit", 13)}<span>重新命名</span></button>
+      <button type="button" role="menuitem" data-workspace-menu-action="pin"${disabled}>${icon("pin", 13)}<span>${entry?.pinned ? "取消釘選" : "釘選對話"}</span></button>
+      <div class="rag-history-menu-divider"></div>
+      <button class="is-danger" type="button" role="menuitem" data-workspace-menu-action="delete"${disabled}>${icon("trash", 13)}<span>刪除</span></button>
+      <div class="rag-history-menu-divider"></div>
+      <button type="button" role="menuitem" data-workspace-menu-action="move"${disabled}>${icon("folder", 13)}<span>移至專案</span></button>
+      ${
+        entry
+          ? ""
+          : `<div class="rag-history-menu-note">目前沒有可管理的對話。</div>`
+      }`;
+  };
+
+  const renderWorkspaceMoveMenu = (entry) => {
+    const current = String(entry.project_id || "");
+    const options = [
+      { id: "", name: "未分類" },
+      ...projects.map((project) => ({
+        id: String(project.id),
+        name: project.name,
+      })),
+    ];
+    workspaceMenu.innerHTML = `
+      <div class="rag-history-menu-head">${icon("folder", 13)}<span>移至專案</span></div>
+      ${options
+        .map(
+          (option) => `<button type="button" role="menuitem"
+            data-workspace-menu-action="assign-project" data-project-id="${escapeHtml(option.id)}">
+            <span class="rag-history-menu-check">${
+              current === option.id ? icon("check", 12) : ""
+            }</span>
+            <span>${escapeHtml(option.name)}</span>
+          </button>`,
+        )
+        .join("")}
+      ${
+        projects.length
+          ? ""
+          : `<div class="rag-history-menu-note">尚未建立專案，可先從左側建立。</div>`
+      }
+      <div class="rag-history-menu-divider"></div>
+      <button type="button" role="menuitem" data-workspace-menu-action="back">${icon(
+        "chevronLeft",
+        13,
+      )}<span>返回</span></button>`;
+  };
+
+  const openWorkspaceMenu = () => {
+    closeHistoryMenu();
+    renderWorkspaceMenu();
+    workspaceMenu.hidden = false;
+    workspaceMenuTrigger?.setAttribute("aria-expanded", "true");
+  };
+
+  const shareCurrentConversation = async () => {
+    const entry = currentWorkspaceEntry();
+    let turns = conversationTurns.map((turn) => ({
+      question: turn.question,
+      asked_at: turn.asked_at || "",
+      payload: turn.payload || {},
+    }));
+    if (!turns.length && Array.isArray(entry?.turns)) {
+      turns = entry.turns.map((turn) => ({ ...turn }));
+    }
+    if (!turns.length) {
+      toast("目前沒有可建立公開連結的對話。", "warn");
+      return;
+    }
+    await shareRagTurns(turns, entry?.title || "Judgment RAG 對話");
+  };
+
   const handleHistoryMenuClick = async (event) => {
     const button = event.target.closest("[data-menu-action]");
     if (!button) return;
@@ -1937,18 +2328,34 @@ export async function render(root) {
   };
 
   const onDocumentClick = (event) => {
-    if (historyMenu.hidden) return;
     const path =
       typeof event.composedPath === "function" ? event.composedPath() : [];
-    if (path.includes(historyMenu) || historyMenu.contains(event.target)) {
-      return;
+    if (!historyMenu.hidden) {
+      const insideHistory =
+        path.includes(historyMenu) || historyMenu.contains(event.target);
+      if (
+        !insideHistory &&
+        !event.target.closest('[data-rag-action="open-history-menu"]')
+      ) {
+        closeHistoryMenu();
+      }
     }
-    if (event.target.closest('[data-rag-action="open-history-menu"]')) return;
-    closeHistoryMenu();
+    if (!workspaceMenu.hidden) {
+      const insideWorkspace =
+        path.includes(workspaceMenu) || workspaceMenu.contains(event.target);
+      if (
+        !insideWorkspace &&
+        !event.target.closest('[data-workspace-action="menu"]')
+      ) {
+        closeWorkspaceMenu();
+      }
+    }
   };
 
   const onDocumentKeydown = (event) => {
-    if (event.key === "Escape") closeHistoryMenu();
+    if (event.key !== "Escape") return;
+    closeHistoryMenu();
+    closeWorkspaceMenu();
   };
 
   const onWindowScroll = (event) => {
@@ -1956,6 +2363,7 @@ export async function render(root) {
       return;
     }
     closeHistoryMenu();
+    if (!workspaceMenu.hidden) closeWorkspaceMenu();
   };
 
   const refreshHistory = async () => {
@@ -2054,6 +2462,7 @@ export async function render(root) {
         text: modeError.message || "請稍後再試，或前往系統狀態頁查看。",
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
       return;
     }
@@ -2070,6 +2479,7 @@ export async function render(root) {
         )} / ${formatNumber(totalJudgments)} 筆判決。回答不是法律意見。`,
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
     } else if (rag?.status === "degraded") {
       heroNotice.innerHTML = renderRagModeCard({
@@ -2078,6 +2488,7 @@ export async function render(root) {
         text: rag.detail || "RAG 會降級為只顯示檢索結果。",
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
     } else {
       heroNotice.innerHTML = renderRagModeCard({
@@ -2088,6 +2499,7 @@ export async function render(root) {
           "設定 QDRANT_URL、EMBEDDING_URL 與 LLM_URL 並執行 judgment-index-vectors 後即可啟用判決檢索。",
         modelSummary,
         refreshing: modeModelRefreshing,
+        expanded: modeCardExpanded,
       });
     }
   };
@@ -2648,6 +3060,7 @@ export async function render(root) {
       (source === "followup" ? followupInput : input).focus();
       return;
     }
+    closeWorkspaceMenu();
     if (fresh || !conversationActive) {
       currentConversationId = null;
       conversationTurns = [];
@@ -2667,7 +3080,7 @@ export async function render(root) {
       input.value = "";
       resizeInput();
     }
-    const { answerElement } = appendConversationTurn(
+    const { turnElement, answerElement } = appendConversationTurn(
       trimmed,
       answerLoading(trimmed, testMode),
     );
@@ -2746,6 +3159,9 @@ export async function render(root) {
       stopFlowUpdates();
       const processHtml = processController?.finish(true) || "";
       answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
+      if (turnElement) turnPayloads.set(turnElement, compactAnswerPayload(payload));
+      turnElement?.classList.remove("is-pending");
+      turnElement?.classList.add("is-complete");
       if (!payload.pipeline_flow) {
         void hydratePipelineFlow(payload).then(() => {
           if (isStale() || !payload.pipeline_flow) return;
@@ -2770,7 +3186,9 @@ export async function render(root) {
       if (isStale()) return;
       stopFlowUpdates();
       const processHtml = processController?.finish(false) || "";
-      answerElement.innerHTML = renderAnswerError(error, processHtml);
+      answerElement.innerHTML = renderAnswerError(error, processHtml, trimmed);
+      turnElement?.classList.remove("is-pending");
+      turnElement?.classList.add("is-complete");
       showFollowup();
       toast(error.message || "檢索失敗。", "danger");
     } finally {
@@ -2817,6 +3235,75 @@ export async function render(root) {
   });
 
   root.addEventListener("click", async (event) => {
+    const questionAction = event.target.closest("[data-rag-question-action]");
+    const answerAction = event.target.closest("[data-rag-answer-action]");
+    if (questionAction || answerAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      const action = questionAction
+        ? questionAction.dataset.ragQuestionAction
+        : answerAction.dataset.ragAnswerAction;
+      const target = questionAction || answerAction;
+      const pointerActivated =
+        Number(event.detail || 0) > 0 ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      const releaseActionFocus = (force = false) => {
+        if ((force || pointerActivated) && document.activeElement === target) {
+          target.blur();
+        }
+      };
+      const question = String(target?.dataset.question || "").trim();
+      const turnElement = target?.closest(".rag-turn");
+      if (!question || !turnElement) return;
+      if (action === "copy") {
+        try {
+          const text = questionAction ? question : answerTextFor(turnElement);
+          const ok = await copyText(text);
+          toast(
+            ok
+              ? questionAction
+                ? "已複製問題。"
+                : "已複製回答。"
+              : "無法複製。",
+            ok ? "ok" : "danger",
+          );
+        } finally {
+          releaseActionFocus();
+        }
+        return;
+      }
+      if (action === "share") {
+        releaseActionFocus(true);
+        try {
+          await shareRagTurns(
+            turnsForShare(turnElement, question),
+            questionAction ? "Judgment RAG 提問" : "Judgment RAG 回答",
+          );
+        } finally {
+          releaseActionFocus(true);
+        }
+        return;
+      }
+      if (action === "edit") {
+        const editTarget = conversationActive ? followupInput : input;
+        if (conversationActive) showFollowup();
+        editTarget.value = question;
+        if (conversationActive) resizeFollowupInput();
+        else resizeInput();
+        editTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+        editTarget.focus({ preventScroll: true });
+        editTarget.setSelectionRange(question.length, question.length);
+        return;
+      }
+      if (action === "reask") {
+        if (submit.disabled) {
+          toast("目前仍在檢索中，請稍後再試。", "warn");
+          return;
+        }
+        await runQuestion(question, { fresh: false, source: "followup" });
+      }
+      return;
+    }
     if (event.target.closest('[data-rag-action="refresh-models"]')) {
       await refreshModels();
     }
@@ -2886,6 +3373,105 @@ export async function render(root) {
     await createProject(form);
   });
 
+  modeNotice.addEventListener("click", (event) => {
+    const head = event.target.closest(".rag-mode-head");
+    if (!head || event.target.closest("button, a")) return;
+    modeCardExpanded = !modeCardExpanded;
+    head.closest(".rag-mode-card")?.classList.toggle(
+      "is-expanded",
+      modeCardExpanded,
+    );
+    head.setAttribute("aria-expanded", String(modeCardExpanded));
+  });
+
+  modeNotice.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const head = event.target.closest(".rag-mode-head");
+    if (!head) return;
+    event.preventDefault();
+    head.click();
+  });
+
+  workspaceToolbar.addEventListener("click", async (event) => {
+    const target = event.target.closest("[data-workspace-action]");
+    if (!target) return;
+    const action = target.dataset.workspaceAction;
+    if (action === "friend-share") {
+      event.preventDefault();
+      const pointerActivated =
+        Number(event.detail || 0) > 0 ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      try {
+        if (typeof navigator.share === "function") {
+          try {
+            await navigator.share({
+              title: "Judgment RAG Console",
+              url: FRIEND_SHARE_URL,
+            });
+            return;
+          } catch (error) {
+            if (error?.name === "AbortError") return;
+          }
+        }
+        const ok = await copyText(FRIEND_SHARE_URL);
+        toast(
+          ok ? "已複製網站連結。" : "無法分享網站連結。",
+          ok ? "ok" : "danger",
+        );
+      } finally {
+        if (pointerActivated) target.blur();
+      }
+      return;
+    }
+    if (action === "menu") {
+      if (workspaceMenu.hidden) openWorkspaceMenu();
+      else closeWorkspaceMenu();
+      return;
+    }
+    if (action === "share") {
+      const pointerActivated =
+        Number(event.detail || 0) > 0 ||
+        Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      if (pointerActivated) target.blur();
+      try {
+        await shareCurrentConversation();
+      } finally {
+        if (pointerActivated) target.blur();
+      }
+    }
+  });
+
+  workspaceMenu.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-workspace-menu-action]");
+    if (!button) return;
+    const action = button.dataset.workspaceMenuAction;
+    if (action === "back") {
+      renderWorkspaceMenu();
+      return;
+    }
+    const entry = currentWorkspaceEntry();
+    if (!entry) {
+      closeWorkspaceMenu();
+      toast("目前沒有可管理的對話。", "warn");
+      return;
+    }
+    if (action === "rename") {
+      closeWorkspaceMenu();
+      await renameHistory(entry);
+    } else if (action === "pin") {
+      closeWorkspaceMenu();
+      await togglePin(entry.id);
+    } else if (action === "delete") {
+      closeWorkspaceMenu();
+      await deleteHistory(entry);
+    } else if (action === "move") {
+      renderWorkspaceMoveMenu(entry);
+    } else if (action === "assign-project") {
+      closeWorkspaceMenu();
+      await assignProject(entry, button.dataset.projectId || "");
+    }
+  });
+
   historyMenu.addEventListener("click", handleHistoryMenuClick);
   document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onDocumentKeydown);
@@ -2915,27 +3501,41 @@ export async function render(root) {
   ]);
   await loadCurrentTestFlow();
 
-  let pendingQuestion = "";
-  try {
-    pendingQuestion =
-      window.sessionStorage.getItem("judgment.pending_question") || "";
-    window.sessionStorage.removeItem("judgment.pending_question");
-  } catch (error) {
-    pendingQuestion = "";
+  let sharedLoaded = false;
+  if (sharedRequest?.token) {
+    sharedLoaded = await loadSharedConversation(sharedRequest.token);
   }
-  if (!pendingQuestion && typeof window.__judgmentPendingQuestion === "string") {
-    pendingQuestion = window.__judgmentPendingQuestion;
-  }
-  delete window.__judgmentPendingQuestion;
-  pendingQuestion = String(pendingQuestion || "").trim().slice(0, 500);
-  if (pendingQuestion && input) {
-    input.value = pendingQuestion;
-    resizeInput();
-    window.setTimeout(() => {
-      if (!disposed) {
-        runQuestion(pendingQuestion, { fresh: true, source: "home" });
-      }
-    }, 40);
+  if (!sharedLoaded) {
+    let pendingQuestion = "";
+    let pendingSource = "home";
+    try {
+      pendingQuestion =
+        window.sessionStorage.getItem("judgment.pending_question") || "";
+      window.sessionStorage.removeItem("judgment.pending_question");
+    } catch (error) {
+      pendingQuestion = "";
+    }
+    if (
+      !pendingQuestion &&
+      typeof window.__judgmentPendingQuestion === "string"
+    ) {
+      pendingQuestion = window.__judgmentPendingQuestion;
+    }
+    delete window.__judgmentPendingQuestion;
+    if (!pendingQuestion && sharedRequest?.question) {
+      pendingQuestion = sharedRequest.question;
+      pendingSource = "share";
+    }
+    pendingQuestion = String(pendingQuestion || "").trim().slice(0, 500);
+    if (pendingQuestion && input) {
+      input.value = pendingQuestion;
+      resizeInput();
+      window.setTimeout(() => {
+        if (!disposed) {
+          runQuestion(pendingQuestion, { fresh: true, source: pendingSource });
+        }
+      }, 40);
+    }
   }
 
   return () => {

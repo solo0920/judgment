@@ -9,13 +9,15 @@ import ipaddress
 import json
 import logging
 import os
+import re
+import secrets
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
 from urllib.parse import unquote, urlparse
@@ -23,6 +25,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from sqlalchemy import delete
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import (
@@ -66,6 +69,7 @@ from .auth import (
 from ..court_normalize import check_court_normalization
 from ..db import build_engine, build_session_factory, init_db
 from ..law_article_versions import check_law_version_status
+from ..models import RagShareSnapshot
 from ..observability import (
     clear_flow,
     current_flow,
@@ -169,7 +173,11 @@ from ..index_versions import (
     validate_version,
 )
 from ..runtime_settings import (
+    get_session_epoch,
     get_test_mode,
+    is_session_revoked,
+    revoke_all_sessions,
+    revoke_session,
     set_llm_model_preference,
     set_test_mode,
 )
@@ -244,6 +252,11 @@ from .query import (
     run_query,
     schema_suggestions,
 )
+from .security_audit import (
+    SECURITY_AUDIT_RETENTION_DAYS,
+    list_security_events,
+    record_security_event,
+)
 from .status import build_status, rerank_status
 from .system_usage import build_system_usage
 
@@ -297,6 +310,85 @@ class QueryRequest(BaseModel):
 
 class RagRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+
+
+class RagShareRequest(BaseModel):
+    title: str = Field(default="", max_length=200)
+    turns: List[Dict[str, Any]] = Field(min_length=1, max_length=30)
+
+
+_RAG_SHARE_TTL_HOURS = 24 * 7
+_RAG_SHARE_MAX_BYTES = 1_000_000
+_RAG_SHARE_PAYLOAD_KEYS = frozenset(
+    {
+        "status",
+        "answer",
+        "answer_source",
+        "notice",
+        "citations",
+        "judgments",
+        "reference_judgments",
+        "law_sources",
+        "matched_terms",
+        "law_answer",
+        "law_framework",
+        "llm_model",
+        "embedding_model",
+        "duration_ms",
+        "show_sources",
+        "retrieval",
+        "rerank_degraded",
+        "degraded_reason",
+    }
+)
+
+
+def _utc_aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _sanitize_rag_share_turns(
+    raw_turns: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    turns: List[Dict[str, Any]] = []
+    for raw in raw_turns:
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=400, detail="分享內容格式不正確。")
+        question = str(raw.get("question") or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="分享問題不能空白。")
+        payload = raw.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        cleaned = {
+            key: payload[key]
+            for key in _RAG_SHARE_PAYLOAD_KEYS
+            if key in payload
+        }
+        cleaned = sanitize_rag_result(cleaned)
+        cleaned = sanitize_query_payload(cleaned)
+        cleaned["partial"] = False
+        cleaned["streaming"] = False
+        asked_at = str(raw.get("asked_at") or "").strip()[:64]
+        turns.append(
+            {
+                "question": question[:500],
+                "asked_at": asked_at or now_iso,
+                "payload": cleaned,
+            }
+        )
+    encoded = json.dumps(turns, ensure_ascii=False).encode("utf-8")
+    if len(encoded) > _RAG_SHARE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="分享內容過大，請分享較短的對話。",
+        )
+    return turns
 
 
 class DemoFeaturesRequest(BaseModel):
@@ -524,7 +616,7 @@ def _write_csp_report(summary: Dict[str, Any]) -> None:
 
 PUBLIC_POLICIES = {"PUBLIC_READ", "PUBLIC_QUERY", "PUBLIC_AUTH"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
-SSE_TICKET_TTL_SECONDS = 120
+SSE_TICKET_TTL_SECONDS = 60
 
 
 def _is_local_request(request: Request) -> bool:
@@ -699,12 +791,8 @@ def route_policy_guard(request: Request) -> None:
         principal = _resolve_principal(request, settings)
         request.state.principal = principal
     policy = _policy_for_matched_route(route, request.method)
-    if (
-        request.url.path == "/api/events/stream"
-        and _valid_sse_ticket(
-            str(request.query_params.get("ticket") or ""),
-            session_secret(settings),
-        )
+    if request.url.path == "/api/events/stream" and bool(
+        getattr(request.state, "sse_ticket_valid", False)
     ):
         return
     if policy in DEMO_POLICIES:
@@ -819,6 +907,26 @@ def _demo_error(
     )
 
 
+def _session_is_active(session_factory: Any, session: Any) -> bool:
+    if not isinstance(session, dict):
+        return False
+    jti = str(session.get("jti") or "").strip()
+    if not jti or "sv" not in session:
+        # Tokens issued before SESSION-01 lack sv and must not outlive the
+        # deployment of all-device revocation.
+        return False
+    try:
+        session_version = max(0, int(session.get("sv") or 0))
+    except (TypeError, ValueError):
+        return False
+    return not is_session_revoked(
+        session_factory,
+        jti,
+        email=str(session.get("email") or ""),
+        session_version=session_version,
+    )
+
+
 def _resolve_principal(
     request: Request, settings: Settings
 ) -> Principal:
@@ -840,41 +948,138 @@ def _resolve_principal(
         and provided
         and hmac.compare_digest(provided, admin_expected)
     ):
+        record_security_event(
+            request.app.state.session_factory,
+            settings,
+            event_type="auth.admin_token",
+            outcome="success",
+            actor="admin_token",
+            source="admin_token",
+            request=request,
+        )
         return admin_token_principal()
 
     session = read_session(request, settings)
-    if session is not None:
+    if session is not None and _session_is_active(
+        request.app.state.session_factory, session
+    ):
         return principal_from_session(session)
     return anonymous_principal()
 
 
-def _make_sse_ticket(secret: str) -> str:
+_SENSITIVE_QUERY_RE = re.compile(
+    r"([?&](?:ticket|code|state|access_token|refresh_token|id_token)=)"
+    r"[^&\s\"']+",
+    re.IGNORECASE,
+)
+
+
+def _redact_sensitive_query(value: str) -> str:
+    return _SENSITIVE_QUERY_RE.sub(r"\1[redacted]", str(value or ""))
+
+
+class _TicketRedactionFilter(logging.Filter):
+    """Keep SSE tickets and OAuth credentials out of uvicorn access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _redact_sensitive_query(item)
+                if isinstance(item, str)
+                else item
+                for item in record.args
+            )
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: _redact_sensitive_query(item)
+                if isinstance(item, str)
+                else item
+                for key, item in record.args.items()
+            }
+        if isinstance(record.msg, str):
+            record.msg = _redact_sensitive_query(record.msg)
+        return True
+
+
+def _sse_binding(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:32]
+
+
+def _sse_principal_binding(principal: Any) -> str:
+    source = str(getattr(principal, "source", "") or "anonymous")
+    email = str(getattr(principal, "email", "") or "")
+    user_id = str(getattr(principal, "user_id", "") or "")
+    return f"{source}:{email or user_id}"
+
+
+def _make_sse_ticket(
+    secret: str,
+    *,
+    store: Dict[str, tuple[int, str, str]],
+    lock: threading.Lock,
+    client_ip: str,
+    binding: str,
+) -> str:
     if not secret:
         return ""
     expires = int(time.time()) + SSE_TICKET_TTL_SECONDS
-    nonce = uuid4().hex
-    payload = f"{expires}:{nonce}"
+    jti = uuid4().hex
+    ip_hash = _sse_binding(client_ip)
+    binding_hash = _sse_binding(binding)
+    payload = f"{expires}:{jti}:{ip_hash}:{binding_hash}"
     signature = hmac.new(
         secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
+    with lock:
+        now = int(time.time())
+        for key, entry in list(store.items()):
+            if entry[0] < now:
+                store.pop(key, None)
+        store[jti] = (expires, ip_hash, binding_hash)
     return f"{payload}:{signature}"
 
 
-def _valid_sse_ticket(ticket: str, secret: str) -> bool:
+def _valid_sse_ticket(
+    ticket: str,
+    secret: str,
+    *,
+    store: Dict[str, tuple[int, str, str]],
+    lock: threading.Lock,
+    client_ip: str,
+) -> bool:
     if not ticket or not secret:
         return False
     try:
-        expires_text, nonce, signature = str(ticket).split(":", 2)
+        expires_text, jti, ip_hash, binding_hash, signature = str(
+            ticket
+        ).split(":", 4)
         expires = int(expires_text)
     except (TypeError, ValueError):
         return False
-    if expires < int(time.time()) or not nonce or not signature:
+    if (
+        expires < int(time.time())
+        or not jti
+        or not ip_hash
+        or not binding_hash
+        or not signature
+    ):
         return False
-    payload = f"{expires}:{nonce}"
+    payload = f"{expires}:{jti}:{ip_hash}:{binding_hash}"
     expected = hmac.new(
         secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    if not hmac.compare_digest(signature, expected):
+        return False
+    if ip_hash != _sse_binding(client_ip):
+        return False
+    with lock:
+        entry = store.get(jti)
+        if entry is None:
+            return False
+        if entry != (expires, ip_hash, binding_hash):
+            return False
+        store.pop(jti, None)
+    return True
 
 
 def _cors_origins(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -908,6 +1113,25 @@ PERFORMANCE_TARGETS = {
     "/api/rag/query": ("RAG 問答", "judgment.rag.answer_question"),
     "/api/rag/query/stream": ("RAG 問答", "judgment.rag.answer_question"),
 }
+
+
+_DEMO_SCHEMA_BLOCKED_COLUMNS = {
+    "law_dataset_versions": frozenset({"parquet_path", "zip_path"}),
+    "download_runs": frozenset({"error_message"}),
+    "judgment_documents": frozenset({"source_archive"}),
+    "judgment_import_runs": frozenset({"error_message"}),
+}
+
+_RAG_SHARE_TELEMETRY_PATH = re.compile(r"^/api/rag/share/[^/]+$")
+
+
+def _telemetry_path(path: str) -> str:
+    """Keep capability tokens out of performance records and flow JSON."""
+
+    return _RAG_SHARE_TELEMETRY_PATH.sub(
+        "/api/rag/share/:share_id",
+        str(path or ""),
+    )
 
 
 def _performance_target(path: str) -> tuple[str, str]:
@@ -975,6 +1199,8 @@ API_ENDPOINT_LABELS = {
     "/api/performance": "效能報表",
     "/api/rag/query": "RAG 問答",
     "/api/rag/query/stream": "RAG 問答 SSE",
+    "/api/rag/share": "建立 RAG 分享連結",
+    "/api/rag/share/{share_id}": "讀取 RAG 分享對話",
     "/api/question-bank/stats": "題庫統計",
     "/api/question-bank/items": "題庫題目",
     "/api/question-bank/tags": "題庫標籤",
@@ -1811,6 +2037,14 @@ def create_app(
     app.state.demo_limiter = DemoRateLimiter()
     app.state.auth_limiter = DemoRateLimiter()
     app.state.csp_limiter = DemoRateLimiter()
+    app.state.sse_tickets = {}
+    app.state.sse_ticket_lock = threading.Lock()
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(
+        isinstance(item, _TicketRedactionFilter)
+        for item in access_logger.filters
+    ):
+        access_logger.addFilter(_TicketRedactionFilter())
     app.state.rag_admission = RagAdmission(
         max_concurrency=settings.rag_admission_max_concurrency,
         max_queue=settings.rag_admission_max_queue,
@@ -1900,6 +2134,20 @@ def create_app(
         )
         payload["endpoints"] = _api_endpoint_catalog(app)
         return payload
+
+    def _query_session_factory(request: Request):
+        if not _is_demo_visitor(request):
+            return app.state.session_factory
+        factory = app.state.demo_query_session_factory
+        if factory is None:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "展示資料查詢未設定。",
+                    "code": "demo_data_unavailable",
+                },
+            )
+        return factory
 
     def _ollama_allowed_hosts() -> tuple[str, ...]:
         return allowed_hosts_from_settings(
@@ -2094,7 +2342,11 @@ def create_app(
                                 "detail": "跨站請求不可寫入本機管理 API。"
                             },
                         )
-                elif principal.source in {"google", "anonymous"}:
+                elif principal.source in {
+                    "google",
+                    "anonymous",
+                    "admin_token",
+                }:
                     if not origin_allowed(
                         request,
                         current,
@@ -2104,10 +2356,10 @@ def create_app(
                         return JSONResponse(
                             status_code=403,
                             content={
-                                "detail": "不允許的 Origin 對展示或登入工作階段寫入。"
+                                "detail": "不允許的 Origin 對展示、登入或管理權杖工作階段寫入。"
                             },
                         )
-                    if principal.source == "google":
+                    if principal.source in {"google", "admin_token"}:
                         sec_fetch_site = request.headers.get("Sec-Fetch-Site")
                         if sec_fetch_site is not None and sec_fetch_site not in {
                             "same-origin",
@@ -2120,11 +2372,37 @@ def create_app(
                                     "detail": "跨站請求不可寫入管理 API。"
                                 },
                             )
-            return await call_next(request)
+            response = await call_next(request)
+            if (
+                principal.is_admin
+                and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and not path.startswith("/api/auth/")
+            ):
+                await asyncio.to_thread(
+                    record_security_event,
+                    app.state.session_factory,
+                    current,
+                    event_type="admin.write",
+                    outcome=(
+                        "success" if response.status_code < 400 else "failure"
+                    ),
+                    actor=str(getattr(principal, "email", "") or ""),
+                    source=str(getattr(principal, "source", "") or ""),
+                    request=request,
+                    detail={"status_code": int(response.status_code)},
+                )
+            return response
 
         if path == "/api/events/stream":
             ticket = str(request.query_params.get("ticket") or "")
-            if _valid_sse_ticket(ticket, session_secret(current)):
+            if _valid_sse_ticket(
+                ticket,
+                session_secret(current),
+                store=app.state.sse_tickets,
+                lock=app.state.sse_ticket_lock,
+                client_ip=client_ip_key(effective_client_ip(request)),
+            ):
+                request.state.sse_ticket_valid = True
                 return await call_next(request)
 
         admin_expected = str(current.admin_token or "")
@@ -2152,6 +2430,10 @@ def create_app(
         if principal is None:
             principal = _resolve_principal(request, current)
         session = read_session(request, current)
+        if session is not None and not _session_is_active(
+            app.state.session_factory, session
+        ):
+            session = None
         payload = {
             # Keep the existing auth/me contract: local bypass and admin
             # tokens are request credentials, not a browser login session.
@@ -2251,11 +2533,48 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/api/admin/security-audit")
+    def admin_security_audit(limit: int = 100) -> JSONResponse:
+        return JSONResponse(
+            content={
+                "events": list_security_events(
+                    app.state.session_factory, limit=limit
+                ),
+                "retention_days": SECURITY_AUDIT_RETENTION_DAYS,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    def audit_auth(
+        request: Request,
+        *,
+        event_type: str,
+        outcome: str,
+        actor: str = "",
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        record_security_event(
+            app.state.session_factory,
+            app.state.settings,
+            event_type=event_type,
+            outcome=outcome,
+            actor=actor,
+            source="google",
+            request=request,
+            detail=detail,
+        )
+
     @app.get("/api/auth/google/start", name="google_start")
     def google_start(request: Request) -> RedirectResponse:
         current = app.state.settings
         target = safe_next_url(request.query_params.get("next"), request, current)
         if not google_login_enabled(current):
+            audit_auth(
+                request,
+                event_type="auth.google_start",
+                outcome="failure",
+                detail={"reason": "google_not_configured"},
+            )
             return redirect_with_auth(target, error="google_not_configured")
         state = new_oauth_state()
         state_token = make_oauth_state_token(state, target, current)
@@ -2280,18 +2599,36 @@ def create_app(
         if not state_data or not hmac.compare_digest(
             str(state_data.get("state") or ""), state
         ):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "state_mismatch"},
+            )
             response = redirect_with_auth("/", error="state_mismatch")
             clear_oauth_state_cookie(response)
             return response
 
         target = safe_next_url(state_data.get("next"), request, current)
         if request.query_params.get("error"):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "access_denied"},
+            )
             response = redirect_with_auth(target, error="access_denied")
             clear_oauth_state_cookie(response)
             return response
 
         code = str(request.query_params.get("code") or "")
         if not code or not google_login_enabled(current):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "oauth_failed"},
+            )
             response = redirect_with_auth(target, error="oauth_failed")
             clear_oauth_state_cookie(response)
             return response
@@ -2306,29 +2643,67 @@ def create_app(
             )
         except Exception:
             logger.exception("Google OAuth code exchange failed")
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "oauth_exchange_failed"},
+            )
             response = redirect_with_auth(target, error="oauth_failed")
             clear_oauth_state_cookie(response)
             return response
 
         if not email_verified(user):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "email_unverified"},
+            )
             response = redirect_with_auth(target, error="email_unverified")
             clear_oauth_state_cookie(response)
             return response
 
         email = str(user.get("email") or "").strip().lower()
         if not allowed_email(email, current):
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="denied",
+                detail={"reason": "not_allowed", "email": email[:320]},
+            )
             response = redirect_with_auth(target, error="not_allowed")
             clear_oauth_state_cookie(response)
             return response
 
         try:
-            token = make_session_token(user, current)
+            session_version = get_session_epoch(
+                app.state.session_factory, email
+            )
+            token = make_session_token(
+                user,
+                current,
+                session_version=session_version,
+            )
         except ValueError:
             logger.exception("Google login session secret is not configured")
+            audit_auth(
+                request,
+                event_type="auth.google_login",
+                outcome="failure",
+                detail={"reason": "session_secret_missing"},
+            )
             response = redirect_with_auth(target, error="oauth_failed")
             clear_oauth_state_cookie(response)
             return response
 
+        audit_auth(
+            request,
+            event_type="auth.google_login",
+            outcome="success",
+            actor=email,
+            detail={"email": email[:320]},
+        )
         response = redirect_with_auth(target, ok=True)
         set_session_cookie(response, request, current, token)
         clear_oauth_state_cookie(response)
@@ -2338,20 +2713,114 @@ def create_app(
     @app.post("/api/auth/logout")
     def auth_logout(request: Request) -> JSONResponse:
         current = app.state.settings
+        if request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "跨站請求不可登出。"},
+            )
         if not origin_allowed(request, current, cors_origins):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "不允許的 Origin。"},
             )
+        session = read_session(request, current)
+        if session is not None:
+            jti = str(session.get("jti") or "").strip()
+            if jti:
+                try:
+                    revoke_session(
+                        app.state.session_factory,
+                        jti,
+                        int(session.get("exp") or 0),
+                    )
+                except Exception:
+                    logger.warning(
+                        "failed to persist session revocation", exc_info=True
+                    )
+        principal = getattr(request.state, "principal", None)
+        record_security_event(
+            app.state.session_factory,
+            current,
+            event_type="auth.logout",
+            outcome="success",
+            actor=str((session or {}).get("email") or ""),
+            source=(
+                "google"
+                if session is not None
+                else str(getattr(principal, "source", "") or "")
+            ),
+            request=request,
+            detail={"had_session": session is not None},
+        )
         response = JSONResponse({"ok": True})
         clear_session_cookie(response)
         clear_oauth_state_cookie(response)
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    @app.post("/api/auth/logout-all")
+    def auth_logout_all(request: Request) -> JSONResponse:
+        current = app.state.settings
+        if request.headers.get("Sec-Fetch-Site") == "cross-site":
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "跨站請求不可登出。"},
+            )
+        if not origin_allowed(request, current, cors_origins):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "不允許的 Origin。"},
+            )
+        session = read_session(request, current)
+        if session is None or not _session_is_active(
+            app.state.session_factory, session
+        ):
+            response = JSONResponse({"ok": True, "revoked": "none"})
+            clear_session_cookie(response)
+            clear_oauth_state_cookie(response)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        email = str(session.get("email") or "").strip().lower()
+        if not email:
+            response = JSONResponse({"ok": True, "revoked": "none"})
+            clear_session_cookie(response)
+            clear_oauth_state_cookie(response)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        try:
+            epoch = revoke_all_sessions(app.state.session_factory, email)
+        except Exception:
+            logger.exception("failed to revoke all sessions")
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "無法撤銷工作階段，請稍後再試。"},
+            )
+        record_security_event(
+            app.state.session_factory,
+            current,
+            event_type="auth.logout_all",
+            outcome="success",
+            actor=email,
+            source="google",
+            request=request,
+            detail={"epoch": int(epoch)},
+        )
+        response = JSONResponse({"ok": True, "revoked": "all"})
+        clear_session_cookie(response)
+        clear_oauth_state_cookie(response)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.post("/api/auth/sse-ticket")
-    def sse_ticket() -> Dict[str, Any]:
-        ticket = _make_sse_ticket(session_secret(app.state.settings))
+    def sse_ticket(request: Request) -> Dict[str, Any]:
+        principal = getattr(request.state, "principal", None)
+        ticket = _make_sse_ticket(
+            session_secret(app.state.settings),
+            store=app.state.sse_tickets,
+            lock=app.state.sse_ticket_lock,
+            client_ip=client_ip_key(effective_client_ip(request)),
+            binding=_sse_principal_binding(principal),
+        )
         return {
             "ticket": ticket,
             "expires_in": SSE_TICKET_TTL_SECONDS if ticket else 0,
@@ -2377,6 +2846,7 @@ def create_app(
         if skipped:
             return await call_next(request)
 
+        path = _telemetry_path(path)
         started_at = datetime.now(timezone.utc)
         started = time.perf_counter()
         request_id = str(
@@ -3947,6 +4417,7 @@ def create_app(
                 settings=runtime_settings(
                     app.state.settings, app.state.session_factory
                 ),
+                include_internal_columns=not demo_visitor,
             )
 
         try:
@@ -3989,6 +4460,7 @@ def create_app(
 
     @app.get("/api/data/suggest")
     def data_suggest(
+        request: Request,
         kind: str,
         query: str = "",
         limit: int = 12,
@@ -3998,13 +4470,15 @@ def create_app(
                 kind=kind,
                 query=query,
                 limit=limit,
-                session_factory=app.state.session_factory,
+                session_factory=_query_session_factory(request),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/judgment")
-    def judgment_detail(jid: str, source: str = "postgres") -> Dict[str, Any]:
+    def judgment_detail(
+        request: Request, jid: str, source: str = "postgres"
+    ) -> Dict[str, Any]:
         try:
             with trace_segment(
                 "api.endpoint",
@@ -4019,9 +4493,12 @@ def create_app(
                 if source not in {"", "postgres"}:
                     raise ValueError(f"不支援的判決來源：{source}")
                 return get_judgment_detail(
-                    session_factory=app.state.session_factory,
+                    session_factory=_query_session_factory(request),
                     jid=jid,
+                    include_internal_fields=not _is_demo_visitor(request),
                 )
+        except HTTPException:
+            raise
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except LookupError as exc:
@@ -4036,6 +4513,7 @@ def create_app(
 
     @app.get("/api/law")
     def law_detail(
+        request: Request,
         law_key: str,
         source_type: Optional[str] = None,
         version_id: Optional[int] = None,
@@ -4054,13 +4532,15 @@ def create_app(
                 },
             ):
                 return get_law_detail(
-                    session_factory=app.state.session_factory,
+                    session_factory=_query_session_factory(request),
                     data_dir=app.state.data_dir,
                     law_key=law_key,
                     source_type=source_type,
                     version_id=version_id,
                     article_no=article_no,
                 )
+        except HTTPException:
+            raise
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -4073,12 +4553,29 @@ def create_app(
 
     @app.get("/api/schema/suggest")
     def schema_suggest(
+        request: Request,
         database: str,
         table: str,
         column: str,
         q: str = "",
         limit: int = 1000,
     ) -> Dict[str, Any]:
+        demo_visitor = _is_demo_visitor(request)
+        if demo_visitor and column in _DEMO_SCHEMA_BLOCKED_COLUMNS.get(
+            table, frozenset()
+        ):
+            return {
+                "status": "ok",
+                "database": database,
+                "table": table,
+                "column": column,
+                "query": q,
+                "values": [],
+                "total": 0,
+                "truncated": False,
+                "warnings": ["此欄位未開放展示。"],
+                "duration_ms": 0,
+            }
         try:
             with trace_segment(
                 "api.endpoint",
@@ -4091,16 +4588,21 @@ def create_app(
                     "query_length": len(q or ""),
                 },
             ):
-                return schema_suggestions(
+                payload = schema_suggestions(
                     database=database,
                     table=table,
                     column=column,
                     query=q,
                     limit=limit,
-                    session_factory=app.state.session_factory,
+                    session_factory=_query_session_factory(request),
                     data_dir=app.state.data_dir,
                     settings=settings,
                 )
+                if demo_visitor:
+                    return sanitize_query_payload(payload)
+                return payload
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -4204,6 +4706,74 @@ def create_app(
                 status_code=500,
                 detail=f"效能報表失敗：{exc.__class__.__name__}: {exc}",
             ) from exc
+
+    @app.post("/api/rag/share")
+    def rag_share_create(request: RagShareRequest) -> JSONResponse:
+        turns = _sanitize_rag_share_turns(request.turns)
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(hours=_RAG_SHARE_TTL_HOURS)
+        title = str(request.title or "").strip()[:200]
+        token = ""
+        with app.state.session_factory() as session:
+            session.execute(
+                delete(RagShareSnapshot).where(
+                    RagShareSnapshot.expires_at < now
+                )
+            )
+            for _ in range(5):
+                candidate = secrets.token_urlsafe(16)
+                if session.get(RagShareSnapshot, candidate) is None:
+                    token = candidate
+                    break
+            if not token:
+                raise HTTPException(
+                    status_code=503,
+                    detail="無法建立分享連結，請稍後再試。",
+                )
+            session.add(
+                RagShareSnapshot(
+                    token=token,
+                    title=title,
+                    turns=turns,
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+            )
+            session.commit()
+        return JSONResponse(
+            {
+                "id": token,
+                "expires_at": expires_at.isoformat(),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/rag/share/{share_id}")
+    def rag_share_get(share_id: str) -> JSONResponse:
+        share_id = str(share_id or "").strip()
+        if not share_id or len(share_id) > 64:
+            raise HTTPException(status_code=404, detail="分享連結不存在。")
+        now = datetime.now(timezone.utc)
+        with app.state.session_factory() as session:
+            row = session.get(RagShareSnapshot, share_id)
+            if row is None or (_utc_aware(row.expires_at) or now) <= now:
+                raise HTTPException(status_code=404, detail="分享連結不存在或已過期。")
+            payload = {
+                "id": row.token,
+                "title": row.title or "",
+                "turns": row.turns or [],
+                "created_at": (
+                    _utc_aware(row.created_at).isoformat()
+                    if _utc_aware(row.created_at)
+                    else None
+                ),
+                "expires_at": (
+                    _utc_aware(row.expires_at).isoformat()
+                    if _utc_aware(row.expires_at)
+                    else None
+                ),
+            }
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/rag/query")
     def rag_query(request: RagRequest, http_request: Request) -> Dict[str, Any]:

@@ -14,7 +14,13 @@ import {
   renderDemoClosed,
   renderDemoLocked,
 } from "./demo.js";
-import { escapeHtml, icon, initScoreCells, toast } from "./utils.js";
+import {
+  SITE_TITLE,
+  escapeHtml,
+  icon,
+  initScoreCells,
+  toast,
+} from "./utils.js";
 import * as adminPage from "./pages/admin.js";
 import * as homePage from "./pages/home.js";
 import * as ragPage from "./pages/rag.js";
@@ -27,15 +33,15 @@ import * as testsPage from "./pages/tests.js";
 
 const DEFAULT_ROUTE = "home";
 const ROUTES = {
-  home: { page: homePage, title: "Judgment RAG Console · 法規與判決檢索" },
-  rag: { page: ragPage, title: "RAG 提問 · Judgment RAG Console" },
-  data: { page: dataPage, title: "資料庫查詢 · Judgment RAG Console" },
-  quality: { page: qualityPage, title: "資料品質 · Judgment RAG Console" },
-  performance: { page: performancePage, title: "效能報表 · Judgment RAG Console" },
-  processing: { page: processingPage, title: "資料處理 · Judgment RAG Console" },
-  status: { page: statusPage, title: "系統狀態 · Judgment RAG Console" },
-  tests: { page: testsPage, title: "系統測試 · Judgment RAG Console" },
-  admin: { page: adminPage, title: "管理設定 · Judgment RAG Console" },
+  home: { page: homePage },
+  rag: { page: ragPage },
+  data: { page: dataPage },
+  quality: { page: qualityPage },
+  performance: { page: performancePage },
+  processing: { page: processingPage },
+  status: { page: statusPage },
+  tests: { page: testsPage },
+  admin: { page: adminPage },
 };
 
 const main = document.getElementById("app-main");
@@ -46,6 +52,24 @@ function parseRoute() {
   const raw = window.location.hash.replace(/^#\/?/, "").trim();
   const route = raw.split("/")[0] || DEFAULT_ROUTE;
   return Object.prototype.hasOwnProperty.call(ROUTES, route) ? route : DEFAULT_ROUTE;
+}
+
+function applySharedEntryRoute() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const hasShareEntry =
+      Boolean(params.get("q")?.trim()) ||
+      Boolean(params.get("share")?.trim());
+    if (!hasShareEntry) return;
+    if (parseRoute() === "rag") return;
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}#/rag`,
+    );
+  } catch (error) {
+    /* hash routing remains the fallback */
+  }
 }
 
 function setActiveNav(route) {
@@ -90,8 +114,13 @@ async function renderRoute() {
   const token = ++routeToken;
   setActiveNav(route);
 
-  if (window.location.hash !== `#/${route}`) {
-    window.history.replaceState(null, "", `#/${route}`);
+  const canonicalHash = `#/${route}`;
+  const currentHash = window.location.hash;
+  if (
+    currentHash !== canonicalHash &&
+    !currentHash.startsWith(`${canonicalHash}/`)
+  ) {
+    window.history.replaceState(null, "", canonicalHash);
   }
 
   if (typeof cleanup === "function") {
@@ -106,36 +135,36 @@ async function renderRoute() {
   applyDemoShell();
   if (!isAdmin()) {
     if (route === "admin") {
-      document.title = "管理設定 · Judgment RAG Console";
+      document.title = SITE_TITLE;
       main.innerHTML = demoAdminGuardMarkup();
       return;
     }
     if (route === "tests") {
-      document.title = "展示模式 · Judgment RAG Console";
+      document.title = SITE_TITLE;
       renderDemoLocked(main, route);
       return;
     }
     if (!demoActive()) {
-      document.title = "展示目前未開放 · Judgment RAG Console";
+      document.title = SITE_TITLE;
       renderDemoClosed(main);
       return;
     }
     if (!demoFeature(route)) {
-      document.title = "展示模式 · Judgment RAG Console";
+      document.title = SITE_TITLE;
       renderDemoLocked(main, route);
       return;
     }
   }
 
-  document.title = ROUTES[route].title;
+  document.title = SITE_TITLE;
 
   const context = {
     route,
     navigate(next) {
       if (ROUTES[next]) window.location.hash = `#/${next}`;
     },
-    setTitle(title) {
-      if (token === routeToken && title) document.title = title;
+    setTitle() {
+      if (token === routeToken) document.title = SITE_TITLE;
     },
   };
 
@@ -274,6 +303,7 @@ function demoContextChanged(before, after) {
 }
 
 async function boot() {
+  applySharedEntryRoute();
   const bootRoute = parseRoute();
   if (bootRoute === "processing") {
     // Start the cached bytes before auth/demo gating resolves.  The page's

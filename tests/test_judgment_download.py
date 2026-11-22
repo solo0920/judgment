@@ -1192,3 +1192,66 @@ def test_run_download_archives_old_same_month_version(
         manifest["history_files"]["72011"]["archived_path"]
         == f"history/{old_path.name}"
     )
+
+
+def test_download_filename_headers_are_reduced_to_safe_basename() -> None:
+    plain = httpx.Headers(
+        {"content-disposition": 'attachment; filename="../../202601evil.rar"'}
+    )
+    encoded = httpx.Headers(
+        {
+            "content-disposition": (
+                "attachment; filename*=UTF-8''%2e%2e%2f202601evil.rar"
+            )
+        }
+    )
+    assert judgment_download._filename_from_headers(plain) == "202601evil.rar"
+    assert judgment_download._filename_from_headers(encoded) == "202601evil.rar"
+    assert (
+        judgment_download._filename_from_headers(
+            httpx.Headers({"content-disposition": "attachment"})
+        )
+        == ""
+    )
+
+
+def test_archive_path_never_escapes_raw_rar(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw_rar"
+    raw_dir.mkdir()
+    assert judgment_download._archive_path(
+        raw_dir, "../../202601evil.rar"
+    ) == (raw_dir / "202601evil.rar").resolve()
+    with pytest.raises(judgment_download.JudgmentDownloadError):
+        judgment_download._archive_path(raw_dir, "..")
+
+
+def test_probe_next_rejects_path_like_filenames() -> None:
+    class PathClient:
+        def metadata(self, _fileset_id: int) -> dict:
+            return {"filename": "../../evil.rar"}
+
+    class SafeClient:
+        def metadata(self, _fileset_id: int) -> dict:
+            return {"filename": "202601--(20261016Update).rar"}
+
+    assert judgment_download._probe_next(PathClient(), 72020) is None
+    entry = judgment_download._probe_next(SafeClient(), 72020)
+    assert entry is not None
+    assert entry["filename"] == "202601--(20261016Update).rar"
+
+
+def test_load_manifest_sanitizes_archive_filenames(tmp_path: Path) -> None:
+    manifest_path = tmp_path / judgment_download.MANIFEST_NAME
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {"72011": {"filename": "../../outside.rar"}},
+                "history_files": {"old": {"filename": "../old.rar"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = judgment_download._load_manifest(manifest_path)
+    assert manifest["files"]["72011"]["filename"] == "outside.rar"
+    assert manifest["history_files"]["old"]["filename"] == "old.rar"

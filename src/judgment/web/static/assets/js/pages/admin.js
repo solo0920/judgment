@@ -42,6 +42,33 @@ function auditRows(items) {
     .join("")}</div>`;
 }
 
+export function securityAuditRows(items) {
+  if (!items?.length) {
+    return `<div class="demo-empty">尚無安全稽核事件。</div>`;
+  }
+  return `<div class="security-audit-list">${items
+    .map(
+      (item) => `<div class="security-audit-row">
+        <span>${escapeHtml(item.created_at || "—")}</span>
+        <strong>${escapeHtml(
+          `${item.event_type || "—"} · ${item.outcome || "—"}`,
+        )}</strong>
+        <span>${escapeHtml(
+          `${item.method || ""} ${item.path || ""}`.trim() || "—",
+        )}</span>
+        <small>${escapeHtml(
+          [
+            item.actor || item.source || "—",
+            item.client_ip_hash ? `IP ${item.client_ip_hash}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        )}</small>
+      </div>`,
+    )
+    .join("")}</div>`;
+}
+
 export async function render(root) {
   if (!isAdmin()) {
     root.innerHTML = demoAdminGuardMarkup();
@@ -87,6 +114,7 @@ export async function render(root) {
   const panel = root.querySelector("#demo-admin-panel");
   const badge = root.querySelector("#demo-admin-badge");
   let data = null;
+  let securityAudit = { events: [] };
   let timer = 0;
 
   const paintCountdown = () => {
@@ -182,6 +210,11 @@ export async function render(root) {
           <div class="report-section-head"><span class="report-section-title">最近切換紀錄</span></div>
           ${auditRows(data.audit)}
         </div>
+
+        <div class="demo-admin-section">
+          <div class="report-section-head"><span class="report-section-title">安全稽核（最近 20 筆）</span></div>
+          ${securityAuditRows(securityAudit.events)}
+        </div>
       </div>
     </div>`;
 
@@ -253,7 +286,12 @@ export async function render(root) {
 
   const load = async () => {
     try {
-      data = await api.adminDemo();
+      const [demo, audit] = await Promise.all([
+        api.adminDemo(),
+        api.adminSecurityAudit(20).catch(() => ({ events: [] })),
+      ]);
+      data = demo;
+      securityAudit = audit || { events: [] };
       paint();
     } catch (error) {
       panel.innerHTML = `<div class="report-card"><div class="report-head">

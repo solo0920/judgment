@@ -12,7 +12,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
-from judgment.models import Base
+from judgment.models import (
+    Base,
+    JudgmentDocument,
+    LawDatasetVersion,
+    LawDocument,
+)
 from judgment.observability import record_performance
 from judgment.web.app import create_app
 
@@ -511,6 +516,145 @@ def test_demo_performance_redacts_rag_question_and_answer(demo_client) -> None:
     assert admin_row["flow"]["metadata"]["answer"] == "測試機密答案"
 
 
+def test_demo_performance_redacts_share_tokens(demo_client) -> None:
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    now = datetime.now(timezone.utc)
+    token = "legacy-share-token"
+    path = f"/api/rag/share/{token}"
+    record_performance(
+        app.state.session_factory,
+        process=path,
+        module=f"http{path}",
+        status="success",
+        started_at=now,
+        finished_at=now,
+        duration_ms=12,
+        method="GET",
+        path=path,
+        request_id="demo-share-token-regression",
+        flow={
+            "version": "1",
+            "request_id": "demo-share-token-regression",
+            "entrypoint": path,
+            "method": "GET",
+            "path": path,
+            "started_at": now.isoformat(),
+            "finished_at": now.isoformat(),
+            "total_ms": 12,
+            "status": "success",
+            "segments": [],
+        },
+    )
+
+    response = client.get("/api/performance", params={"page_size": 10})
+    assert response.status_code == 200
+    dumped = json.dumps(response.json(), ensure_ascii=False)
+    assert token not in dumped
+    assert "/api/rag/share/:share_id" in dumped
+    row = next(
+        item
+        for item in response.json()["rows"]
+        if item["request_id"] == "demo-share-token-regression"
+    )
+    assert token not in json.dumps(row, ensure_ascii=False)
+
+
+def test_demo_schema_suggest_blocks_sensitive_paths(
+    demo_client, tmp_path: Path
+) -> None:
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+    app.state.demo_query_session_factory = app.state.session_factory
+    parquet_path = str(tmp_path / "secret-laws.parquet")
+    with app.state.session_factory() as session:
+        session.add(
+            LawDatasetVersion(
+                source_type="law",
+                source_url="https://example.test/law",
+                update_date="20261122",
+                version_code="202611220001",
+                content_sha256="a" * 64,
+                raw_json_sha256="b" * 64,
+                zip_sha256="c" * 64,
+                zip_path=str(tmp_path / "secret-laws.zip"),
+                parquet_path=parquet_path,
+                law_count=1,
+                article_count=2,
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    params = {
+        "database": "postgres",
+        "table": "law_dataset_versions",
+        "column": "parquet_path",
+    }
+    demo = client.get("/api/schema/suggest", params=params)
+    assert demo.status_code == 200
+    assert demo.json()["values"] == []
+    assert demo.json()["warnings"] == ["此欄位未開放展示。"]
+    assert str(tmp_path) not in demo.text
+
+    admin = client.get(
+        "/api/schema/suggest", params=params, headers=ADMIN_HEADERS
+    )
+    assert admin.status_code == 200
+    assert parquet_path in admin.json()["values"]
+
+    visible = client.get(
+        "/api/schema/suggest",
+        params={**params, "column": "id"},
+    )
+    assert visible.status_code == 200
+    assert visible.json()["values"] == ["1"]
+
+    query = client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "law_dataset_versions"},
+            "page_size": 1,
+        },
+    )
+    assert query.status_code == 200
+    columns = {item["key"] for item in query.json()["columns"]}
+    assert "parquet_path" not in columns
+    assert "zip_path" not in columns
+
+
 def test_sanitize_processing_payload_redacts_paths() -> None:
     from judgment.web.demo_mode import sanitize_processing_payload
 
@@ -785,6 +929,212 @@ def test_demo_query_uses_readonly_session_factory(demo_client) -> None:
     assert response.json()["database"] == "postgres"
 
 
+def test_demo_data_endpoints_use_restricted_session_factory(
+    demo_client, monkeypatch
+) -> None:
+    import importlib
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, app = demo_client
+    version = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()[
+        "stored"
+    ]["version"]
+    assert (
+        client.put(
+            "/api/admin/demo",
+            headers=ADMIN_HEADERS,
+            json={
+                "enabled": True,
+                "duration_hours": 2,
+                "features": ALL_FEATURES,
+                "version": version,
+            },
+        ).status_code
+        == 200
+    )
+
+    app.state.demo_query_session_factory = None
+    assert client.get(
+        "/api/data/suggest", params={"kind": "law_name"}
+    ).status_code == 403
+    assert client.get(
+        "/api/judgment", params={"jid": "TEST", "source": "postgres"}
+    ).status_code == 403
+    assert client.get(
+        "/api/law", params={"law_key": "銀行法"}
+    ).status_code == 403
+    assert client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+        },
+    ).status_code == 403
+
+    sentinel = object()
+    app.state.demo_query_session_factory = sentinel
+    seen = {}
+
+    def spy(name):
+        def capture(**kwargs):
+            seen[name] = kwargs.get("session_factory") is sentinel
+            if name == "judgment":
+                seen["judgment_internal"] = kwargs.get(
+                    "include_internal_fields"
+                )
+            return {"ok": True}
+
+        return capture
+
+    monkeypatch.setattr(app_module, "data_suggestions", spy("data"))
+    monkeypatch.setattr(app_module, "get_judgment_detail", spy("judgment"))
+    monkeypatch.setattr(app_module, "get_law_detail", spy("law"))
+    monkeypatch.setattr(app_module, "schema_suggestions", spy("schema"))
+
+    assert client.get(
+        "/api/data/suggest", params={"kind": "law_name"}
+    ).status_code == 200
+    assert client.get(
+        "/api/judgment", params={"jid": "TEST", "source": "postgres"}
+    ).status_code == 200
+    assert client.get(
+        "/api/law", params={"law_key": "銀行法"}
+    ).status_code == 200
+    assert client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+        },
+    ).status_code == 200
+    assert seen == {
+        "data": True,
+        "judgment": True,
+        "judgment_internal": False,
+        "law": True,
+        "schema": True,
+    }
+
+
+def test_demo_data_routes_do_not_touch_primary_session(
+    demo_client, monkeypatch
+) -> None:
+    import importlib
+    from types import SimpleNamespace
+
+    app_module = importlib.import_module("judgment.web.app")
+    client, app = demo_client
+    working = app.state.session_factory
+    with working() as session:
+        version = LawDatasetVersion(
+            source_type="law",
+            source_url="https://example.test/law",
+            update_date="20261122",
+            version_code="202611220002",
+            content_sha256="d" * 64,
+            raw_json_sha256="e" * 64,
+            zip_sha256="f" * 64,
+            zip_path="/tmp/demo.zip",
+            parquet_path="/tmp/demo.parquet",
+            law_count=1,
+            article_count=1,
+            is_current=True,
+        )
+        session.add(version)
+        session.flush()
+        session.add(
+            LawDocument(
+                source_type="law",
+                law_key="DEMO-LAW-1",
+                law_name="示範銀行法",
+                law_level="法律",
+                law_category="金融",
+                law_url="https://example.test/law/1",
+                law_modified_date="20261122",
+                article_count=1,
+                content_hash="a" * 64,
+                first_seen_version_id=version.id,
+                last_seen_version_id=version.id,
+                is_current=True,
+            )
+        )
+        session.add(
+            JudgmentDocument(
+                jid="DEMO,115,金訴,1,20260110,1",
+                jyear="115",
+                jcase="金訴",
+                jno="1",
+                jdate="20260110",
+                court="臺灣臺北地方法院",
+                court_normalized="臺灣臺北地方法院",
+                title="示範判決",
+                full_text="示範判決全文",
+                pdf_url="https://example.test/demo.pdf",
+                source_archive="202601.rar",
+                content_hash="b" * 64,
+                matched_laws=["示範銀行法"],
+                matched_laws_text="示範銀行法",
+                citations=[],
+                citation_count=0,
+                full_text_length=6,
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    app.state.demo_query_session_factory = working
+    monkeypatch.setattr(
+        app_module,
+        "load_demo_state",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            active=True, features=ALL_FEATURES
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "load_demo_usage",
+        lambda *_args, **_kwargs: {"tokens": 0, "requests": 0},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "runtime_settings",
+        lambda settings, *_args, **_kwargs: settings,
+    )
+
+    def poison(*_args, **_kwargs):
+        raise RuntimeError("primary session must not be used for demo data")
+
+    app.state.session_factory = poison
+
+    assert client.get(
+        "/api/data/suggest", params={"kind": "law", "query": "示範"}
+    ).status_code == 200
+    assert client.get(
+        "/api/law", params={"law_key": "DEMO-LAW-1"}
+    ).status_code == 200
+    assert client.get(
+        "/api/judgment", params={"jid": "DEMO,115,金訴,1,20260110,1"}
+    ).status_code == 200
+    assert client.get(
+        "/api/schema/suggest",
+        params={
+            "database": "postgres",
+            "table": "law_documents",
+            "column": "law_name",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/query",
+        json={
+            "database": "postgres",
+            "filters": {"table": "law_documents"},
+            "page_size": 1,
+        },
+    ).status_code == 200
+
+
 def test_demo_route_feature_mapping_is_explicit() -> None:
     from judgment.web.route_policy import demo_feature_for, load_demo_policies
 
@@ -792,6 +1142,8 @@ def test_demo_route_feature_mapping_is_explicit() -> None:
     assert mapping["GET /api/status"] == "status"
     assert mapping["GET /api/processing"] == "processing"
     assert mapping["POST /api/rag/query"] == "rag"
+    assert mapping["POST /api/rag/share"] == "rag"
+    assert mapping["GET /api/rag/share/{share_id}"] == "rag"
     assert mapping["POST /api/query"] == "data"
     assert demo_feature_for("GET", "/api/status") == "status"
     assert demo_feature_for("GET", "/api/processing") == "processing"
@@ -816,10 +1168,12 @@ def test_demo_visible_routes_are_explicitly_allowlisted() -> None:
         "GET /api/processing",
         "GET /api/quality",
         "GET /api/schema/suggest",
+        "GET /api/rag/share/{share_id}",
         "GET /api/status",
         "POST /api/query",
         "POST /api/rag/query",
         "POST /api/rag/query/stream",
+        "POST /api/rag/share",
     }
 
 

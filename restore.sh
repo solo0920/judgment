@@ -107,10 +107,16 @@ load_env() {
 
 qdrant_curl() {
   if [[ -n "${QDRANT_API_KEY:-}" ]]; then
-    curl -H "api-key: ${QDRANT_API_KEY}" "$@"
+    curl -K - "$@" <<CURL_CONFIG
+header = "api-key: ${QDRANT_API_KEY}"
+CURL_CONFIG
   else
     curl "$@"
   fi
+}
+
+pg_compose_exec() {
+  PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" docker compose exec -T -e PGPASSWORD "$@"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -319,16 +325,12 @@ else
 fi
 
 info "還原設定"
-STAMP="$(date '+%Y%m%d-%H%M%S')"
 if [[ -f "$BACKUP_DIR/config/.env" ]]; then
-  if [[ -f "$PROJECT_DIR/.env" ]]; then
-    cp "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.before-restore.$STAMP"
-    echo "已保留舊 .env 為 .env.before-restore.$STAMP"
-  fi
-  cp "$BACKUP_DIR/config/.env" "$PROJECT_DIR/.env"
-  echo "已還原 .env；若新電腦路徑或主機不同，請先檢查內容。"
-elif [[ ! -f "$PROJECT_DIR/.env" ]]; then
-  echo "警告：備份未包含 .env。請先從密鑰管理器還原 .env，再啟動服務。" >&2
+  echo "備份內含 config/.env；為避免供應鏈風險，不自動覆寫目前 .env。" >&2
+  echo "請人工比對後，從密鑰管理器設定 .env 再啟動服務。" >&2
+fi
+if [[ ! -f "$PROJECT_DIR/.env" ]]; then
+  echo "警告：目前專案沒有 .env。請先從密鑰管理器還原 .env，再啟動服務。" >&2
 fi
 if [[ ! -f "$PROJECT_DIR/docker-compose.yml" && -f "$BACKUP_DIR/config/docker-compose.yml" ]]; then
   cp "$BACKUP_DIR/config/docker-compose.yml" "$PROJECT_DIR/docker-compose.yml"
@@ -347,8 +349,7 @@ info "啟動 PostgreSQL 與 Qdrant"
 docker compose up -d postgres qdrant
 
 for _ in {1..60}; do
-  if docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  if pg_compose_exec "$PG_SERVICE" \
     pg_isready -U "$PG_USER" -d "$PG_DB" >/dev/null 2>&1; then
     break
   fi
@@ -373,16 +374,41 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
       || die "age 解密 PostgreSQL dump 失敗"
     PG_RESTORE_FILE="$PG_RESTORE_TMP"
   fi
-  docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  APP_DB_ROLE="${JUDGMENT_APP_DB_ROLE:-judgment_app}"
+  [[ "$APP_DB_ROLE" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+    || die "JUDGMENT_APP_DB_ROLE 不是合法識別字：$APP_DB_ROLE"
+  ROLE_EXISTS="$(pg_compose_exec "$PG_SERVICE" \
+    psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "select 1 from pg_roles where rolname = '$APP_DB_ROLE';" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$ROLE_EXISTS" == "1" ]] \
+    || die "找不到 $APP_DB_ROLE；請先建立 NOSUPERUSER 應用角色再還原"
+  pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
     -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' >/dev/null
-  docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  pg_compose_exec "$PG_SERVICE" \
     pg_restore -U "$PG_USER" -d "$PG_DB" \
     --no-owner --no-privileges --exit-on-error < "$PG_RESTORE_FILE"
-  JUDGMENT_COUNT="$(docker compose exec -T "$PG_SERVICE" \
-    env PGPASSWORD="${JUDGMENT_PG_PASSWORD:-${POSTGRES_PASSWORD:-judgment}}" \
+  pg_compose_exec "$PG_SERVICE" \
+    psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 <<SQL
+GRANT CONNECT ON DATABASE "$PG_DB" TO "$APP_DB_ROLE";
+GRANT USAGE, CREATE ON SCHEMA public TO "$APP_DB_ROLE";
+DO \$\$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO %I', r.tablename, '$APP_DB_ROLE');
+  END LOOP;
+  FOR r IN SELECT sequence_name FROM information_schema.sequences
+           WHERE sequence_schema='public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO %I', r.sequence_name, '$APP_DB_ROLE');
+  END LOOP;
+  FOR r IN SELECT viewname FROM pg_views WHERE schemaname='public' LOOP
+    EXECUTE format('ALTER VIEW public.%I OWNER TO %I', r.viewname, '$APP_DB_ROLE');
+  END LOOP;
+END \$\$;
+SQL
+  echo "已將 public tables／sequences 轉移給 $APP_DB_ROLE；pg_restore --no-privileges 不會還原 demo_reader grants，請依 demo-config-runbook.md 重新套用。" >&2
+  JUDGMENT_COUNT="$(pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -tAc \
     'select count(*) from judgment_documents;' 2>/dev/null || echo '?')"
   printf 'PostgreSQL judgment_documents：%s 筆\n' "$JUDGMENT_COUNT"

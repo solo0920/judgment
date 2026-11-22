@@ -99,10 +99,17 @@ def verify_signed_token(token: str, secret: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def make_session_token(user: Dict[str, Any], settings: Settings) -> str:
+def make_session_token(
+    user: Dict[str, Any],
+    settings: Settings,
+    *,
+    session_version: int = 0,
+) -> str:
     return make_signed_token(
         {
             "purpose": "session",
+            "jti": secrets.token_urlsafe(18),
+            "sv": max(0, int(session_version or 0)),
             "sub": str(user.get("sub") or ""),
             "email": str(user.get("email") or "").strip().lower(),
             "name": str(user.get("name") or ""),

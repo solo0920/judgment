@@ -115,6 +115,13 @@ TABLE_COLUMNS: Dict[str, List[Dict[str, str]]] = {
     ],
 }
 
+DEMO_HIDDEN_QUERY_COLUMNS = {
+    "law_dataset_versions": frozenset({"parquet_path", "zip_path"}),
+    "download_runs": frozenset({"error_message"}),
+    "judgment_documents": frozenset({"source_archive"}),
+    "judgment_import_runs": frozenset({"error_message"}),
+}
+
 TABLE_SEARCH_COLUMNS = {
     "law_documents": (
         LawDocument.law_name,
@@ -620,7 +627,7 @@ def _distribution(
 @traced(
     "query.postgres",
     module=__name__,
-    params_fn=lambda session_factory, filters, page, page_size: {
+    params_fn=lambda session_factory, filters, page, page_size, **_kwargs: {
         "table": filters.get("table"),
         "page": page,
         "page_size": page_size,
@@ -632,13 +639,18 @@ def _query_postgres(
     filters: Dict[str, Any],
     page: int,
     page_size: int,
+    *,
+    include_internal_columns: bool = True,
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     table = str(filters.get("table") or "law_documents")
     if table not in TABLE_MODELS:
         raise ValueError(f"不支援的 PostgreSQL 資料表：{table}")
     model = TABLE_MODELS[table]
-    columns = TABLE_COLUMNS[table]
+    hidden = set() if include_internal_columns else DEMO_HIDDEN_QUERY_COLUMNS.get(
+        table, frozenset()
+    )
+    columns = [item for item in TABLE_COLUMNS[table] if item["key"] not in hidden]
 
     with session_factory() as session:
         count_stmt = _apply_filters(
@@ -1483,8 +1495,15 @@ def get_law_detail(
                 else None,
             }
 
-            version_rows = session.scalars(
-                select(LawDatasetVersion)
+            version_rows = session.execute(
+                select(
+                    LawDatasetVersion.id,
+                    LawDatasetVersion.update_date,
+                    LawDatasetVersion.downloaded_at,
+                    LawDatasetVersion.is_current,
+                    LawDatasetVersion.law_count,
+                    LawDatasetVersion.article_count,
+                )
                 .where(LawDatasetVersion.source_type == record.source_type)
                 .order_by(LawDatasetVersion.id.desc())
             ).all()
@@ -1768,13 +1787,40 @@ def get_judgment_detail(
     *,
     session_factory: sessionmaker[Session],
     jid: str,
+    include_internal_fields: bool = True,
 ) -> Dict[str, Any]:
     key = str(jid or "").strip()
     if not key:
         raise ValueError("jid 不可為空")
+    columns = [
+        JudgmentDocument.jid,
+        JudgmentDocument.jyear,
+        JudgmentDocument.jcase,
+        JudgmentDocument.jno,
+        JudgmentDocument.jdate,
+        JudgmentDocument.court,
+        JudgmentDocument.court_normalized,
+        JudgmentDocument.title,
+        JudgmentDocument.full_text,
+        JudgmentDocument.pdf_url,
+        JudgmentDocument.content_hash,
+        JudgmentDocument.matched_laws,
+        JudgmentDocument.citations,
+        JudgmentDocument.citation_count,
+        JudgmentDocument.full_text_length,
+        JudgmentDocument.created_at,
+        JudgmentDocument.updated_at,
+    ]
+    if include_internal_fields:
+        columns.extend(
+            [
+                JudgmentDocument.source_archive,
+                JudgmentDocument.import_run_id,
+            ]
+        )
     with session_factory() as session:
-        record = session.scalars(
-            select(JudgmentDocument).where(
+        record = session.execute(
+            select(*columns).where(
                 JudgmentDocument.jid == key,
                 JudgmentDocument.is_current.is_(True),
             )
@@ -1794,13 +1840,17 @@ def get_judgment_detail(
             "title": record.title,
             "full_text": record.full_text,
             "pdf_url": record.pdf_url,
-            "source_archive": record.source_archive,
+            "source_archive": (
+                record.source_archive if include_internal_fields else None
+            ),
             "content_hash": record.content_hash,
             "matched_laws": list(record.matched_laws or []),
             "citations": citations,
             "citation_count": int(record.citation_count or 0),
             "full_text_length": int(record.full_text_length or 0),
-            "import_run_id": record.import_run_id,
+            "import_run_id": (
+                record.import_run_id if include_internal_fields else None
+            ),
             "created_at": record.created_at.isoformat()
             if record.created_at
             else None,
@@ -2499,11 +2549,16 @@ def run_query(
     session_factory: sessionmaker[Session],
     data_dir: Path,
     settings: Optional[Settings] = None,
+    include_internal_columns: bool = True,
 ) -> Dict[str, Any]:
     current_page, current_size = _clamp_page(page, page_size)
     if database == "postgres":
         return _query_postgres(
-            session_factory, filters, current_page, current_size
+            session_factory,
+            filters,
+            current_page,
+            current_size,
+            include_internal_columns=include_internal_columns,
         )
     if database == "parquet":
         parquet_table = str(filters.get("table") or filters.get("dataset") or "")
