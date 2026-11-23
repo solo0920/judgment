@@ -784,6 +784,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "rag-feedback-rerun" in feedback_js.text
     assert "問題群組（Issue）" in feedback_js.text
     assert "data-feedback-issue-id" in feedback_js.text
+    assert "rag-feedback-issue-detail" in feedback_js.text
+    assert "data-issue-form" in feedback_js.text
     assert "建立並連結" in feedback_js.text
     assert "批次重跑評估" in feedback_js.text
     assert "rag-feedback-evaluation" in feedback_js.text
@@ -857,6 +859,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-evaluation-row" in css.text
     assert ".rag-feedback-experiment-table" in css.text
     assert ".rag-feedback-report-alert" in css.text
+    assert ".rag-feedback-issue-detail" in css.text
+    assert ".rag-feedback-issue-feedback-row" in css.text
     assert ".rag-feedback-review-row" in css.text
     assert ".rag-feedback-review-detail" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
@@ -3237,6 +3241,16 @@ def test_feedback_issue_grouping_and_export(web_client) -> None:
     ]
     assert matching and matching[0]["feedback_count"] == 1
 
+    issue_detail = web_client.get(
+        f"/api/rag/feedback-issues/{issue['id']}"
+    )
+    assert issue_detail.status_code == 200
+    issue_payload = issue_detail.json()
+    assert issue_payload["issue"]["title"] == "吸收存款回答不完整"
+    assert issue_payload["feedback"][0]["id"] == feedback["id"]
+    assert issue_payload["daily"]
+    assert issue_payload["by_reason"][0]["code"] == "incomplete"
+
     updated_issue = web_client.patch(
         f"/api/rag/feedback-issues/{issue['id']}",
         json={
@@ -4435,6 +4449,10 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     )
     assert (
         policy_for("GET", "/api/rag/feedback/report", policies)
+        == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for("GET", "/api/rag/feedback-issues/{issue_id}", policies)
         == "ADMIN_ONLY"
     )
     assert (

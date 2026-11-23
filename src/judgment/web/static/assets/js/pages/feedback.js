@@ -685,6 +685,103 @@ function renderQualityReport(report) {
 }
 
 
+function renderIssueDetail(detail) {
+  if (!detail?.issue) return "";
+  const issue = detail.issue;
+  const feedback = Array.isArray(detail.feedback) ? detail.feedback : [];
+  const daily = Array.isArray(detail.daily) ? detail.daily : [];
+  const reasons = Array.isArray(detail.by_reason) ? detail.by_reason : [];
+  const maxDaily = Math.max(
+    ...daily.map((row) => Number(row.total) || 0),
+    1,
+  );
+  return `<div class="report-card rag-feedback-issue-detail" data-issue-detail="${issue.id}">
+    <div class="report-head">
+      <div class="report-title-group">
+        <div class="report-kicker">ISSUE DETAIL · #${issue.id}</div>
+        <div class="report-title">${escapeHtml(issue.title)}</div>
+        <div class="report-sub">${escapeHtml(optionLabel(ROOT_CAUSE_OPTIONS, issue.root_cause_stage))} · ${escapeHtml(ISSUE_STATUS_LABELS[issue.status] || issue.status)} · ${formatNumber(issue.feedback_count || 0)} 筆回饋</div>
+      </div>
+      <div class="rag-feedback-detail-head-actions">
+        ${statusBadge(issue.status === "resolved" ? "success" : issue.status === "dismissed" ? "neutral" : "warning", ISSUE_STATUS_LABELS[issue.status] || issue.status)}
+        <button class="judgment-dialog-close" type="button" data-issue-action="close" aria-label="關閉 Issue 詳情">${icon("x", 14)}</button>
+      </div>
+    </div>
+    <div class="report-section">
+      <div class="metric-grid quality-coverage-grid rag-feedback-issue-metrics">
+        <div class="metric-card"><div class="metric-label">關聯回饋</div><div class="metric-value">${formatNumber(feedback.length)}</div></div>
+        <div class="metric-card"><div class="metric-label">不滿意</div><div class="metric-value">${formatNumber(feedback.filter((row) => row.sentiment === "unsatisfied").length)}</div></div>
+        <div class="metric-card"><div class="metric-label">待處理</div><div class="metric-value">${formatNumber(feedback.filter((row) => row.status === "new").length)}</div></div>
+        <div class="metric-card"><div class="metric-label">已解決</div><div class="metric-value">${formatNumber(feedback.filter((row) => row.status === "resolved").length)}</div></div>
+      </div>
+      <div class="rag-feedback-report-grid">
+        <div>
+          <div class="report-section-title">每日趨勢</div>
+          ${daily.length
+            ? daily
+                .map(
+                  (row) => `<div class="rag-feedback-daily-row">
+                    <span>${escapeHtml(row.date)}</span>
+                    <span class="rag-feedback-attribution-track"><i style="width:${Math.max(2, (Number(row.total) || 0) / maxDaily * 100)}%"></i></span>
+                    <strong>${formatNumber(row.total)}</strong>
+                  </div>`,
+                )
+                .join("")
+            : '<p class="cell-empty">沒有趨勢資料。</p>'}
+        </div>
+        <div>
+          <div class="report-section-title">原因分布</div>
+          ${reasons.length
+            ? reasons
+                .map(
+                  (row) => `<div class="rag-feedback-attribution-row">
+                    <span>${escapeHtml(row.label || row.code)}</span>
+                    <span class="rag-feedback-attribution-track"><i style="width:${Math.max(2, (Number(row.count) || 0) / Math.max(...reasons.map((item) => Number(item.count) || 0), 1) * 100)}%"></i></span>
+                    <strong>${formatNumber(row.count)}</strong>
+                  </div>`,
+                )
+                .join("")
+            : '<p class="cell-empty">沒有原因資料。</p>'}
+        </div>
+      </div>
+      <form class="rag-feedback-issue-form" data-issue-form data-issue-id="${issue.id}">
+        <label>狀態
+          <select class="input" name="status">
+            ${Object.entries(ISSUE_STATUS_LABELS).map(([code, label]) => `<option value="${code}" ${issue.status === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+          </select>
+        </label>
+        <label>嚴重度
+          <select class="input" name="severity">
+            ${["low", "medium", "high"].map((code) => `<option value="${code}" ${issue.severity === code ? "selected" : ""}>${escapeHtml(SEVERITY_LABELS[code] || code)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="rag-feedback-issue-form-wide">Linked PR
+          <input class="input" type="url" name="linked_pr_url" maxlength="1000" value="${escapeHtml(issue.linked_pr_url || "")}" placeholder="https://github.com/..." />
+        </label>
+        <div class="rag-feedback-issue-form-actions">
+          <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>儲存 Issue</span></button>
+        </div>
+      </form>
+      <div class="rag-feedback-issue-feedback-list">
+        ${feedback.length
+          ? feedback
+              .map(
+                (row) => `<button type="button" class="rag-feedback-issue-feedback-row" data-issue-feedback-open="${row.id}">
+                  <span class="rag-feedback-issue-feedback-main">
+                    <strong>${escapeHtml(questionExcerpt(row.question, 100))}</strong>
+                    <small>#${row.id} · ${escapeHtml(formatDateTime(row.created_at))} · ${escapeHtml((row.reasons || []).join(", ") || "未分類")}</small>
+                  </span>
+                  ${statusBadge(STATUS_TONES[row.status] || "neutral", STATUS_LABELS[row.status] || row.status)}
+                </button>`,
+              )
+              .join("")
+          : '<p class="cell-empty">這個群組還沒有回饋。</p>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+
 function renderDetail(detail, issues = []) {
   const snapshot = detail?.snapshot || {};
   const flow = snapshot.pipeline_flow;
@@ -887,6 +984,7 @@ export function createFeedbackController(container, { onStats } = {}) {
   let qualityReport = null;
   let reviewQueue = [];
   let reviewCandidate = null;
+  let issueDetail = null;
   let disposed = false;
 
   const notifyStats = (stats) => {
@@ -906,6 +1004,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       <div class="report-section" data-feedback-stats></div>
       <div class="report-section" data-feedback-review-queue></div>
       <div class="report-section" data-feedback-issues></div>
+      <div data-feedback-issue-detail-slot></div>
       <div class="report-section" data-feedback-filter-slot></div>
       <div class="report-section" data-feedback-list></div>
       <div data-feedback-evaluation-slot></div>
@@ -922,6 +1021,9 @@ export function createFeedbackController(container, { onStats } = {}) {
       "[data-feedback-review-queue]",
     );
     const issueBox = container.querySelector("[data-feedback-issues]");
+    const issueDetailBox = container.querySelector(
+      "[data-feedback-issue-detail-slot]",
+    );
     const filterBox = container.querySelector("[data-feedback-filter-slot]");
     const listBox = container.querySelector("[data-feedback-list]");
     const evaluationBox = container.querySelector(
@@ -942,6 +1044,9 @@ export function createFeedbackController(container, { onStats } = {}) {
       );
     }
     if (issueBox) issueBox.innerHTML = renderIssuePanel(issues, filters);
+    if (issueDetailBox) {
+      issueDetailBox.innerHTML = renderIssueDetail(issueDetail);
+    }
     if (filterBox) filterBox.innerHTML = renderFilterForm(payload, filters);
     if (listBox) listBox.innerHTML = renderList(payload, selectedId);
     if (evaluationBox) {
@@ -1031,6 +1136,7 @@ export function createFeedbackController(container, { onStats } = {}) {
     };
     evaluation = null;
     experiment = null;
+    issueDetail = null;
     page = 1;
   };
 
@@ -1043,6 +1149,30 @@ export function createFeedbackController(container, { onStats } = {}) {
       detail = null;
       rerun = null;
       await load();
+      return;
+    }
+    const issueForm = event.target.closest("[data-issue-form]");
+    if (issueForm) {
+      event.preventDefault();
+      const issueId = issueForm.dataset.issueId;
+      const data = new FormData(issueForm);
+      const button = issueForm.querySelector('button[type="submit"]');
+      setBusy(button, true, "儲存中…");
+      try {
+        await api.ragFeedbackIssueUpdate(issueId, {
+          status: String(data.get("status") || ""),
+          severity: String(data.get("severity") || ""),
+          linked_pr_url: String(data.get("linked_pr_url") || ""),
+        });
+        issueDetail = await api.ragFeedbackIssueDetail(issueId);
+        await loadIssues();
+        render();
+        toast("已更新問題群組。", "ok", 4200);
+      } catch (error) {
+        toast(error.message || "問題群組更新失敗。", "danger");
+      } finally {
+        setBusy(button, false);
+      }
       return;
     }
     const triageForm = event.target.closest("[data-feedback-triage]");
@@ -1288,6 +1418,17 @@ export function createFeedbackController(container, { onStats } = {}) {
         return;
       }
     }
+    const issueAction = event.target.closest("[data-issue-action]");
+    if (issueAction?.dataset.issueAction === "close") {
+      issueDetail = null;
+      render();
+      return;
+    }
+    const issueFeedback = event.target.closest("[data-issue-feedback-open]");
+    if (issueFeedback) {
+      await loadDetail(issueFeedback.dataset.issueFeedbackOpen);
+      return;
+    }
     const reviewAction = event.target.closest("[data-review-action]");
     if (reviewAction) {
       const action = reviewAction.dataset.reviewAction;
@@ -1345,6 +1486,14 @@ export function createFeedbackController(container, { onStats } = {}) {
       rerun = null;
       evaluation = null;
       experiment = null;
+      issueDetail = null;
+      if (filters.issue_id) {
+        try {
+          issueDetail = await api.ragFeedbackIssueDetail(filters.issue_id);
+        } catch (error) {
+          toast(error.message || "無法讀取問題群組詳情。", "danger");
+        }
+      }
       await load();
       return;
     }

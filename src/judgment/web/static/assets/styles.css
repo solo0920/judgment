@@ -21276,3 +21276,113 @@ a.auth-menu-item {
     grid-template-columns: 1fr;
   }
 }
+
+.rag-feedback-issue-detail {
+  margin-top: 12px;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+
+.rag-feedback-issue-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.rag-feedback-issue-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  align-items: end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rag-feedback-issue-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.rag-feedback-issue-form-wide {
+  grid-column: span 1;
+}
+
+.rag-feedback-issue-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rag-feedback-issue-feedback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.rag-feedback-issue-feedback-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rag-feedback-issue-feedback-row:hover,
+.rag-feedback-issue-feedback-row:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rag-feedback-issue-feedback-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rag-feedback-issue-feedback-main strong {
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-feedback-issue-feedback-main small {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+@media (max-width: 980px) {
+  .rag-feedback-issue-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rag-feedback-issue-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .rag-feedback-issue-metrics,
+  .rag-feedback-issue-form {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-feedback-issue-form-wide {
+    grid-column: span 1;
+  }
+
+  .rag-feedback-issue-feedback-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

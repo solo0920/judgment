@@ -59,6 +59,7 @@
     "GET /api/question-bank/tags": "ADMIN_ONLY",
     "GET /api/rag/feedback": "ADMIN_ONLY",
     "GET /api/rag/feedback-issues": "ADMIN_ONLY",
+    "GET /api/rag/feedback-issues/{issue_id}": "ADMIN_ONLY",
     "GET /api/rag/feedback/export": "ADMIN_ONLY",
     "GET /api/rag/feedback/evaluations": "ADMIN_ONLY",
     "GET /api/rag/feedback/experiments": "ADMIN_ONLY",
