@@ -581,7 +581,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "law-index-timeline-card" in processing_js.text
     assert "pending_count" in processing_js.text
     assert "update_mechanism" in processing_js.text
-    assert "processing-update-action" in processing_js.text
+    assert "processing-workflow-intro" in processing_js.text
+    assert "processing-inline-update" in processing_js.text
+    assert "processing-workflow-details" in processing_js.text
     assert "data-processing-update-notice" in processing_js.text
     assert "judgment:processing-pending" in processing_js.text
     assert "index_pending_months" in processing_js.text
