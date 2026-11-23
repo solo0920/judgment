@@ -289,6 +289,30 @@ const RAG_PIPELINE_STAGES = [
   },
 ];
 
+const STRUCTURED_LAW_PIPELINE_STAGES = [
+  {
+    key: "parsing",
+    label: "Parsing",
+    hint: "輸入長度、解析時間",
+    names: ["rag.parse_question"],
+    color: "#64748b",
+  },
+  {
+    key: "law_retrieval",
+    label: "法規檢索與統計",
+    hint: "法規／命令檢索、判決引用統計",
+    names: ["rag.law_retrieval", "rag.law_stats"],
+    color: "#0ea5e9",
+  },
+  {
+    key: "law_content",
+    label: "法條載入",
+    hint: "Parquet 條文載入",
+    names: ["rag.law_content"],
+    color: "#64748b",
+  },
+];
+
 const RAG_STATUS_TONES = {
   ok: "badge-ok",
   warn: "badge-warn",
@@ -345,7 +369,16 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
     ...segments.map((segment) => ragPipelineWindow(segment).end),
     1,
   );
-  const sourceStages = RAG_PIPELINE_STAGES.map((definition) => {
+  const answerSource = String(
+    flow?.metadata?.rag_response?.answer_source || "",
+  );
+  const structuredLaw =
+    answerSource === "structured" &&
+    segments.some((segment) => segment.name === "rag.law_retrieval");
+  const stageDefinitions = structuredLaw
+    ? STRUCTURED_LAW_PIPELINE_STAGES
+    : RAG_PIPELINE_STAGES;
+  const sourceStages = stageDefinitions.map((definition) => {
     let matched = segments.filter((segment) =>
       definition.names.includes(segment.name),
     );
@@ -456,6 +489,8 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
     client: flow?.client || {},
     models: Array.isArray(flow?.summary?.models) ? flow.summary.models : [],
     hasLoad: stages.some((stage) => Boolean(stage.loadInfo)),
+    answerSource,
+    structuredLaw,
   };
 }
 
@@ -1070,9 +1105,11 @@ function ragPipelineStagesMarkup(pipeline) {
   const legend = hasLoad
     ? `<div class="rag-wf-legend"><span><i class="is-load"></i>Model Load（階段 bar 前段）</span></div>`
     : "";
-  const hint = hasLoad
-    ? "階段依執行順序由左至右排列，上一階段結束後接續下一階段；Embedding／LLM 的藍色前段為 Model Load，後段為推論。實際開始／結束時間、Token 與載入占比可展開查看。"
-    : "階段依執行順序由左至右排列，上一階段結束後接續下一階段。實際開始／結束時間與 Token 可展開查看。";
+  const hint = pipeline.structuredLaw
+    ? "此題使用結構化法規查詢：實際執行 Parsing、法規檢索與判決引用統計、法條載入與 Response；Embedding／Qdrant／Reranker／Context／LLM 未執行，因此不列入此 waterfall。"
+    : hasLoad
+      ? "階段依執行順序由左至右排列，上一階段結束後接續下一階段；Embedding／LLM 的藍色前段為 Model Load，後段為推論。實際開始／結束時間、Token 與載入占比可展開查看。"
+      : "階段依執行順序由左至右排列，上一階段結束後接續下一階段。實際開始／結束時間與 Token 可展開查看。";
   return renderWaterfallStages(
     pipeline.stages,
     pipeline.total,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import copy
+import logging
 import math
 import re
+import threading
+import time
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
@@ -12,6 +16,8 @@ from sqlalchemy import or_, select
 
 from .models import JudgmentDocument, LawDocument
 from .observability import traced
+
+logger = logging.getLogger(__name__)
 
 LAW_ALIASES = {
     "證交法": "證券交易法",
@@ -1041,8 +1047,9 @@ def law_source_text(source: Dict[str, Any]) -> str:
             f"{item['article_no']} {item['count']} 次"
             for item in article_counts[:5]
         )
+        sample = "取樣 " if stats.get("sampled") else ""
         lines.append(
-            f"判決引用統計：{int(stats.get('judgment_count') or 0)} 筆提及"
+            f"判決引用統計：{sample}{int(stats.get('judgment_count') or 0)} 筆提及"
             f"「{stats.get('entity') or ''}」的判決中，本法規被引用 "
             f"{int(stats.get('law_count') or 0)} 次"
             + (f"；熱門條文：{top}" if top else "")
@@ -1304,37 +1311,80 @@ def find_related_law_records(
     return records[:limit]
 
 
-@traced(
-    "rag.law_stats",
-    module=__name__,
-    params_fn=lambda session_factory, entity, **_: {
-        "entity_length": len(entity or "")
-    },
-)
-def judgment_law_stats(
-    session_factory,
+_LAW_STATS_LIMIT_ROWS = 100
+_LAW_STATS_CACHE_TTL_SECONDS = 600.0
+_LAW_STATS_CACHE_MAX_ENTRIES = 128
+_LAW_STATS_CACHE: Dict[
+    Tuple[Any, str, int], Tuple[float, Dict[str, Any]]
+] = {}
+_LAW_STATS_LOCKS: Dict[Tuple[Any, str, int], threading.Lock] = {}
+_LAW_STATS_CACHE_GUARD = threading.Lock()
+
+
+def _law_stats_cache_key(
+    session_factory: Any,
     entity: str,
-    *,
-    limit_rows: int = 2000,
+    limit_rows: int,
+) -> Tuple[Any, str, int]:
+    return (session_factory, entity, int(limit_rows))
+
+
+def _cached_law_stats(
+    key: Tuple[Any, str, int],
+) -> Optional[Dict[str, Any]]:
+    now = time.monotonic()
+    with _LAW_STATS_CACHE_GUARD:
+        entry = _LAW_STATS_CACHE.get(key)
+        if entry is None:
+            return None
+        if entry[0] <= now:
+            _LAW_STATS_CACHE.pop(key, None)
+            return None
+        return copy.deepcopy(entry[1])
+
+
+def _store_law_stats(
+    key: Tuple[Any, str, int],
+    stats: Dict[str, Any],
+) -> None:
+    expires_at = time.monotonic() + _LAW_STATS_CACHE_TTL_SECONDS
+    with _LAW_STATS_CACHE_GUARD:
+        while len(_LAW_STATS_CACHE) >= _LAW_STATS_CACHE_MAX_ENTRIES:
+            _LAW_STATS_CACHE.pop(next(iter(_LAW_STATS_CACHE)))
+        _LAW_STATS_CACHE[key] = (expires_at, copy.deepcopy(stats))
+
+
+def _law_stats_lock(key: Tuple[Any, str, int]) -> threading.Lock:
+    with _LAW_STATS_CACHE_GUARD:
+        return _LAW_STATS_LOCKS.setdefault(key, threading.Lock())
+
+
+def _compute_judgment_law_stats(
+    session_factory: Any,
+    entity: str,
+    limit_rows: int,
 ) -> Dict[str, Any]:
-    entity = str(entity or "").strip()
-    if not entity:
-        return {}
     with session_factory() as session:
         rows = session.execute(
             select(JudgmentDocument.citations, JudgmentDocument.jid)
             .where(
-                JudgmentDocument.matched_laws_text.contains(entity, autoescape=True),
+                JudgmentDocument.matched_laws_text.contains(
+                    entity, autoescape=True
+                ),
                 JudgmentDocument.is_current.is_(True),
             )
             .limit(limit_rows)
         ).all()
         matched_by = "matched_laws"
         if not rows:
+            # The fallback scans full_text.  Keep the sample small so a
+            # common entity still stops before scanning all 4.7M judgments.
             rows = session.execute(
                 select(JudgmentDocument.citations, JudgmentDocument.jid)
                 .where(
-                    JudgmentDocument.full_text.contains(entity, autoescape=True),
+                    JudgmentDocument.full_text.contains(
+                        entity, autoescape=True
+                    ),
                     JudgmentDocument.is_current.is_(True),
                 )
                 .limit(limit_rows)
@@ -1358,6 +1408,7 @@ def judgment_law_stats(
         "judgment_count": len(rows),
         "matched_by": matched_by,
         "sampled": len(rows) >= limit_rows,
+        "limit_rows": limit_rows,
         "laws": [
             {"law_name": name, "count": count}
             for name, count in law_counts.most_common(10)
@@ -1367,6 +1418,49 @@ def judgment_law_stats(
             for (name, article_no), count in article_counts.most_common(12)
         ],
     }
+
+
+@traced(
+    "rag.law_stats",
+    module=__name__,
+    params_fn=lambda session_factory, entity, **_: {
+        "entity_length": len(entity or "")
+    },
+)
+def judgment_law_stats(
+    session_factory,
+    entity: str,
+    *,
+    limit_rows: int = _LAW_STATS_LIMIT_ROWS,
+) -> Dict[str, Any]:
+    entity = str(entity or "").strip()
+    if not entity:
+        return {}
+    limit_rows = max(1, int(limit_rows))
+    key = _law_stats_cache_key(session_factory, entity, limit_rows)
+    cached = _cached_law_stats(key)
+    if cached is not None:
+        return cached
+    # Single-flight per entity so concurrent identical questions do not each
+    # start the expensive full-text scan.
+    lock = _law_stats_lock(key)
+    with lock:
+        cached = _cached_law_stats(key)
+        if cached is not None:
+            return cached
+        try:
+            stats = _compute_judgment_law_stats(
+                session_factory, entity, limit_rows
+            )
+        except Exception:
+            logger.warning(
+                "judgment law stats failed for entity=%s", entity,
+                exc_info=True,
+            )
+            stats = {}
+        if stats:
+            _store_law_stats(key, stats)
+        return copy.deepcopy(stats)
 
 
 def _stats_for_law(stats: Dict[str, Any], law_name: str) -> Optional[Dict[str, Any]]:
@@ -1388,6 +1482,8 @@ def _stats_for_law(stats: Dict[str, Any], law_name: str) -> Optional[Dict[str, A
         "entity": stats.get("entity"),
         "judgment_count": stats.get("judgment_count", 0),
         "law_count": law_count,
+        "sampled": bool(stats.get("sampled")),
+        "matched_by": stats.get("matched_by") or "",
         "articles": articles,
     }
 
