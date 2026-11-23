@@ -1402,6 +1402,13 @@ export const api = {
     });
   },
 
+  ragFeedbackIssueDetail(issueId, days = 30) {
+    return request(
+      `/api/rag/feedback-issues/${encodeURIComponent(issueId)}?days=${encodeURIComponent(days)}`,
+      { timeout: 45000, trackClient: false },
+    );
+  },
+
   ragFeedbackIssueCreate(payload) {
     return request("/api/rag/feedback-issues", {
       method: "POST",

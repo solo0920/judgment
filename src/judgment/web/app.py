@@ -197,6 +197,7 @@ from .feedback import (
     feedback_count_since,
     feedback_stats,
     get_feedback,
+    get_feedback_issue_detail,
     get_review_candidate,
     list_feedback,
     list_feedback_evaluations,
@@ -1348,7 +1349,7 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback": "RAG 使用者回饋",
     "/api/rag/feedback/stats": "RAG 回饋統計",
     "/api/rag/feedback-issues": "RAG 回饋問題群組",
-    "/api/rag/feedback-issues/{issue_id}": "RAG 回饋問題群組明細",
+    "/api/rag/feedback-issues/{issue_id}": "RAG 回饋問題群組詳情與趨勢",
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
     "/api/rag/feedback/evaluate": "RAG 回饋批次評估",
     "/api/rag/feedback/evaluations": "RAG 回饋評估報告",
@@ -5096,6 +5097,18 @@ def create_app(
         except FeedbackError as exc:
             return _feedback_error_response(exc)
         return JSONResponse(payload, status_code=201)
+
+    @app.get("/api/rag/feedback-issues/{issue_id}")
+    def rag_feedback_issue_detail(
+        issue_id: int, days: int = 30
+    ) -> JSONResponse:
+        try:
+            payload = get_feedback_issue_detail(
+                app.state.session_factory, issue_id, days=days
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.patch("/api/rag/feedback-issues/{issue_id}")
     def rag_feedback_issue_update(

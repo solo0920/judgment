@@ -1740,6 +1740,94 @@ def create_feedback_issue(
         return serialize_issue(row)
 
 
+def get_feedback_issue_detail(
+    session_factory: sessionmaker[Session],
+    issue_id: int,
+    *,
+    days: int = 30,
+) -> Dict[str, Any]:
+    days = max(1, min(90, int(days or 30)))
+    with session_factory() as session:
+        issue = session.get(RagFeedbackIssue, int(issue_id))
+        if issue is None:
+            raise FeedbackError(404, "issue_not_found", "找不到這個問題群組。")
+        rows = session.execute(
+            select(
+                RagFeedback.id,
+                RagFeedback.request_id,
+                RagFeedback.sentiment,
+                RagFeedback.status,
+                RagFeedback.severity,
+                RagFeedback.created_at,
+                RagFeedback.snapshot,
+            )
+            .where(RagFeedback.issue_id == int(issue_id))
+            .order_by(RagFeedback.created_at.desc())
+            .limit(200)
+        ).all()
+        feedback_ids = [int(row.id) for row in rows]
+        reasons = _reasons_for(session, feedback_ids)
+        issue_count = len(rows)
+        issue_payload = serialize_issue(
+            issue, feedback_count=issue_count
+        )
+        cutoff = _utcnow() - timedelta(days=days)
+        daily: Dict[str, Dict[str, Any]] = {}
+        reason_counts: Dict[str, int] = {}
+        status_counts: Dict[str, int] = {}
+        feedback_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            created = _aware(row.created_at)
+            if created and created >= cutoff:
+                key = created.date().isoformat()
+                bucket = daily.setdefault(
+                    key,
+                    {
+                        "date": key,
+                        "total": 0,
+                        "unsatisfied": 0,
+                    },
+                )
+                bucket["total"] += 1
+                if row.sentiment == "unsatisfied":
+                    bucket["unsatisfied"] += 1
+            status_counts[str(row.status)] = (
+                status_counts.get(str(row.status), 0) + 1
+            )
+            for code in reasons.get(int(row.id), []):
+                reason_counts[code] = reason_counts.get(code, 0) + 1
+            snapshot = row.snapshot or {}
+            feedback_rows.append(
+                {
+                    "id": int(row.id),
+                    "request_id": row.request_id,
+                    "question": str(snapshot.get("question") or ""),
+                    "sentiment": row.sentiment,
+                    "status": row.status,
+                    "severity": row.severity,
+                    "reasons": reasons.get(int(row.id), []),
+                    "created_at": _iso(row.created_at),
+                }
+            )
+    return {
+        "issue": issue_payload,
+        "feedback": feedback_rows,
+        "daily": [daily[key] for key in sorted(daily)],
+        "by_reason": [
+            {
+                "code": code,
+                "label": FEEDBACK_REASONS.get(code, code),
+                "count": count,
+            }
+            for code, count in sorted(
+                reason_counts.items(), key=lambda item: item[1], reverse=True
+            )
+        ],
+        "by_status": status_counts,
+        "days": days,
+    }
+
+
 def update_feedback_issue(
     session_factory: sessionmaker[Session],
     issue_id: int,
