@@ -327,6 +327,10 @@ def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
             "ALTER TABLE rag_feedback ADD COLUMN "
             "citation_verdicts JSON NOT NULL DEFAULT '{}'",
         ),
+        (
+            "issue_id",
+            "ALTER TABLE rag_feedback ADD COLUMN issue_id INTEGER",
+        ),
     ]
     if not additions:
         return
@@ -340,6 +344,12 @@ def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
                 "CREATE INDEX IF NOT EXISTS "
                 "ix_rag_feedback_root_cause_stage "
                 "ON rag_feedback (root_cause_stage)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_rag_feedback_issue_id "
+                "ON rag_feedback (issue_id)"
             )
         )
 

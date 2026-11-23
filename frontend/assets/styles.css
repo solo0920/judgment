@@ -20375,7 +20375,7 @@ a.auth-menu-item {
 }
 
 .rag-feedback-metrics {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .rag-feedback-filter {
@@ -20904,4 +20904,115 @@ a.auth-menu-item {
 .rag-feedback-attribution-row strong {
   color: var(--ink);
   text-align: right;
+}
+
+.rag-feedback-issues-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.rag-feedback-issues-note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.rag-feedback-issues {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.rag-feedback-issue {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rag-feedback-issue:hover,
+.rag-feedback-issue:focus-visible,
+.rag-feedback-issue.is-active {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rag-feedback-issue.is-active {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+
+.rag-feedback-issue-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rag-feedback-issue-main strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-feedback-issue-main small {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.rag-feedback-issue-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.rag-feedback-issue-meta a {
+  color: var(--accent);
+}
+
+.rag-feedback-issue-link {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.3fr) minmax(160px, 1.3fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.rag-feedback-issue-link label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .rag-feedback-issues {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .rag-feedback-issues,
+  .rag-feedback-issue-link {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-feedback-issue-link .btn {
+    justify-self: start;
+  }
 }

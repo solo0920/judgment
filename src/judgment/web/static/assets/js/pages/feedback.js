@@ -9,6 +9,7 @@ import {
   formatNumber,
   icon,
   notice,
+  safeUrl,
   setBusy,
   statusBadge,
   toast,
@@ -78,6 +79,14 @@ const EXPECTED_REFUSAL_OPTIONS = [
   ["should_refuse", "應該拒答"],
 ];
 
+const ISSUE_STATUS_LABELS = {
+  open: "待處理",
+  triaged: "已分類",
+  planned: "已排入",
+  resolved: "已解決",
+  dismissed: "不處理",
+};
+
 const CITATION_VERDICT_OPTIONS = [
   ["", "未標註"],
   ["supports", "支持答案"],
@@ -108,6 +117,7 @@ function renderStats(stats) {
     <div class="metric-card"><div class="metric-label">不滿意率</div><div class="metric-value">${rate}</div><div class="metric-desc">不滿意 ÷ 總回饋</div></div>
     <div class="metric-card"><div class="metric-label">待處理</div><div class="metric-value">${formatNumber(stats?.new || 0)}</div><div class="metric-desc">狀態為待處理</div></div>
     <div class="metric-card"><div class="metric-label">可行動</div><div class="metric-value">${formatNumber(stats?.actionable || 0)}</div><div class="metric-desc">已標記可轉 regression</div></div>
+    <div class="metric-card"><div class="metric-label">問題群組</div><div class="metric-value">${formatNumber(stats?.open_issues || 0)}</div><div class="metric-desc">未結案 Issue</div></div>
   </div>
   ${renderAttribution(stats)}`;
 }
@@ -132,11 +142,46 @@ function renderAttribution(stats) {
   </div>`;
 }
 
+function optionLabel(options, code) {
+  const found = options.find(([value]) => value === code);
+  return found ? found[1] : code || "—";
+}
+
+function renderIssuePanel(issues, filters) {
+  const rows = Array.isArray(issues) ? issues : [];
+  const activeId = String(filters?.issue_id || "");
+  return `<div class="rag-feedback-issues-head">
+      <div>
+        <div class="report-section-title">問題群組（Issue）</div>
+        <p class="rag-feedback-issues-note">把相同 root cause 的回饋連到同一個群組；點選群組可篩選回饋。</p>
+      </div>
+      <span class="badge badge-neutral badge-mono">${formatNumber(rows.length)} 組</span>
+    </div>
+    ${rows.length
+      ? `<div class="rag-feedback-issues">${rows
+          .map(
+            (issue) => `<button type="button" class="rag-feedback-issue${activeId === String(issue.id) ? " is-active" : ""}"
+              data-feedback-issue-id="${issue.id}">
+              <span class="rag-feedback-issue-main">
+                <strong>${escapeHtml(issue.title)}</strong>
+                <small>${escapeHtml(optionLabel(ROOT_CAUSE_OPTIONS, issue.root_cause_stage))} · ${escapeHtml(ISSUE_STATUS_LABELS[issue.status] || issue.status)}</small>
+              </span>
+              <span class="rag-feedback-issue-meta">
+                <span class="badge badge-neutral">${formatNumber(issue.feedback_count || 0)} 筆</span>
+                ${issue.linked_pr_url ? `<a href="${safeUrl(issue.linked_pr_url)}" target="_blank" rel="noopener noreferrer">PR</a>` : ""}
+              </span>
+            </button>`,
+          )
+          .join("")}</div>`
+      : '<p class="cell-empty">尚未建立問題群組。</p>'}`;
+}
+
 function renderFilterForm(payload, filters) {
   const reasons = payload?.reason_options || [];
   const statuses = payload?.status_options || [];
   const severities = payload?.severity_options || [];
   return `<form class="rag-feedback-filter" data-feedback-filter>
+    <input type="hidden" name="issue_id" value="${escapeHtml(filterValue(filters, "issue_id"))}" />
     <label>滿意度
       <select name="sentiment" class="input">
         <option value="">全部</option>
@@ -349,7 +394,7 @@ function renderRerun(result) {
 }
 
 
-function renderDetail(detail) {
+function renderDetail(detail, issues = []) {
   const snapshot = detail?.snapshot || {};
   const flow = snapshot.pipeline_flow;
   const waterfall = flow
@@ -380,6 +425,7 @@ function renderDetail(detail) {
       <div class="rag-feedback-detail-head-actions">
         ${detail.sentiment === "satisfied" ? statusBadge("success", "滿意") : statusBadge("warning", "不滿意")}
         ${statusBadge(STATUS_TONES[detail.status] || "neutral", STATUS_LABELS[detail.status] || detail.status)}
+        ${detail.issue ? statusBadge("info", `Issue #${detail.issue.id}`) : ""}
         ${detail.linked_question_id ? statusBadge("info", `題庫 #${detail.linked_question_id}`) : ""}
       </div>
     </div>
@@ -441,23 +487,49 @@ function renderDetail(detail) {
             <span>可行動 / 轉 regression</span>
           </label>
         </div>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>主要錯誤階段</legend>
+            <div class="rag-feedback-choice-options">
+              ${ROOT_CAUSE_OPTIONS.map(([code, label]) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="root_cause_stage" value="${code}" ${detail.root_cause_stage === code ? "checked" : ""} />
+                <span>${escapeHtml(label)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+        </div>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>預期回答模式</legend>
+            <div class="rag-feedback-choice-options">
+              ${ANSWER_MODE_OPTIONS.map(([code, label]) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="expected_answer_mode" value="${code}" ${detail.expected_answer_mode === code ? "checked" : ""} />
+                <span>${escapeHtml(label)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+        </div>
         <div class="rag-feedback-attribution rag-feedback-triage-wide">
-          <label>主要錯誤階段
-            <select class="input" name="root_cause_stage">
-              ${ROOT_CAUSE_OPTIONS.map(([code, label]) => `<option value="${code}" ${detail.root_cause_stage === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-            </select>
-          </label>
-          <label>預期回答模式
-            <select class="input" name="expected_answer_mode">
-              ${ANSWER_MODE_OPTIONS.map(([code, label]) => `<option value="${code}" ${detail.expected_answer_mode === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-            </select>
-          </label>
           <label>預期日期起
             <input class="input" type="date" name="expected_date_from" value="${escapeHtml(detail.expected_date_from || "")}" />
           </label>
           <label>預期日期迄
             <input class="input" type="date" name="expected_date_to" value="${escapeHtml(detail.expected_date_to || "")}" />
           </label>
+        </div>
+        <div class="rag-feedback-issue-link rag-feedback-triage-wide">
+          <label>問題群組
+            <select class="input" name="issue_id">
+              <option value="">未分類</option>
+              ${issues.map((issue) => `<option value="${issue.id}" ${Number(detail.issue_id) === Number(issue.id) ? "selected" : ""}>#${issue.id} ${escapeHtml(issue.title)}（${formatNumber(issue.feedback_count || 0)} 筆）</option>`).join("")}
+            </select>
+          </label>
+          <label>建立新群組
+            <input class="input" type="text" name="new_issue_title" maxlength="300" placeholder="例：近二年日期 filter 未套用" />
+          </label>
+          <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="create-issue" data-feedback-id="${detail.id}">
+            ${icon("plus", 13)}<span>建立並連結</span>
+          </button>
         </div>
         <div class="rag-feedback-choice-row rag-feedback-triage-wide">
           <fieldset class="rag-feedback-choice-group">
@@ -518,6 +590,7 @@ export function createFeedbackController(container, { onStats } = {}) {
   let selectedId = null;
   let detail = null;
   let rerun = null;
+  let issues = [];
   let disposed = false;
 
   const notifyStats = (stats) => {
@@ -535,6 +608,7 @@ export function createFeedbackController(container, { onStats } = {}) {
         <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="refresh">${icon("refresh", 13)}<span>重新整理</span></button>
       </div>
       <div class="report-section" data-feedback-stats></div>
+      <div class="report-section" data-feedback-issues></div>
       <div class="report-section" data-feedback-filter-slot></div>
       <div class="report-section" data-feedback-list></div>
       <div data-feedback-detail-slot></div>
@@ -544,18 +618,30 @@ export function createFeedbackController(container, { onStats } = {}) {
   const render = () => {
     if (!payload || disposed) return;
     const statsBox = container.querySelector("[data-feedback-stats]");
+    const issueBox = container.querySelector("[data-feedback-issues]");
     const filterBox = container.querySelector("[data-feedback-filter-slot]");
     const listBox = container.querySelector("[data-feedback-list]");
     const detailBox = container.querySelector("[data-feedback-detail-slot]");
     if (statsBox) statsBox.innerHTML = renderStats(payload.stats || {});
+    if (issueBox) issueBox.innerHTML = renderIssuePanel(issues, filters);
     if (filterBox) filterBox.innerHTML = renderFilterForm(payload, filters);
     if (listBox) listBox.innerHTML = renderList(payload, selectedId);
     if (detailBox) {
       detailBox.innerHTML = detail
-        ? `${renderDetail(detail)}${renderRerun(rerun)}`
+        ? `${renderDetail(detail, issues)}${renderRerun(rerun)}`
         : "";
     }
     notifyStats(payload.stats || {});
+  };
+
+  const loadIssues = async () => {
+    try {
+      const data = await api.ragFeedbackIssues({ limit: 100 });
+      issues = Array.isArray(data?.issues) ? data.issues : [];
+    } catch (error) {
+      issues = [];
+    }
+    if (!disposed) render();
   };
 
   const load = async () => {
@@ -601,6 +687,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       status: String(data.get("status") || ""),
       reason: String(data.get("reason") || ""),
       severity: String(data.get("severity") || ""),
+      issue_id: String(data.get("issue_id") || ""),
       root_cause_stage: String(data.get("root_cause_stage") || ""),
       keyword: String(data.get("keyword") || "").trim(),
       actionable: data.get("actionable") ? "1" : "",
@@ -652,6 +739,7 @@ export function createFeedbackController(container, { onStats } = {}) {
           expected_date_from: String(data.get("expected_date_from") || ""),
           expected_date_to: String(data.get("expected_date_to") || ""),
           citation_verdicts: citationVerdicts,
+          issue_id: String(data.get("issue_id") || ""),
           review_comment: String(data.get("review_comment") || ""),
         });
         render();
@@ -715,6 +803,41 @@ export function createFeedbackController(container, { onStats } = {}) {
         }
         return;
       }
+      if (action === "create-issue") {
+        const feedbackId = actionButton.dataset.feedbackId;
+        const form = actionButton.closest("[data-feedback-triage]");
+        const title = String(form?.elements.new_issue_title?.value || "").trim();
+        if (title.length < 4) {
+          toast("問題群組標題至少需要 4 個字。", "warn");
+          form?.elements.new_issue_title?.focus();
+          return;
+        }
+        const rootCause =
+          String(form?.elements.root_cause_stage?.value || "unknown");
+        const severity =
+          form?.querySelector('input[name="severity"]:checked')?.value ||
+          "medium";
+        setBusy(actionButton, true, "建立中…");
+        try {
+          const issue = await api.ragFeedbackIssueCreate({
+            title,
+            root_cause_stage: rootCause,
+            severity,
+            description: "",
+          });
+          detail = await api.ragFeedbackUpdate(feedbackId, {
+            issue_id: issue.id,
+          });
+          await loadIssues();
+          render();
+          toast(`已建立問題群組 #${issue.id} 並連結。`, "ok", 6200);
+        } catch (error) {
+          toast(error.message || "建立問題群組失敗。", "danger");
+        } finally {
+          setBusy(actionButton, false);
+        }
+        return;
+      }
       if (action === "rerun") {
         const feedbackId = actionButton.dataset.feedbackId;
         setBusy(actionButton, true, "重跑中…");
@@ -735,6 +858,7 @@ export function createFeedbackController(container, { onStats } = {}) {
         try {
           const result = await api.ragFeedbackPromote(feedbackId);
           detail = result.feedback;
+          await loadIssues();
           render();
           toast(
             result.reused
@@ -757,6 +881,19 @@ export function createFeedbackController(container, { onStats } = {}) {
         return;
       }
     }
+    const issueButton = event.target.closest("[data-feedback-issue-id]");
+    if (issueButton) {
+      if (event.target.closest("a")) return;
+      const issueId = String(issueButton.dataset.feedbackIssueId || "");
+      filters.issue_id =
+        String(filters.issue_id || "") === issueId ? "" : issueId;
+      page = 1;
+      selectedId = null;
+      detail = null;
+      rerun = null;
+      await load();
+      return;
+    }
     const row = event.target.closest("tr[data-feedback-id]");
     if (!row) return;
     await loadDetail(row.dataset.feedbackId);
@@ -767,9 +904,11 @@ export function createFeedbackController(container, { onStats } = {}) {
     show() {
       if (disposed) return;
       render();
+      void loadIssues();
       return load();
     },
     refresh() {
+      void loadIssues();
       return load();
     },
     dispose() {

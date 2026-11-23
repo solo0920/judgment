@@ -746,6 +746,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "ragFeedbackList" in api_js.text
     assert "ragFeedbackPromote" in api_js.text
     assert "ragFeedbackRerun" in api_js.text
+    assert "ragFeedbackIssues" in api_js.text
+    assert "/api/rag/feedback-issues" in api_js.text
     assert "/api/rag/feedback/export" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
@@ -774,10 +776,15 @@ def test_static_console_is_served(web_client) -> None:
     assert "data-citation-verdict" in feedback_js.text
     assert "citation_verdicts" in feedback_js.text
     assert "rag-feedback-rerun" in feedback_js.text
+    assert "問題群組（Issue）" in feedback_js.text
+    assert "data-feedback-issue-id" in feedback_js.text
+    assert "建立並連結" in feedback_js.text
     assert "ragFeedbackUpdate" in feedback_js.text
     assert "rag-feedback-choice-pill" in feedback_js.text
     assert 'type="radio" name="status"' in feedback_js.text
     assert 'type="radio" name="severity"' in feedback_js.text
+    assert 'type="radio" name="root_cause_stage"' in feedback_js.text
+    assert 'type="radio" name="expected_answer_mode"' in feedback_js.text
     assert "不含原始留言" in feedback_js.text
     rag_js = web_client.get("/assets/js/pages/rag.js")
     assert rag_js.status_code == 200
@@ -830,6 +837,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-attribution" in css.text
     assert ".rag-feedback-rerun-grid" in css.text
     assert ".rag-feedback-citation-verdict" in css.text
+    assert ".rag-feedback-issue-link" in css.text
+    assert ".rag-feedback-issues" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -3160,6 +3169,87 @@ def test_feedback_structured_triage_export_and_rerun(web_client) -> None:
     assert "laws_added" in rerun_payload["diff"]
 
 
+def test_feedback_issue_grouping_and_export(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    feedback = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": answer["request_id"],
+            "feedback_token": answer["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "comment": "issue grouping test",
+        },
+    ).json()
+
+    issue_response = web_client.post(
+        "/api/rag/feedback-issues",
+        json={
+            "title": "吸收存款回答不完整",
+            "description": "相同 root cause 的回饋群組",
+            "root_cause_stage": "llm_generation",
+            "severity": "high",
+        },
+    )
+    assert issue_response.status_code == 201, issue_response.text
+    issue = issue_response.json()
+    assert issue["status"] == "open"
+    assert issue["feedback_count"] == 0
+
+    linked = web_client.patch(
+        f"/api/rag/feedback/{feedback['id']}",
+        json={
+            "issue_id": issue["id"],
+            "actionable": True,
+            "expected_behavior": "吸收存款回答必須列出存款與授信限制。",
+        },
+    )
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["issue"]["id"] == issue["id"]
+    assert linked.json()["issue"]["title"] == "吸收存款回答不完整"
+
+    listing = web_client.get("/api/rag/feedback-issues").json()
+    matching = [
+        row for row in listing["issues"] if row["id"] == issue["id"]
+    ]
+    assert matching and matching[0]["feedback_count"] == 1
+
+    updated_issue = web_client.patch(
+        f"/api/rag/feedback-issues/{issue['id']}",
+        json={
+            "status": "planned",
+            "linked_pr_url": "https://example.test/pr/1",
+        },
+    )
+    assert updated_issue.status_code == 200
+    assert updated_issue.json()["status"] == "planned"
+    assert updated_issue.json()["linked_pr_url"].endswith("/pr/1")
+
+    invalid = web_client.patch(
+        f"/api/rag/feedback/{feedback['id']}",
+        json={"issue_id": 999999},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["code"] == "issue_not_found"
+
+    export = web_client.get(
+        "/api/rag/feedback/export",
+        params={"sentiment": "unsatisfied"},
+    )
+    rows = [
+        json.loads(line)
+        for line in export.text.splitlines()
+        if line.strip()
+    ]
+    row = next(item for item in rows if item["feedback_id"] == feedback["id"])
+    assert row["issue"]["id"] == issue["id"]
+    assert row["issue"]["status"] == "planned"
+    assert row["issue"]["linked_pr_url"].endswith("/pr/1")
+
+
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
     answer = web_client.post(
         "/api/rag/query",
@@ -4143,6 +4233,13 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert policy_for("POST", "/api/rag/query", policies) == "DEMO_QUERY"
     assert (
         policy_for("POST", "/api/rag/feedback/{feedback_id}/promote", policies)
+        == "ADMIN_WRITE"
+    )
+    assert policy_for("GET", "/api/rag/feedback-issues", policies) == "ADMIN_ONLY"
+    assert (
+        policy_for(
+            "PATCH", "/api/rag/feedback-issues/{issue_id}", policies
+        )
         == "ADMIN_WRITE"
     )
     assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"

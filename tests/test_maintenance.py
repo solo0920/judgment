@@ -11,6 +11,7 @@ from judgment.models import (
     PerformanceRecord,
     RagFeedback,
     RagFeedbackEvent,
+    RagFeedbackIssue,
     RagFeedbackReason,
     RagInteraction,
     RagShareSnapshot,
@@ -104,7 +105,19 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             expires_at=now + timedelta(days=180),
             created_at=now,
         )
-        session.add_all([expired_feedback, current_feedback])
+        expired_issue = RagFeedbackIssue(
+            title="expired issue",
+            root_cause_stage="llm_generation",
+            status="open",
+            updated_at=now - timedelta(days=200),
+        )
+        current_issue = RagFeedbackIssue(
+            title="current issue",
+            root_cause_stage="llm_generation",
+            status="open",
+            updated_at=now,
+        )
+        session.add_all([expired_feedback, current_feedback, expired_issue, current_issue])
         session.flush()
         session.add_all(
             [
@@ -127,6 +140,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_shares": 1,
         "rag_interactions": 1,
         "rag_feedback": 1,
+        "rag_feedback_issues": 1,
     }
     with factory() as session:
         assert len(session.scalars(select(PerformanceRecord)).all()) == 1
@@ -143,6 +157,9 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         ]
         assert session.scalars(select(RagFeedbackReason)).all() == []
         assert session.scalars(select(RagFeedbackEvent)).all() == []
+        assert [row.title for row in session.scalars(select(RagFeedbackIssue)).all()] == [
+            "current issue"
+        ]
 
     assert run_retention_maintenance(factory) == {
         "performance_records": 0,
@@ -150,6 +167,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_shares": 0,
         "rag_interactions": 0,
         "rag_feedback": 0,
+        "rag_feedback_issues": 0,
     }
 
 
@@ -164,4 +182,5 @@ def test_daily_maintenance_failure_is_non_blocking() -> None:
         "rag_shares": 0,
         "rag_interactions": 0,
         "rag_feedback": 0,
+        "rag_feedback_issues": 0,
     }
