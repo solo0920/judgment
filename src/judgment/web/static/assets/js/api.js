@@ -1411,6 +1411,18 @@ export const api = {
     );
   },
 
+  ragFeedbackPromote(feedbackId) {
+    return request(
+      `/api/rag/feedback/${encodeURIComponent(feedbackId)}/promote`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeout: 60000,
+        trackClient: false,
+      },
+    );
+  },
+
   async ragFeedbackExport(params = {}) {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

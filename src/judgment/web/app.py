@@ -195,6 +195,8 @@ from .feedback import (
     feedback_stats,
     get_feedback,
     list_feedback,
+    promote_feedback_to_question_bank,
+    record_feedback_export,
     record_interaction,
     submit_feedback,
     update_feedback,
@@ -1264,6 +1266,7 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback/stats": "RAG 回饋統計",
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
     "/api/rag/feedback/{feedback_id}": "RAG 回饋明細",
+    "/api/rag/feedback/{feedback_id}/promote": "RAG 回饋轉題庫 draft",
     "/api/question-bank/stats": "題庫統計",
     "/api/question-bank/items": "題庫題目",
     "/api/question-bank/tags": "題庫標籤",
@@ -4152,10 +4155,12 @@ def create_app(
     def question_bank_export(
         status: str = "accepted",
         include_deleted: bool = False,
+        include_holdout: bool = False,
     ) -> Dict[str, Any]:
         listing = list_items(
             app.state.session_factory,
             status=status,
+            visibility="" if include_holdout else "shared",
             include_deleted=include_deleted,
             limit=200,
         )
@@ -4944,6 +4949,13 @@ def create_app(
             )
         except FeedbackError as exc:
             return _feedback_error_response(exc)
+        record_feedback_export(
+            app.state.session_factory,
+            app.state.settings,
+            filters=filters,
+            feedback_ids=[int(row["feedback_id"]) for row in rows],
+            format="jsonl",
+        )
         body = "\n".join(
             json.dumps(row, ensure_ascii=False, default=str) for row in rows
         )
@@ -5024,6 +5036,25 @@ def create_app(
         except FeedbackError as exc:
             return _feedback_error_response(exc)
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/feedback/{feedback_id}/promote")
+    def rag_feedback_promote(
+        feedback_id: int,
+        http_request: Request,
+    ) -> JSONResponse:
+        try:
+            payload = promote_feedback_to_question_bank(
+                app.state.session_factory,
+                app.state.settings,
+                feedback_id,
+                actor=_demo_actor(http_request),
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(
+            payload,
+            status_code=200 if payload.get("reused") else 201,
+        )
 
     @app.post("/api/rag/feedback")
     def rag_feedback_create(

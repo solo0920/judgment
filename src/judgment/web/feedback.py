@@ -25,8 +25,15 @@ from ..models import (
     QuestionBankItem,
     RagFeedback,
     RagFeedbackEvent,
+    RagFeedbackExport,
     RagFeedbackReason,
     RagInteraction,
+)
+from ..question_bank import (
+    QuestionBankError,
+    create_item,
+    question_fingerprint,
+    serialize_item,
 )
 from .client_ip import hashed_client_ip_key
 from .demo_mode import sanitize_feedback_snapshot
@@ -951,6 +958,196 @@ def get_feedback(
         return payload
 
 
+def promote_feedback_to_question_bank(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    feedback_id: int,
+    *,
+    actor: str,
+) -> Dict[str, Any]:
+    """Create a shared, pending-review question-bank draft from a feedback.
+
+    The generated item is deliberately a draft: ``pending_review`` and
+    ``source=user_feedback``.  It is never created as holdout, and it never
+    copies the visitor's raw comment into the question bank or the agent
+    export.
+    """
+
+    now = _utcnow()
+    existing_item: Optional[Dict[str, Any]] = None
+    already_linked = False
+    request_id = ""
+    with session_factory() as session:
+        row = session.get(RagFeedback, int(feedback_id))
+        if row is None:
+            raise FeedbackError(404, "feedback_not_found", "找不到這筆回饋。")
+        if row.sentiment != "unsatisfied":
+            raise FeedbackError(
+                422,
+                "feedback_not_unsatisfied",
+                "只有不滿意回饋可以建立改善題目。",
+            )
+        if not row.actionable:
+            raise FeedbackError(
+                422,
+                "feedback_not_actionable",
+                "請先將回饋標記為可行動。",
+            )
+        expected_behavior = str(row.expected_behavior or "").strip()
+        if not expected_behavior:
+            raise FeedbackError(
+                422,
+                "expected_behavior_required",
+                "請先填寫預期行為，才能建立題庫 draft。",
+            )
+        snapshot = row.snapshot or {}
+        question = str(snapshot.get("question") or "").strip()
+        if len(question) < 4:
+            raise FeedbackError(
+                422,
+                "feedback_question_missing",
+                "這筆回饋沒有可建立題目的問題文字。",
+            )
+        reasons = _reasons_for(session, [int(row.id)]).get(int(row.id), [])
+        request_id = str(row.request_id or "")
+        if row.linked_question_id:
+            linked = session.get(QuestionBankItem, int(row.linked_question_id))
+            if linked is not None and linked.deleted_at is None:
+                if linked.visibility == "holdout":
+                    raise FeedbackError(
+                        409,
+                        "feedback_holdout_duplicate",
+                        "此回饋已連結 holdout 題目，禁止自動匯出或再連結。",
+                    )
+                existing_item = serialize_item(linked)
+                already_linked = True
+        duplicate = session.scalars(
+            select(QuestionBankItem).where(
+                QuestionBankItem.fingerprint == question_fingerprint(question),
+                QuestionBankItem.deleted_at.is_(None),
+            )
+        ).first()
+        if duplicate is not None:
+            if duplicate.visibility == "holdout":
+                raise FeedbackError(
+                    409,
+                    "feedback_holdout_duplicate",
+                    "相同題目已存在於 holdout，禁止自動連結或匯出。",
+                )
+            existing_item = serialize_item(duplicate)
+        law_refs: List[Dict[str, str]] = []
+        seen_laws: set[str] = set()
+        for source in snapshot.get("law_sources") or []:
+            if not isinstance(source, Mapping):
+                continue
+            law_name = str(source.get("law_name") or "").strip()
+            if not law_name or law_name in seen_laws:
+                continue
+            seen_laws.add(law_name)
+            law_refs.append({"law_name": law_name})
+
+    if already_linked and existing_item is not None:
+        return {
+            "feedback": get_feedback(session_factory, feedback_id),
+            "item": existing_item,
+            "reused": True,
+        }
+
+    if existing_item is None:
+        payload: Dict[str, Any] = {
+            "question": question,
+            "question_type": "general",
+            "difficulty": "medium",
+            "status": "pending_review",
+            "visibility": "shared",
+            "source": "user_feedback",
+            "reference_answer": str(snapshot.get("answer") or "").strip(),
+            "expected_laws": law_refs,
+            "expected_articles": [],
+            "expected_judgments": [],
+            "rubric": {
+                "source_feedback_id": int(feedback_id),
+                "must_refuse": False,
+            },
+            "tags": list(
+                dict.fromkeys(
+                    [
+                        "user_feedback",
+                        f"rag-feedback-{int(feedback_id)}",
+                        *[f"reason:{code}" for code in reasons],
+                    ]
+                )
+            ),
+            "notes": (
+                f"由 RAG 使用者回饋 #{int(feedback_id)} 建立；"
+                f"request_id={request_id}。"
+                f"原因：{', '.join(reasons) or '未分類'}。"
+                f"預期行為：{expected_behavior}。"
+                "此題為 pending_review draft，需人工改寫與驗收；"
+                "未自動進入 holdout，也不含使用者原始留言。"
+            ),
+        }
+        try:
+            item = create_item(
+                session_factory,
+                payload,
+                actor=str(actor or "")[:120],
+            )
+        except QuestionBankError as exc:
+            if payload["expected_laws"]:
+                payload["expected_laws"] = []
+                try:
+                    item = create_item(
+                        session_factory,
+                        payload,
+                        actor=str(actor or "")[:120],
+                    )
+                except QuestionBankError as retry_exc:
+                    raise FeedbackError(
+                        422,
+                        "question_bank_validation_failed",
+                        "；".join(retry_exc.errors)
+                        or "題庫 draft 驗證失敗。",
+                    ) from retry_exc
+            else:
+                raise FeedbackError(
+                    422,
+                    "question_bank_validation_failed",
+                    "；".join(exc.errors) or "題庫 draft 驗證失敗。",
+                ) from exc
+    else:
+        item = existing_item
+
+    with session_factory() as session:
+        row = session.get(RagFeedback, int(feedback_id))
+        if row is None:
+            raise FeedbackError(404, "feedback_not_found", "找不到這筆回饋。")
+        row.linked_question_id = int(item["id"])
+        row.expires_at = max(
+            _aware(row.expires_at) or now,
+            now + timedelta(
+                days=max(1, int(settings.rag_feedback_retention_days))
+            ),
+        )
+        session.add(
+            RagFeedbackEvent(
+                feedback_id=row.id,
+                event_type="promoted",
+                from_status=row.status,
+                to_status=row.status,
+                actor=str(actor or "")[:120],
+                comment=f"題庫 draft #{item['id']}",
+            )
+        )
+        session.commit()
+
+    return {
+        "feedback": get_feedback(session_factory, feedback_id),
+        "item": item,
+        "reused": existing_item is not None,
+    }
+
+
 def update_feedback(
     session_factory: sessionmaker[Session],
     feedback_id: int,
@@ -1092,29 +1289,60 @@ def export_agent_feedback(
     *,
     filters: Optional[Mapping[str, Any]] = None,
     limit: int = 500,
+    require_ready: bool = True,
 ) -> List[Dict[str, Any]]:
     """Return the structured, comment-free export used for agent proposals.
 
-    The free-text comment is intentionally excluded: anonymous visitors can
-    write it and it will be read by an agent that can change code.  Operators
-    read the original comment in the admin UI instead.
+    By default only feedback that a human marked ``actionable`` and supplied
+    ``expected_behavior`` for is exported.  The free-text comment is
+    intentionally excluded: anonymous visitors can write it and it will be read
+    by an agent that can change code.  Operators read the original comment in
+    the admin UI instead.  Holdout question-bank items are never referenced.
     """
 
     filters = dict(filters or {})
     filters.setdefault("sentiment", "unsatisfied")
     with session_factory() as session:
         statement = _feedback_filters(select(RagFeedback), filters)
+        if require_ready:
+            statement = statement.where(
+                RagFeedback.actionable.is_(True),
+                RagFeedback.expected_behavior != "",
+                RagFeedback.status.notin_(("resolved", "dismissed")),
+            )
         rows = session.scalars(
             statement.order_by(RagFeedback.created_at.asc()).limit(
                 max(1, min(2000, int(limit)))
             )
         ).all()
         reasons = _reasons_for(session, [int(row.id) for row in rows])
+        linked_ids = {
+            int(row.linked_question_id)
+            for row in rows
+            if row.linked_question_id
+        }
+        holdout_ids: set[int] = set()
+        if linked_ids:
+            holdout_ids = {
+                int(value)
+                for value in session.scalars(
+                    select(QuestionBankItem.id).where(
+                        QuestionBankItem.id.in_(linked_ids),
+                        QuestionBankItem.visibility == "holdout",
+                    )
+                ).all()
+            }
         result: List[Dict[str, Any]] = []
         for row in rows:
             snapshot = row.snapshot or {}
             retrieval = snapshot.get("retrieval") or {}
             flow = snapshot.get("pipeline_flow") or {}
+            linked_id = (
+                int(row.linked_question_id)
+                if row.linked_question_id
+                and int(row.linked_question_id) not in holdout_ids
+                else None
+            )
             result.append(
                 {
                     "feedback_id": row.id,
@@ -1125,6 +1353,7 @@ def export_agent_feedback(
                     "expected_behavior": row.expected_behavior,
                     "severity": row.severity,
                     "actionable": bool(row.actionable),
+                    "linked_question_id": linked_id,
                     "question": str(snapshot.get("question") or ""),
                     "answer": str(snapshot.get("answer") or ""),
                     "answer_source": snapshot.get("answer_source") or "",
@@ -1140,6 +1369,38 @@ def export_agent_feedback(
                 }
             )
         return result
+
+
+def record_feedback_export(
+    session_factory: Optional[sessionmaker[Session]],
+    settings: Settings,
+    *,
+    filters: Mapping[str, Any],
+    feedback_ids: Sequence[int],
+    format: str = "jsonl",
+    status: str = "created",
+) -> Optional[int]:
+    """Record one agent-facing export for later audit."""
+
+    if session_factory is None:
+        return None
+    try:
+        with session_factory() as session:
+            row = RagFeedbackExport(
+                filter_json=dict(filters),
+                feedback_ids=[int(value) for value in feedback_ids],
+                format=str(format or "jsonl")[:16],
+                status=str(status or "created")[:24],
+                model="",
+                prompt_version=settings.rag_prompt_version or "",
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return int(row.id)
+    except Exception:
+        logger.warning("feedback export audit write failed", exc_info=True)
+        return None
 
 
 def prune_rag_interactions(

@@ -669,6 +669,7 @@ def list_items(
     difficulty: str = "",
     tag: str = "",
     tags: Optional[Sequence[str]] = None,
+    visibility: str = "",
     stale: Optional[bool] = None,
     include_deleted: bool = False,
     limit: int = 50,
@@ -696,6 +697,13 @@ def list_items(
             conditions.append(QuestionBankItem.question_type == question_type)
         if difficulty:
             conditions.append(QuestionBankItem.difficulty == difficulty)
+        if visibility:
+            if visibility not in VISIBILITIES:
+                raise QuestionBankError(
+                    f"不支援的可見性：{visibility}",
+                    errors=[f"不支援的可見性：{visibility}"],
+                )
+            conditions.append(QuestionBankItem.visibility == visibility)
         if stale is not None:
             conditions.append(QuestionBankItem.stale.is_(bool(stale)))
         statement = select(QuestionBankItem)

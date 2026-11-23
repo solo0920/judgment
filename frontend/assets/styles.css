@@ -20624,7 +20624,9 @@ a.auth-menu-item {
 .rag-feedback-triage-actions {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 7px;
 }
 
 @media (max-width: 980px) {
