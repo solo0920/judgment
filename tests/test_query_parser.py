@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from judgment.query_parser import (
@@ -81,6 +83,37 @@ def test_build_base_filter_is_optional_and_combined() -> None:
         "gte": 20000101,
         "lte": 20101231,
     }
+
+
+def test_relative_two_years_becomes_absolute_date_filter() -> None:
+    parsed = parse_judgment_query(
+        "近二年證券違約交割的判決有那些?",
+        today=date(2026, 11, 23),
+    )
+    assert parsed.date_from == "2024-11-23"
+    assert parsed.date_to == "2026-11-23"
+    assert parsed.has_filter is True
+    assert parsed.to_dict()["date_from"] == "2024-11-23"
+
+    query_filter = build_base_filter(parsed)
+    assert query_filter is not None
+    range_condition = next(
+        item for item in query_filter["must"] if item["key"] == "jdate_num"
+    )
+    assert range_condition["range"] == {
+        "gte": 20241123,
+        "lte": 20261123,
+    }
+
+
+def test_relative_range_violations_use_exact_dates() -> None:
+    parsed = parse_judgment_query(
+        "最近兩年判決",
+        today=date(2026, 11, 23),
+    )
+    assert violations({"jdate": "20141020"}, parsed) == ["date=20141020"]
+    assert violations({"jdate": "20250101"}, parsed) == []
+    assert violations({"jdate": "20261123"}, parsed) == []
 
 
 class FakeFacetStore:

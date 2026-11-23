@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from .courts import CANONICAL_COURTS
@@ -94,24 +96,83 @@ _YEAR_ONE = re.compile(r"(?:民國)?(?<!\d)(\d{2,4})\s*年(?!代|度)")
 _LIST_INTENT = re.compile(
     r"有哪些|有那些|有什麼|列出|清單|所有|全部|幾筆|多少"
 )
+_RELATIVE_RANGE = re.compile(
+    r"(?:近|最近|過去)\s*(\d{1,2}|[一二三四五六七八九十兩两]+)\s*"
+    r"(年|個月|月)"
+)
+_RELATIVE_WITHIN = re.compile(
+    r"(?<!\d)(\d{1,2}|[一二三四五六七八九十兩两]+)\s*"
+    r"(年|個月|月)\s*內"
+)
+_CN_DIGITS = {
+    "一": 1,
+    "二": 2,
+    "兩": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _chinese_int(value: str) -> int:
+    value = value.strip()
+    if value.isdigit():
+        return int(value)
+    if value == "十":
+        return 10
+    if value.startswith("十"):
+        return 10 + _CN_DIGITS.get(value[1:], 0)
+    if "十" in value:
+        left, right = value.split("十", 1)
+        return _CN_DIGITS.get(left, 1) * 10 + (
+            _CN_DIGITS.get(right, 0) if right else 0
+        )
+    return _CN_DIGITS.get(value, 0)
+
+
+def _shift_date(today: date, count: int, unit: str) -> date:
+    if unit == "年":
+        try:
+            return today.replace(year=today.year - count)
+        except ValueError:
+            return today.replace(year=today.year - count, day=28)
+    months = today.year * 12 + today.month - 1 - count
+    year, month_index = divmod(months, 12)
+    month = month_index + 1
+    day = min(today.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
 
 
 @dataclass
 class ParsedJudgmentQuery:
     year_from: Optional[int] = None
     year_to: Optional[int] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
     courts: List[str] = field(default_factory=list)
     topics: List[str] = field(default_factory=list)
     list_intent: bool = False
 
     @property
     def has_filter(self) -> bool:
-        return bool(self.courts or self.topics or self.year_from is not None)
+        return bool(
+            self.courts
+            or self.topics
+            or self.year_from is not None
+            or self.date_from is not None
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "year_from": self.year_from,
             "year_to": self.year_to,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
             "courts": list(self.courts),
             "topics": list(self.topics),
             "list_intent": self.list_intent,
@@ -123,9 +184,14 @@ def _to_ad(value: int) -> Optional[int]:
     return year if 1990 <= year <= 2100 else None
 
 
-def parse_judgment_query(question: str) -> ParsedJudgmentQuery:
+def parse_judgment_query(
+    question: str,
+    *,
+    today: Optional[date] = None,
+) -> ParsedJudgmentQuery:
     text = (question or "").strip().replace("台", "臺")
     parsed = ParsedJudgmentQuery()
+    now = today or date.today()
 
     match = _YEAR_RANGE.search(text)
     if match:
@@ -139,6 +205,15 @@ def parse_judgment_query(question: str) -> ParsedJudgmentQuery:
             year = _to_ad(int(match.group(1)))
             if year is not None:
                 parsed.year_from = parsed.year_to = year
+
+    # 相對時間（近二年／最近兩年／三年內…）轉成絕對日期範圍。
+    relative = _RELATIVE_RANGE.search(text) or _RELATIVE_WITHIN.search(text)
+    if relative and parsed.year_from is None:
+        count = _chinese_int(relative.group(1))
+        unit = relative.group(2)
+        if count > 0:
+            parsed.date_from = _shift_date(now, count, unit).isoformat()
+            parsed.date_to = now.isoformat()
 
     seen: List[str] = []
     for short, values in COURT_ALIASES.items():
@@ -170,14 +245,19 @@ def build_base_filter(
         must.append(
             {"key": "court", "match": {"any": list(parsed.courts)}}
         )
-    if parsed.year_from is not None and parsed.year_to is not None:
+    if parsed.date_from is not None and parsed.date_to is not None:
+        start = int(parsed.date_from.replace("-", ""))
+        end = int(parsed.date_to.replace("-", ""))
+    elif parsed.year_from is not None and parsed.year_to is not None:
+        start = parsed.year_from * 10000 + 101
+        end = parsed.year_to * 10000 + 1231
+    else:
+        start = end = None
+    if start is not None and end is not None:
         must.append(
             {
                 "key": "jdate_num",
-                "range": {
-                    "gte": parsed.year_from * 10000 + 101,
-                    "lte": parsed.year_to * 10000 + 1231,
-                },
+                "range": {"gte": start, "lte": end},
             }
         )
     return {"must": must} if must else None
@@ -201,6 +281,8 @@ def build_query_filter(
     meta: Dict[str, Any] = {
         "year_from": parsed.year_from,
         "year_to": parsed.year_to,
+        "date_from": parsed.date_from,
+        "date_to": parsed.date_to,
         "courts": list(parsed.courts),
         "topics": list(parsed.topics),
         "titles": [],
@@ -266,7 +348,11 @@ def is_structured_case_list(question: str) -> bool:
     if not text:
         return False
     parsed = parse_judgment_query(text)
-    if not (parsed.courts or parsed.year_from is not None):
+    if not (
+        parsed.courts
+        or parsed.year_from is not None
+        or parsed.date_from is not None
+    ):
         return False
     if not parsed.topics:
         return False
@@ -281,15 +367,23 @@ def violations(
 
     errors: List[str] = []
     jdate = str(payload.get("jdate") or "")
-    if (
-        parsed.year_from is not None
-        and parsed.year_to is not None
-        and len(jdate) == 8
-        and jdate.isdigit()
-    ):
-        year = int(jdate[:4])
-        if not (parsed.year_from <= year <= parsed.year_to):
-            errors.append(f"year={year}")
+    if len(jdate) == 8 and jdate.isdigit():
+        value = int(jdate)
+        if (
+            parsed.date_from is not None
+            and parsed.date_to is not None
+        ):
+            start = int(parsed.date_from.replace("-", ""))
+            end = int(parsed.date_to.replace("-", ""))
+            if not (start <= value <= end):
+                errors.append(f"date={jdate}")
+        elif (
+            parsed.year_from is not None
+            and parsed.year_to is not None
+        ):
+            year = int(jdate[:4])
+            if not (parsed.year_from <= year <= parsed.year_to):
+                errors.append(f"year={year}")
     if parsed.courts and payload.get("court") not in parsed.courts:
         errors.append(f"court={payload.get('court')}")
     title = str(payload.get("title") or "")
