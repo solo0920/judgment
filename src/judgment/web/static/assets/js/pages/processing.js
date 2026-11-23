@@ -7523,6 +7523,8 @@ export async function render(root) {
           count: Number(snapshot.capabilities?.unprocessed_archives) || 0,
           index_pending:
             Number(snapshot.capabilities?.index_pending_months) || 0,
+          legal_index_pending:
+            Number(snapshot.capabilities?.legal_index_pending_count) || 0,
         },
       }),
     );

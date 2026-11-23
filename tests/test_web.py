@@ -754,7 +754,9 @@ def test_static_console_is_served(web_client) -> None:
     assert 'DEFAULT_ROUTE = "home"' in app_js.text
     assert "judgment:processing-pending" in app_js.text
     assert "index_pending_count" in app_js.text
+    assert "legal_index_pending_count" in app_js.text
     assert "Qdrant 向量索引待補" in app_js.text
+    assert "法規／命令索引待重建" in app_js.text
 
     css = web_client.get("/assets/styles.css")
     assert css.status_code == 200
@@ -1420,6 +1422,41 @@ def test_updates_status_includes_index_pending_months(
     assert status.status_code == 200
     body = status.json()
     assert body["index_pending_count"] == 1
+
+
+def test_updates_status_includes_legal_index_pending(
+    web_client, monkeypatch
+) -> None:
+    def fake_legal_index_metrics(**kwargs):
+        return {
+            "status": "stale",
+            "stale": True,
+            "reasons": ["law_count_mismatch"],
+            "alias": "legal_articles_current",
+            "collection": "legal_articles_v001",
+            "points_count": 10,
+            "dimension": 1024,
+            "version_id": 1,
+            "article_count": 10,
+            "indexed_at": "2026-11-23T00:00:00Z",
+            "freshness": {},
+        }
+
+    monkeypatch.setattr(
+        processing_module,
+        "_legal_index_plan_metrics",
+        fake_legal_index_metrics,
+    )
+    snapshot = processing_module.build_processing_snapshot(
+        settings=web_client.app.state.settings,
+        session_factory=web_client.app.state.session_factory,
+    )
+    assert snapshot["capabilities"]["legal_index_pending_count"] == 1
+
+    status = web_client.get("/api/updates/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["legal_index_pending_count"] == 1
 
 
 def test_updates_check_can_filter_sources(web_client, monkeypatch) -> None:

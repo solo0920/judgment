@@ -227,6 +227,7 @@ function initUpdateBadge() {
   let sourceCount = 0;
   let importPending = 0;
   let indexPending = 0;
+  let legalIndexPending = 0;
   const renderBadge = () => {
     const parts = [];
     if (sourceCount > 0) {
@@ -238,19 +239,16 @@ function initUpdateBadge() {
     if (indexPending > 0) {
       parts.push(`Qdrant 向量索引待補 ${indexPending} 個月`);
     }
-    if (!parts.length) {
+    if (legalIndexPending > 0) {
+      parts.push(`法規／命令索引待重建 ${legalIndexPending} 項`);
+    }
+    const total =
+      sourceCount + importPending + indexPending + legalIndexPending;
+    if (!parts.length || total <= 0) {
       badge.hidden = true;
       return;
     }
-    const components =
-      (sourceCount > 0 ? 1 : 0) +
-      (importPending > 0 ? 1 : 0) +
-      (indexPending > 0 ? 1 : 0);
-    badge.textContent = String(
-      components === 1
-        ? sourceCount || importPending || indexPending
-        : components,
-    );
+    badge.textContent = String(total);
     badge.title = parts.join("；");
     badge.hidden = false;
   };
@@ -270,6 +268,15 @@ function initUpdateBadge() {
       ) {
         indexPending = Number(info.index_pending_count) || 0;
       }
+      if (
+        info &&
+        Object.prototype.hasOwnProperty.call(
+          info,
+          "legal_index_pending_count",
+        )
+      ) {
+        legalIndexPending = Number(info.legal_index_pending_count) || 0;
+      }
       renderBadge();
     } catch (error) {
       badge.hidden = true;
@@ -286,6 +293,15 @@ function initUpdateBadge() {
       Object.prototype.hasOwnProperty.call(event.detail, "index_pending")
     ) {
       indexPending = Number(event.detail.index_pending) || 0;
+    }
+    if (
+      event.detail &&
+      Object.prototype.hasOwnProperty.call(
+        event.detail,
+        "legal_index_pending",
+      )
+    ) {
+      legalIndexPending = Number(event.detail.legal_index_pending) || 0;
     }
     renderBadge();
   });
