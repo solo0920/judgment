@@ -810,11 +810,15 @@ function lawSourceCard(source, index) {
   const stats = source.stats;
   const statsBlock = stats
     ? `<div class="law-source-stats">
-        <span>${stats.sampled ? "取樣 " : ""}提及「${escapeHtml(
-          stats.entity || "",
-        )}」的判決 ${formatNumber(
-          stats.judgment_count || 0,
-        )} 筆</span>
+        <span>${
+          stats.sampled
+            ? `取樣 ${formatNumber(
+                stats.judgment_count || 0,
+              )} 筆提及「${escapeHtml(stats.entity || "")}」的判決`
+            : `提及「${escapeHtml(stats.entity || "")}」的判決 ${formatNumber(
+                stats.judgment_count || 0,
+              )} 筆`
+        }</span>
         <span>本法規被引用 ${formatNumber(stats.law_count || 0)} 次</span>
       </div>`
     : "";

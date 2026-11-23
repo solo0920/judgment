@@ -1336,6 +1336,8 @@ _RAG_PIPELINE_SEGMENTS = {
     "rag.qdrant_search",
     "rag.law_vector_search",
     "rag.law_retrieval",
+    "rag.law_stats",
+    "rag.law_content",
     "rag.law_rerank",
     "rag.rerank",
     "rag.context",
