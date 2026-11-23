@@ -2666,7 +2666,7 @@ function workflowItems(snapshot) {
       lastRun,
       status: activeRun
         ? activeRun.status || "running"
-        : workflow.update_available
+        : workflow.update_available && !isUpdateConsumed(workflow.id)
           ? "update"
           : lastRun?.status || "idle",
     };
@@ -2708,11 +2708,13 @@ function workflowNavMarkup(snapshot, activeWorkflowId) {
             ? '<div class="status-tab-divider" role="separator" aria-hidden="true"></div>'
             : "";
           const pendingCount = Number(item.pending_count) || 0;
+          const itemUpdateAvailable =
+            item.update_available && !isUpdateConsumed(item.id);
           const updateCount =
             Number(item.update_count) ||
-            (item.update_available ? pendingCount : 0);
+            (itemUpdateAvailable ? pendingCount : 0);
           const showUpdateCount =
-            item.update_available && updateCount > 0 && !item.activeRun;
+            itemUpdateAvailable && updateCount > 0 && !item.activeRun;
           const updateTitle = [
             item.update_message ||
               `${item.update_origin || "更新偵測"}找到 ${formatNumber(
