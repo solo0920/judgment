@@ -7998,9 +7998,9 @@ export async function render(root) {
                 : "資料");
         if (record.status === "error") {
           toast(
-            `${label}版本檢查失敗：${record.message || "無法取得線上版本"}`,
-            "danger",
-            7000,
+            record.message || `${label}版本檢查失敗`,
+            record.details?.retryable ? "warn" : "danger",
+            8000,
           );
         } else {
           toast(
@@ -8018,10 +8018,12 @@ export async function render(root) {
         );
         const failed = sources.filter((key) => records[key]?.status === "error");
         if (failed.length) {
+          const first = records[failed[0]] || {};
           toast(
-            `更新檢查完成，但有 ${failed.length} 項檢查失敗。`,
-            "danger",
-            7000,
+            first.message ||
+              `更新檢查完成，但有 ${failed.length} 項檢查失敗。`,
+            first.details?.retryable ? "warn" : "danger",
+            8000,
           );
         } else {
           toast(
@@ -8103,7 +8105,11 @@ export async function render(root) {
       );
     }
     if (record.status === "error") {
-      toast("版本檢查失敗，將直接執行下載。", "warn", 6000);
+      toast(
+        record.message || "版本檢查失敗，將直接執行下載。",
+        record.details?.retryable ? "warn" : "danger",
+        8000,
+      );
     }
     return true;
   };
