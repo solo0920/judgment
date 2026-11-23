@@ -35,6 +35,8 @@ class UpdateSourceHTTPError(RuntimeError):
 def _format_checked_at(value: str) -> str:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     except (TypeError, ValueError):
         return str(value or "")[:19] or "未知時間"

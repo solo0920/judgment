@@ -222,3 +222,10 @@ def test_update_http_500_reports_previous_check(monkeypatch) -> None:
     assert "目前保留上次的更新狀態" in result["message"]
     status = update_status(session_factory)
     assert status["sources"]["order"]["details"]["retryable"] is True
+
+
+def test_format_checked_at_treats_naive_timestamp_as_utc() -> None:
+    assert (
+        update_checks._format_checked_at("2026-11-23T01:07:28.123456")
+        == "2026-11-23 01:07 UTC"
+    )
