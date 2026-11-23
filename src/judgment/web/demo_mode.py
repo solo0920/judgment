@@ -309,10 +309,223 @@ def sanitize_processing_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
+_PUBLIC_TRACE_SEGMENT_KEYS = frozenset(
+    {
+        "seq",
+        "parent_seq",
+        "depth",
+        "name",
+        "offset_ms",
+        "duration_ms",
+        "end_offset_ms",
+        "status",
+        "started_at",
+        "finished_at",
+    }
+)
+_PUBLIC_TRACE_DECISION_KEYS = frozenset(
+    {
+        "id",
+        "stage",
+        "question",
+        "method",
+        "selected",
+        "offset_ms",
+        "duration_ms",
+        "end_offset_ms",
+        "opaque",
+        "status",
+    }
+)
+_PUBLIC_TRACE_OPTION_KEYS = frozenset(
+    {"id", "label", "selected", "evaluated", "reason", "score"}
+)
+_PUBLIC_TRACE_RAG_RESPONSE_KEYS = frozenset(
+    {
+        "status",
+        "answer_source",
+        "citation_count",
+        "judgment_citations",
+        "law_citations",
+        "abstain",
+        "duration_ms",
+        "has_answer",
+        "judgment_limit",
+        "judgment_limit_applied",
+    }
+)
+_PUBLIC_TRACE_METADATA_KEYS = frozenset(
+    {
+        "input_length",
+        "normalized_length",
+        "trimmed_chars",
+        "parsed_query",
+        "filter",
+        "hits",
+        "unique_judgments",
+        "top_k",
+        "candidate_k",
+        "total_matches",
+        "chunks",
+        "documents",
+        "token_estimate",
+        "context_chars",
+        "citation_count",
+        "answer_source",
+        "abstain",
+        "status",
+        "reason",
+        "count",
+        "removed",
+        "filter_violations_removed",
+        "rerank_degraded",
+    }
+)
+_TRACE_PRIVATE_KEYS = frozenset(
+    {
+        "params",
+        "prompt",
+        "prompts",
+        "messages",
+        "collection",
+        "collections",
+        "positive_jids",
+        "negative_jids",
+        "jids",
+        "jid",
+        "raw",
+        "raw_json",
+        "source_archive",
+        "base_url",
+        "active_base_url",
+        "embedding_model",
+        "llm_model",
+        "model",
+        "models",
+        "url",
+        "urls",
+        "host",
+        "hosts",
+        "port",
+        "ports",
+        "path",
+        "paths",
+        "api_key",
+        "token",
+        "secret",
+        "password",
+        "user",
+        "pid",
+    }
+)
+
+
+def _public_trace_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _public_trace_value(item)
+            for key, item in value.items()
+            if key not in _TRACE_PRIVATE_KEYS
+        }
+    if isinstance(value, list):
+        return [_public_trace_value(item) for item in value]
+    if isinstance(value, str):
+        return _scrub_internal_endpoints(_scrub_absolute_paths(value))
+    return value
+
+
+def sanitize_public_pipeline_flow(flow: Any) -> Dict[str, Any]:
+    """Return the visitor-safe decision trace embedded in a RAG response.
+
+    The public trace deliberately omits prompts, collection names, hosts,
+    absolute paths, positive/negative JIDs and model identifiers.  It keeps
+    the decision names, options, selected result, counts and timing so the
+    visitor can understand the deterministic path without seeing internals.
+    """
+
+    if not isinstance(flow, dict):
+        return {}
+    decisions = []
+    for raw in flow.get("decisions") or []:
+        if not isinstance(raw, dict):
+            continue
+        decision = {
+            key: _public_trace_value(raw[key])
+            for key in _PUBLIC_TRACE_DECISION_KEYS
+            if key in raw
+        }
+        options = []
+        for option in raw.get("options") or []:
+            if not isinstance(option, dict):
+                continue
+            options.append(
+                {
+                    key: _public_trace_value(option[key])
+                    for key in _PUBLIC_TRACE_OPTION_KEYS
+                    if key in option
+                }
+            )
+        decision["options"] = options
+        decision["result"] = _public_trace_value(raw.get("result") or {})
+        decisions.append(decision)
+    segments = []
+    for raw in flow.get("segments") or []:
+        if not isinstance(raw, dict):
+            continue
+        segment = {
+            key: _public_trace_value(raw[key])
+            for key in _PUBLIC_TRACE_SEGMENT_KEYS
+            if key in raw
+        }
+        metadata = raw.get("metadata") or {}
+        segment["metadata"] = {
+            key: _public_trace_value(metadata[key])
+            for key in _PUBLIC_TRACE_METADATA_KEYS
+            if key in metadata
+        }
+        segments.append(segment)
+    metadata = flow.get("metadata") or {}
+    public_metadata = {
+        key: _public_trace_value(metadata[key])
+        for key in (
+            "rag_status",
+            "asgi_to_handler_ms",
+            "asgi_to_flow_ms",
+            "handler_to_flow_ms",
+            "citation_retry",
+        )
+        if key in metadata
+    }
+    response = metadata.get("rag_response")
+    if isinstance(response, dict):
+        public_metadata["rag_response"] = {
+            key: _public_trace_value(response[key])
+            for key in _PUBLIC_TRACE_RAG_RESPONSE_KEYS
+            if key in response
+        }
+    return {
+        "version": flow.get("version", 1),
+        "decision_version": flow.get("decision_version", 1),
+        "started_at": flow.get("started_at"),
+        "finished_at": flow.get("finished_at"),
+        "total_ms": flow.get("total_ms"),
+        "status": flow.get("status"),
+        "metadata": public_metadata,
+        "summary": {"models": [], "decision_count": len(decisions)},
+        "segments": segments,
+        "decisions": decisions,
+    }
+
+
 def sanitize_rag_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     cleaned = dict(result)
-    for key in ("pipeline_flow", "llm_model", "embedding_model"):
+    trace = cleaned.pop("pipeline_flow", None)
+    for key in ("llm_model", "embedding_model"):
         cleaned.pop(key, None)
+    if isinstance(trace, dict):
+        public_trace = sanitize_public_pipeline_flow(trace)
+        if public_trace:
+            cleaned["pipeline_flow"] = public_trace
     if "retrieval" in cleaned:
         cleaned["retrieval"] = sanitize_infrastructure(cleaned.get("retrieval"))
     return cleaned

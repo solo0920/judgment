@@ -157,6 +157,8 @@ class ParsedJudgmentQuery:
     courts: List[str] = field(default_factory=list)
     topics: List[str] = field(default_factory=list)
     list_intent: bool = False
+    date_rule: str = "none"
+    relative_text: str = ""
 
     @property
     def has_filter(self) -> bool:
@@ -176,6 +178,8 @@ class ParsedJudgmentQuery:
             "courts": list(self.courts),
             "topics": list(self.topics),
             "list_intent": self.list_intent,
+            "date_rule": self.date_rule,
+            "relative_text": self.relative_text,
         }
 
 
@@ -199,6 +203,7 @@ def parse_judgment_query(
         end = _to_ad(int(match.group(2)))
         if start is not None and end is not None:
             parsed.year_from, parsed.year_to = sorted((start, end))
+            parsed.date_rule = "year_range"
     # 相對時間（近二年／最近兩年／三年內…）優先於單一年份解析。
     # 否則「近80年」會被 _YEAR_ONE 誤讀成西元 1980 年代。
     relative = _RELATIVE_RANGE.search(text) or _RELATIVE_WITHIN.search(text)
@@ -208,6 +213,7 @@ def parse_judgment_query(
             year = _to_ad(int(match.group(1)))
             if year is not None:
                 parsed.year_from = parsed.year_to = year
+                parsed.date_rule = "single_year"
 
     # 相對時間轉成以今日為終點的絕對日期範圍。
     if relative and parsed.year_from is None:
@@ -216,6 +222,8 @@ def parse_judgment_query(
         if count > 0:
             parsed.date_from = _shift_date(now, count, unit).isoformat()
             parsed.date_to = now.isoformat()
+            parsed.date_rule = "relative_range"
+            parsed.relative_text = relative.group(0)
 
     seen: List[str] = []
     for short, values in COURT_ALIASES.items():

@@ -477,10 +477,28 @@ function buildRagPipeline(flow, rowDurationMs = 0) {
     duration: Math.max(0, total - responseStart),
     responseMetadata: responseMeta,
   });
+  const decisions = Array.isArray(flow?.decisions)
+    ? [...flow.decisions].sort(
+        (left, right) =>
+          Number(left.offset_ms || 0) - Number(right.offset_ms || 0),
+      )
+    : [];
+  for (const decision of decisions) {
+    const stageKey =
+      decision.stage === "routing" ? "parsing" : String(decision.stage || "");
+    const target =
+      stages.find((stage) => stage.key === stageKey) ||
+      stages[stages.length - 1];
+    if (!target) continue;
+    if (!Array.isArray(target.decisions)) target.decisions = [];
+    target.decisions.push(decision);
+  }
   applyRagSequentialDisplay(stages, total);
   return {
     total,
     stages,
+    decisions,
+    decisionCount: decisions.length,
     response: responseMeta,
     traceStatus,
     requestId: flow?.request_id || "",
@@ -906,6 +924,7 @@ function ragSpanTooltip(stage, span, options = {}) {
 
 function renderRagPipelineStage(stage, total) {
   const spans = stage.spans || [];
+  const decisions = Array.isArray(stage.decisions) ? stage.decisions : [];
   const modelLabels = ragStageModelLabels(stage);
   const displaySegments = Array.isArray(stage.displaySegments)
     ? stage.displaySegments
@@ -1036,6 +1055,12 @@ function renderRagPipelineStage(stage, total) {
                   modelLabels.join(" · "),
                 )}</small>`
               : ""
+          }${
+            decisions.length
+              ? `<small class="rag-wf-decision-badge">${formatNumber(
+                  decisions.length,
+                )} 決策</small>`
+              : ""
           }</span>
         </span>
         <span class="rag-wf-stage-meta">${duration} · ${
@@ -1044,6 +1069,7 @@ function renderRagPipelineStage(stage, total) {
       </span>
       <span class="rag-wf-track" style="height:${trackHeight}px">${bars}</span>
     </summary>
+    ${renderRagDecisionList(decisions)}
     ${detailsMarkup}
   </details>`;
 }
@@ -1076,6 +1102,13 @@ function ragPipelineSummaryMarkup(pipeline, serverDurationMs, loading = false) {
       )}</strong></span>
       <span>Abstain <strong>${response.abstain ? "是" : "否"}</strong></span>
       ${
+        pipeline.decisionCount
+          ? `<span>決策 <strong>${formatNumber(
+              pipeline.decisionCount,
+            )}</strong></span>`
+          : ""
+      }
+      ${
         models.length
           ? `<span>Model <strong>${escapeHtml(models.join(" · "))}</strong></span>`
           : ""
@@ -1100,16 +1133,145 @@ export function renderWaterfallStages(
     <p class="rag-wf-hint">${escapeHtml(hint)}</p>`;
 }
 
+function decisionSelectedLabel(decision) {
+  const selected = Array.isArray(decision?.selected)
+    ? decision.selected
+    : decision?.selected
+      ? [decision.selected]
+      : [];
+  const labels = (Array.isArray(decision?.options) ? decision.options : [])
+    .filter((option) => selected.includes(option.id))
+    .map((option) => option.label || option.id);
+  return labels.length
+    ? labels.join("、")
+    : selected.length
+      ? selected.join("、")
+      : "—";
+}
+
+function decisionValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) {
+    return value.length ? value.map((item) => decisionValue(item)).join("、") : "—";
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return "—";
+    }
+  }
+  return String(value);
+}
+
+function renderDecisionResult(result) {
+  const entries = Object.entries(result || {})
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 10);
+  if (!entries.length) return "";
+  return `<div class="rag-wf-decision-result">
+    ${entries
+      .map(
+        ([key, value]) =>
+          `<span class="rag-wf-decision-result-item"><span>${escapeHtml(
+            key,
+          )}</span><strong>${escapeHtml(decisionValue(value))}</strong></span>`,
+      )
+      .join("")}
+  </div>`;
+}
+
+function renderRagDecisionList(decisions) {
+  if (!Array.isArray(decisions) || !decisions.length) return "";
+  return `<div class="rag-wf-decisions">
+    <div class="rag-wf-decisions-head">
+      <span>決策記錄</span>
+      <span class="badge badge-neutral badge-mono">${formatNumber(
+        decisions.length,
+      )}</span>
+    </div>
+    ${decisions
+      .map((decision, index) => {
+        const selectedLabel = decisionSelectedLabel(decision);
+        const options = (Array.isArray(decision.options) ? decision.options : [])
+          .map((option) => {
+            const selected = Boolean(option.selected);
+            const evaluated = option.evaluated !== false;
+            const state = selected
+              ? "選中"
+              : evaluated
+                ? "未選"
+                : "未評估";
+            const className = selected
+              ? "is-selected"
+              : evaluated
+                ? "is-considered"
+                : "is-skipped";
+            return `<div class="rag-wf-decision-option ${className}">
+              <span class="rag-wf-decision-option-state">${escapeHtml(state)}</span>
+              <span class="rag-wf-decision-option-label">${escapeHtml(
+                option.label || option.id || "選項",
+              )}</span>
+              <span class="rag-wf-decision-option-reason">${escapeHtml(
+                option.reason || "—",
+              )}</span>
+            </div>`;
+          })
+          .join("");
+        return `<details class="rag-wf-decision">
+          <summary class="rag-wf-decision-summary">
+            <span class="rag-wf-decision-seq">${index + 1}</span>
+            <span class="rag-wf-decision-question">${escapeHtml(
+              decision.question || decision.id || "決策",
+            )}</span>
+            <span class="rag-wf-decision-selected">${escapeHtml(
+              selectedLabel,
+            )}</span>
+            ${
+              decision.opaque
+                ? `<span class="rag-wf-decision-opaque">LLM 黑箱</span>`
+                : ""
+            }
+            <span class="rag-wf-chevron">${icon("chevronRight", 12)}</span>
+          </summary>
+          <div class="rag-wf-decision-body">
+            <div class="rag-wf-decision-meta">
+              <span>方法</span><strong>${escapeHtml(
+                decision.method || "—",
+              )}</strong>
+              <span>耗時</span><strong>${escapeHtml(
+                formatDuration(decision.duration_ms || 0),
+              )}</strong>
+            </div>
+            ${options || `<div class="rag-wf-decision-empty">沒有記錄選項。</div>`}
+            ${renderDecisionResult(decision.result)}
+            ${
+              decision.opaque
+                ? `<p class="rag-wf-decision-note">LLM 內部推理不可見；只記錄輸入摘要、輸出與耗時。</p>`
+                : ""
+            }
+          </div>
+        </details>`;
+      })
+      .join("")}
+  </div>`;
+}
+
 function ragPipelineStagesMarkup(pipeline) {
   const hasLoad = (pipeline.stages || []).some((stage) => stage.loadInfo);
   const legend = hasLoad
     ? `<div class="rag-wf-legend"><span><i class="is-load"></i>Model Load（階段 bar 前段）</span></div>`
     : "";
-  const hint = pipeline.structuredLaw
-    ? "此題使用結構化法規查詢：實際執行 Parsing、法規檢索與判決引用統計、法條載入與 Response；Embedding／Qdrant／Reranker／Context／LLM 未執行，因此不列入此 waterfall。"
-    : hasLoad
-      ? "階段依執行順序由左至右排列，上一階段結束後接續下一階段；Embedding／LLM 的藍色前段為 Model Load，後段為推論。實際開始／結束時間、Token 與載入占比可展開查看。"
-      : "階段依執行順序由左至右排列，上一階段結束後接續下一階段。實際開始／結束時間與 Token 可展開查看。";
+  const decisionHint = pipeline.decisionCount
+    ? " 每個階段可展開決策記錄；未評估的選項會標示「未評估」，不會事後補理由。"
+    : "";
+  const hint =
+    (pipeline.structuredLaw
+      ? "此題使用結構化法規查詢：實際執行 Parsing、法規檢索與判決引用統計、法條載入與 Response；Embedding／Qdrant／Reranker／Context／LLM 未執行，因此不列入此 waterfall。"
+      : hasLoad
+        ? "階段依執行順序由左至右排列，上一階段結束後接續下一階段；Embedding／LLM 的藍色前段為 Model Load，後段為推論。實際開始／結束時間、Token 與載入占比可展開查看。"
+        : "階段依執行順序由左至右排列，上一階段結束後接續下一階段。實際開始／結束時間與 Token 可展開查看。") +
+    decisionHint;
   return renderWaterfallStages(
     pipeline.stages,
     pipeline.total,

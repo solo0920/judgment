@@ -1619,6 +1619,8 @@ def _rag_pipeline_snapshot(flow, session_factory=None) -> Dict[str, Any]:
         for segment in snapshot.get("segments") or []
         if segment.get("name") in _RAG_PIPELINE_SEGMENTS
     ]
+    snapshot["decisions"] = list(snapshot.get("decisions") or [])
+    snapshot["decision_count"] = len(snapshot["decisions"])
     if session_factory is not None:
         for segment in snapshot["segments"]:
             segment_metadata = segment.get("metadata")

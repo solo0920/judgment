@@ -12,8 +12,10 @@ from judgment.models import Base, PerformanceRecord
 from judgment.observability import (
     clear_flow,
     current_flow,
+    record_decision,
     record_performance,
     start_flow,
+    trace_decision,
     trace_segment,
     traced,
 )
@@ -155,3 +157,124 @@ def test_flow_trace_listener_receives_live_segment_events() -> None:
     assert starts[0]["segment"]["depth"] == 0
     assert starts[1]["segment"]["depth"] == 1
     assert all(event["segment"]["seq"] for event in starts)
+
+
+def test_flow_trace_records_decision_options_and_selection() -> None:
+    flow = start_flow(
+        request_id="request-decision",
+        entrypoint="/api/rag/query",
+    )
+    with trace_decision(
+        "route.plan",
+        stage="routing",
+        question="要走哪一條檢索路徑？",
+        method="query_plan.build_query_plan",
+    ) as decision:
+        decision.option(
+            "structured_list",
+            "結構化列舉",
+            reason="沒有可列舉條件",
+        )
+        decision.option(
+            "structured_semantic",
+            "套 filter 的向量檢索",
+            selected=True,
+            reason="只有相對日期",
+        )
+        decision.skip(
+            "llm",
+            "LLM 生成",
+            reason="前面已選定檢索路徑，未評估",
+        )
+        decision.select("structured_semantic")
+        decision.result({"dense": True, "enumerate": False})
+    payload = flow.finish(status="success")
+    clear_flow()
+
+    trace = payload["decisions"][0]
+    assert trace["id"] == "route.plan"
+    assert trace["stage"] == "routing"
+    assert trace["selected"] == "structured_semantic"
+    assert trace["result"] == {"dense": True, "enumerate": False}
+    assert trace["options"][1]["selected"] is True
+    assert trace["options"][2]["evaluated"] is False
+    assert trace["options"][2]["reason"].startswith("前面已選定")
+    assert payload["summary"]["decision_count"] == 1
+    assert payload["decision_version"] == 1
+
+
+def test_record_decision_is_noop_without_flow() -> None:
+    clear_flow()
+    record_decision(
+        "parse.query",
+        stage="parsing",
+        question="?",
+        method="test",
+        options=[{"id": "none", "label": "none", "selected": True}],
+        selected="none",
+    )
+    assert current_flow() is None
+
+
+def test_flow_trace_caps_decision_count_and_options() -> None:
+    flow = start_flow(request_id="request-decision-cap", entrypoint="/api/test")
+    for index in range(45):
+        record_decision(
+            f"step.{index}",
+            stage="parsing",
+            question="?",
+            method="test",
+        )
+    payload = flow.finish(status="success")
+    assert len(payload["decisions"]) == 40
+
+    clear_flow()
+    option_flow = start_flow(
+        request_id="request-option-cap",
+        entrypoint="/api/test",
+    )
+    with trace_decision(
+        "many.options",
+        stage="parsing",
+        question="?",
+        method="test",
+    ) as decision:
+        for index in range(20):
+            decision.option(f"o{index}", f"option {index}")
+    option_payload = option_flow.finish(status="success")
+    clear_flow()
+
+    assert len(option_payload["decisions"][0]["options"]) == 12
+
+
+def test_flow_trace_listener_receives_decision_event() -> None:
+    events = []
+    flow = start_flow(
+        request_id="request-decision-live",
+        entrypoint="/api/rag/query",
+        listener=events.append,
+    )
+    record_decision(
+        "parse.query",
+        stage="parsing",
+        question="日期語意？",
+        method="query_parser.parse_judgment_query",
+        options=[
+            {
+                "id": "relative_range",
+                "label": "相對日期",
+                "selected": True,
+                "evaluated": True,
+                "reason": "近二年",
+            }
+        ],
+        selected="relative_range",
+        result={"date_from": "2024-11-23"},
+    )
+    flow.finish(status="success")
+    clear_flow()
+
+    decisions = [event for event in events if event["type"] == "decision"]
+    assert len(decisions) == 1
+    assert decisions[0]["decision"]["selected"] == "relative_range"
+    assert decisions[0]["decision"]["options"][0]["evaluated"] is True
