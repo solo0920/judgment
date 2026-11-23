@@ -3260,19 +3260,19 @@ LIMIT ${l} OFFSET ${p}`,warnings:d,meta:{store:n,filters:a,client_side:!0}}}asyn
           <span class="badge badge-neutral badge-mono">${r(e.branch||"")}</span>
         </div>
       <div class="processing-workflow-actions">
-        <button class="btn btn-primary btn-sm" type="button"
-          data-processing-action="run-workflow"
-          data-workflow-id="${r(e.id)}"
-          ${o?"":"disabled"}
-          title="${r(o?"\u7ACB\u5373\u57F7\u884C\uFF1B\u6703\u5148\u8A08\u7B97\u7E3D\u5927\u5C0F\u8207\u9810\u4F30\u6642\u9593":l)}">
-          ${i?'<span class="spinner" aria-hidden="true"></span>':g("play",14)}<span>${i?T:"\u57F7\u884C\u6B64\u6D41\u7A0B"}</span>
-        </button>
         ${["law_download","order_download","judgment_download"].includes(e.id)?`<button class="btn btn-secondary btn-sm" type="button"
                 data-processing-action="check-updates"
                 data-workflow-id="${r(e.id)}"
                 ${i?"disabled":""}>
                 ${g("refresh",14)}<span>\u6AA2\u67E5\u66F4\u65B0</span>
               </button>`:""}
+        <button class="btn btn-primary btn-sm" type="button"
+          data-processing-action="run-workflow"
+          data-workflow-id="${r(e.id)}"
+          ${o?"":"disabled"}
+          title="${r(o?"\u7ACB\u5373\u66F4\u65B0\uFF1B\u6703\u5148\u6AA2\u67E5\u7248\u672C\u4E26\u8A08\u7B97\u7E3D\u5927\u5C0F\u8207\u9810\u4F30\u6642\u9593":l)}">
+          ${i?'<span class="spinner" aria-hidden="true"></span>':g("play",14)}<span>${i?T:"\u66F4\u65B0"}</span>
+        </button>
         ${i?`<button class="btn btn-secondary btn-sm processing-stop" type="button"
                 data-processing-action="stop">${g("x",14)}<span>\u4E2D\u6B62\u57F7\u884C</span></button>`:""}
         ${e.id==="judgment_download"?`<div class="processing-download-progress" data-judgment-progress hidden>

@@ -588,7 +588,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "judgment:processing-pending" in processing_js.text
     assert "index_pending_months" in processing_js.text
     assert "index_pending:" in processing_js.text
-    assert "立即執行" in processing_js.text
+    assert "立即更新" in processing_js.text
     assert "processing-download-active" in processing_js.text
     assert "data-judgment-downloads-list" in processing_js.text
     assert "stopRequested" in processing_js.text

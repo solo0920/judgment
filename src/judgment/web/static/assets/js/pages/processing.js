@@ -5644,17 +5644,6 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
           )}</span>
         </div>
       <div class="processing-workflow-actions">
-        <button class="btn btn-primary btn-sm" type="button"
-          data-processing-action="run-workflow"
-          data-workflow-id="${escapeHtml(workflow.id)}"
-          ${canRun ? "" : "disabled"}
-          title="${escapeHtml(
-            canRun
-              ? "立即執行；會先計算總大小與預估時間"
-              : disabledReason,
-          )}">
-          ${busy ? '<span class="spinner" aria-hidden="true"></span>' : icon("play", 14)}<span>${busy ? runStatusLabel : "執行此流程"}</span>
-        </button>
         ${
           ["law_download", "order_download", "judgment_download"].includes(
             workflow.id,
@@ -5667,6 +5656,17 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
               </button>`
             : ""
         }
+        <button class="btn btn-primary btn-sm" type="button"
+          data-processing-action="run-workflow"
+          data-workflow-id="${escapeHtml(workflow.id)}"
+          ${canRun ? "" : "disabled"}
+          title="${escapeHtml(
+            canRun
+              ? "立即更新；會先檢查版本並計算總大小與預估時間"
+              : disabledReason,
+          )}">
+          ${busy ? '<span class="spinner" aria-hidden="true"></span>' : icon("play", 14)}<span>${busy ? runStatusLabel : "更新"}</span>
+        </button>
         ${
           busy
             ? `<button class="btn btn-secondary btn-sm processing-stop" type="button"
