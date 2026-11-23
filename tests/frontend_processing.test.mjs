@@ -128,3 +128,52 @@ test("download update stays locked until a check finds an update", () => {
     clearUpdateConsumed("law_download");
   }
 });
+
+test("index update stays locked until a rebuild is detected", () => {
+  for (const id of ["legal_index_versions", "index_versions"]) {
+    const base = {
+      id,
+      label: id === "legal_index_versions" ? "法規／命令索引" : "判決向量索引",
+      description: "索引工作流程。",
+      branch: "system",
+      program: "judgment-index",
+      script: "src/judgment/index.py",
+      command: ["python", "-m", "judgment.index"],
+      can_run: true,
+      update_available: false,
+      update_count: 0,
+      pending_count: 0,
+      update_status: {},
+      progress: { stages: [], active_stage: "" },
+      recent_runs: [],
+      update_history: [],
+      index_timelines: [],
+    };
+    const locked = workflowPanelMarkup(base);
+    assert.match(
+      locked,
+      /data-processing-action="run-workflow"[\s\S]{0,180}disabled/,
+      `${id} should stay locked without a detected update`,
+    );
+    assert.equal(
+      locked.includes("目前未偵測到可重建的索引內容。"),
+      true,
+      `${id} should explain why the update is locked`,
+    );
+    assert.equal(locked.includes("processing-inline-update"), false);
+
+    const available = workflowPanelMarkup({
+      ...base,
+      update_available: true,
+      update_count: 1,
+      pending_count: 1,
+      update_message: "偵測到需要重建的索引內容。",
+    });
+    assert.doesNotMatch(
+      available,
+      /data-processing-action="run-workflow"[\s\S]{0,160}disabled/,
+      `${id} should be enabled when a rebuild is detected`,
+    );
+    assert.equal(available.includes("processing-inline-update"), true);
+  }
+});

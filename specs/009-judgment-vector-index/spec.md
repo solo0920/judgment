@@ -308,7 +308,7 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 前端 MUST 在下列位置顯示更新提示：
 
 - 資料處理 workflow 側邊清單的 `index_versions` 按鈕：顯示 refresh icon 與 E 未完成月份數。
-- Qdrant workflow 面板上方：顯示更新提示、偵測機制、月份數與「更新」按鈕；按鈕啟動 `index_versions` workflow。
+- Qdrant workflow 面板上方：顯示更新提示、偵測機制、月份數與「更新」按鈕；按鈕啟動 `index_versions` workflow。按鈕 MUST 依 `index_versions.update_available` 鎖定：只有 E 待補月份數大於 0 時才能點選；沒有待補內容時 MUST 停用並顯示「目前未偵測到可重建的索引內容。」，不得讓使用者在沒有變更時誤觸重建。
 - 全站左側「資料處理」導覽：顯示更新 badge。
 - 更新 badge 的 tooltip MUST 說明是「Qdrant 向量索引待補 N 個月」。
 
@@ -383,7 +383,7 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - [ ] 新 RAR 全部 unchanged 時，不會產生新的 E 未完成月份。
 - [ ] Summary 標籤明確標示「月份」，不是 RAR 檔數。
 - [ ] E 未完成月份會在 workflow 側邊清單、workflow 面板與全站「資料處理」導覽顯示更新 badge。
-- [ ] Qdrant workflow 面板上方有更新提示與「更新」按鈕。
+- [ ] Qdrant workflow 面板上方有更新提示與「更新」按鈕；沒有 E 待補月份時按鈕停用並顯示「目前未偵測到可重建的索引內容。」。
 - [ ] `/api/updates/status` 回傳 `index_pending_count`，且與 E 未完成月份數一致。
 - [ ] Coverage-only 沒有 run 時仍能顯示正確 R／E，並明確標示沒有本次 run。
 - [ ] Build mode 續跑能恢復 R／E counters。
@@ -434,3 +434,4 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 | 1.25 | 2026-11-20 | 04 月份時間表移除 A 分格，改為 R／E 兩格；A 只保留為 E no-backlog 的內部 baseline，不再顯示於表格、legend、summary 或 tooltip。 |
 | 1.26 | 2026-11-20 | 續跑時合併同一版本先前 run 已完成的 copy metadata；waterfall 的 03 複製階段需顯示先前 copy 時長與「續跑前完成」。 |
 | 1.27 | 2026-11-20 | 續跑時 04 索引階段合併先前 run 的 index-only 執行時間；waterfall 顯示前次執行＋本次執行合計。 |
+| 1.28 | 2026-11-23 | `index_versions` 的「更新」按鈕在沒有 E 待補月份時停用，只有偵測到待補內容才可執行；避免無變更時誤觸重建。 |
