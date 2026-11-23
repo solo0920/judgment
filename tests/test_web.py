@@ -752,6 +752,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "renderIndexPipelinePanel" in performance_js.text
     assert "rag-wf-decision" in performance_js.text
     assert "renderRagDecisionList" in performance_js.text
+    assert "renderRagPipelineStageChart" in performance_js.text
     assert "未評估" in performance_js.text
     app_js = web_client.get("/assets/js/app.js")
     assert app_js.status_code == 200
@@ -4320,6 +4321,9 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
     bundle_css = (root / "frontend" / "assets" / "styles.css").read_text(
         encoding="utf-8"
     )
+    assert "renderRagPipelineStageChart" in source_js
+    assert "finish(true, payload)" in source_js
+    assert "buildFlowWaterfallStages" not in source_js
     for script in (source_js, bundle_js):
         assert "data-rag-question-action" in script
         assert "data-rag-answer-action" in script

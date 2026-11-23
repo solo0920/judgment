@@ -503,7 +503,7 @@ Pilot 題庫檔位於 `data/benchmarks/pilot_30.json`；執行 `uv run python sc
 
 點擊 RAG 判決引用卡的案號標題（`citation-head`）會直接從原始判決 Parquet 讀取完整判決，不再只連到外部 PDF。若問題包含「所有／全部／列出／清單／近 N 年所有判決」等完整列表意圖，RAG 會在 `notice` 顯示本次候選數、實際保留的前 N 筆，並建議改用「資料庫查詢」頁面的判決分類，以案由、關鍵字與裁判日期範圍篩選或匯出 CSV／JSON；避免使用者誤以為 top-K 引用就是全部判決。「近二年／最近兩年／三年內」等相對時間會在 query parser 轉成以今日為終點的絕對日期範圍，同時套用 PostgreSQL `jdate`、Qdrant `jdate_num` 與 keyword list 的硬條件，不會回傳超出範圍的舊判決。若問題只有相對日期、沒有法院／年份／案由等可列舉條件，系統仍會用套用日期 filter 的向量檢索找出語意相近的判決，不會把日期範圍內全部判決都當成命中清單。
 
-RAG Pipeline waterfall 另外記錄 `pipeline_flow.decisions`：金融範圍 guard、未支援統計 guard、日期／法院／案由解析、route plan、filter、檢索通道、後驗、rerank、context budget、回答模式與引用稽核。每個階段可展開決策列表，顯示選項、判斷方法、選中結果與「未評估」原因；LLM 階段只標示黑箱摘要（輸入／輸出 Token、耗時），不記錄完整 prompt 或內部推理。決策由實際程式路徑產生，並隨 `performance_records.flow` 保留供事後調校；demo visitor 只取得去敏後的白名單欄位。
+RAG Pipeline waterfall 另外記錄 `pipeline_flow.decisions`：金融範圍 guard、未支援統計 guard、日期／法院／案由解析、route plan、filter、檢索通道、後驗、rerank、context budget、回答模式與引用稽核。每個階段可展開決策列表，顯示選項、判斷方法、選中結果與「未評估」原因；LLM 階段只標示黑箱摘要（輸入／輸出 Token、耗時），不記錄完整 prompt 或內部推理。決策由實際程式路徑產生，並隨 `performance_records.flow` 保留供事後調校；demo visitor 只取得去敏後的白名單欄位。`#/rag` 完成後的「後端處理流程」與回答底部共用同一份 canonical `pipeline_flow` stages，階段依執行順序接續排列；raw nested `FlowTrace.segments` 只保留在展開明細／除錯 JSON，不再形成第二套重疊 waterfall。
 
 - 輸出：`data/judgments/parquet/raw_judgments/<archive>/<YYYYMMDD>/<snapshot>/raw.parquet`
 - `raw_json` 保留未修改的原始 JSON 文字；同一份 Parquet 另含案號、法院、案由、裁判日期、命中法規與引用等查詢欄位。
