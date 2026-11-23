@@ -12,6 +12,7 @@
 | RAG 回饋問題群組 | PostgreSQL `rag_feedback_issues` | 無 feedback 且超過 180 天未更新時刪除 | 每日背景維護刪除孤兒 issue |
 | RAG 批次評估報告 | PostgreSQL `rag_feedback_evaluations` | 180 天 | 每日背景維護刪除過期報告 |
 | RAG A/B 實驗報告 | PostgreSQL `rag_feedback_experiments` | 180 天 | 每日背景維護刪除過期報告 |
+| Holdout 輪替提案與審查 | PostgreSQL `rag_holdout_rotations` | 365 天 | 每日背景維護刪除過期提案 |
 | RAG 提問／回答與效能紀錄 | PostgreSQL `performance_records` | 90 天（`PERFORMANCE_RETENTION_DAYS`） | 每日背景維護＋每 200 次寫入備援清理 |
 | 安全稽核事件 | PostgreSQL `security_audit_events` | 180 天 | 每日背景維護＋每 200 次寫入備援清理 |
 | 公開分享快照 | PostgreSQL `rag_share_snapshots` | 7 天 | 每日背景維護＋建立新分享時清理 |
@@ -28,6 +29,8 @@
 - 回饋的 `expected_behavior` 由人工 triage 填寫；匯出給 OpenCode 的 JSONL 不含原始 `comment`，避免匿名留言成為間接提示注入管道。
 - `security_audit_events` 的 180 天期限用於追查登入與管理操作。
 - 公開分享快照的 7 天期限同時受 demo 狀態影響：demo 關閉時連結失效，重新開啟不會讓已過期快照復活。分享 payload 不含 feedback token。
+- 品質週報的 Slack／email 傳送不保存副本；`.run/quality-report-*.md` 只留在本機排程目錄，且只含聚合資料與警示。
+- Holdout 輪替提案套用後只改 visibility 或 stale 旗標，不刪除題目、benchmark 結果或歷史 run。
 - 隱私文案位於 `#/rag` 的提問區與側欄，內容必須與本表一致。
 
 ## 驗證
@@ -47,5 +50,6 @@ run_retention_maintenance()
   ├─ prune_rag_feedback()          # 180 天／結案後 180 天
   ├─ prune_rag_feedback_issues()   # 無 feedback 且 180 天未更新
   ├─ prune_rag_feedback_evaluations() # 180 天
-  └─ prune_rag_feedback_experiments()  # 180 天
+  ├─ prune_rag_feedback_experiments()  # 180 天
+  └─ prune_rag_holdout_rotations()     # 365 天
 ```

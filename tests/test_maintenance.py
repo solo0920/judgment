@@ -15,6 +15,7 @@ from judgment.models import (
     RagFeedbackExperiment,
     RagFeedbackIssue,
     RagFeedbackReason,
+    RagHoldoutRotation,
     RagInteraction,
     RagShareSnapshot,
     SecurityAuditEvent,
@@ -137,6 +138,18 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             status="completed",
             created_at=now,
         )
+        expired_rotation = RagHoldoutRotation(
+            item_id=1,
+            direction="retire",
+            status="rejected",
+            created_at=now - timedelta(days=400),
+        )
+        current_rotation = RagHoldoutRotation(
+            item_id=1,
+            direction="promote",
+            status="applied",
+            created_at=now,
+        )
         session.add_all([
             expired_feedback,
             current_feedback,
@@ -146,6 +159,8 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             current_evaluation,
             expired_experiment,
             current_experiment,
+            expired_rotation,
+            current_rotation,
         ])
         session.flush()
         session.add_all(
@@ -172,6 +187,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_feedback_issues": 1,
         "rag_feedback_evaluations": 1,
         "rag_feedback_experiments": 1,
+        "rag_holdout_rotations": 1,
     }
     with factory() as session:
         assert len(session.scalars(select(PerformanceRecord)).all()) == 1
@@ -193,6 +209,8 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         ]
         assert len(session.scalars(select(RagFeedbackEvaluation)).all()) == 1
         assert len(session.scalars(select(RagFeedbackExperiment)).all()) == 1
+        rotations = session.scalars(select(RagHoldoutRotation)).all()
+        assert [row.direction for row in rotations] == ["promote"]
 
     assert run_retention_maintenance(factory) == {
         "performance_records": 0,
@@ -203,6 +221,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_feedback_issues": 0,
         "rag_feedback_evaluations": 0,
         "rag_feedback_experiments": 0,
+        "rag_holdout_rotations": 0,
     }
 
 
@@ -220,4 +239,5 @@ def test_daily_maintenance_failure_is_non_blocking() -> None:
         "rag_feedback_issues": 0,
         "rag_feedback_evaluations": 0,
         "rag_feedback_experiments": 0,
+        "rag_holdout_rotations": 0,
     }

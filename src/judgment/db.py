@@ -331,6 +331,16 @@ def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
             "issue_id",
             "ALTER TABLE rag_feedback ADD COLUMN issue_id INTEGER",
         ),
+        (
+            "conversation_id",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "conversation_id VARCHAR(64) NOT NULL DEFAULT ''",
+        ),
+        (
+            "feedback_scope",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "feedback_scope VARCHAR(16) NOT NULL DEFAULT 'turn'",
+        ),
     ]
     if not additions:
         return
@@ -350,6 +360,12 @@ def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_rag_feedback_issue_id "
                 "ON rag_feedback (issue_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_rag_feedback_conversation_id "
+                "ON rag_feedback (conversation_id)"
             )
         )
 
@@ -379,6 +395,16 @@ def _ensure_rag_interaction_review_columns(engine: Engine) -> None:
             "reviewed_at",
             "ALTER TABLE rag_interactions ADD COLUMN reviewed_at TIMESTAMP",
         ),
+        (
+            "conversation_id",
+            "ALTER TABLE rag_interactions ADD COLUMN "
+            "conversation_id VARCHAR(64) NOT NULL DEFAULT ''",
+        ),
+        (
+            "turn_index",
+            "ALTER TABLE rag_interactions ADD COLUMN "
+            "turn_index INTEGER NOT NULL DEFAULT 0",
+        ),
     ]
     with engine.begin() as connection:
         for name, statement in additions:
@@ -389,6 +415,12 @@ def _ensure_rag_interaction_review_columns(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_rag_interactions_review_status "
                 "ON rag_interactions (review_status)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_rag_interactions_conversation_id "
+                "ON rag_interactions (conversation_id)"
             )
         )
 

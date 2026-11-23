@@ -1339,7 +1339,10 @@ export const api = {
   rag(question, options = {}) {
     return request("/api/rag/query", {
       method: "POST",
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({
+        question,
+        conversation_id: options.conversationId || "",
+      }),
       timeout: options.testMode ? 0 : RAG_TIMEOUT,
     });
   },
@@ -1406,6 +1409,58 @@ export const api = {
     return request(
       `/api/rag/feedback-issues/${encodeURIComponent(issueId)}?days=${encodeURIComponent(days)}`,
       { timeout: 45000, trackClient: false },
+    );
+  },
+
+  holdoutRotations(status = "pending", limit = 50) {
+    return request(
+      `/api/rag/holdout-rotations?status=${encodeURIComponent(status)}&limit=${encodeURIComponent(limit)}`,
+      { timeout: 45000, trackClient: false },
+    );
+  },
+
+  planHoldoutRotations(payload = {}) {
+    return request("/api/rag/holdout-rotations/plan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 60000,
+      trackClient: false,
+    });
+  },
+
+  applyHoldoutRotation(rotationId, payload = {}) {
+    return request(
+      `/api/rag/holdout-rotations/${encodeURIComponent(rotationId)}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  rejectHoldoutRotation(rotationId, payload = {}) {
+    return request(
+      `/api/rag/holdout-rotations/${encodeURIComponent(rotationId)}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  ragFeedbackIssueBatch(issueId, payload) {
+    return request(
+      `/api/rag/feedback-issues/${encodeURIComponent(issueId)}/batch`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 45000,
+        trackClient: false,
+      },
     );
   },
 
@@ -1564,6 +1619,7 @@ export const api = {
     question,
     {
       testMode = false,
+      conversationId = "",
       onStep = null,
       onPartial = null,
       onQueued = null,
@@ -1590,7 +1646,10 @@ export const api = {
       response = await fetch(apiUrl("/api/rag/query/stream", base), {
         method: "POST",
         headers,
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({
+          question,
+          conversation_id: conversationId,
+        }),
         credentials: "include",
         signal: controller.signal,
       });

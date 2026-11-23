@@ -786,6 +786,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "data-feedback-issue-id" in feedback_js.text
     assert "rag-feedback-issue-detail" in feedback_js.text
     assert "data-issue-form" in feedback_js.text
+    assert "data-issue-batch" in feedback_js.text
+    assert "rag-feedback-conversation" in feedback_js.text
     assert "建立並連結" in feedback_js.text
     assert "批次重跑評估" in feedback_js.text
     assert "rag-feedback-evaluation" in feedback_js.text
@@ -861,6 +863,16 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-report-alert" in css.text
     assert ".rag-feedback-issue-detail" in css.text
     assert ".rag-feedback-issue-feedback-row" in css.text
+    assert ".rag-feedback-conversation-turn" in css.text
+    assert ".qb-rotation-row" in css.text
+    question_bank_js = web_client.get(
+        "/assets/js/pages/question_bank.js"
+    )
+    assert question_bank_js.status_code == 200
+    assert "rotation-plan" in question_bank_js.text
+    assert "Holdout 輪替" in question_bank_js.text
+    assert "data-qb-action=\"rotation-apply\"" in question_bank_js.text
+    assert ".rag-feedback-scope-options" in css.text
     assert ".rag-feedback-review-row" in css.text
     assert ".rag-feedback-review-detail" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
@@ -3284,6 +3296,169 @@ def test_feedback_issue_grouping_and_export(web_client) -> None:
     assert row["issue"]["linked_pr_url"].endswith("/pr/1")
 
 
+def test_rag_feedback_multi_turn_conversation_scope(web_client) -> None:
+    first = web_client.post(
+        "/api/rag/query",
+        json={
+            "question": "銀行法如何規範吸收存款？",
+            "conversation_id": "conv-test-1001",
+        },
+    ).json()
+    second = web_client.post(
+        "/api/rag/query",
+        json={
+            "question": "那授信限額呢？",
+            "conversation_id": "conv-test-1001",
+        },
+    ).json()
+    assert first["request_id"] != second["request_id"]
+
+    feedback = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": second["request_id"],
+            "feedback_token": second["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "comment": "追問沒有接續前一輪。",
+            "feedback_scope": "conversation",
+        },
+    )
+    assert feedback.status_code == 201, feedback.text
+    payload = feedback.json()
+    assert payload["feedback_scope"] == "conversation"
+    assert payload["conversation_id"] == "conv-test-1001"
+
+    detail = web_client.get(f"/api/rag/feedback/{payload['id']}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["feedback_scope"] == "conversation"
+    conversation = detail_payload["conversation"]
+    assert [turn["turn_index"] for turn in conversation] == [0, 1]
+    assert conversation[0]["question"] == "銀行法如何規範吸收存款？"
+    assert conversation[1]["question"] == "那授信限額呢？"
+    assert conversation[1]["feedback_id"] == payload["id"]
+    assert conversation[1]["feedback_scope"] == "conversation"
+    assert all("comment" not in turn for turn in conversation)
+
+    invalid = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": second["request_id"],
+            "feedback_token": second["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "feedback_scope": "conversation-wide",
+        },
+    )
+    assert invalid.status_code == 422
+
+
+def test_feedback_issue_batch_actions(web_client) -> None:
+    feedback_ids = []
+    for index, question in enumerate(
+        ["銀行法如何規範吸收存款？", "銀行法如何規範授信？"]
+    ):
+        answer = web_client.post(
+            "/api/rag/query",
+            json={
+                "question": question,
+                "conversation_id": f"conv-batch-{index}",
+            },
+        ).json()
+        feedback = web_client.post(
+            "/api/rag/feedback",
+            json={
+                "request_id": answer["request_id"],
+                "feedback_token": answer["feedback"]["token"],
+                "sentiment": "unsatisfied",
+                "reasons": ["incomplete"],
+                "comment": "",
+            },
+        ).json()
+        feedback_ids.append(feedback["id"])
+
+    issue = web_client.post(
+        "/api/rag/feedback-issues",
+        json={
+            "title": "吸收存款與授信回答不完整",
+            "root_cause_stage": "llm_generation",
+            "severity": "high",
+        },
+    ).json()
+    for feedback_id in feedback_ids:
+        linked = web_client.patch(
+            f"/api/rag/feedback/{feedback_id}",
+            json={"issue_id": issue["id"]},
+        )
+        assert linked.status_code == 200, linked.text
+
+    planned = web_client.post(
+        f"/api/rag/feedback-issues/{issue['id']}/batch",
+        json={
+            "action": "plan",
+            "expected_behavior": "回答必須先界定吸收存款與授信的適用範圍。",
+            "linked_pr_url": "https://example.test/pr/42",
+        },
+    )
+    assert planned.status_code == 200, planned.text
+    planned_payload = planned.json()
+    assert planned_payload["updated"] == 2
+    assert planned_payload["issue"]["status"] == "planned"
+    assert planned_payload["issue"]["linked_pr_url"].endswith("/pr/42")
+
+    for feedback_id in feedback_ids:
+        detail = web_client.get(f"/api/rag/feedback/{feedback_id}").json()
+        assert detail["status"] == "planned"
+        assert detail["expected_behavior"].startswith("回答必須先界定")
+        assert any(
+            event["event_type"] == "batch_plan"
+            for event in detail["events"]
+        )
+
+    export = web_client.get(
+        "/api/rag/feedback/export",
+        params={"sentiment": "unsatisfied"},
+    )
+    rows = [
+        json.loads(line)
+        for line in export.text.splitlines()
+        if line.strip()
+    ]
+    assert {row["feedback_id"] for row in rows} >= set(feedback_ids)
+
+    mismatched = web_client.post(
+        f"/api/rag/feedback-issues/{issue['id']}/batch",
+        json={"action": "resolve", "feedback_ids": [999999]},
+    )
+    assert mismatched.status_code == 422
+    assert mismatched.json()["code"] == "feedback_issue_mismatch"
+
+    resolved = web_client.post(
+        f"/api/rag/feedback-issues/{issue['id']}/batch",
+        json={"action": "resolve"},
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["updated"] == 2
+    assert resolved.json()["issue"]["status"] == "resolved"
+    export_after = web_client.get(
+        "/api/rag/feedback/export",
+        params={"sentiment": "unsatisfied"},
+    )
+    remaining = [
+        json.loads(line)
+        for line in export_after.text.splitlines()
+        if line.strip()
+    ]
+    assert not ({row["feedback_id"] for row in remaining} & set(feedback_ids))
+
+    invalid = web_client.post(
+        f"/api/rag/feedback-issues/{issue['id']}/batch",
+        json={"action": "archive"},
+    )
+    assert invalid.status_code == 422
+
+
 def test_feedback_batch_evaluation_is_stored(web_client) -> None:
     answer = web_client.post(
         "/api/rag/query",
@@ -3441,6 +3616,31 @@ def test_feedback_quality_report_includes_alerts_and_markdown(web_client) -> Non
     assert payload["daily"]
     assert "RAG 品質週報" in payload["markdown"]
     assert payload["markdown"].count("不滿意") >= 1
+
+
+def test_holdout_rotation_routes_are_admin_only(web_client) -> None:
+    listing = web_client.get("/api/rag/holdout-rotations")
+    assert listing.status_code == 200
+    assert listing.json()["rotations"] == []
+
+    planned = web_client.post(
+        "/api/rag/holdout-rotations/plan",
+        json={"max_promotions": 1, "max_retirements": 1},
+    )
+    assert planned.status_code == 200, planned.text
+    assert planned.json()["generated"] == 0
+
+    missing = web_client.post(
+        "/api/rag/holdout-rotations/999999/apply",
+        json={"review_comment": ""},
+    )
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "rotation_not_found"
+
+    invalid = web_client.get(
+        "/api/rag/holdout-rotations", params={"status": "unknown"}
+    )
+    assert invalid.status_code == 422
 
 
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
@@ -4454,6 +4654,27 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert (
         policy_for("GET", "/api/rag/feedback-issues/{issue_id}", policies)
         == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for(
+            "POST", "/api/rag/feedback-issues/{issue_id}/batch", policies
+        )
+        == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for("GET", "/api/rag/holdout-rotations", policies)
+        == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for("POST", "/api/rag/holdout-rotations/plan", policies)
+        == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for(
+            "POST", "/api/rag/holdout-rotations/{rotation_id}/apply",
+            policies,
+        )
+        == "ADMIN_WRITE"
     )
     assert (
         policy_for("GET", "/api/rag/feedback/evaluations", policies)

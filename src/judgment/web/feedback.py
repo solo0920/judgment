@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -134,6 +135,7 @@ ISSUE_STATUSES: Dict[str, str] = {
     "dismissed": "不處理",
 }
 
+FEEDBACK_SCOPES = ("turn", "conversation")
 REVIEW_STATUSES = ("new", "reviewed", "dismissed")
 REVIEW_STATUS_LABELS = {
     "new": "待審",
@@ -513,6 +515,7 @@ def record_interaction(
     settings: Settings,
     *,
     request_id: str,
+    conversation_id: str,
     question: str,
     result: Mapping[str, Any],
     pipeline_flow: Optional[Mapping[str, Any]],
@@ -527,6 +530,9 @@ def record_interaction(
     """
 
     request_id = str(request_id or "").strip()
+    conversation_id = re.sub(
+        r"[^A-Za-z0-9_-]", "", str(conversation_id or "")
+    )[:64]
     if not request_id or session_factory is None:
         return {}
     created_at = _aware(now or _utcnow()) or _utcnow()
@@ -560,6 +566,23 @@ def record_interaction(
                     expires_at=expires_at,
                 )
                 session.add(row)
+            turn_index = 0
+            if conversation_id:
+                previous_turn = session.scalar(
+                    select(func.max(RagInteraction.turn_index)).where(
+                        RagInteraction.conversation_id == conversation_id,
+                        RagInteraction.request_id != request_id,
+                    )
+                )
+                turn_index = (
+                    int(previous_turn) + 1
+                    if previous_turn is not None
+                    else 0
+                )
+            snapshot["conversation_id"] = conversation_id
+            snapshot["turn_index"] = turn_index
+            row.conversation_id = conversation_id
+            row.turn_index = turn_index
             row.question = str(question or "")
             row.answer = str(result.get("answer") or "")
             row.answer_source = str(result.get("answer_source") or "")[:32]
@@ -612,6 +635,7 @@ def submit_feedback(
     sentiment: str,
     reasons: Iterable[str],
     comment: str,
+    feedback_scope: str = "turn",
     client_ip: str,
     is_demo: bool,
     now: Optional[datetime] = None,
@@ -622,6 +646,11 @@ def submit_feedback(
     sentiment = str(sentiment or "").strip().lower()
     if sentiment not in {"satisfied", "unsatisfied"}:
         raise FeedbackError(422, "invalid_sentiment", "回饋必須是滿意或不滿意。")
+    feedback_scope = str(feedback_scope or "turn").strip().lower()
+    if feedback_scope not in FEEDBACK_SCOPES:
+        raise FeedbackError(
+            422, "invalid_feedback_scope", "回饋範圍必須是單輪或整段對話。"
+        )
     payload = parse_feedback_token(feedback_token, settings)
     if payload is None:
         raise FeedbackError(
@@ -673,8 +702,10 @@ def submit_feedback(
             row = RagFeedback(
                 interaction_id=interaction.id,
                 request_id=request_id,
+                conversation_id=interaction.conversation_id or "",
                 client_key_hash=client_hash,
                 sentiment=sentiment,
+                feedback_scope=feedback_scope,
                 primary_reason=codes[0] if codes else "",
                 comment=text,
                 snapshot=interaction.response_snapshot or {},
@@ -711,6 +742,8 @@ def submit_feedback(
                 )
             )
         row.sentiment = sentiment
+        row.conversation_id = interaction.conversation_id or ""
+        row.feedback_scope = feedback_scope
         row.primary_reason = codes[0] if codes else ""
         row.comment = text
         row.snapshot = interaction.response_snapshot or {}
@@ -760,6 +793,8 @@ def serialize_feedback(
         "id": row.id,
         "request_id": row.request_id,
         "sentiment": row.sentiment,
+        "feedback_scope": row.feedback_scope or "turn",
+        "conversation_id": row.conversation_id or "",
         "reasons": list(reasons or []),
         "primary_reason": row.primary_reason,
         "comment": row.comment,
@@ -1899,6 +1934,120 @@ def update_feedback_issue(
         return serialize_issue(row, feedback_count=count)
 
 
+ISSUE_BATCH_ACTIONS = {
+    "triage": ("triaged", "triaged"),
+    "plan": ("planned", "planned"),
+    "resolve": ("resolved", "resolved"),
+    "dismiss": ("dismissed", "dismissed"),
+}
+
+
+def batch_update_feedback_issue(
+    session_factory: sessionmaker[Session],
+    issue_id: int,
+    *,
+    action: str,
+    feedback_ids: Optional[Iterable[int]] = None,
+    expected_behavior: str = "",
+    linked_pr_url: Optional[str] = None,
+    review_comment: str = "",
+    actionable: Optional[bool] = None,
+    actor: str,
+    settings: Settings,
+) -> Dict[str, Any]:
+    action = str(action or "").strip()
+    if action not in ISSUE_BATCH_ACTIONS:
+        raise FeedbackError(
+            422,
+            "invalid_batch_action",
+            "批次動作必須是 triage、plan、resolve 或 dismiss。",
+        )
+    feedback_status, issue_status = ISSUE_BATCH_ACTIONS[action]
+    behavior = str(expected_behavior or "").strip()
+    if len(behavior) > COMMENT_MAX_LENGTH:
+        raise FeedbackError(
+            422, "expected_behavior_too_long", "人工建議 Agent 修正方向的 prompt 最多 4000 字。"
+        )
+    note = str(review_comment or "").strip()
+    if len(note) > COMMENT_MAX_LENGTH:
+        raise FeedbackError(
+            422, "review_comment_too_long", "審查備註最多 4000 字。"
+        )
+    selected_ids = {
+        int(value)
+        for value in (feedback_ids or [])
+        if str(value).strip().isdigit()
+    }
+    with session_factory() as session:
+        issue = session.get(RagFeedbackIssue, int(issue_id))
+        if issue is None:
+            raise FeedbackError(404, "issue_not_found", "找不到這個問題群組。")
+        query = select(RagFeedback).where(RagFeedback.issue_id == issue.id)
+        if selected_ids:
+            query = query.where(RagFeedback.id.in_(selected_ids))
+        rows = list(session.scalars(query.order_by(RagFeedback.id.asc())).all())
+        if selected_ids:
+            found = {int(row.id) for row in rows}
+            missing = sorted(selected_ids - found)
+            if missing:
+                raise FeedbackError(
+                    422,
+                    "feedback_issue_mismatch",
+                    f"回饋 {', '.join(str(value) for value in missing)} 不在這個問題群組。",
+                )
+        now = _utcnow()
+        expires_at = now + timedelta(
+            days=max(1, int(settings.rag_feedback_retention_days))
+        )
+        effective_actionable = (
+            True if actionable is None and action == "plan" else actionable
+        )
+        for row in rows:
+            before = row.status
+            row.status = feedback_status
+            if effective_actionable is not None:
+                row.actionable = bool(effective_actionable)
+            if behavior:
+                row.expected_behavior = behavior
+            if note:
+                row.review_comment = note
+            row.reviewed_by = str(actor or "")[:120]
+            row.reviewed_at = now
+            row.updated_at = now
+            row.expires_at = max(_aware(row.expires_at) or now, expires_at)
+            session.add(
+                RagFeedbackEvent(
+                    feedback_id=row.id,
+                    event_type=f"batch_{action}",
+                    from_status=before,
+                    to_status=feedback_status,
+                    actor=str(actor or "")[:120],
+                    comment=note[:COMMENT_MAX_LENGTH],
+                )
+            )
+        issue.status = issue_status
+        issue.updated_at = now
+        if linked_pr_url is not None:
+            issue.linked_pr_url = str(linked_pr_url or "").strip()[:1000]
+        session.commit()
+        session.refresh(issue)
+        count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.issue_id == issue.id)
+            )
+            or 0
+        )
+        payload = {
+            "issue": serialize_issue(issue, feedback_count=count),
+            "action": action,
+            "updated": len(rows),
+            "feedback_ids": [int(row.id) for row in rows],
+        }
+    return payload
+
+
 def _attach_issue(
     session: Session,
     row: RagFeedback,
@@ -1955,6 +2104,52 @@ def get_feedback(
             }
             for event in events
         ]
+        conversation = []
+        if row.conversation_id:
+            turns = session.scalars(
+                select(RagInteraction)
+                .where(
+                    RagInteraction.conversation_id == row.conversation_id
+                )
+                .order_by(
+                    RagInteraction.turn_index.asc(),
+                    RagInteraction.created_at.asc(),
+                )
+                .limit(50)
+            ).all()
+            request_ids = [turn.request_id for turn in turns]
+            feedback_map = {
+                feedback.request_id: feedback
+                for feedback in session.scalars(
+                    select(RagFeedback).where(
+                        RagFeedback.request_id.in_(request_ids)
+                    )
+                ).all()
+            } if request_ids else {}
+            for turn in turns:
+                turn_feedback = feedback_map.get(turn.request_id)
+                conversation.append(
+                    {
+                        "request_id": turn.request_id,
+                        "turn_index": int(turn.turn_index or 0),
+                        "question": turn.question,
+                        "answer_preview": str(turn.answer or "")[:320],
+                        "answer_source": turn.answer_source,
+                        "status": turn.status,
+                        "created_at": _iso(turn.created_at),
+                        "feedback_id": (
+                            int(turn_feedback.id)
+                            if turn_feedback is not None
+                            else None
+                        ),
+                        "feedback_scope": (
+                            turn_feedback.feedback_scope
+                            if turn_feedback is not None
+                            else ""
+                        ),
+                    }
+                )
+        payload["conversation"] = conversation
         return payload
 
 
@@ -2822,6 +3017,7 @@ def update_feedback(
         "expected_date_to",
         "citation_verdicts",
         "issue_id",
+        "feedback_scope",
         "review_comment",
         "linked_pr_url",
         "linked_question_id",
@@ -2911,6 +3107,13 @@ def update_feedback(
             row.citation_verdicts = _normalize_citation_verdicts(
                 updates.get("citation_verdicts")
             )
+        if "feedback_scope" in updates:
+            scope = str(updates.get("feedback_scope") or "").strip()
+            if scope not in FEEDBACK_SCOPES:
+                raise FeedbackError(
+                    422, "invalid_feedback_scope", "回饋範圍不正確。"
+                )
+            row.feedback_scope = scope
         if "issue_id" in updates:
             value = updates.get("issue_id")
             if value in {None, ""}:

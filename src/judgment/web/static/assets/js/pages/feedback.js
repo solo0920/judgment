@@ -759,6 +759,10 @@ function renderIssueDetail(detail) {
           <input class="input" type="url" name="linked_pr_url" maxlength="1000" value="${escapeHtml(issue.linked_pr_url || "")}" placeholder="https://github.com/..." />
         </label>
         <div class="rag-feedback-issue-form-actions">
+          <span class="rag-feedback-issue-batch-hint">批次套用到 ${formatNumber(feedback.length)} 筆關聯回饋</span>
+          <button class="btn btn-secondary btn-sm" type="button" data-issue-batch="plan">${icon("clock", 13)}<span>標記已排入</span></button>
+          <button class="btn btn-secondary btn-sm" type="button" data-issue-batch="resolve">${icon("check", 13)}<span>全部解決</span></button>
+          <button class="btn btn-secondary btn-sm" type="button" data-issue-batch="dismiss">${icon("x", 13)}<span>全部忽略</span></button>
           <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>儲存 Issue</span></button>
         </div>
       </form>
@@ -782,6 +786,28 @@ function renderIssueDetail(detail) {
 }
 
 
+function renderConversationTimeline(conversation) {
+  if (!Array.isArray(conversation) || !conversation.length) return "";
+  return `<div class="report-section rag-feedback-conversation">
+    <div class="report-section-title">整段對話時間線 · ${formatNumber(conversation.length)} 輪</div>
+    <div class="rag-feedback-conversation-list">
+      ${conversation
+        .map(
+          (turn) => `<div class="rag-feedback-conversation-turn ${turn.feedback_id ? "has-feedback" : ""}">
+            <div class="rag-feedback-conversation-meta">
+              <span class="badge badge-neutral">第 ${formatNumber(Number(turn.turn_index || 0) + 1)} 輪</span>
+              ${turn.feedback_id ? statusBadge(turn.feedback_scope === "conversation" ? "warning" : "info", `回饋 #${turn.feedback_id}${turn.feedback_scope === "conversation" ? " · 整段對話" : ""}`) : ""}
+              <span class="muted">${escapeHtml(formatDateTime(turn.created_at))}</span>
+            </div>
+            <div class="rag-feedback-conversation-question">${escapeHtml(turn.question || "")}</div>
+            <div class="rag-feedback-conversation-answer">${escapeHtml(turn.answer_preview || "（沒有回答文字）")}</div>
+          </div>`,
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
 function renderDetail(detail, issues = []) {
   const snapshot = detail?.snapshot || {};
   const flow = snapshot.pipeline_flow;
@@ -798,6 +824,7 @@ function renderDetail(detail, issues = []) {
         ${detail.sentiment === "satisfied" ? statusBadge("success", "滿意") : statusBadge("warning", "不滿意")}
       </div>
       <div class="rag-feedback-user-reasons">
+        <span class="badge badge-neutral">${detail.feedback_scope === "conversation" ? "整段對話" : "這一輪回答"}</span>
         ${(detail.reasons || []).map((code) => `<span class="badge badge-warn">${escapeHtml(code)}</span>`).join(" ") || '<span class="cell-empty">沒有選原因</span>'}
       </div>
       ${detail.comment ? `<blockquote class="rag-feedback-comment-view">${escapeHtml(detail.comment)}</blockquote>` : '<p class="cell-empty">沒有留言。</p>'}
@@ -835,6 +862,7 @@ function renderDetail(detail, issues = []) {
       </div>
       ${renderCitations(snapshot, detail)}
     </div>
+    ${renderConversationTimeline(detail.conversation)}
     ${waterfall ? `<div class="report-section"><div class="report-section-title">Pipeline 快照</div><div class="rag-process-body">${waterfall}</div></div>` : ""}
     <div class="report-section">
       <details class="rag-feedback-raw">
@@ -849,6 +877,17 @@ function renderDetail(detail, issues = []) {
     <div class="report-section">
       <div class="report-section-title">管理者 triage</div>
       <form class="rag-feedback-triage" data-feedback-triage>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>回饋範圍</legend>
+            <div class="rag-feedback-choice-options">
+              ${[["turn", "這一輪回答"], ["conversation", "整段對話"]].map(([code, label]) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="feedback_scope" value="${code}" ${(detail.feedback_scope || "turn") === code ? "checked" : ""} />
+                <span>${escapeHtml(label)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+        </div>
         <div class="rag-feedback-choice-row rag-feedback-triage-wide">
           <fieldset class="rag-feedback-choice-group">
             <legend>狀態</legend>
@@ -1208,6 +1247,10 @@ export function createFeedbackController(container, { onStats } = {}) {
           expected_date_from: String(data.get("expected_date_from") || ""),
           expected_date_to: String(data.get("expected_date_to") || ""),
           citation_verdicts: citationVerdicts,
+          feedback_scope:
+            String(data.get("feedback_scope") || "turn") === "conversation"
+              ? "conversation"
+              : "turn",
           issue_id: String(data.get("issue_id") || ""),
           review_comment: String(data.get("review_comment") || ""),
         });
@@ -1417,6 +1460,41 @@ export function createFeedbackController(container, { onStats } = {}) {
         }
         return;
       }
+    }
+    const issueBatch = event.target.closest("[data-issue-batch]");
+    if (issueBatch) {
+      const issueId = issueDetail?.issue?.id;
+      if (!issueId) return;
+      const action = String(issueBatch.dataset.issueBatch || "");
+      const actionLabel =
+        action === "plan" ? "標記為已排入" : action === "resolve" ? "全部解決" : "全部忽略";
+      if (
+        (action === "resolve" || action === "dismiss") &&
+        !window.confirm(`確定要將此問題群組的全部回饋${actionLabel}嗎？`)
+      ) {
+        return;
+      }
+      const form = issueBatch.closest("[data-issue-form]");
+      const linkedPr = String(form?.elements?.linked_pr_url?.value || "").trim();
+      setBusy(issueBatch, true, "套用中…");
+      try {
+        const result = await api.ragFeedbackIssueBatch(issueId, {
+          action,
+          linked_pr_url: linkedPr || null,
+        });
+        issueDetail = await api.ragFeedbackIssueDetail(issueId);
+        await Promise.all([loadIssues(), load()]);
+        toast(
+          `已將 ${formatNumber(result.updated)} 筆回饋${actionLabel}。`,
+          "ok",
+          4600,
+        );
+      } catch (error) {
+        toast(error.message || "批次操作失敗。", "danger");
+      } finally {
+        setBusy(issueBatch, false);
+      }
+      return;
     }
     const issueAction = event.target.closest("[data-issue-action]");
     if (issueAction?.dataset.issueAction === "close") {
