@@ -1527,6 +1527,50 @@ def test_relative_date_filter_reaches_vector_search_and_list_answer() -> None:
     assert payload["retrieval"]["retrieval_mode"] == "vector"
 
 
+def test_answer_question_records_rag_decision_trace() -> None:
+    session_factory = _session_factory()
+    _seed_judgments(session_factory)
+    flow = start_flow(
+        request_id="rag-decision-test",
+        entrypoint="/api/rag/query",
+        method="POST",
+        path="/api/rag/query",
+    )
+    try:
+        payload = answer_question(
+            session_factory=session_factory,
+            question="近二年返還借款的判決有那些?",
+            settings=_settings(
+                qdrant_url="http://qdrant.test",
+                embedding_url="http://ollama.test",
+            ),
+            store=FakeStore(),
+            embedder=FakeEmbedder(),
+            enable_law_retrieval=False,
+        )
+    finally:
+        trace = flow.finish(status="success")
+        clear_flow()
+
+    assert payload["retrieval"]["retrieval_mode"] == "vector"
+    decisions = {item["id"]: item for item in trace["decisions"]}
+    assert decisions["parse.query"]["selected"] == "relative_range"
+    assert decisions["parse.query"]["result"]["date_from"]
+    assert decisions["guard.financial_scope"]["selected"] == "in_scope"
+    assert decisions["route.plan"]["selected"] == "structured_semantic"
+    assert decisions["filter.apply"]["selected"] == ["date_range"]
+    assert decisions["retrieve.channel"]["selected"] == "vector"
+    assert decisions["answer.mode"]["selected"] == "retrieval_list"
+    assert decisions["rerank"]["selected"] == "skip"
+    rerank_option = next(
+        item
+        for item in decisions["rerank"]["options"]
+        if item["id"] == "rerank"
+    )
+    assert rerank_option["evaluated"] is False
+    assert trace["summary"]["decision_count"] == len(trace["decisions"])
+
+
 def test_answer_question_reranks_candidates_and_traces_provider(
     monkeypatch,
 ) -> None:
@@ -2897,6 +2941,29 @@ def test_unsupported_statistics_question_detection() -> None:
     assert not is_unsupported_statistics_question("證券交易法對內線交易有什麼規範？")
 
 
+def test_unsupported_statistics_records_guard_decision() -> None:
+    flow = start_flow(
+        request_id="unsupported-statistics-decision-test",
+        entrypoint="/api/rag/query",
+    )
+    try:
+        payload = answer_question(
+            session_factory=_session_factory(),
+            question="這部法有幾章?",
+            settings=_settings(),
+        )
+    finally:
+        trace = flow.finish(status="success")
+        clear_flow()
+
+    assert payload["retrieval"]["status"] == "unsupported_statistics"
+    assert payload["answer_source"] == "structured"
+    decisions = {item["id"]: item for item in trace["decisions"]}
+    assert decisions["guard.statistics"]["selected"] == "unsupported"
+    assert decisions["guard.statistics"]["result"]["refusal"] is True
+    assert "answer.mode" not in decisions
+
+
 def test_company_law_boundary_and_count_answers(tmp_path: Path, monkeypatch) -> None:
     session_factory = _session_factory()
     _seed_laws(session_factory)
@@ -2963,14 +3030,24 @@ def test_company_law_boundary_and_count_answers(tmp_path: Path, monkeypatch) -> 
     )
     settings = _settings(law_data_dir=tmp_path)
 
-    last = answer_question(
-        session_factory=session_factory,
-        question="公司法最後一條是什麼內容?",
-        settings=settings,
+    flow = start_flow(
+        request_id="law-boundary-decision-test",
+        entrypoint="/api/rag/query",
     )
+    try:
+        last = answer_question(
+            session_factory=session_factory,
+            question="公司法最後一條是什麼內容?",
+            settings=settings,
+        )
+    finally:
+        trace = flow.finish(status="success")
+        clear_flow()
     assert last["answer_source"] == "structured"
     assert "第 449 條" in last["answer"]
     assert "自公布日施行" in last["answer"]
+    decisions = {item["id"]: item for item in trace["decisions"]}
+    assert decisions["law.structured"]["selected"] == ["article_boundary"]
 
     count = answer_question(
         session_factory=session_factory,

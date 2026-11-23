@@ -23,6 +23,9 @@ _current_flow: contextvars.ContextVar[Optional["FlowTrace"]] = contextvars.Conte
 )
 
 MAX_FLOW_SEGMENTS = 500
+MAX_FLOW_DECISIONS = 40
+MAX_DECISION_OPTIONS = 12
+MAX_DECISION_TEXT = 600
 
 
 def _json_safe(value: Any) -> Any:
@@ -55,6 +58,32 @@ def _safe_params(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(params, dict):
         return {}
     return _json_safe(_trim_json(params))
+
+
+def _decision_text(value: Any) -> str:
+    text = str(value or "").replace("\x00", "").strip()
+    return text[:MAX_DECISION_TEXT]
+
+
+def _safe_decision_value(value: Any) -> Any:
+    """Keep decision payloads small and JSON-safe."""
+
+    return _json_safe(_trim_json(value))
+
+
+def _selected_ids(selected: Any) -> List[str]:
+    if selected is None:
+        return []
+    if isinstance(selected, (list, tuple, set)):
+        values = selected
+    else:
+        values = [selected]
+    result: List[str] = []
+    for value in values:
+        text = _decision_text(value)
+        if text and text not in result:
+            result.append(text)
+    return result
 
 
 def _summarize_value(value: Any) -> Any:
@@ -178,6 +207,202 @@ def summarize_flow(
     return result
 
 
+class DecisionTrace:
+    """One recorded branch decision inside a request flow.
+
+    Decisions are annotations, not timing spans.  They are linked to the
+    waterfall by ``stage`` and ``offset_ms``.  A decision can have multiple
+    selected options (for example "which filters were applied?"), but every
+    unselected option must be explicit about whether it was evaluated.
+    """
+
+    def __init__(
+        self,
+        flow: Optional["FlowTrace"],
+        decision_id: str,
+        *,
+        stage: str = "",
+        question: str = "",
+        method: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.flow = flow
+        self._started = time.perf_counter()
+        self._closed = False
+        self.record: Optional[Dict[str, Any]] = None
+        if flow is None:
+            return
+        flow._decision_seq += 1
+        self.record = {
+            "seq": flow._decision_seq,
+            "id": _decision_text(decision_id) or "decision",
+            "stage": _decision_text(stage) or "unknown",
+            "question": _decision_text(question),
+            "method": _decision_text(method),
+            "offset_ms": round(
+                max(0.0, self._started - flow._started) * 1000, 2
+            ),
+            "duration_ms": 0.0,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "status": "ok",
+            "error": None,
+            "selected": None,
+            "options": [],
+            "result": {},
+            "opaque": False,
+            "metadata": _safe_params(metadata),
+        }
+
+    def option(
+        self,
+        option_id: str,
+        label: str,
+        *,
+        selected: bool = False,
+        evaluated: bool = True,
+        reason: str = "",
+        score: Optional[float] = None,
+    ) -> "DecisionTrace":
+        if self.record is None:
+            return self
+        options = self.record["options"]
+        if len(options) >= MAX_DECISION_OPTIONS:
+            return self
+        if any(item.get("id") == option_id for item in options):
+            return self
+        item: Dict[str, Any] = {
+            "id": _decision_text(option_id),
+            "label": _decision_text(label) or _decision_text(option_id),
+            "selected": bool(selected),
+            "evaluated": bool(evaluated),
+            "reason": _decision_text(reason),
+        }
+        if score is not None:
+            try:
+                item["score"] = round(float(score), 4)
+            except (TypeError, ValueError):
+                pass
+        options.append(item)
+        return self
+
+    def skip(
+        self,
+        option_id: str,
+        label: str,
+        *,
+        reason: str = "",
+    ) -> "DecisionTrace":
+        return self.option(
+            option_id,
+            label,
+            selected=False,
+            evaluated=False,
+            reason=reason,
+        )
+
+    def select(self, *selected: Any) -> "DecisionTrace":
+        if self.record is None:
+            return self
+        if (
+            len(selected) == 1
+            and isinstance(selected[0], (list, tuple, set))
+        ):
+            selected = tuple(selected[0])
+        values = _selected_ids(selected)
+        if not values:
+            return self
+        for item in self.record["options"]:
+            item["selected"] = item.get("id") in values
+        self.record["selected"] = (
+            values[0] if len(values) == 1 else list(values)
+        )
+        return self
+
+    def select_many(self, selected: Any) -> "DecisionTrace":
+        """Select multiple options and always store the result as a list."""
+
+        if self.record is None:
+            return self
+        values = _selected_ids(selected)
+        if not values:
+            return self
+        for item in self.record["options"]:
+            item["selected"] = item.get("id") in values
+        self.record["selected"] = list(values)
+        return self
+
+    def result(self, value: Any) -> "DecisionTrace":
+        if self.record is not None:
+            self.record["result"] = _safe_decision_value(value)
+        return self
+
+    def note(self, key: str, value: Any) -> "DecisionTrace":
+        if self.record is not None:
+            self.record["metadata"][_decision_text(key)[:100]] = (
+                _safe_decision_value(value)
+            )
+        return self
+
+    def opaque(self, value: bool = True) -> "DecisionTrace":
+        if self.record is not None:
+            self.record["opaque"] = bool(value)
+        return self
+
+    def _finish(self, *, error: Optional[BaseException] = None) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self.record is None or self.flow is None:
+            return
+        finished = time.perf_counter()
+        self.record["duration_ms"] = round(
+            max(0.0, finished - self._started) * 1000, 2
+        )
+        self.record["end_offset_ms"] = round(
+            float(self.record["offset_ms"])
+            + float(self.record["duration_ms"]),
+            2,
+        )
+        self.record["finished_at"] = datetime.now(timezone.utc).isoformat()
+        if error is not None:
+            self.record["status"] = "error"
+            self.record["error"] = (
+                f"{error.__class__.__name__}: {error}"[:1000]
+            )
+        if self.record.get("selected") is None:
+            selected = [
+                str(item.get("id"))
+                for item in self.record["options"]
+                if item.get("selected")
+            ]
+            if selected:
+                self.record["selected"] = (
+                    selected[0] if len(selected) == 1 else selected
+                )
+        self.flow._record_decision(self.record)
+
+    def __enter__(self) -> "DecisionTrace":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self._finish(error=exc)
+        return False
+
+
+class _NullDecision(DecisionTrace):
+    """No-op decision used when tracing is disabled."""
+
+    def __init__(self) -> None:
+        super().__init__(None, "")
+
+    def __enter__(self) -> "_NullDecision":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
 class FlowTrace:
     """One request-scoped flow: root timing plus nested function segments."""
 
@@ -203,6 +428,8 @@ class FlowTrace:
         self._seq = 0
         self._stack: List[int] = []
         self._segments: List[Dict[str, Any]] = []
+        self._decision_seq = 0
+        self._decisions: List[Dict[str, Any]] = []
         self.metadata: Dict[str, Any] = {}
         self.status = "success"
         self.error_message: Optional[str] = None
@@ -222,6 +449,86 @@ class FlowTrace:
     @property
     def segments(self) -> List[Dict[str, Any]]:
         return self._segments
+
+    @property
+    def decisions(self) -> List[Dict[str, Any]]:
+        return self._decisions
+
+    def decision(
+        self,
+        decision_id: str,
+        *,
+        stage: str = "",
+        question: str = "",
+        method: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> DecisionTrace:
+        return DecisionTrace(
+            self,
+            decision_id,
+            stage=stage,
+            question=question,
+            method=method,
+            metadata=metadata,
+        )
+
+    def _record_decision(self, record: Optional[Dict[str, Any]]) -> None:
+        if record is None:
+            return
+        if len(self._decisions) >= MAX_FLOW_DECISIONS:
+            return
+        self._decisions.append(record)
+        self._notify({"type": "decision", "decision": dict(record)})
+
+    def record_decision(
+        self,
+        decision_id: str,
+        *,
+        stage: str = "",
+        question: str = "",
+        method: str = "",
+        options: Optional[list] = None,
+        selected: Any = None,
+        result: Any = None,
+        opaque: bool = False,
+        multi: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record a completed decision whose duration is effectively zero.
+
+        This is for branches that have already finished (for example a guard
+        that returned early).  Use :meth:`decision` when the decision itself
+        performs work that should be timed.
+        """
+
+        builder = self.decision(
+            decision_id,
+            stage=stage,
+            question=question,
+            method=method,
+            metadata=metadata,
+        )
+        for option in options or []:
+            if not isinstance(option, dict):
+                continue
+            builder.option(
+                str(option.get("id") or ""),
+                str(option.get("label") or option.get("id") or ""),
+                selected=bool(option.get("selected")),
+                evaluated=bool(option.get("evaluated", True)),
+                reason=str(option.get("reason") or ""),
+                score=option.get("score"),
+            )
+        if selected is not None:
+            if multi:
+                builder.select_many(selected)
+            else:
+                builder.select(selected)
+        if result is not None:
+            builder.result(result)
+        if opaque:
+            builder.opaque(True)
+        builder._finish()
 
     def set_metadata(self, key: str, value: Any) -> None:
         self.metadata[str(key)] = _trim_json(value)
@@ -362,8 +669,11 @@ class FlowTrace:
                 ),
                 2,
             )
+        summary = summarize_flow(self._segments, client=self.client)
+        summary["decision_count"] = len(self._decisions)
         flow = {
             "version": 1,
+            "decision_version": 1,
             "request_id": self.request_id,
             "entrypoint": self.entrypoint,
             "method": self.method,
@@ -379,8 +689,9 @@ class FlowTrace:
             "params": self.params,
             "metadata": self.metadata,
             "client": self.client,
-            "summary": summarize_flow(self._segments, client=self.client),
+            "summary": summary,
             "segments": self._segments,
+            "decisions": self._decisions,
         }
         if self.error_message:
             flow["error_message"] = self.error_message
@@ -439,6 +750,65 @@ def trace_segment(
         metadata=metadata,
     ) as segment:
         yield segment
+
+
+@contextmanager
+def trace_decision(
+    decision_id: str,
+    *,
+    stage: str = "",
+    question: str = "",
+    method: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Iterator[DecisionTrace]:
+    """Record a branch decision if a request flow is active."""
+
+    flow = _current_flow.get()
+    builder: DecisionTrace = (
+        flow.decision(
+            decision_id,
+            stage=stage,
+            question=question,
+            method=method,
+            metadata=metadata,
+        )
+        if flow is not None
+        else _NullDecision()
+    )
+    with builder:
+        yield builder
+
+
+def record_decision(
+    decision_id: str,
+    *,
+    stage: str = "",
+    question: str = "",
+    method: str = "",
+    options: Optional[list] = None,
+    selected: Any = None,
+    result: Any = None,
+    opaque: bool = False,
+    multi: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record an already-completed decision if a flow is active."""
+
+    flow = _current_flow.get()
+    if flow is None:
+        return
+    flow.record_decision(
+        decision_id,
+        stage=stage,
+        question=question,
+        method=method,
+        options=options,
+        selected=selected,
+        result=result,
+        opaque=opaque,
+        multi=multi,
+        metadata=metadata,
+    )
 
 
 def traced(

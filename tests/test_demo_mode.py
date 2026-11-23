@@ -20,6 +20,7 @@ from judgment.models import (
 )
 from judgment.observability import record_performance
 from judgment.web.app import create_app
+from judgment.web.demo_mode import sanitize_rag_result
 
 ADMIN_HEADERS = {"X-Judgment-Admin-Token": "secret-demo-token"}
 ALL_FEATURES = {
@@ -1436,3 +1437,94 @@ def test_demo_full_pages_use_admin_layout_with_locked_actions(
     processing_js = client.get("/assets/js/pages/processing.js").text
     assert 'title = "展示模式' not in processing_js
     assert 'if ("disabled" in button) button.disabled = false;' in processing_js
+
+
+def test_sanitize_rag_result_keeps_public_decisions_without_internals() -> None:
+    result = {
+        "status": "operational",
+        "answer_source": "llm",
+        "retrieval": {
+            "collection": "judgments_v005",
+            "url": "http://internal:6333",
+            "hits": 3,
+        },
+        "llm_model": "internal-model",
+        "embedding_model": "internal-embed",
+        "pipeline_flow": {
+            "version": 1,
+            "decision_version": 1,
+            "total_ms": 120,
+            "status": "success",
+            "metadata": {
+                "rag_status": "operational",
+                "rag_response": {
+                    "status": "operational",
+                    "answer_source": "llm",
+                    "citation_count": 2,
+                    "duration_ms": 120,
+                    "judgment_candidates": ["SECRET,2"],
+                    "reference_judgments": [{"jid": "SECRET,3"}],
+                },
+            },
+            "segments": [
+                {
+                    "seq": 1,
+                    "name": "rag.qdrant_search",
+                    "offset_ms": 10,
+                    "duration_ms": 20,
+                    "end_offset_ms": 30,
+                    "status": "ok",
+                    "params": {
+                        "collection": "judgments_v005",
+                        "url": "http://internal:6333",
+                    },
+                    "metadata": {
+                        "hits": 3,
+                        "collection": "judgments_v005",
+                        "base_url": "http://internal:6333",
+                    },
+                }
+            ],
+            "decisions": [
+                {
+                    "id": "parse.query",
+                    "stage": "parsing",
+                    "question": "日期語意？",
+                    "method": "query_parser.parse_judgment_query",
+                    "selected": "relative_range",
+                    "duration_ms": 0.4,
+                    "opaque": False,
+                    "options": [
+                        {
+                            "id": "relative_range",
+                            "label": "相對日期",
+                            "selected": True,
+                            "evaluated": True,
+                            "reason": "近二年",
+                        }
+                    ],
+                    "result": {
+                        "date_from": "2024-11-23",
+                        "positive_jids": ["SECRET,1"],
+                        "collection": "judgments_v005",
+                    },
+                }
+            ],
+        },
+    }
+    cleaned = sanitize_rag_result(result)
+    serialized = json.dumps(cleaned, ensure_ascii=False)
+    assert "judgments_v005" not in serialized
+    assert "internal:6333" not in serialized
+    assert "SECRET,1" not in serialized
+    assert "SECRET,2" not in serialized
+    assert "SECRET,3" not in serialized
+    assert "internal-model" not in serialized
+    assert "internal-embed" not in serialized
+    flow = cleaned["pipeline_flow"]
+    assert flow["decisions"][0]["selected"] == "relative_range"
+    assert flow["decisions"][0]["result"] == {"date_from": "2024-11-23"}
+    assert flow["segments"][0]["metadata"] == {"hits": 3}
+    assert "params" not in flow["segments"][0]
+    assert cleaned["retrieval"]["collection"] == ""
+    assert cleaned["retrieval"]["url"] == ""

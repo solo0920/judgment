@@ -58,7 +58,7 @@ from .llm_backends import (
     stream_finish_reason,
 )
 from .models import JudgmentDocument
-from .observability import trace_segment, traced
+from .observability import record_decision, trace_decision, trace_segment, traced
 from .query_plan import build_query_plan
 from .query_parser import (
     LIST_ANALYSIS_TERMS,
@@ -178,6 +178,87 @@ SYSTEM_PROMPT = (
 )
 
 _CASE_NO_RE = re.compile(r"\b[A-Z]{2,6},\d{2,3},[^,\s]+,\d+,\d{8},\d+\b")
+
+
+def _decision_option(
+    option_id: str,
+    label: str,
+    *,
+    selected: bool = False,
+    evaluated: bool = True,
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Build one option row for the request decision trace."""
+
+    return {
+        "id": option_id,
+        "label": label,
+        "selected": selected,
+        "evaluated": evaluated,
+        "reason": reason,
+    }
+
+
+def _record_channel_decision(
+    mode: str,
+    *,
+    method: str,
+    reason: str,
+    result: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record the actual judgment retrieval channel."""
+
+    selected = mode or "vector"
+    record_decision(
+        "retrieve.channel",
+        stage="qdrant",
+        question="實際使用哪個判決檢索通道？",
+        method=method,
+        options=[
+            _decision_option(
+                "keyword_list",
+                "PostgreSQL 精確關鍵字列表",
+                selected=selected == "keyword_list",
+                reason=(
+                    reason
+                    if selected == "keyword_list"
+                    else "未走精確關鍵字列表"
+                ),
+            ),
+            _decision_option(
+                "structured_list",
+                "Qdrant 結構化 count／scroll",
+                selected=selected == "structured_list",
+                reason=(
+                    reason
+                    if selected == "structured_list"
+                    else "未走結構化列舉"
+                ),
+            ),
+            _decision_option(
+                "vector",
+                "Qdrant 向量檢索",
+                selected=selected == "vector",
+                reason=(
+                    reason if selected == "vector" else "未走向量檢索"
+                ),
+            ),
+            _decision_option(
+                "unavailable",
+                "Qdrant 不可用",
+                selected=selected == "unavailable",
+                reason=(
+                    reason
+                    if selected == "unavailable"
+                    else "Qdrant 可用或未進入此分支"
+                ),
+            ),
+        ],
+        selected=selected,
+        result=result or {},
+    )
+
+
 _CITATION_RE = re.compile(r"\[(\d{1,2}(?:\s*[,，、]\s*\d{1,2})*)\]")
 _CITATION_NUMBER_RE = re.compile(r"\d{1,2}")
 _INSUFFICIENT_RE = re.compile(r"(不足以回答|無法回答|沒有足夠|查無相關|未提及|無法判斷)")
@@ -3177,7 +3258,70 @@ def answer_question(
 ) -> Dict[str, Any]:
     started = time.perf_counter()
     raw_question = str(question or "")
-    parsed_query = parse_judgment_query(raw_question)
+    with trace_decision(
+        "parse.query",
+        stage="parsing",
+        question="問題中的日期語意是什麼？",
+        method="query_parser.parse_judgment_query",
+    ) as decision:
+        parsed_query = parse_judgment_query(raw_question)
+        date_rule = parsed_query.date_rule
+        decision.option(
+            "relative_range",
+            "相對日期範圍",
+            selected=date_rule == "relative_range",
+            reason=(
+                f"命中「{parsed_query.relative_text}」，以今日為終點"
+                if parsed_query.relative_text
+                else "未命中相對日期詞"
+            ),
+        )
+        decision.option(
+            "year_range",
+            "年份範圍",
+            selected=date_rule == "year_range",
+            reason=(
+                f"{parsed_query.year_from}–{parsed_query.year_to}"
+                if date_rule == "year_range"
+                else "未命中年份範圍"
+            ),
+        )
+        decision.option(
+            "single_year",
+            "單一年份",
+            selected=date_rule == "single_year",
+            evaluated=date_rule not in {"relative_range", "year_range"},
+            reason=(
+                str(parsed_query.year_from)
+                if date_rule == "single_year"
+                else (
+                    "相對日期或年份範圍已優先命中，未評估"
+                    if date_rule in {"relative_range", "year_range"}
+                    else "未命中單一年份"
+                )
+            ),
+        )
+        decision.option(
+            "none",
+            "沒有日期條件",
+            selected=date_rule == "none",
+            evaluated=date_rule == "none",
+            reason=(
+                "未解析出日期條件"
+                if date_rule == "none"
+                else "已有日期條件"
+            ),
+        )
+        decision.result(
+            {
+                "date_rule": date_rule,
+                "relative_text": parsed_query.relative_text,
+                "date_from": parsed_query.date_from,
+                "date_to": parsed_query.date_to,
+                "year_from": parsed_query.year_from,
+                "year_to": parsed_query.year_to,
+            }
+        )
     with trace_segment(
         "rag.parse_question",
         module=__name__,
@@ -3199,6 +3343,70 @@ def answer_question(
                     "parsed_query": parsed_query.to_dict(),
                 }
             )
+    parsed_filters = []
+    if parsed_query.courts:
+        parsed_filters.append("court_alias")
+    if parsed_query.topics:
+        parsed_filters.append("topic_title")
+    if parsed_query.list_intent:
+        parsed_filters.append("list_intent")
+    if not parsed_filters:
+        parsed_filters.append("none")
+    record_decision(
+        "parse.filters",
+        stage="parsing",
+        question="問題中還萃取了哪些查詢條件？",
+        method="query_parser.COURT_ALIASES / TOPIC_RULES / LIST_INTENT",
+        options=[
+            _decision_option(
+                "court_alias",
+                "法院別名",
+                selected="court_alias" in parsed_filters,
+                reason=(
+                    "／".join(parsed_query.courts)
+                    if parsed_query.courts
+                    else "未命中法院別名"
+                ),
+            ),
+            _decision_option(
+                "topic_title",
+                "案由關鍵詞",
+                selected="topic_title" in parsed_filters,
+                reason=(
+                    "／".join(parsed_query.topics)
+                    if parsed_query.topics
+                    else "未命中案由關鍵詞"
+                ),
+            ),
+            _decision_option(
+                "list_intent",
+                "列表意圖",
+                selected="list_intent" in parsed_filters,
+                reason=(
+                    "命中列表問法"
+                    if parsed_query.list_intent
+                    else "未命中列表問法"
+                ),
+            ),
+            _decision_option(
+                "none",
+                "沒有額外條件",
+                selected="none" in parsed_filters,
+                reason=(
+                    "只解析出日期或一般語意"
+                    if "none" in parsed_filters
+                    else "已有額外條件"
+                ),
+            ),
+        ],
+        selected=parsed_filters,
+        multi=True,
+        result={
+            "courts": parsed_query.courts,
+            "topics": parsed_query.topics,
+            "list_intent": parsed_query.list_intent,
+        },
+    )
 
     def emit_partial(payload: Dict[str, Any]) -> None:
         if on_partial is None:
@@ -3361,6 +3569,23 @@ def answer_question(
                             payload["retrieval"][
                                 "scope_probe_notice"
                             ] = extra_notice
+                        _record_channel_decision(
+                            "keyword_list",
+                            method="rag._keyword_list_payload",
+                            reason="scope probe 命中 active 法規術語",
+                            result={
+                                "hits": payload["retrieval"].get("hits"),
+                                "unique_judgments": payload["retrieval"].get(
+                                    "unique_judgments"
+                                ),
+                                "total_matches": payload["retrieval"].get(
+                                    "total_matches"
+                                ),
+                                "terms": [
+                                    term.key for term in probe_legal_terms
+                                ],
+                            },
+                        )
                         return payload
                 elif not scope_probe_result.has_hits and not exact_terms:
                     scope_probe_zero = True
@@ -3653,6 +3878,21 @@ def answer_question(
                 settings=settings,
                 started=started,
             )
+            _record_channel_decision(
+                "keyword_list",
+                method="rag._keyword_list_payload",
+                reason="命中 active 法規術語，走 PostgreSQL 精確比對",
+                result={
+                    "hits": payload["retrieval"].get("hits"),
+                    "unique_judgments": payload["retrieval"].get(
+                        "unique_judgments"
+                    ),
+                    "total_matches": payload["retrieval"].get(
+                        "total_matches"
+                    ),
+                    "terms": [term.key for term in exact_terms],
+                },
+            )
             if scope_probe_payload and scope_probe_result is not None:
                 payload["retrieval"]["scope_probe"] = (
                     scope_probe_payload
@@ -3713,10 +3953,87 @@ def answer_question(
         assign_law_indexes(law_sources)
         structured_answer = structured_law_answer(question, law_sources, law_stats)
         if structured_answer:
+            article_count = is_article_count_question(question)
+            history = is_history_question(question)
+            related_laws = is_related_laws_question(question)
+            law_overview = is_law_overview_question(question, law_sources)
+            boundary = law_article_boundary_question(question)
+            citation_stats = bool(law_stats and law_stats.get("articles"))
+            selected_law_rules = [
+                name
+                for name, active in (
+                    ("article_count", article_count),
+                    ("history", history),
+                    ("related_laws", related_laws),
+                    ("law_overview", law_overview),
+                    ("article_boundary", bool(boundary)),
+                    ("citation_stats", citation_stats),
+                )
+                if active
+            ] or ["structured_law"]
+            record_decision(
+                "law.structured",
+                stage="law_retrieval",
+                question="要使用哪個法規結構化回答？",
+                method="law_rag.structured_law_answer",
+                options=[
+                    _decision_option(
+                        "article_count",
+                        "條文數",
+                        selected="article_count" in selected_law_rules,
+                        reason="命中條文數問法" if article_count else "未命中",
+                    ),
+                    _decision_option(
+                        "history",
+                        "沿革／日期",
+                        selected="history" in selected_law_rules,
+                        reason="命中沿革問法" if history else "未命中",
+                    ),
+                    _decision_option(
+                        "related_laws",
+                        "相關法規",
+                        selected="related_laws" in selected_law_rules,
+                        reason="命中相關法規問法" if related_laws else "未命中",
+                    ),
+                    _decision_option(
+                        "law_overview",
+                        "法規總覽",
+                        selected="law_overview" in selected_law_rules,
+                        reason="命中法規總覽問法" if law_overview else "未命中",
+                    ),
+                    _decision_option(
+                        "article_boundary",
+                        "第一／最後一條",
+                        selected="article_boundary" in selected_law_rules,
+                        reason=(
+                            f"boundary={boundary}"
+                            if boundary
+                            else "未命中條文邊界問法"
+                        ),
+                    ),
+                    _decision_option(
+                        "citation_stats",
+                        "判決引用統計",
+                        selected="citation_stats" in selected_law_rules,
+                        reason=(
+                            "有引用統計資料"
+                            if citation_stats
+                            else "無引用統計資料"
+                        ),
+                    ),
+                ],
+                selected=selected_law_rules,
+                multi=True,
+                result={
+                    "boundary": boundary or None,
+                    "law_stats_entity": law_stats.get("entity"),
+                    "law_stats_timeout": bool(law_stats.get("timeout")),
+                },
+            )
             if (
-                is_article_count_question(question)
-                or is_history_question(question)
-                or is_related_laws_question(question)
+                article_count
+                or history
+                or related_laws
             ):
                 for source in law_sources:
                     source["articles"] = []
@@ -3752,6 +4069,28 @@ def answer_question(
             }
 
     if is_unsupported_statistics_question(question):
+        record_decision(
+            "guard.statistics",
+            stage="parsing",
+            question="這是未支援的統計／排序問題嗎？",
+            method="law_rag.is_unsupported_statistics_question",
+            options=[
+                _decision_option(
+                    "supported",
+                    "有支援的結構化規則",
+                    selected=False,
+                    reason="已檢查條文數、條文邊界與沿革規則，未命中",
+                ),
+                _decision_option(
+                    "unsupported",
+                    "未支援，直接拒答",
+                    selected=True,
+                    reason="命中統計／排序詞，但沒有可用的結構化 handler",
+                ),
+            ],
+            selected="unsupported",
+            result={"refusal": True, "answer_source": "structured"},
+        )
         return {
             "status": "retrieval_only",
             "answer": "無法確認：本系統目前不支援這類統計或排序查詢。",
@@ -3772,9 +4111,40 @@ def answer_question(
             "duration_ms": _elapsed_ms(started),
         }
 
-    if not is_financial_query(
+    financial_scope = is_financial_query(
         question, law_sources, settings.judgment_law_list
-    ):
+    )
+    record_decision(
+        "guard.financial_scope",
+        stage="parsing",
+        question="問題是否屬於金融法規範圍？",
+        method="law_rag.is_financial_query",
+        options=[
+            _decision_option(
+                "in_scope",
+                "在 99 項金融法規範圍",
+                selected=financial_scope,
+                reason=(
+                    "命中金融法規名稱或關鍵詞"
+                    if financial_scope
+                    else "未命中金融法規名稱或關鍵詞"
+                ),
+            ),
+            _decision_option(
+                "out_of_scope",
+                "不在金融法規範圍",
+                selected=not financial_scope,
+                reason=(
+                    "未命中金融法規名稱或關鍵詞"
+                    if not financial_scope
+                    else "已命中金融法規範圍"
+                ),
+            ),
+        ],
+        selected="in_scope" if financial_scope else "out_of_scope",
+        result={"financial_scope": financial_scope},
+    )
+    if not financial_scope:
         notice = (
             "本RAG提問功能主要以金融相關判決為主。"
             "此問題未對應 99 項金融相關法規，因此不生成判決 RAG 回答。"
@@ -3955,6 +4325,104 @@ def answer_question(
                     filter_segment["metadata"].update(filter_meta)
             if query_filter:
                 candidate_k = max(candidate_k, 50)
+        filter_selected = []
+        if query_filter:
+            if (
+                filter_meta.get("date_from") is not None
+                or filter_meta.get("year_from") is not None
+            ):
+                filter_selected.append("date_range")
+            if filter_meta.get("courts"):
+                filter_selected.append("court")
+            if filter_meta.get("titles"):
+                filter_selected.append("title")
+            if not filter_selected:
+                filter_selected.append("other")
+        else:
+            filter_selected.append("none")
+        record_decision(
+            "filter.apply",
+            stage="routing",
+            question="要套用哪些硬性 filter？",
+            method="rag.should_apply_filters / query_parser.build_query_filter",
+            options=[
+                _decision_option(
+                    "date_range",
+                    "裁判日期範圍",
+                    selected="date_range" in filter_selected,
+                    evaluated=(
+                        parsed_query.date_from is not None
+                        or parsed_query.year_from is not None
+                    ),
+                    reason=(
+                        f"{filter_meta.get('date_from')}～{filter_meta.get('date_to')}"
+                        if filter_meta.get("date_from")
+                        else (
+                            f"{filter_meta.get('year_from')}–{filter_meta.get('year_to')}"
+                            if filter_meta.get("year_from") is not None
+                            else "沒有日期條件"
+                        )
+                    ),
+                ),
+                _decision_option(
+                    "court",
+                    "法院",
+                    selected="court" in filter_selected,
+                    evaluated=bool(parsed_query.courts),
+                    reason=(
+                        "／".join(parsed_query.courts)
+                        if parsed_query.courts
+                        else "沒有法院條件"
+                    ),
+                ),
+                _decision_option(
+                    "title",
+                    "案由 facet",
+                    selected="title" in filter_selected,
+                    evaluated=bool(parsed_query.topics),
+                    reason=(
+                        "／".join(filter_meta.get("titles") or [])
+                        if filter_meta.get("titles")
+                        else (
+                            "facet 失敗"
+                            if filter_meta.get("facet_error")
+                            else "沒有可解析的案由"
+                        )
+                    ),
+                ),
+                _decision_option(
+                    "other",
+                    "其他 filter",
+                    selected="other" in filter_selected,
+                    reason=(
+                        "有 filter，但沒有日期／法院／案由可分類"
+                        if "other" in filter_selected
+                        else "沒有其他 filter"
+                    ),
+                ),
+                _decision_option(
+                    "none",
+                    "不套用 filter",
+                    selected="none" in filter_selected,
+                    reason=(
+                        "沒有可套用的硬性條件"
+                        if "none" in filter_selected
+                        else "已有可套用的條件"
+                    ),
+                ),
+            ],
+            selected=filter_selected,
+            multi=True,
+            result={
+                "applied": bool(query_filter),
+                "date_from": filter_meta.get("date_from"),
+                "date_to": filter_meta.get("date_to"),
+                "courts": filter_meta.get("courts") or [],
+                "titles": filter_meta.get("titles") or [],
+                "title_unresolved": bool(filter_meta.get("title_unresolved")),
+                "facet_error": bool(filter_meta.get("facet_error")),
+            },
+        )
         query_plan = build_query_plan(
             parsed_query=parsed_query,
             query_filter=bool(query_filter),
@@ -3971,6 +4439,56 @@ def answer_question(
         ) as plan_segment:
             if plan_segment is not None:
                 plan_segment["metadata"].update(query_plan.to_dict())
+        record_decision(
+            "route.plan",
+            stage="routing",
+            question="要走哪一條檢索路徑？",
+            method="query_plan.build_query_plan",
+            options=[
+                _decision_option(
+                    "structured_list",
+                    "結構化列舉",
+                    selected=query_plan.intent == "judgment_list",
+                    reason=(
+                        "有法院／年份／案由等可列舉條件"
+                        if query_plan.intent == "judgment_list"
+                        else "沒有可安全 enumerate 的條件"
+                    ),
+                ),
+                _decision_option(
+                    "law_first",
+                    "法規優先",
+                    selected=query_plan.intent == "law_first",
+                    reason=(
+                        "問題是法規／條文導向"
+                        if query_plan.intent == "law_first"
+                        else "不是法規優先"
+                    ),
+                ),
+                _decision_option(
+                    "structured_semantic",
+                    "套 filter 的向量檢索",
+                    selected=query_plan.intent == "structured_semantic",
+                    reason=(
+                        "有硬性 filter，但仍需語意排序"
+                        if query_plan.intent == "structured_semantic"
+                        else "不需要套 filter 的語意檢索"
+                    ),
+                ),
+                _decision_option(
+                    "semantic",
+                    "一般語意檢索",
+                    selected=query_plan.intent == "semantic",
+                    reason=(
+                        "沒有硬性 filter"
+                        if query_plan.intent == "semantic"
+                        else "已有硬性 filter 或法規優先"
+                    ),
+                ),
+            ],
+            selected=query_plan.intent,
+            result=query_plan.to_dict(),
+        )
         try:
             if test_mode_enabled:
                 from .observability import current_flow
@@ -4132,6 +4650,84 @@ def answer_question(
     retrieval["retrieval_mode"] = (
         "structured_list" if structured_list_path else "vector"
     )
+    record_decision(
+        "route.intent",
+        stage="routing",
+        question="這是法規優先、判決列表，還是一般判決問答？",
+        method="rag.is_law_first_question / is_judgment_list_question",
+        options=[
+            _decision_option(
+                "law_first",
+                "法規優先",
+                selected=law_first,
+                reason=(
+                    "法規來源有條文且問題為法規導向"
+                    if law_first
+                    else "不符合法規優先條件"
+                ),
+            ),
+            _decision_option(
+                "judgment_list",
+                "判決列表",
+                selected=judgment_list_hint and not law_first,
+                reason=(
+                    "命中判決列表問法"
+                    if judgment_list_hint and not law_first
+                    else "不是判決列表或已由法規優先接管"
+                ),
+            ),
+            _decision_option(
+                "general",
+                "一般判決問答",
+                selected=not law_first and not judgment_list_hint,
+                reason=(
+                    "沒有法規優先或列表意圖"
+                    if not law_first and not judgment_list_hint
+                    else "已有其他意圖"
+                ),
+            ),
+        ],
+        selected=(
+            "law_first"
+            if law_first
+            else "judgment_list"
+            if judgment_list_hint
+            else "general"
+        ),
+        result={
+            "law_first": law_first,
+            "judgment_list_hint": judgment_list_hint,
+            "structured_list_path": structured_list_path,
+        },
+    )
+    _record_channel_decision(
+        (
+            retrieval["retrieval_mode"]
+            if qdrant_available
+            else "unavailable"
+        ),
+        method=(
+            "QdrantStore.count / QdrantStore.scroll"
+            if structured_list_path
+            else "rag._search_hits"
+            if qdrant_available
+            else "QdrantStore.collection_info"
+        ),
+        reason=(
+            "query_plan 選定結構化 count／scroll"
+            if structured_list_path
+            else "query_plan 選定向量檢索"
+            if qdrant_available
+            else "Qdrant 未設定、無法連線或 collection 尚未建立"
+        ),
+        result={
+            "hits": retrieval.get("hits"),
+            "unique_judgments": retrieval.get("unique_judgments"),
+            "total_matches": retrieval.get("total_matches"),
+            "candidate_k": retrieval.get("candidate_k"),
+            "top_k": retrieval.get("top_k"),
+        },
+    )
     citation_start = 1
     if law_first:
         assign_law_indexes(law_sources, start=1)
@@ -4166,6 +4762,7 @@ def answer_question(
             deduped_hits.append(hit)
         hits = deduped_hits
         if parsed_query.has_filter:
+            violations_checked = len(hits)
             valid_hits = [
                 hit
                 for hit in hits
@@ -4175,6 +4772,40 @@ def answer_question(
             if removed:
                 retrieval["filter_violations_removed"] = removed
             hits = valid_hits
+            record_decision(
+                "postfilter.violations",
+                stage="context",
+                question="後驗是否剔除不符條件的判決？",
+                method="query_parser.violations",
+                options=[
+                    _decision_option(
+                        "keep",
+                        "全部保留",
+                        selected=removed == 0,
+                        reason=(
+                            "所有候選都符合日期／法院／案由"
+                            if removed == 0
+                            else f"有 {removed} 筆不符"
+                        ),
+                    ),
+                    _decision_option(
+                        "drop",
+                        "剔除不符條件的判決",
+                        selected=removed > 0,
+                        reason=(
+                            f"剔除 {removed} 筆"
+                            if removed > 0
+                            else "沒有需要剔除的判決"
+                        ),
+                    ),
+                ],
+                selected="drop" if removed > 0 else "keep",
+                result={
+                    "checked": violations_checked,
+                    "removed": removed,
+                    "kept": len(valid_hits),
+                },
+            )
         if (
             on_partial is not None
             and rerank_active
@@ -4356,6 +4987,67 @@ def answer_question(
             "candidate_count": 0,
         }
 
+    rerank_meta = retrieval.get("rerank") or {}
+    rerank_status = str(rerank_meta.get("status") or "disabled")
+    rerank_used = rerank_status in {"ok", "degraded"}
+    rerank_selected = (
+        "fallback"
+        if rerank_meta.get("fallback_used")
+        else "rerank"
+        if rerank_used
+        else "skip"
+    )
+    record_decision(
+        "rerank",
+        stage="reranker",
+        question="是否使用 reranker 重新排序？",
+        method="rag._rerank_hits",
+        options=[
+            _decision_option(
+                "rerank",
+                "使用 reranker",
+                selected=rerank_selected == "rerank",
+                evaluated=rerank_active,
+                reason=(
+                    f"status={rerank_status}"
+                    if rerank_active
+                    else "RAG_RERANK_ENABLED 未啟用或沒有 endpoint"
+                ),
+            ),
+            _decision_option(
+                "fallback",
+                "使用 fallback reranker",
+                selected=rerank_selected == "fallback",
+                evaluated=rerank_active,
+                reason=(
+                    "主要 reranker 失敗，已使用 fallback"
+                    if rerank_meta.get("fallback_used")
+                    else "未使用 fallback"
+                ),
+            ),
+            _decision_option(
+                "skip",
+                "跳過 rerank",
+                selected=rerank_selected == "skip",
+                reason=(
+                    "structured_list 不需要 rerank"
+                    if structured_list_path
+                    else f"status={rerank_status}"
+                ),
+            ),
+        ],
+        selected=rerank_selected,
+        result={
+            "status": rerank_status,
+            "candidates": rerank_meta.get("candidate_count"),
+            "selected": rerank_meta.get(
+                "selected_count", rerank_meta.get("selected")
+            ),
+            "fallback_used": bool(rerank_meta.get("fallback_used")),
+            "top_score": rerank_meta.get("top_score"),
+        },
+    )
+
     if not citations and not law_sources:
         if not qdrant_available:
             status = retrieval.get("status")
@@ -4510,6 +5202,59 @@ def answer_question(
                 }
             ),
         }
+    prompt_context = retrieval.get("prompt_context") or {}
+    dropped_indexes = prompt_context.get("dropped_indexes") or []
+    if structured_judgment_list:
+        context_budget_selected = "not_applicable"
+        context_budget_reason = "規則式判決清單，不進 LLM prompt"
+    elif not llm_configured:
+        context_budget_selected = "not_applicable"
+        context_budget_reason = "LLM 未設定"
+    elif dropped_indexes:
+        context_budget_selected = "trim"
+        context_budget_reason = f"丟棄 {len(dropped_indexes)} 個 context"
+    else:
+        context_budget_selected = "all"
+        context_budget_reason = "所有 context 都在 prompt 預算內"
+    record_decision(
+        "context.budget",
+        stage="context",
+        question="Context 是否全部放入 prompt？",
+        method="rag._fit_contexts_to_prompt_budget",
+        options=[
+            _decision_option(
+                "all",
+                "全部放入",
+                selected=context_budget_selected == "all",
+                evaluated=llm_configured and not structured_judgment_list,
+                reason=(
+                    "全部在預算內"
+                    if context_budget_selected == "all"
+                    else "未走 LLM prompt"
+                ),
+            ),
+            _decision_option(
+                "trim",
+                "裁切／丟棄部分 context",
+                selected=context_budget_selected == "trim",
+                evaluated=llm_configured and not structured_judgment_list,
+                reason=context_budget_reason,
+            ),
+            _decision_option(
+                "not_applicable",
+                "不適用",
+                selected=context_budget_selected == "not_applicable",
+                reason=context_budget_reason,
+            ),
+        ],
+        selected=context_budget_selected,
+        result={
+            "used_indexes": prompt_context.get("used_indexes") or [],
+            "dropped_indexes": dropped_indexes,
+            "token_estimate": prompt_context.get("token_estimate"),
+            "context_chars": prompt_context.get("context_chars"),
+        },
+    )
     if on_partial is not None and (llm_configured or structured_judgment_list):
         emit_partial(
             {
@@ -4696,6 +5441,115 @@ def answer_question(
         if answer
         else None
     )
+    if citation_audit is not None:
+        unsupported_citations = int(
+            citation_audit.get("unsupported_citation_count") or 0
+        )
+        citation_selected = (
+            "retry"
+            if citation_retry
+            else "pass"
+            if unsupported_citations == 0
+            else "fail"
+        )
+        record_decision(
+            "citation.audit",
+            stage="response",
+            question="回答的引用編號是否通過稽核？",
+            method="rag._citation_audit",
+            options=[
+                _decision_option(
+                    "pass",
+                    "引用全部有效",
+                    selected=citation_selected == "pass",
+                    reason=(
+                        "沒有未支撐的引用"
+                        if citation_selected == "pass"
+                        else f"未支撐引用 {unsupported_citations} 句"
+                    ),
+                ),
+                _decision_option(
+                    "retry",
+                    "觸發引用重試",
+                    selected=citation_selected == "retry",
+                    reason=(
+                        "第一次回答引用無效，已重試"
+                        if citation_retry
+                        else "未觸發重試"
+                    ),
+                ),
+                _decision_option(
+                    "fail",
+                    "仍有未支撐引用",
+                    selected=citation_selected == "fail",
+                    reason=(
+                        f"未支撐引用 {unsupported_citations} 句"
+                        if citation_selected == "fail"
+                        else "沒有殘留問題"
+                    ),
+                ),
+            ],
+            selected=citation_selected,
+            result={
+                "unsupported_citation_count": unsupported_citations,
+                "citation_retry": bool(citation_retry),
+            },
+        )
+    answer_source = (
+        "retrieval_list"
+        if structured_judgment_list
+        else "llm"
+        if llm_configured and status == "operational"
+        else "retrieval"
+    )
+    record_decision(
+        "answer.mode",
+        stage="response",
+        question="最終回答由誰產生？",
+        method="rag.answer_question",
+        options=[
+            _decision_option(
+                "retrieval_list",
+                "規則式判決清單",
+                selected=answer_source == "retrieval_list",
+                evaluated=bool(structured_judgment_list),
+                reason=(
+                    "命中列表意圖且有引用，使用 deterministic template"
+                    if structured_judgment_list
+                    else "不是規則式判決清單"
+                ),
+            ),
+            _decision_option(
+                "llm",
+                "LLM 生成",
+                selected=answer_source == "llm",
+                evaluated=llm_configured,
+                reason=(
+                    "LLM 已設定且流程成功"
+                    if answer_source == "llm"
+                    else "LLM 未設定或流程未成功"
+                ),
+            ),
+            _decision_option(
+                "retrieval",
+                "檢索結果／拒答",
+                selected=answer_source == "retrieval",
+                reason=(
+                    "沒有可用的 LLM，回傳檢索結果或拒答"
+                    if answer_source == "retrieval"
+                    else "已由其他模式回答"
+                ),
+            ),
+        ],
+        selected=answer_source,
+        result={
+            "status": status,
+            "answer_source": answer_source,
+            "llm_configured": llm_configured,
+            "structured_judgment_list": structured_judgment_list,
+        },
+        opaque=answer_source == "llm",
+    )
     return {
         "status": status,
         "answer": answer,
@@ -4707,13 +5561,7 @@ def answer_question(
         "law_answer": law_answer,
         "law_framework": law_framework,
         "matched_terms": terms,
-        "answer_source": (
-            "retrieval_list"
-            if structured_judgment_list
-            else "llm"
-            if llm_configured and status == "operational"
-            else "retrieval"
-        ),
+        "answer_source": answer_source,
         "llm_model": (
             None
             if structured_judgment_list

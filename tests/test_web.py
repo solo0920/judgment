@@ -750,6 +750,9 @@ def test_static_console_is_served(web_client) -> None:
     assert performance_js.status_code == 200
     assert "判決向量索引 Pipeline" in performance_js.text
     assert "renderIndexPipelinePanel" in performance_js.text
+    assert "rag-wf-decision" in performance_js.text
+    assert "renderRagDecisionList" in performance_js.text
+    assert "未評估" in performance_js.text
     app_js = web_client.get("/assets/js/app.js")
     assert app_js.status_code == 200
     assert 'DEFAULT_ROUTE = "home"' in app_js.text
@@ -776,6 +779,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".workflow-wf-card" in css.text
     assert ".workflow-wf-bar.is-hollow" in css.text
     assert ".workflow-wf-card .rag-wf-stage-head" in css.text
+    assert ".rag-wf-decision-option.is-selected" in css.text
+    assert ".rag-wf-decision-option.is-skipped" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -1930,6 +1935,11 @@ def test_rag_flow_records_nested_segments_and_models(web_client) -> None:
     assert "rag.parse_question" in [
         segment["name"] for segment in pipeline["segments"]
     ]
+    assert pipeline["decision_version"] == 1
+    assert pipeline["decision_count"] == len(pipeline["decisions"])
+    decision_ids = {item["id"] for item in pipeline["decisions"]}
+    assert "parse.query" in decision_ids
+    assert "guard.financial_scope" in decision_ids
 
     payload = web_client.get(
         "/api/performance",
