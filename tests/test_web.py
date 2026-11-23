@@ -782,6 +782,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".workflow-wf-card .rag-wf-stage-head" in css.text
     assert ".rag-wf-decision-option.is-selected" in css.text
     assert ".rag-wf-decision-option.is-skipped" in css.text
+    assert ".rag-process-body > .rag-wf-card" in css.text
+    assert "font-size: 12px" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text

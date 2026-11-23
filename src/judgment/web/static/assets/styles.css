@@ -5797,6 +5797,19 @@ button.chip:hover {
   padding: 0 12px 10px;
 }
 
+/* Keep the integrated RAG pipeline card readable at the same 12px base
+   size as the model table; the report header keeps its original hierarchy. */
+.rag-process-body > .rag-wf-card,
+.rag-process-body > .rag-wf-card :is(span, strong, small, p, a, summary) {
+  font-size: 12px;
+}
+
+.rag-process-body > .rag-wf-card .rag-wf-decision-seq {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+
 .rag-process-list {
   display: flex;
   flex-direction: column;
