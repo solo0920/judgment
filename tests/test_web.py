@@ -4331,6 +4331,8 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
     assert "pipelineSection" not in source_js
     assert "beginQuestionEdit" in source_js
     assert "rag-user-edit" in source_js
+    assert "replaceTurnElement" in source_js
+    assert "replaceIndex" in source_js
     assert "editTarget.value = question" not in source_js
     for script in (source_js, bundle_js):
         assert "data-rag-question-action" in script

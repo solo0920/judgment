@@ -1753,6 +1753,18 @@ export async function render(root) {
     return { turnElement, answerElement };
   };
 
+  const updateTurnQuestion = (turnElement, question) => {
+    const bubble = turnElement?.querySelector(".rag-user-bubble");
+    if (bubble) bubble.textContent = question;
+    turnElement
+      ?.querySelectorAll(
+        "[data-rag-question-action], [data-rag-answer-action]",
+      )
+      .forEach((button) => {
+        button.dataset.question = question;
+      });
+  };
+
   const renderStoredConversation = () => {
     turnsBox.innerHTML = conversationTurns.length
       ? conversationTurns
@@ -2406,14 +2418,29 @@ export async function render(root) {
     }
   };
 
-  const recordTurn = async (question, payload, projectId, requestToken) => {
+  const recordTurn = async (
+    question,
+    payload,
+    projectId,
+    requestToken,
+    { replaceIndex = null } = {},
+  ) => {
     const turns = conversationTurns;
     const conversationId = currentConversationId;
-    turns.push({
+    const nextTurn = {
       question,
       asked_at: new Date().toISOString(),
       payload: compactAnswerPayload(payload),
-    });
+    };
+    if (
+      Number.isInteger(replaceIndex) &&
+      replaceIndex >= 0 &&
+      replaceIndex <= turns.length
+    ) {
+      turns[replaceIndex] = nextTurn;
+    } else {
+      turns.push(nextTurn);
+    }
     const citations = Array.isArray(payload.citations) ? payload.citations : [];
     const judgments = Array.isArray(payload.judgments) ? payload.judgments : [];
     const summary = {
@@ -3073,7 +3100,11 @@ export async function render(root) {
 
   const runQuestion = async (
     question,
-    { fresh = false, source = "hero" } = {},
+    {
+      fresh = false,
+      source = "hero",
+      replaceTurnElement = null,
+    } = {},
   ) => {
     const trimmed = question.trim();
     if (!trimmed) {
@@ -3082,7 +3113,21 @@ export async function render(root) {
       return;
     }
     closeWorkspaceMenu();
-    if (fresh || !conversationActive) {
+    const targetTurn =
+      replaceTurnElement instanceof HTMLElement &&
+      turnsBox.contains(replaceTurnElement)
+        ? replaceTurnElement
+        : null;
+    const replaceIndex = targetTurn
+      ? Array.from(turnsBox.querySelectorAll(".rag-turn")).indexOf(
+          targetTurn,
+        )
+      : null;
+    const replacing =
+      Boolean(targetTurn?.querySelector("[data-rag-answer]")) &&
+      Number.isInteger(replaceIndex) &&
+      replaceIndex >= 0;
+    if (!replacing && (fresh || !conversationActive)) {
       currentConversationId = null;
       conversationTurns = [];
       turnsBox.innerHTML = "";
@@ -3094,17 +3139,35 @@ export async function render(root) {
     lastQuestion = trimmed;
     setConversationMode(true);
     hideFollowup();
-    if (source === "followup") {
-      followupInput.value = "";
-      resizeFollowupInput();
-    } else {
-      input.value = "";
-      resizeInput();
+    if (!replacing) {
+      if (source === "followup") {
+        followupInput.value = "";
+        resizeFollowupInput();
+      } else {
+        input.value = "";
+        resizeInput();
+      }
     }
-    const { turnElement, answerElement } = appendConversationTurn(
-      trimmed,
-      answerLoading(trimmed, testMode),
-    );
+    let turnElement;
+    let answerElement;
+    let previousTurnHtml = "";
+    let previousPayload = null;
+    if (replacing) {
+      turnElement = targetTurn;
+      answerElement = turnElement.querySelector("[data-rag-answer]");
+      previousTurnHtml = turnElement.outerHTML;
+      previousPayload = turnPayloads.get(turnElement) || null;
+      updateTurnQuestion(turnElement, trimmed);
+      turnElement.classList.remove("is-complete");
+      turnElement.classList.add("is-pending");
+      answerElement.innerHTML = answerLoading(trimmed, testMode);
+      turnPayloads.delete(turnElement);
+    } else {
+      ({ turnElement, answerElement } = appendConversationTurn(
+        trimmed,
+        answerLoading(trimmed, testMode),
+      ));
+    }
     const processController = testMode
       ? null
       : createProcessController(answerElement);
@@ -3197,16 +3260,32 @@ export async function render(root) {
       } else {
         paintTestFlow(null);
       }
-      await recordTurn(trimmed, payload, projectId, requestToken);
+      await recordTurn(trimmed, payload, projectId, requestToken, {
+        replaceIndex,
+      });
       if (isStale()) return;
       showFollowup();
     } catch (error) {
       if (isStale()) return;
       stopFlowUpdates();
-      const processHtml = processController?.finish(false) || "";
-      answerElement.innerHTML = renderAnswerError(error, processHtml, trimmed);
-      turnElement?.classList.remove("is-pending");
-      turnElement?.classList.add("is-complete");
+      if (replacing && previousTurnHtml) {
+        turnElement.outerHTML = previousTurnHtml;
+        const restoredTurn = turnsBox.querySelectorAll(".rag-turn")[
+          replaceIndex
+        ];
+        if (restoredTurn && previousPayload) {
+          turnPayloads.set(restoredTurn, previousPayload);
+        }
+      } else {
+        const processHtml = processController?.finish(false) || "";
+        answerElement.innerHTML = renderAnswerError(
+          error,
+          processHtml,
+          trimmed,
+        );
+        turnElement?.classList.remove("is-pending");
+        turnElement?.classList.add("is-complete");
+      }
       showFollowup();
       toast(error.message || "檢索失敗。", "danger");
     } finally {
@@ -3292,11 +3371,11 @@ export async function render(root) {
         toast("目前仍在檢索中，請稍後再試。", "warn");
         return;
       }
-      const inConversation = conversationActive;
       cancelQuestionEdit({ restoreFocus: false });
       await runQuestion(edited, {
-        fresh: !inConversation,
-        source: inConversation ? "followup" : "hero",
+        fresh: false,
+        source: "inline_edit",
+        replaceTurnElement: turnElement,
       });
     });
     textarea.addEventListener("blur", () => {
