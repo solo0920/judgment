@@ -6,13 +6,14 @@ import math
 import re
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow.parquet as pq
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
+from sqlalchemy.exc import OperationalError
 
 from .models import JudgmentDocument, LawDocument
 from .observability import traced
@@ -1047,10 +1048,12 @@ def law_source_text(source: Dict[str, Any]) -> str:
             f"{item['article_no']} {item['count']} 次"
             for item in article_counts[:5]
         )
-        sample = "取樣 " if stats.get("sampled") else ""
+        sampled = bool(stats.get("sampled"))
+        sample = "取樣 " if sampled else ""
+        cited = "本法規在取樣中被引用" if sampled else "本法規被引用"
         lines.append(
             f"判決引用統計：{sample}{int(stats.get('judgment_count') or 0)} 筆提及"
-            f"「{stats.get('entity') or ''}」的判決中，本法規被引用 "
+            f"「{stats.get('entity') or ''}」的判決中，{cited} "
             f"{int(stats.get('law_count') or 0)} 次"
             + (f"；熱門條文：{top}" if top else "")
         )
@@ -1314,9 +1317,9 @@ def find_related_law_records(
 _LAW_STATS_LIMIT_ROWS = 100
 _LAW_STATS_CACHE_TTL_SECONDS = 600.0
 _LAW_STATS_CACHE_MAX_ENTRIES = 128
-_LAW_STATS_CACHE: Dict[
+_LAW_STATS_CACHE: OrderedDict[
     Tuple[Any, str, int], Tuple[float, Dict[str, Any]]
-] = {}
+] = OrderedDict()
 _LAW_STATS_LOCKS: Dict[Tuple[Any, str, int], threading.Lock] = {}
 _LAW_STATS_CACHE_GUARD = threading.Lock()
 
@@ -1340,6 +1343,7 @@ def _cached_law_stats(
         if entry[0] <= now:
             _LAW_STATS_CACHE.pop(key, None)
             return None
+        _LAW_STATS_CACHE.move_to_end(key)
         return copy.deepcopy(entry[1])
 
 
@@ -1349,14 +1353,31 @@ def _store_law_stats(
 ) -> None:
     expires_at = time.monotonic() + _LAW_STATS_CACHE_TTL_SECONDS
     with _LAW_STATS_CACHE_GUARD:
-        while len(_LAW_STATS_CACHE) >= _LAW_STATS_CACHE_MAX_ENTRIES:
-            _LAW_STATS_CACHE.pop(next(iter(_LAW_STATS_CACHE)))
         _LAW_STATS_CACHE[key] = (expires_at, copy.deepcopy(stats))
+        _LAW_STATS_CACHE.move_to_end(key)
+        while len(_LAW_STATS_CACHE) > _LAW_STATS_CACHE_MAX_ENTRIES:
+            _LAW_STATS_CACHE.popitem(last=False)
 
 
 def _law_stats_lock(key: Tuple[Any, str, int]) -> threading.Lock:
     with _LAW_STATS_CACHE_GUARD:
         return _LAW_STATS_LOCKS.setdefault(key, threading.Lock())
+
+
+def _law_stats_timeout_result(
+    entity: str,
+    limit_rows: int,
+) -> Dict[str, Any]:
+    return {
+        "entity": entity,
+        "judgment_count": 0,
+        "matched_by": "full_text_timeout",
+        "sampled": False,
+        "limit_rows": limit_rows,
+        "timeout": True,
+        "laws": [],
+        "articles": [],
+    }
 
 
 def _compute_judgment_law_stats(
@@ -1377,18 +1398,28 @@ def _compute_judgment_law_stats(
         ).all()
         matched_by = "matched_laws"
         if not rows:
-            # The fallback scans full_text.  Keep the sample small so a
-            # common entity still stops before scanning all 4.7M judgments.
-            rows = session.execute(
-                select(JudgmentDocument.citations, JudgmentDocument.jid)
-                .where(
-                    JudgmentDocument.full_text.contains(
-                        entity, autoescape=True
-                    ),
-                    JudgmentDocument.is_current.is_(True),
-                )
-                .limit(limit_rows)
-            ).all()
+            # The fallback scans full_text.  Keep the sample small and give
+            # the statistics query its own budget so it can never hold the
+            # whole answer hostage again.
+            if getattr(getattr(session, "bind", None), "dialect", None):
+                if session.bind.dialect.name == "postgresql":
+                    session.execute(text("SET LOCAL statement_timeout = '5s'"))
+            try:
+                rows = session.execute(
+                    select(JudgmentDocument.citations, JudgmentDocument.jid)
+                    .where(
+                        JudgmentDocument.full_text.contains(
+                            entity, autoescape=True
+                        ),
+                        JudgmentDocument.is_current.is_(True),
+                    )
+                    .limit(limit_rows)
+                ).all()
+            except OperationalError as exc:
+                message = str(exc).lower()
+                if "timeout" in message or "canceling statement" in message:
+                    return _law_stats_timeout_result(entity, limit_rows)
+                raise
             matched_by = "full_text"
     law_counts: Counter[str] = Counter()
     article_counts: Counter[Tuple[str, str]] = Counter()
@@ -1409,6 +1440,7 @@ def _compute_judgment_law_stats(
         "matched_by": matched_by,
         "sampled": len(rows) >= limit_rows,
         "limit_rows": limit_rows,
+        "timeout": False,
         "laws": [
             {"law_name": name, "count": count}
             for name, count in law_counts.most_common(10)
@@ -1452,13 +1484,18 @@ def judgment_law_stats(
             stats = _compute_judgment_law_stats(
                 session_factory, entity, limit_rows
             )
+        except OperationalError as exc:
+            message = str(exc).lower()
+            if "timeout" in message or "canceling statement" in message:
+                return _law_stats_timeout_result(entity, limit_rows)
+            raise
         except Exception:
             logger.warning(
                 "judgment law stats failed for entity=%s", entity,
                 exc_info=True,
             )
             stats = {}
-        if stats:
+        if stats and not stats.get("timeout"):
             _store_law_stats(key, stats)
         return copy.deepcopy(stats)
 
@@ -1484,6 +1521,8 @@ def _stats_for_law(stats: Dict[str, Any], law_name: str) -> Optional[Dict[str, A
         "law_count": law_count,
         "sampled": bool(stats.get("sampled")),
         "matched_by": stats.get("matched_by") or "",
+        "limit_rows": int(stats.get("limit_rows") or 0),
+        "timeout": bool(stats.get("timeout")),
         "articles": articles,
     }
 
@@ -2026,7 +2065,10 @@ def structured_law_answer(
         if parts:
             entity = stats.get("entity") or ""
             count = int(stats.get("judgment_count") or 0)
-            sampled = "（取前 2,000 筆）" if stats.get("sampled") else ""
+            sample_size = int(
+                stats.get("limit_rows") or stats.get("judgment_count") or 0
+            )
+            sampled = f"（取樣 {sample_size} 筆）" if stats.get("sampled") else ""
             if stats.get("matched_by") == "full_text":
                 scope = f"在 {count} 筆全文提及「{entity}」的判決中{sampled}"
             else:
@@ -2053,7 +2095,10 @@ def structured_law_answer(
         if parts:
             entity = stats.get("entity") or ""
             count = int(stats.get("judgment_count") or 0)
-            sampled = "（取前 2,000 筆）" if stats.get("sampled") else ""
+            sample_size = int(
+                stats.get("limit_rows") or stats.get("judgment_count") or 0
+            )
+            sampled = f"（取樣 {sample_size} 筆）" if stats.get("sampled") else ""
             if stats.get("matched_by") == "full_text":
                 scope = f"在 {count} 筆全文提及「{entity}」的判決中{sampled}"
             else:

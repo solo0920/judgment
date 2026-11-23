@@ -3702,7 +3702,8 @@ def answer_question(
                 "status": "operational",
                 "answer": structured_answer,
                 "notice": (
-                    "本回答由法規資料庫的 metadata、條文與判決引用統計直接整理；"
+                    ("法規引用統計暫時無法提供；" if law_stats.get("timeout") else "")
+                    + "本回答由法規資料庫的 metadata、條文與判決引用統計直接整理；"
                     "引用編號可對應下方來源。這不是法律意見。"
                 ),
                 "citations": [],
