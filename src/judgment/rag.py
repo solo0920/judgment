@@ -4572,18 +4572,23 @@ def answer_question(
                         break
                 if answer is not None:
                     status = "operational"
+                    stats_notice = (
+                        "法規引用統計暫時無法提供；"
+                        if law_stats.get("timeout")
+                        else ""
+                    )
                     if law_sources and citations:
-                        notice = (
+                        notice = stats_notice + (
                             "回答只根據檢索到的法規／命令與判決片段生成，"
                             "引用編號可對應下方來源。這不是法律意見。"
                         )
                     elif law_sources:
-                        notice = (
+                        notice = stats_notice + (
                             "回答只根據法規資料庫中的法規／命令與條文生成，"
                             "引用編號可對應下方來源。這不是法律意見。"
                         )
                     else:
-                        notice = (
+                        notice = stats_notice + (
                             "回答只根據檢索到的判決片段生成，"
                             "引用編號可對應下方判決。這不是法律意見。"
                         )
