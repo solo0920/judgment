@@ -11,10 +11,9 @@ import {
   updateHistoryEntry,
 } from "../store.js";
 import {
-  buildFlowWaterfallStages,
+  renderRagPipelineStageChart,
   renderRagPipelineWaterfall,
   renderTestFlowPanel,
-  renderWaterfallStages,
 } from "./performance.js";
 import {
   copyText,
@@ -397,7 +396,6 @@ function createProcessController(answerCard) {
   const summary = panel?.querySelector("#rag-process-summary");
   const started = performance.now();
   const items = new Map();
-  const collectedSegments = new Map();
 
   const updateText = (element, selector, text) => {
     const target = element.querySelector(selector);
@@ -472,10 +470,6 @@ function createProcessController(answerCard) {
   const step = (payload) => {
     const segment = payload?.segment;
     if (!segment) return;
-    collectedSegments.set(
-      String(segment.seq ?? segment.name ?? collectedSegments.size),
-      { ...segment },
-    );
     const item = ensureItem(segment);
     if (!item) return;
     if (payload.type === "segment_start") {
@@ -500,7 +494,7 @@ function createProcessController(answerCard) {
     }
   };
 
-  const finish = (ok = true) => {
+  const finish = (ok = true, payload = null) => {
     if (!panel) return "";
     panel.querySelectorAll(".rag-process-item.is-running").forEach((element) => {
       element.classList.remove("is-running");
@@ -513,33 +507,28 @@ function createProcessController(answerCard) {
     });
     const stepCount = list?.children.length || items.size;
     const elapsed = formatProcessMs(Math.max(0, performance.now() - started));
+    const flow =
+      ok && payload?.pipeline_flow && typeof payload.pipeline_flow === "object"
+        ? payload.pipeline_flow
+        : null;
+    const decisionCount = Array.isArray(flow?.decisions)
+      ? flow.decisions.length
+      : 0;
     if (summary) {
       summary.textContent = ok
-        ? `完成 · ${stepCount} 步 · ${elapsed}`
+        ? `完成 · ${stepCount} 步${
+            flow ? ` · ${decisionCount} 決策` : ""
+          } · ${elapsed}`
         : `失敗 · ${stepCount} 步`;
     }
-    const segments = [...collectedSegments.values()]
-      .filter((segment) => segment?.name)
-      .sort(
-        (left, right) =>
-          Number(left.offset_ms || 0) - Number(right.offset_ms || 0),
-      );
-    if (list && segments.length) {
-      const total = Math.max(
-        1,
-        ...segments.map(
-          (segment) =>
-            Number(segment.end_offset_ms) ||
-            (Number(segment.offset_ms) || 0) +
-              (Number(segment.duration_ms) || 0),
-        ),
-      );
-      list.classList.add("is-waterfall");
-      list.innerHTML = renderWaterfallStages(
-        buildFlowWaterfallStages(segments),
-        total,
-        "後端 Flow 使用與 RAG Pipeline 相同的 waterfall；每個 span 以絕對 offset 定位，點選可查看參數、module／function、開始／結束時間與錯誤。",
-      );
+    if (list && flow) {
+      const chart = renderRagPipelineStageChart(flow, {
+        serverDurationMs: Number(payload.duration_ms) || 0,
+      });
+      if (chart) {
+        list.classList.add("is-waterfall");
+        list.innerHTML = chart;
+      }
     }
     panel.classList.add("is-complete");
     setProcessExpanded(panel, false);
@@ -3178,7 +3167,7 @@ export async function render(root) {
           });
       if (isStale()) return;
       stopFlowUpdates();
-      const processHtml = processController?.finish(true) || "";
+      const processHtml = processController?.finish(true, payload) || "";
       answerElement.innerHTML = renderAnswer(trimmed, payload, processHtml);
       if (turnElement) turnPayloads.set(turnElement, compactAnswerPayload(payload));
       turnElement?.classList.remove("is-pending");

@@ -1280,6 +1280,15 @@ function ragPipelineStagesMarkup(pipeline) {
   );
 }
 
+export function renderRagPipelineStageChart(
+  flow,
+  { serverDurationMs = 0 } = {},
+) {
+  if (!flow || typeof flow !== "object") return "";
+  const pipeline = buildRagPipeline(flow, serverDurationMs);
+  return ragPipelineStagesMarkup(pipeline);
+}
+
 export function renderRagPipelineWaterfall(
   flow,
   { serverDurationMs = 0, loading = false, embedded = false } = {},
