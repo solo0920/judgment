@@ -1501,6 +1501,13 @@ export const api = {
     );
   },
 
+  ragQualityReport(days = 7) {
+    return request(
+      `/api/rag/feedback/report?days=${encodeURIComponent(days)}`,
+      { timeout: 60000, trackClient: false },
+    );
+  },
+
   ragFeedbackExperiment(payload) {
     return request("/api/rag/feedback/experiments", {
       method: "POST",

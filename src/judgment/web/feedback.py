@@ -1119,6 +1119,318 @@ def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
     }
 
 
+def _report_markdown(report: Mapping[str, Any]) -> str:
+    period = report.get("period") or {}
+    totals = report.get("totals") or {}
+    lines = [
+        f"# RAG 品質週報（最近 {period.get('days', 7)} 天）",
+        "",
+        f"- 產生時間：{report.get('generated_at')}",
+        f"- 期間：{period.get('start')} ～ {period.get('end')}",
+        f"- 回饋總數：{totals.get('feedback', 0)}",
+        f"- 不滿意：{totals.get('unsatisfied', 0)}",
+        f"- 不滿意率：{totals.get('unsatisfied_rate') if totals.get('unsatisfied_rate') is not None else '—'}%",
+        f"- 可行動：{totals.get('actionable', 0)}",
+        f"- 待處理 Issue：{totals.get('open_issues', 0)}",
+        f"- 待審抽樣：{totals.get('unreviewed_reviews', 0)}",
+        "",
+        "## 警示",
+    ]
+    alerts = report.get("alerts") or []
+    if alerts:
+        for alert in alerts:
+            lines.append(
+                f"- [{alert.get('level')}] {alert.get('message')}"
+            )
+    else:
+        lines.append("- 無")
+    lines.extend(["", "## 錯誤階段"])
+    roots = report.get("by_root_cause") or []
+    if roots:
+        for row in roots:
+            lines.append(f"- {row.get('label')}: {row.get('count')}")
+    else:
+        lines.append("- 尚未標註")
+    lines.extend(["", "## 原因分布"])
+    reasons = report.get("by_reason") or []
+    if reasons:
+        for row in reasons:
+            lines.append(f"- {row.get('label')}: {row.get('count')}")
+    else:
+        lines.append("- 無")
+    lines.extend(["", "## 每日趨勢"])
+    daily = report.get("daily") or []
+    if daily:
+        for row in daily:
+            lines.append(
+                f"- {row.get('date')}: 回饋 {row.get('total')} / 不滿意 {row.get('unsatisfied')}"
+            )
+    else:
+        lines.append("- 無")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_quality_report(
+    session_factory: sessionmaker[Session],
+    *,
+    days: int = 7,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    current = _aware(now or _utcnow()) or _utcnow()
+    days = max(1, min(90, int(days or 7)))
+    start = current - timedelta(days=days)
+    previous_start = start - timedelta(days=days)
+    with session_factory() as session:
+        rows = session.execute(
+            select(
+                RagFeedback.created_at,
+                RagFeedback.sentiment,
+                RagFeedback.status,
+                RagFeedback.actionable,
+                RagFeedback.root_cause_stage,
+            ).where(RagFeedback.created_at >= start)
+        ).all()
+        previous_sentiments = session.scalars(
+            select(RagFeedback.sentiment).where(
+                RagFeedback.created_at >= previous_start,
+                RagFeedback.created_at < start,
+            )
+        ).all()
+        reason_rows = session.execute(
+            select(RagFeedbackReason.reason_code, func.count())
+            .join(
+                RagFeedback,
+                RagFeedback.id == RagFeedbackReason.feedback_id,
+            )
+            .where(RagFeedback.created_at >= start)
+            .group_by(RagFeedbackReason.reason_code)
+            .order_by(func.count().desc())
+        ).all()
+        open_issues = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedbackIssue)
+                .where(
+                    RagFeedbackIssue.status.notin_(("resolved", "dismissed"))
+                )
+            )
+            or 0
+        )
+        issue_rows = session.execute(
+            select(
+                RagFeedbackIssue.id,
+                RagFeedbackIssue.title,
+                RagFeedbackIssue.status,
+                func.count(RagFeedback.id),
+            )
+            .outerjoin(
+                RagFeedback,
+                RagFeedback.issue_id == RagFeedbackIssue.id,
+            )
+            .where(
+                RagFeedbackIssue.status.notin_(("resolved", "dismissed"))
+            )
+            .group_by(
+                RagFeedbackIssue.id,
+                RagFeedbackIssue.title,
+                RagFeedbackIssue.status,
+            )
+            .order_by(func.count(RagFeedback.id).desc())
+            .limit(5)
+        ).all()
+        feedback_exists = (
+            select(RagFeedback.id)
+            .where(RagFeedback.request_id == RagInteraction.request_id)
+            .exists()
+        )
+        unreviewed_reviews = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagInteraction)
+                .where(
+                    RagInteraction.review_status == "new",
+                    ~feedback_exists,
+                )
+            )
+            or 0
+        )
+        evaluations = session.scalars(
+            select(RagFeedbackEvaluation).where(
+                RagFeedbackEvaluation.created_at >= start
+            )
+        ).all()
+        experiments = session.scalars(
+            select(RagFeedbackExperiment).where(
+                RagFeedbackExperiment.created_at >= start
+            )
+        ).all()
+
+    total = len(rows)
+    unsatisfied = sum(
+        1 for row in rows if row.sentiment == "unsatisfied"
+    )
+    actionable = sum(1 for row in rows if row.actionable)
+    untriaged_actionable = sum(
+        1
+        for row in rows
+        if row.actionable and row.status == "new"
+    )
+    previous_total = len(previous_sentiments)
+    previous_unsatisfied = sum(
+        1 for value in previous_sentiments if value == "unsatisfied"
+    )
+    rate = round(unsatisfied / total * 100, 2) if total else None
+    previous_rate = (
+        round(previous_unsatisfied / previous_total * 100, 2)
+        if previous_total
+        else None
+    )
+    daily: Dict[str, Dict[str, int]] = {}
+    roots: Dict[str, int] = {}
+    for row in rows:
+        row_date = _aware(row.created_at)
+        key = row_date.date().isoformat() if row_date else ""
+        bucket = daily.setdefault(
+            key, {"date": key, "total": 0, "unsatisfied": 0}
+        )
+        bucket["total"] += 1
+        if row.sentiment == "unsatisfied":
+            bucket["unsatisfied"] += 1
+        stage = str(row.root_cause_stage or "unknown")
+        if stage != "unknown":
+            roots[stage] = roots.get(stage, 0) + 1
+    failed_evaluations = sum(
+        int((row.summary or {}).get("failed") or 0)
+        for row in evaluations
+    )
+    alerts: List[Dict[str, str]] = []
+    if total == 0:
+        alerts.append(
+            {
+                "level": "info",
+                "code": "no_feedback",
+                "message": "本期沒有收到回饋，請確認展示或收集管道。",
+            }
+        )
+    if 0 < total < 10:
+        alerts.append(
+            {
+                "level": "info",
+                "code": "small_sample",
+                "message": f"本期只有 {total} 筆回饋，比例不宜過度解讀。",
+            }
+        )
+    if total >= 10 and rate is not None and rate >= 30:
+        alerts.append(
+            {
+                "level": "warning",
+                "code": "high_unsatisfied_rate",
+                "message": f"不滿意率 {rate:.2f}% 偏高（樣本 {total} 筆）。",
+            }
+        )
+    if (
+        total >= 10
+        and rate is not None
+        and previous_rate is not None
+        and rate - previous_rate >= 10
+    ):
+        alerts.append(
+            {
+                "level": "warning",
+                "code": "unsatisfied_rate_up",
+                "message": (
+                    f"不滿意率較前一期上升 {rate - previous_rate:.2f} 個百分點。"
+                ),
+            }
+        )
+    if untriaged_actionable:
+        alerts.append(
+            {
+                "level": "warning",
+                "code": "untriaged_actionable",
+                "message": f"{untriaged_actionable} 筆可行動回饋仍是待處理。",
+            }
+        )
+    if open_issues > 5:
+        alerts.append(
+            {
+                "level": "warning",
+                "code": "open_issues",
+                "message": f"目前有 {open_issues} 個未結案問題群組。",
+            }
+        )
+    if unreviewed_reviews > 20:
+        alerts.append(
+            {
+                "level": "warning",
+                "code": "review_backlog",
+                "message": f"主動抽樣待審 {unreviewed_reviews} 筆。",
+            }
+        )
+    if failed_evaluations:
+        alerts.append(
+            {
+                "level": "danger",
+                "code": "evaluation_failures",
+                "message": f"本期批次評估有 {failed_evaluations} 筆失敗。",
+            }
+        )
+    report = {
+        "period": {
+            "days": days,
+            "start": start.isoformat(),
+            "end": current.isoformat(),
+        },
+        "generated_at": current.isoformat(),
+        "totals": {
+            "feedback": total,
+            "unsatisfied": unsatisfied,
+            "unsatisfied_rate": rate,
+            "actionable": actionable,
+            "untriaged_actionable": untriaged_actionable,
+            "previous_feedback": previous_total,
+            "previous_unsatisfied_rate": previous_rate,
+            "open_issues": open_issues,
+            "unreviewed_reviews": unreviewed_reviews,
+            "evaluations": len(evaluations),
+            "failed_evaluations": failed_evaluations,
+            "experiments": len(experiments),
+        },
+        "by_root_cause": [
+            {
+                "code": code,
+                "label": ROOT_CAUSE_STAGES.get(code, code),
+                "count": count,
+            }
+            for code, count in sorted(
+                roots.items(), key=lambda item: item[1], reverse=True
+            )
+        ],
+        "by_reason": [
+            {
+                "code": str(code),
+                "label": FEEDBACK_REASONS.get(str(code), str(code)),
+                "count": int(count),
+            }
+            for code, count in reason_rows
+        ],
+        "top_issues": [
+            {
+                "id": int(issue_id),
+                "title": str(title),
+                "status": str(status),
+                "count": int(count),
+            }
+            for issue_id, title, status, count in issue_rows
+        ],
+        "daily": [daily[key] for key in sorted(daily)],
+        "alerts": alerts,
+    }
+    report["markdown"] = _report_markdown(report)
+    return report
+
+
 def _review_signals(
     interaction: RagInteraction,
 ) -> Tuple[int, List[str]]:

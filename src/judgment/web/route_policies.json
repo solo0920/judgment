@@ -62,6 +62,7 @@
     "GET /api/rag/feedback/export": "ADMIN_ONLY",
     "GET /api/rag/feedback/evaluations": "ADMIN_ONLY",
     "GET /api/rag/feedback/experiments": "ADMIN_ONLY",
+    "GET /api/rag/feedback/report": "ADMIN_ONLY",
     "GET /api/rag/feedback/stats": "ADMIN_ONLY",
     "GET /api/rag/feedback/review-queue": "ADMIN_ONLY",
     "GET /api/rag/feedback/review-queue/{request_id}": "ADMIN_ONLY",
