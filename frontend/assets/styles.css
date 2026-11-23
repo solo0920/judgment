@@ -20663,3 +20663,39 @@ a.auth-menu-item {
     padding: 8px 9px;
   }
 }
+
+.rag-feedback-priority {
+  border-left: 3px solid var(--warning);
+  background: color-mix(in srgb, var(--warning-soft) 55%, var(--surface));
+  font-size: 12px;
+}
+
+.rag-feedback-priority-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.rag-feedback-priority .report-section-title {
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.rag-feedback-priority .badge {
+  font-size: 12px;
+}
+
+.rag-feedback-priority .rag-feedback-user-reasons {
+  margin-top: 2px;
+}
+
+.rag-feedback-priority .rag-feedback-comment-view {
+  margin-top: 8px;
+  font-size: 12px;
+}

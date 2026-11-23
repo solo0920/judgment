@@ -205,7 +205,18 @@ function renderDetail(detail) {
       })
     : "";
   const events = Array.isArray(detail?.events) ? detail.events : [];
+  const feedbackBlock = `<div class="report-section rag-feedback-priority">
+      <div class="rag-feedback-priority-head">
+        <span class="report-section-title">使用者回饋 · 最優先檢視</span>
+        ${detail.sentiment === "satisfied" ? statusBadge("success", "滿意") : statusBadge("warning", "不滿意")}
+      </div>
+      <div class="rag-feedback-user-reasons">
+        ${(detail.reasons || []).map((code) => `<span class="badge badge-warn">${escapeHtml(code)}</span>`).join(" ") || '<span class="cell-empty">沒有選原因</span>'}
+      </div>
+      ${detail.comment ? `<blockquote class="rag-feedback-comment-view">${escapeHtml(detail.comment)}</blockquote>` : '<p class="cell-empty">沒有留言。</p>'}
+    </div>`;
   return `<section class="report-card rag-feedback-detail" data-feedback-detail="${detail.id}">
+    ${feedbackBlock}
     <div class="report-head">
       <div class="report-title-group">
         <div class="report-kicker">FEEDBACK REPLAY · #${detail.id}</div>
@@ -233,13 +244,6 @@ function renderDetail(detail) {
         ${snapshot.notice ? `<div class="answer-notice">${escapeHtml(snapshot.notice)}</div>` : ""}
       </div>
       ${renderCitations(snapshot)}
-    </div>
-    <div class="report-section">
-      <div class="report-section-title">使用者回饋</div>
-      <div class="rag-feedback-user-reasons">
-        ${(detail.reasons || []).map((code) => `<span class="badge badge-warn">${escapeHtml(code)}</span>`).join(" ") || '<span class="cell-empty">沒有選原因</span>'}
-      </div>
-      ${detail.comment ? `<blockquote class="rag-feedback-comment-view">${escapeHtml(detail.comment)}</blockquote>` : '<p class="cell-empty">沒有留言。</p>'}
     </div>
     ${waterfall ? `<div class="report-section"><div class="report-section-title">Pipeline 快照</div><div class="rag-process-body">${waterfall}</div></div>` : ""}
     <div class="report-section">
