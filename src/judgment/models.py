@@ -999,6 +999,11 @@ class RagInteraction(Base):
     system_version = Column(JSON, nullable=False, default=dict)
     client_key_hash = Column(String(64), nullable=False, default="", index=True)
     is_demo = Column(Boolean, nullable=False, default=False)
+    review_status = Column(
+        String(16), nullable=False, default="new", index=True
+    )
+    reviewed_by = Column(String(120), nullable=False, default="")
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, default=utcnow, index=True
     )

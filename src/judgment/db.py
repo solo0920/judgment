@@ -354,9 +354,49 @@ def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
         )
 
 
+def _ensure_rag_interaction_review_columns(engine: Engine) -> None:
+    """Add active-learning review fields to an existing rag_interactions."""
+
+    inspector = inspect(engine)
+    if "rag_interactions" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("rag_interactions")
+    }
+    additions = [
+        (
+            "review_status",
+            "ALTER TABLE rag_interactions ADD COLUMN "
+            "review_status VARCHAR(16) NOT NULL DEFAULT 'new'",
+        ),
+        (
+            "reviewed_by",
+            "ALTER TABLE rag_interactions ADD COLUMN "
+            "reviewed_by VARCHAR(120) NOT NULL DEFAULT ''",
+        ),
+        (
+            "reviewed_at",
+            "ALTER TABLE rag_interactions ADD COLUMN reviewed_at TIMESTAMP",
+        ),
+    ]
+    with engine.begin() as connection:
+        for name, statement in additions:
+            if name in columns:
+                continue
+            connection.execute(text(statement))
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_rag_interactions_review_status "
+                "ON rag_interactions (review_status)"
+            )
+        )
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_rag_feedback_triage_columns(engine)
+    _ensure_rag_interaction_review_columns(engine)
     _ensure_judgment_court_normalized(engine)
     _ensure_judgment_versioning(engine)
     _ensure_law_version_code(engine)

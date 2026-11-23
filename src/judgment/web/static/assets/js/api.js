@@ -1469,6 +1469,38 @@ export const api = {
     );
   },
 
+  ragReviewQueue(params = {}) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === "") continue;
+      query.set(key, String(value));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(`/api/rag/feedback/review-queue${suffix}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  ragReviewCandidate(requestId) {
+    return request(
+      `/api/rag/feedback/review-queue/${encodeURIComponent(requestId)}`,
+      { timeout: 45000, trackClient: false },
+    );
+  },
+
+  ragReviewMark(requestId, payload) {
+    return request(
+      `/api/rag/feedback/review-queue/${encodeURIComponent(requestId)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeout: 30000,
+        trackClient: false,
+      },
+    );
+  },
+
   ragFeedbackEvaluate(payload) {
     return request("/api/rag/feedback/evaluate", {
       method: "POST",

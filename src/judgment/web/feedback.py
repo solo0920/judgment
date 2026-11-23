@@ -10,7 +10,16 @@ import secrets
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from sqlalchemy import Text, cast, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -121,6 +130,13 @@ ISSUE_STATUSES: Dict[str, str] = {
     "planned": "已排入",
     "resolved": "已解決",
     "dismissed": "不處理",
+}
+
+REVIEW_STATUSES = ("new", "reviewed", "dismissed")
+REVIEW_STATUS_LABELS = {
+    "new": "待審",
+    "reviewed": "已檢視",
+    "dismissed": "略過",
 }
 
 SNAPSHOT_VERSION = 1
@@ -1099,6 +1115,210 @@ def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
             for issue_id, title, status, stage, count in issue_rows
         ],
     }
+
+
+def _review_signals(
+    interaction: RagInteraction,
+) -> Tuple[int, List[str]]:
+    snapshot = interaction.response_snapshot or {}
+    retrieval = snapshot.get("retrieval") or {}
+    score = 1
+    reasons: List[str] = ["unreviewed_recent"]
+    status = str(interaction.status or snapshot.get("status") or "")
+    answer_source = str(
+        interaction.answer_source or snapshot.get("answer_source") or ""
+    )
+
+    def add(points: int, reason: str) -> None:
+        nonlocal score
+        score += points
+        if reason not in reasons:
+            reasons.append(reason)
+
+    if status in {
+        "degraded",
+        "retrieval_only",
+        "unavailable",
+        "preview",
+        "not_configured",
+        "failed",
+    }:
+        add(35, f"status:{status}")
+    if answer_source == "retrieval":
+        add(22, "answer_source:retrieval")
+    if not str(snapshot.get("answer") or "").strip():
+        add(25, "missing_answer")
+
+    retrieval_status = str(retrieval.get("status") or "")
+    if retrieval_status and retrieval_status not in {"ok", "not_configured"}:
+        add(25, f"retrieval:{retrieval_status}")
+    if retrieval_status == "not_configured":
+        add(18, "retrieval:not_configured")
+    hits = int(retrieval.get("hits") or 0)
+    if retrieval_status == "ok" and hits == 0:
+        add(35, "retrieval:zero_hits")
+    citations = snapshot.get("citations") or snapshot.get("judgments") or []
+    laws = snapshot.get("law_sources") or []
+    if retrieval_status == "ok" and not citations and not laws:
+        add(28, "retrieval:no_sources")
+
+    citation_audit = snapshot.get("citation_audit") or {}
+    unsupported = int(
+        citation_audit.get("unsupported_citation_count") or 0
+    )
+    if unsupported > 0:
+        add(35, f"citation_audit:unsupported:{unsupported}")
+    if citation_audit.get("citation_retry"):
+        add(20, "citation_audit:retry")
+
+    rerank = retrieval.get("rerank") or {}
+    rerank_status = str(rerank.get("status") or "")
+    if rerank_status and rerank_status not in {"ok", "disabled"}:
+        add(18, f"rerank:{rerank_status}")
+    if rerank.get("fallback_used"):
+        add(12, "rerank:fallback")
+    top_score = retrieval.get("top_score")
+    threshold = retrieval.get("score_threshold")
+    try:
+        if (
+            top_score is not None
+            and threshold is not None
+            and float(top_score) < float(threshold) + 0.08
+        ):
+            add(12, "retrieval:low_margin")
+    except (TypeError, ValueError):
+        pass
+
+    if snapshot.get("degraded_reason"):
+        add(15, f"degraded:{snapshot.get('degraded_reason')}")
+    if snapshot.get("scope_probe_notice"):
+        add(12, "scope_probe:notice")
+    if int(score) > 100:
+        score = 100
+    return int(score), reasons
+
+
+def _serialize_review_candidate(
+    interaction: RagInteraction,
+) -> Dict[str, Any]:
+    snapshot = interaction.response_snapshot or {}
+    retrieval = snapshot.get("retrieval") or {}
+    score, reasons = _review_signals(interaction)
+    return {
+        "request_id": interaction.request_id,
+        "question": interaction.question,
+        "answer_preview": str(interaction.answer or "")[:360],
+        "created_at": _iso(interaction.created_at),
+        "answer_source": interaction.answer_source,
+        "status": interaction.status,
+        "duration_ms": snapshot.get("duration_ms"),
+        "risk_score": score,
+        "reasons": reasons,
+        "review_status": interaction.review_status or "new",
+        "retrieval": {
+            "status": retrieval.get("status"),
+            "mode": retrieval.get("mode"),
+            "hits": retrieval.get("hits"),
+            "top_score": retrieval.get("top_score"),
+            "score_threshold": retrieval.get("score_threshold"),
+        },
+        "llm_model": snapshot.get("llm_model") or "",
+    }
+
+
+def list_review_candidates(
+    session_factory: sessionmaker[Session],
+    *,
+    limit: int = 20,
+    scan_limit: int = 500,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        interactions = session.scalars(
+            select(RagInteraction)
+            .where(RagInteraction.review_status == "new")
+            .order_by(RagInteraction.created_at.desc())
+            .limit(max(1, min(2000, int(scan_limit))))
+        ).all()
+        request_ids = [row.request_id for row in interactions]
+        feedback_ids = set(
+            session.scalars(
+                select(RagFeedback.request_id).where(
+                    RagFeedback.request_id.in_(request_ids)
+                )
+            ).all()
+        ) if request_ids else set()
+    candidates = [
+        _serialize_review_candidate(row)
+        for row in interactions
+        if row.request_id not in feedback_ids
+    ]
+    candidates.sort(
+        key=lambda item: (item["risk_score"], item["created_at"] or ""),
+        reverse=True,
+    )
+    return {
+        "candidates": candidates[: max(1, min(100, int(limit)))],
+        "scanned": len(interactions),
+        "unreviewed": len(candidates),
+    }
+
+
+def get_review_candidate(
+    session_factory: sessionmaker[Session],
+    request_id: str,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        row = session.scalars(
+            select(RagInteraction).where(
+                RagInteraction.request_id == str(request_id)
+            )
+        ).first()
+        if row is None:
+            raise FeedbackError(
+                404, "interaction_not_found", "找不到這筆 RAG 紀錄。"
+            )
+        feedback = session.scalars(
+            select(RagFeedback).where(
+                RagFeedback.request_id == str(request_id)
+            )
+        ).first()
+        candidate = _serialize_review_candidate(row)
+        return {
+            **candidate,
+            "has_feedback": feedback is not None,
+            "snapshot": row.response_snapshot or {},
+            "system_version": row.system_version or {},
+        }
+
+
+def mark_review_candidate(
+    session_factory: sessionmaker[Session],
+    request_id: str,
+    *,
+    status: str,
+    actor: str,
+) -> Dict[str, Any]:
+    status = str(status or "").strip()
+    if status not in REVIEW_STATUSES:
+        raise FeedbackError(
+            422, "invalid_review_status", "審查狀態不正確。"
+        )
+    with session_factory() as session:
+        row = session.scalars(
+            select(RagInteraction).where(
+                RagInteraction.request_id == str(request_id)
+            )
+        ).first()
+        if row is None:
+            raise FeedbackError(
+                404, "interaction_not_found", "找不到這筆 RAG 紀錄。"
+            )
+        row.review_status = status
+        row.reviewed_by = str(actor or "")[:120]
+        row.reviewed_at = _utcnow() if status != "new" else None
+        session.commit()
+        session.refresh(row)
+        return _serialize_review_candidate(row)
 
 
 def serialize_issue(

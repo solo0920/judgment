@@ -748,8 +748,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "ragFeedbackRerun" in api_js.text
     assert "ragFeedbackIssues" in api_js.text
     assert "ragFeedbackEvaluate" in api_js.text
+    assert "ragReviewQueue" in api_js.text
     assert "/api/rag/feedback-issues" in api_js.text
     assert "/api/rag/feedback/evaluate" in api_js.text
+    assert "/api/rag/feedback/review-queue" in api_js.text
     assert "/api/rag/feedback/export" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
@@ -783,6 +785,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "建立並連結" in feedback_js.text
     assert "批次重跑評估" in feedback_js.text
     assert "rag-feedback-evaluation" in feedback_js.text
+    assert "主動學習抽樣" in feedback_js.text
+    assert "data-review-open" in feedback_js.text
+    assert "標記已檢視" in feedback_js.text
     assert "ragFeedbackUpdate" in feedback_js.text
     assert "rag-feedback-choice-pill" in feedback_js.text
     assert 'type="radio" name="status"' in feedback_js.text
@@ -844,6 +849,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-issue-link" in css.text
     assert ".rag-feedback-issues" in css.text
     assert ".rag-feedback-evaluation-row" in css.text
+    assert ".rag-feedback-review-row" in css.text
+    assert ".rag-feedback-review-detail" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -3292,6 +3299,44 @@ def test_feedback_batch_evaluation_is_stored(web_client) -> None:
     assert all("results" not in row for row in listing["evaluations"])
 
 
+def test_active_learning_review_queue(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    request_id = answer["request_id"]
+
+    queue = web_client.get("/api/rag/feedback/review-queue")
+    assert queue.status_code == 200
+    candidates = queue.json()["candidates"]
+    candidate = next(
+        item for item in candidates if item["request_id"] == request_id
+    )
+    assert candidate["risk_score"] >= 1
+    assert candidate["question"] == "銀行法如何規範吸收存款？"
+    assert "unreviewed_recent" in candidate["reasons"]
+
+    detail = web_client.get(
+        f"/api/rag/feedback/review-queue/{request_id}"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["has_feedback"] is False
+    assert detail.json()["snapshot"]["question"] == "銀行法如何規範吸收存款？"
+
+    marked = web_client.post(
+        f"/api/rag/feedback/review-queue/{request_id}/review",
+        json={"status": "reviewed"},
+    )
+    assert marked.status_code == 200
+    assert marked.json()["review_status"] == "reviewed"
+
+    queue_after = web_client.get("/api/rag/feedback/review-queue").json()
+    assert all(
+        item["request_id"] != request_id
+        for item in queue_after["candidates"]
+    )
+
+
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
     answer = web_client.post(
         "/api/rag/query",
@@ -4291,6 +4336,18 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert (
         policy_for("GET", "/api/rag/feedback/evaluations", policies)
         == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for("GET", "/api/rag/feedback/review-queue", policies)
+        == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for(
+            "POST",
+            "/api/rag/feedback/review-queue/{request_id}/review",
+            policies,
+        )
+        == "ADMIN_WRITE"
     )
     assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"
     assert policy_for("POST", "/api/auth/sse-ticket", policies) == "AUTH_READ"
