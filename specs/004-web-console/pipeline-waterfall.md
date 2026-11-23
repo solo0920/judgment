@@ -36,7 +36,7 @@
 
 ### 2.1 MUST 使用本規格
 
-- RAG 查詢的 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 流程。
+- RAG 查詢的 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 流程；結構化法規查詢改用 Parsing／法規檢索與統計／法條載入／Response，不得把未執行的標準階段列成「未記錄」。
 - 判決向量索引的 Ollama 測試／Blue-Green 版本／向量複製／金融判決索引／驗證／alias 切換流程。
 - 效能報表的 Flow 紀錄與測試 Flow。
 - `#/status` 的服務總覽載入 Pipeline。

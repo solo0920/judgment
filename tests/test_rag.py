@@ -58,6 +58,7 @@ from judgment.law_rag import (
     is_law_first_question,
     is_law_overview_question,
     is_related_laws_question,
+    judgment_law_stats,
     law_sources_for_question,
     select_law_articles,
     structured_law_answer,
@@ -2638,6 +2639,56 @@ def test_insurance_salesperson_citation_stats(tmp_path: Path) -> None:
         "民法",
     ]
     assert payload["retrieval"]["law_stats"]["judgment_count"] == 3
+    assert payload["retrieval"]["law_stats"]["sampled"] is False
+
+
+def test_judgment_law_stats_samples_and_caches(monkeypatch) -> None:
+    session_factory = _session_factory()
+    with session_factory() as session:
+        for index in range(120):
+            session.add(
+                JudgmentDocument(
+                    jid=f"sample-{index}",
+                    jdate="20260101",
+                    court="臺灣臺北地方法院",
+                    court_normalized="臺灣臺北地方法院",
+                    title="證券營業員爭議",
+                    full_text="證券營業員執行業務爭議。",
+                    full_text_length=13,
+                    content_hash=f"{index:064d}",
+                    matched_laws=[],
+                    matched_laws_text="",
+                    citations=[
+                        {
+                            "law_name": "證券交易法",
+                            "article_no": "第171條",
+                        }
+                    ],
+                    citation_count=1,
+                    source_archive="test.rar",
+                )
+            )
+        session.commit()
+
+    first = judgment_law_stats(session_factory, "證券營業員")
+    assert first["judgment_count"] == 100
+    assert first["sampled"] is True
+    assert first["matched_by"] == "full_text"
+    assert first["laws"][0]["law_name"] == "證券交易法"
+
+    import judgment.law_rag as law_rag
+
+    def fail_on_cache_miss(*args, **kwargs):
+        raise AssertionError("cache miss")
+
+    monkeypatch.setattr(
+        law_rag,
+        "_compute_judgment_law_stats",
+        fail_on_cache_miss,
+    )
+    cached = judgment_law_stats(session_factory, "證券營業員")
+    assert cached["judgment_count"] == 100
+    assert cached["sampled"] is True
 
 
 def test_related_life_and_property_insurance_laws(tmp_path: Path) -> None:
