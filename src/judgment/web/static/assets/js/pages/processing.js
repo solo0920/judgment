@@ -40,6 +40,14 @@ function formatSpanSeconds(value) {
   return `${days} 天 ${restHours} 小時`;
 }
 
+export function newRunVisible(workflow, baselineRunId = "") {
+  const runId =
+    workflow?.active_run?.id || workflow?.last_run?.id || "";
+  return Boolean(workflow?.active_run) || Boolean(
+    runId && runId !== baselineRunId,
+  );
+}
+
 function normalizeModelLabel(value) {
   return String(value || "")
     .trim()
@@ -7460,12 +7468,7 @@ export async function render(root) {
       const workflow = (snapshot.workflows || []).find(
         (item) => item.id === pendingWorkflowId,
       );
-      const runId =
-        workflow?.active_run?.id || workflow?.last_run?.id || "";
-      if (
-        workflow?.active_run ||
-        (runId && runId !== pendingWorkflowBaselineRunId)
-      ) {
+      if (newRunVisible(workflow, pendingWorkflowBaselineRunId)) {
         pendingWorkflowId = "";
         pendingWorkflowBaselineRunId = "";
       }
@@ -7728,11 +7731,7 @@ export async function render(root) {
     );
     if (pendingWorkflowId) {
       const pending = workflowById.get(pendingWorkflowId);
-      const runId = pending?.active_run?.id || pending?.last_run?.id || "";
-      if (
-        pending?.active_run ||
-        (runId && runId !== pendingWorkflowBaselineRunId)
-      ) {
+      if (newRunVisible(pending, pendingWorkflowBaselineRunId)) {
         pendingWorkflowId = "";
         pendingWorkflowBaselineRunId = "";
       }
@@ -8163,13 +8162,27 @@ export async function render(root) {
       // the next SSE tick.  This is what transitions the panel from「啟動中」
       // to the real run with its stop button and progress table.
       void refresh({ silent: true });
+      // Do not unlock just because a fixed timeout elapsed.  A legitimate
+      // download+parquet+parse+postgres run can take longer than 15s, and a
+      // slow snapshot could otherwise re-enable the button while the run is
+      // still active.  Only clear after a long safety timeout if no snapshot
+      // has shown the new run yet.
       window.setTimeout(() => {
-        if (pendingWorkflowId === workflowId) {
+        if (pendingWorkflowId !== workflowId) return;
+        const workflow = (lastSnapshot?.workflows || []).find(
+          (item) => item.id === workflowId,
+        );
+        if (!newRunVisible(workflow, pendingWorkflowBaselineRunId)) {
           pendingWorkflowId = "";
           pendingWorkflowBaselineRunId = "";
-          void refresh({ silent: true });
+          if (lastSnapshot) {
+            syncControls(lastSnapshot);
+            lastMarkup = "";
+            repaintFromSnapshot();
+          }
         }
-      }, 15000);
+        void refresh({ silent: true });
+      }, 120000);
     } catch (error) {
       toast(error.message || "無法啟動工作流程。", "danger", 7000);
     } finally {
