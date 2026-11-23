@@ -224,6 +224,7 @@ function renderFilterForm(payload, filters) {
       <button class="btn btn-secondary btn-sm" type="submit">套用篩選</button>
       <button class="btn btn-ghost btn-sm" type="button" data-feedback-action="reset">清除</button>
       <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="export">${icon("download", 13)}<span>匯出代理 JSONL</span></button>
+      <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="evaluate">${icon("refresh", 13)}<span>批次重跑評估</span></button>
     </div>
   </form>`;
 }
@@ -391,6 +392,60 @@ function renderRerun(result) {
       </div>
     </div>
   </section>`;
+}
+
+
+function renderEvaluation(evaluation) {
+  if (!evaluation) return "";
+  const summary = evaluation.summary || {};
+  const results = Array.isArray(evaluation.results)
+    ? evaluation.results
+    : [];
+  const metric = (label, value, desc = "") =>
+    `<div class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${formatNumber(value || 0)}</div>${desc ? `<div class="metric-desc">${escapeHtml(desc)}</div>` : ""}</div>`;
+  return `<div class="report-card rag-feedback-evaluation" data-feedback-evaluation="${evaluation.id}">
+    <div class="report-head">
+      <div class="report-title-group">
+        <div class="report-kicker">OFFLINE COUNTERFACTUAL EVALUATION</div>
+        <div class="report-title">批次重跑評估 #${evaluation.id}</div>
+        <div class="report-sub">共 ${formatNumber(evaluation.total || 0)} 筆 · ${escapeHtml(formatDuration(evaluation.duration_ms || 0))} · 以目前 pipeline 重跑，對照原始快照</div>
+      </div>
+      <div class="rag-feedback-detail-head-actions">
+        ${statusBadge(summary.failed ? "warning" : "success", summary.failed ? `${formatNumber(summary.failed)} 筆失敗` : "全部完成")}
+      </div>
+    </div>
+    <div class="report-section">
+      <div class="metric-grid quality-coverage-grid rag-feedback-evaluation-metrics">
+        ${metric("成功", summary.succeeded)}
+        ${metric("失敗", summary.failed)}
+        ${metric("答案變更", summary.answer_changed)}
+        ${metric("來源模式變更", summary.answer_source_changed)}
+        ${metric("判決引用新增", summary.citations_added_total)}
+        ${metric("判決引用移除", summary.citations_removed_total)}
+      </div>
+      <div class="rag-feedback-evaluation-list">
+        ${results
+          .map(
+            (result) => `<button type="button" class="rag-feedback-evaluation-row"
+              data-feedback-evaluate-open="${result.feedback_id}">
+              <span class="rag-feedback-evaluation-question">#${result.feedback_id} ${escapeHtml(questionExcerpt(result.question || "", 80))}</span>
+              <span class="rag-feedback-evaluation-badges">
+                ${statusBadge(result.status === "success" ? "success" : "danger", result.status === "success" ? "完成" : "失敗")}
+                ${result.diff?.answer_changed ? statusBadge("warning", "答案變更") : ""}
+                ${result.diff?.answer_source_changed ? statusBadge("warning", "來源變更") : ""}
+                ${(result.diff?.citations_added || []).length ? statusBadge("info", `+${result.diff.citations_added.length} 引用`) : ""}
+                ${(result.diff?.citations_removed || []).length ? statusBadge("info", `-${result.diff.citations_removed.length} 引用`) : ""}
+              </span>
+            </button>`,
+          )
+          .join("")}
+      </div>
+      <details class="rag-feedback-raw">
+        <summary>完整評估 JSON</summary>
+        <pre>${escapeHtml(JSON.stringify(evaluation, null, 2))}</pre>
+      </details>
+    </div>
+  </div>`;
 }
 
 
@@ -591,6 +646,7 @@ export function createFeedbackController(container, { onStats } = {}) {
   let detail = null;
   let rerun = null;
   let issues = [];
+  let evaluation = null;
   let disposed = false;
 
   const notifyStats = (stats) => {
@@ -611,6 +667,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       <div class="report-section" data-feedback-issues></div>
       <div class="report-section" data-feedback-filter-slot></div>
       <div class="report-section" data-feedback-list></div>
+      <div data-feedback-evaluation-slot></div>
       <div data-feedback-detail-slot></div>
     </div>`;
   };
@@ -621,11 +678,17 @@ export function createFeedbackController(container, { onStats } = {}) {
     const issueBox = container.querySelector("[data-feedback-issues]");
     const filterBox = container.querySelector("[data-feedback-filter-slot]");
     const listBox = container.querySelector("[data-feedback-list]");
+    const evaluationBox = container.querySelector(
+      "[data-feedback-evaluation-slot]",
+    );
     const detailBox = container.querySelector("[data-feedback-detail-slot]");
     if (statsBox) statsBox.innerHTML = renderStats(payload.stats || {});
     if (issueBox) issueBox.innerHTML = renderIssuePanel(issues, filters);
     if (filterBox) filterBox.innerHTML = renderFilterForm(payload, filters);
     if (listBox) listBox.innerHTML = renderList(payload, selectedId);
+    if (evaluationBox) {
+      evaluationBox.innerHTML = renderEvaluation(evaluation);
+    }
     if (detailBox) {
       detailBox.innerHTML = detail
         ? `${renderDetail(detail, issues)}${renderRerun(rerun)}`
@@ -692,6 +755,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       keyword: String(data.get("keyword") || "").trim(),
       actionable: data.get("actionable") ? "1" : "",
     };
+    evaluation = null;
     page = 1;
   };
 
@@ -784,6 +848,26 @@ export function createFeedbackController(container, { onStats } = {}) {
         if (page >= Number(payload?.pages || 1)) return;
         page += 1;
         await load();
+        return;
+      }
+      if (action === "evaluate") {
+        setBusy(actionButton, true, "評估中…");
+        try {
+          evaluation = await api.ragFeedbackEvaluate({
+            filters,
+            limit: 10,
+          });
+          render();
+          toast(
+            `已完成 ${formatNumber(evaluation.total || 0)} 筆批次重跑評估。`,
+            "ok",
+            6200,
+          );
+        } catch (error) {
+          toast(error.message || "批次評估失敗。", "danger");
+        } finally {
+          setBusy(actionButton, false);
+        }
         return;
       }
       if (action === "export") {
@@ -881,6 +965,13 @@ export function createFeedbackController(container, { onStats } = {}) {
         return;
       }
     }
+    const evaluationRow = event.target.closest(
+      "[data-feedback-evaluate-open]",
+    );
+    if (evaluationRow) {
+      await loadDetail(evaluationRow.dataset.feedbackEvaluateOpen);
+      return;
+    }
     const issueButton = event.target.closest("[data-feedback-issue-id]");
     if (issueButton) {
       if (event.target.closest("a")) return;
@@ -891,6 +982,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       selectedId = null;
       detail = null;
       rerun = null;
+      evaluation = null;
       await load();
       return;
     }

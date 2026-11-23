@@ -21016,3 +21016,74 @@ a.auth-menu-item {
     justify-self: start;
   }
 }
+
+.rag-feedback-evaluation {
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+
+.rag-feedback-evaluation-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.rag-feedback-evaluation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.rag-feedback-evaluation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rag-feedback-evaluation-row:hover,
+.rag-feedback-evaluation-row:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rag-feedback-evaluation-question {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-feedback-evaluation-badges {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+@media (max-width: 980px) {
+  .rag-feedback-evaluation-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .rag-feedback-evaluation-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rag-feedback-evaluation-badges {
+    justify-content: flex-start;
+  }
+}

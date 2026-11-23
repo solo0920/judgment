@@ -24,6 +24,7 @@ from ..models import (
     LawDatasetVersion,
     QuestionBankItem,
     RagFeedback,
+    RagFeedbackEvaluation,
     RagFeedbackEvent,
     RagFeedbackExport,
     RagFeedbackIssue,
@@ -1453,6 +1454,183 @@ def rerun_feedback(
     }
 
 
+def serialize_evaluation(
+    row: RagFeedbackEvaluation,
+    *,
+    include_results: bool = False,
+) -> Dict[str, Any]:
+    payload = {
+        "id": row.id,
+        "filters": row.filters or {},
+        "feedback_ids": row.feedback_ids or [],
+        "total": int(row.total or 0),
+        "summary": row.summary or {},
+        "status": row.status,
+        "created_by": row.created_by,
+        "duration_ms": int(row.duration_ms or 0),
+        "created_at": _iso(row.created_at),
+    }
+    if include_results:
+        payload["results"] = row.results or []
+    return payload
+
+
+def evaluate_feedback_batch(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    feedback_ids: Optional[Sequence[int]] = None,
+    filters: Optional[Mapping[str, Any]] = None,
+    limit: int = 10,
+    actor: str = "",
+) -> Dict[str, Any]:
+    """Re-run selected feedback with the current pipeline and diff the result."""
+
+    filters = dict(filters or {})
+    requested_limit = max(1, min(20, int(limit or 10)))
+    started = time.perf_counter()
+    selected: List[int] = []
+    with session_factory() as session:
+        if feedback_ids:
+            selected = [int(value) for value in feedback_ids][:requested_limit]
+        else:
+            statement = _feedback_filters(select(RagFeedback.id), filters)
+            selected = [
+                int(value)
+                for value in session.scalars(
+                    statement.order_by(RagFeedback.created_at.desc()).limit(
+                        requested_limit
+                    )
+                ).all()
+            ]
+        existing = set(
+            int(value)
+            for value in session.scalars(
+                select(RagFeedback.id).where(
+                    RagFeedback.id.in_(selected)
+                )
+            ).all()
+        )
+        selected = [value for value in selected if value in existing]
+
+    results: List[Dict[str, Any]] = []
+    summary = {
+        "succeeded": 0,
+        "failed": 0,
+        "answer_changed": 0,
+        "answer_source_changed": 0,
+        "status_changed": 0,
+        "retrieval_mode_changed": 0,
+        "citations_added_total": 0,
+        "citations_removed_total": 0,
+        "laws_added_total": 0,
+        "laws_removed_total": 0,
+    }
+    for feedback_id in selected:
+        try:
+            rerun = rerun_feedback(
+                session_factory, settings, feedback_id
+            )
+            diff = rerun.get("diff") or {}
+            summary["succeeded"] += 1
+            for key in (
+                "answer_changed",
+                "answer_source_changed",
+                "status_changed",
+                "retrieval_mode_changed",
+            ):
+                if diff.get(key):
+                    summary[key] += 1
+            summary["citations_added_total"] += len(
+                diff.get("citations_added") or []
+            )
+            summary["citations_removed_total"] += len(
+                diff.get("citations_removed") or []
+            )
+            summary["laws_added_total"] += len(diff.get("laws_added") or [])
+            summary["laws_removed_total"] += len(
+                diff.get("laws_removed") or []
+            )
+            results.append(
+                {
+                    "feedback_id": feedback_id,
+                    "question": rerun.get("question") or "",
+                    "status": "success",
+                    "diff": diff,
+                    "previous": {
+                        "answer": (rerun.get("previous") or {}).get("answer")
+                        or "",
+                        "answer_source": (
+                            rerun.get("previous") or {}
+                        ).get("answer_source")
+                        or "",
+                        "retrieval_mode": (
+                            rerun.get("previous") or {}
+                        ).get("retrieval_mode")
+                        or "",
+                    },
+                    "current": {
+                        "answer": (rerun.get("current") or {}).get("answer")
+                        or "",
+                        "answer_source": (
+                            rerun.get("current") or {}
+                        ).get("answer_source")
+                        or "",
+                        "retrieval_mode": (
+                            rerun.get("current") or {}
+                        ).get("retrieval_mode")
+                        or "",
+                    },
+                }
+            )
+        except Exception as exc:
+            summary["failed"] += 1
+            results.append(
+                {
+                    "feedback_id": feedback_id,
+                    "question": "",
+                    "status": "failed",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                    "diff": {},
+                }
+            )
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    with session_factory() as session:
+        row = RagFeedbackEvaluation(
+            filters=filters,
+            feedback_ids=selected,
+            total=len(selected),
+            summary=summary,
+            results=results,
+            status="completed" if selected else "empty",
+            created_by=str(actor or "")[:120],
+            duration_ms=int(duration_ms),
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return serialize_evaluation(row, include_results=True)
+
+
+def list_feedback_evaluations(
+    session_factory: sessionmaker[Session],
+    *,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        rows = session.scalars(
+            select(RagFeedbackEvaluation)
+            .order_by(RagFeedbackEvaluation.created_at.desc())
+            .limit(max(1, min(100, int(limit))))
+        ).all()
+        return {
+            "evaluations": [
+                serialize_evaluation(row) for row in rows
+            ]
+        }
+
+
 def promote_feedback_to_question_bank(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -2108,6 +2286,29 @@ def prune_rag_interactions(
             return int(result.rowcount or 0)
     except Exception:
         logger.warning("RAG interaction retention failed", exc_info=True)
+        return 0
+
+
+def prune_rag_feedback_evaluations(
+    session_factory: Optional[sessionmaker[Session]],
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    if session_factory is None:
+        return 0
+    current = _aware(now or _utcnow()) or _utcnow()
+    cutoff = current - timedelta(days=180)
+    try:
+        with session_factory() as session:
+            result = session.execute(
+                delete(RagFeedbackEvaluation).where(
+                    RagFeedbackEvaluation.created_at < cutoff
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+    except Exception:
+        logger.warning("RAG feedback evaluation retention failed", exc_info=True)
         return 0
 
 
