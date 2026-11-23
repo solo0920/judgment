@@ -24,9 +24,10 @@ VALID_CATEGORIES = frozenset(
         "ADMIN_WRITE",
         "DEMO_READ",
         "DEMO_QUERY",
+        "DEMO_ACTION",
     }
 )
-DEMO_POLICIES = frozenset({"DEMO_READ", "DEMO_QUERY"})
+DEMO_POLICIES = frozenset({"DEMO_READ", "DEMO_QUERY", "DEMO_ACTION"})
 VALID_DEMO_FEATURES = frozenset(
     {"rag", "data", "quality", "performance", "processing", "status", "home"}
 )

@@ -79,6 +79,81 @@ def demo_client(tmp_path: Path):
         yield client, app
 
 
+def test_demo_visitor_can_submit_feedback_while_rag_is_open(demo_client) -> None:
+    client, _app = demo_client
+    admin = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()
+    opened = client.put(
+        "/api/admin/demo",
+        headers=ADMIN_HEADERS,
+        json={
+            "enabled": True,
+            "duration_hours": 2,
+            "features": ALL_FEATURES,
+            "version": admin["stored"]["version"],
+        },
+    )
+    assert opened.status_code == 200
+
+    answer = client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    )
+    assert answer.status_code == 200, answer.text
+    payload = answer.json()
+    created = client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": payload["request_id"],
+            "feedback_token": payload["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["not_helpful"],
+            "comment": "",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["sentiment"] == "unsatisfied"
+
+
+def test_demo_feedback_reads_stay_admin_only(demo_client) -> None:
+    client, _app = demo_client
+    admin = client.get("/api/admin/demo", headers=ADMIN_HEADERS).json()
+    opened = client.put(
+        "/api/admin/demo",
+        headers=ADMIN_HEADERS,
+        json={
+            "enabled": True,
+            "duration_hours": 2,
+            "features": ALL_FEATURES,
+            "version": admin["stored"]["version"],
+        },
+    )
+    assert opened.status_code == 200
+    assert client.get("/api/rag/feedback").status_code == 401
+    assert client.get("/api/rag/feedback/stats").status_code == 401
+
+    admin_read = client.get(
+        "/api/rag/feedback", headers=ADMIN_HEADERS
+    )
+    assert admin_read.status_code == 200
+    assert admin_read.json()["total"] == 0
+
+
+def test_demo_feedback_write_is_gated_by_demo_mode(demo_client) -> None:
+    client, _app = demo_client
+    response = client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": "abcdefgh",
+            "feedback_token": "x" * 32,
+            "sentiment": "satisfied",
+            "reasons": [],
+            "comment": "",
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "demo_closed"
+
+
 def test_demo_defaults_closed_and_admin_can_open(demo_client) -> None:
     client, _app = demo_client
     assert client.get("/api/health").status_code == 200
@@ -1143,6 +1218,7 @@ def test_demo_route_feature_mapping_is_explicit() -> None:
     assert mapping["GET /api/status"] == "status"
     assert mapping["GET /api/processing"] == "processing"
     assert mapping["POST /api/rag/query"] == "rag"
+    assert mapping["POST /api/rag/feedback"] == "rag"
     assert mapping["POST /api/rag/share"] == "rag"
     assert mapping["GET /api/rag/share/{share_id}"] == "rag"
     assert mapping["POST /api/query"] == "data"
@@ -1172,6 +1248,7 @@ def test_demo_visible_routes_are_explicitly_allowlisted() -> None:
         "GET /api/rag/share/{share_id}",
         "GET /api/status",
         "POST /api/query",
+        "POST /api/rag/feedback",
         "POST /api/rag/query",
         "POST /api/rag/query/stream",
         "POST /api/rag/share",

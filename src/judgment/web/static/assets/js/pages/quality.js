@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { demoLockMarkup, isDemoVisitor } from "../demo.js";
+import { createFeedbackController } from "./feedback.js";
 import { createQuestionBankController } from "./question_bank.js";
 import {
   downloadText,
@@ -390,6 +391,11 @@ export async function render(root) {
             <span class="status-tab-copy"><strong>題庫人工驗收批注</strong><small>待審、批注、核准與退回</small></span>
             <span class="badge badge-warn" id="quality-badge-review">—</span>
           </button>
+          <button class="status-tab" type="button" data-quality-tab="feedback">
+            <span class="status-tab-icon">${icon("message", 15)}</span>
+            <span class="status-tab-copy"><strong>使用者回饋</strong><small>重現回答、檢視不滿意原因與 triage</small></span>
+            <span class="badge badge-warn" id="quality-badge-feedback">—</span>
+          </button>
         </nav>
         <div class="status-sidebar-foot">
           <span>題目驗證</span>
@@ -418,6 +424,7 @@ export async function render(root) {
         <div id="quality-panel-question-manage" hidden></div>
         <div id="quality-panel-benchmark-bank" hidden></div>
         <div id="quality-panel-question-review" hidden></div>
+        <div id="quality-panel-feedback" hidden></div>
       </section>
     </div>
   </section>`;
@@ -432,6 +439,7 @@ export async function render(root) {
     manage: root.querySelector("#quality-panel-question-manage"),
     suite: root.querySelector("#quality-panel-benchmark-bank"),
     review: root.querySelector("#quality-panel-question-review"),
+    feedback: root.querySelector("#quality-panel-feedback"),
   };
   let current = null;
   let activeTab = "overview";
@@ -457,12 +465,37 @@ export async function render(root) {
     for (const [name, panel] of Object.entries(panels)) {
       if (panel) panel.hidden = name !== activeTab;
     }
-    if (activeTab !== "overview") {
+    if (activeTab === "feedback") {
+      meta.textContent = "USER FEEDBACK · 使用者回饋";
+    } else if (activeTab !== "overview") {
       meta.textContent = "QUESTION BANK · 題庫工作區";
     } else if (current) {
       paint();
     }
   };
+
+  const feedbackController = demoReadOnly
+    ? null
+    : createFeedbackController(panels.feedback, {
+        onStats: (stats) => {
+          const badge = root.querySelector("#quality-badge-feedback");
+          if (badge) {
+            badge.textContent = formatNumber(stats?.new || 0);
+          }
+        },
+      });
+
+  if (!demoReadOnly) {
+    api
+      .ragFeedbackStats()
+      .then((stats) => {
+        const badge = root.querySelector("#quality-badge-feedback");
+        if (badge) badge.textContent = formatNumber(stats?.new || 0);
+      })
+      .catch(() => {
+        /* the feedback tab reports its own errors when opened */
+      });
+  }
 
   const controller = createQuestionBankController(root, {
     onNavigate: (tab) => syncTab(tab),
@@ -490,10 +523,18 @@ export async function render(root) {
       const target = panels[tab];
       if (target) {
         target.innerHTML = demoLockMarkup(
-          "題庫管理需要管理者權限",
-          "展示模式可瀏覽完整的資料品質總覽；題庫新增、管理、Benchmark 與人工驗收由管理者操作。",
+          tab === "feedback"
+            ? "使用者回饋需要管理者權限"
+            : "題庫管理需要管理者權限",
+          tab === "feedback"
+            ? "展示模式可送出回饋，但不能讀取其他人的問題、回答快照或留言。"
+            : "展示模式可瀏覽完整的資料品質總覽；題庫新增、管理、Benchmark 與人工驗收由管理者操作。",
         );
       }
+      return;
+    }
+    if (tab === "feedback") {
+      feedbackController?.show();
       return;
     }
     controller.show(tab);
@@ -531,6 +572,7 @@ export async function render(root) {
 
   const onRefresh = async () => {
     if (activeTab === "overview") await load();
+    else if (activeTab === "feedback") await feedbackController?.refresh();
     else await controller.refresh();
   };
 
@@ -561,7 +603,10 @@ export async function render(root) {
       if (button.dataset.qualityTab === "overview") continue;
       button.classList.add("is-demo-locked");
       button.removeAttribute("title");
-      button.dataset.demoLockTooltip = "展示模式不提供題庫管理";
+      button.dataset.demoLockTooltip =
+        button.dataset.qualityTab === "feedback"
+          ? "展示模式不提供使用者回饋檢視"
+          : "展示模式不提供題庫管理";
       const badge = button.querySelector(".badge");
       if (badge) badge.textContent = "LOCK";
     }

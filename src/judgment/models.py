@@ -975,3 +975,167 @@ class RagShareSnapshot(Base):
     expires_at = Column(
         DateTime(timezone=True), nullable=False, index=True
     )
+
+
+class RagInteraction(Base):
+    """Server-side snapshot of one RAG answer.
+
+    The frontend never supplies the question or answer for feedback.  It sends
+    only ``request_id`` and a signed capability token; the backend loads this
+    row so the replay cannot be forged or mixed with another visitor.
+    """
+
+    __tablename__ = "rag_interactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(String(64), nullable=False, unique=True, index=True)
+    question = Column(Text, nullable=False, default="")
+    answer = Column(Text, nullable=False, default="")
+    answer_source = Column(String(32), nullable=False, default="")
+    status = Column(String(32), nullable=False, default="")
+    notice = Column(Text, nullable=False, default="")
+    response_snapshot = Column(JSON, nullable=False, default=dict)
+    snapshot_version = Column(SmallInteger, nullable=False, default=1)
+    system_version = Column(JSON, nullable=False, default=dict)
+    client_key_hash = Column(String(64), nullable=False, default="", index=True)
+    is_demo = Column(Boolean, nullable=False, default=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    expires_at = Column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        Index("ix_rag_interactions_source_created", "answer_source", "created_at"),
+        Index("ix_rag_interactions_demo_created", "is_demo", "created_at"),
+    )
+
+
+class RagFeedback(Base):
+    __tablename__ = "rag_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    interaction_id = Column(
+        Integer,
+        ForeignKey("rag_interactions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    request_id = Column(String(64), nullable=False, index=True)
+    client_key_hash = Column(String(64), nullable=False, default="", index=True)
+
+    sentiment = Column(String(16), nullable=False)
+    primary_reason = Column(String(40), nullable=False, default="")
+    comment = Column(Text, nullable=False, default="")
+
+    snapshot = Column(JSON, nullable=False, default=dict)
+    snapshot_version = Column(SmallInteger, nullable=False, default=1)
+    system_version = Column(JSON, nullable=False, default=dict)
+
+    revision = Column(Integer, nullable=False, default=1)
+    editable_until = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+    status = Column(String(24), nullable=False, default="new", index=True)
+    severity = Column(String(16), nullable=False, default="medium")
+    actionable = Column(Boolean, nullable=False, default=False)
+    expected_behavior = Column(Text, nullable=False, default="")
+    linked_question_id = Column(
+        Integer,
+        ForeignKey("question_bank_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    linked_pr_url = Column(Text, nullable=False, default="")
+
+    is_demo = Column(Boolean, nullable=False, default=False)
+    reviewed_by = Column(String(120), nullable=False, default="")
+    review_comment = Column(Text, nullable=False, default="")
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id",
+            "client_key_hash",
+            name="uq_rag_feedback_request_client",
+        ),
+        CheckConstraint(
+            "sentiment IN ('satisfied', 'unsatisfied')",
+            name="ck_rag_feedback_sentiment",
+        ),
+        CheckConstraint(
+            "status IN ('new', 'triaged', 'planned', 'resolved', 'dismissed')",
+            name="ck_rag_feedback_status",
+        ),
+        CheckConstraint(
+            "severity IN ('low', 'medium', 'high')",
+            name="ck_rag_feedback_severity",
+        ),
+        Index("ix_rag_feedback_sentiment_created", "sentiment", "created_at"),
+        Index("ix_rag_feedback_status_created", "status", "created_at"),
+        Index("ix_rag_feedback_reason_created", "primary_reason", "created_at"),
+    )
+
+
+class RagFeedbackReason(Base):
+    __tablename__ = "rag_feedback_reasons"
+
+    feedback_id = Column(
+        Integer,
+        ForeignKey("rag_feedback.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    reason_code = Column(String(40), primary_key=True)
+
+    __table_args__ = (
+        Index("ix_rag_feedback_reasons_code", "reason_code"),
+    )
+
+
+class RagFeedbackEvent(Base):
+    __tablename__ = "rag_feedback_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    feedback_id = Column(
+        Integer,
+        ForeignKey("rag_feedback.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type = Column(String(32), nullable=False)
+    from_status = Column(String(24), nullable=False, default="")
+    to_status = Column(String(24), nullable=False, default="")
+    actor = Column(String(120), nullable=False, default="")
+    comment = Column(Text, nullable=False, default="")
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+
+    __table_args__ = (
+        Index("ix_rag_feedback_events_created", "feedback_id", "created_at"),
+    )
+
+
+class RagFeedbackExport(Base):
+    __tablename__ = "rag_feedback_exports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    filter_json = Column(JSON, nullable=False, default=dict)
+    feedback_ids = Column(JSON, nullable=False, default=list)
+    format = Column(String(16), nullable=False, default="jsonl")
+    status = Column(String(24), nullable=False, default="created")
+    model = Column(String(120), nullable=False, default="")
+    prompt_version = Column(String(80), nullable=False, default="")
+    pr_url = Column(Text, nullable=False, default="")
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )

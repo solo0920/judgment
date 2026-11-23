@@ -1360,6 +1360,70 @@ export const api = {
     });
   },
 
+  ragFeedbackCreate(payload) {
+    return request("/api/rag/feedback", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackStats() {
+    return request("/api/rag/feedback/stats", {
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackList(params = {}) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === "") continue;
+      query.set(key, String(value));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(`/api/rag/feedback${suffix}`, {
+      timeout: 45000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackDetail(feedbackId) {
+    return request(
+      `/api/rag/feedback/${encodeURIComponent(feedbackId)}`,
+      {
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  ragFeedbackUpdate(feedbackId, payload) {
+    return request(
+      `/api/rag/feedback/${encodeURIComponent(feedbackId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+        timeout: 45000,
+        trackClient: false,
+      },
+    );
+  },
+
+  async ragFeedbackExport(params = {}) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === "") continue;
+      query.set(key, String(value));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(`/api/rag/feedback/export${suffix}`, {
+      timeout: 60000,
+      trackClient: false,
+    });
+  },
+
   async ragStream(
     question,
     {

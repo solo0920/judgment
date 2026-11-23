@@ -971,3 +971,43 @@ judgment-reranker:
 ### Addendum Success Criteria — Data Quality
 
 - **SC-019**: 同月份新舊 update archive 重複收錄相同 JID 時，品質頁不得誤報 PostgreSQL 匯入短少；差異必須為 0，並可另外看到重複列數。
+
+## Addendum: RAG 使用者回饋與品質改善 (2026-11-24)
+
+**Input**: 在 RAG 回答下方提供滿意度回饋；不滿意時收集原因與留言；資料品質頁提供管理者檢視、重現與 triage；未來可由 OpenCode 依結構化回饋產生 PR 提案，但不得自動修改 production。
+
+### 使用者故事
+
+1. **作為展示訪客**，我可以在 RAG 回答下方按「回應良好」或「回應欠佳」；按「回應欠佳」後可以選白話原因並留言，讓我不用登入也能指出回答錯在哪裡。
+2. **作為管理者**，我可以在 `#/quality` 的「使用者回饋」看到不滿意原因、完整問題與回答重現、Pipeline 決策與模型版本，並標記 triage 狀態、嚴重度、可行動與預期行為。
+3. **作為維運者**，我可以匯出不含原始留言的結構化 JSONL 給 OpenCode 在隔離 worktree 產生 PR 提案；代理不得讀 production DB、不得取得 secrets、不得自動 merge。
+4. **作為訪客**，我不能讀取任何其他人的回饋、問題、回答快照或留言；展示關閉時回饋寫入也一起關閉。
+
+### 資料模型
+
+- **FR-184**: 系統 MUST 新增 `rag_interactions`，每次 RAG 回答寫入一列 server-side 快照；`request_id` MUST 唯一。快照 MUST 由後端依實際回應產生，MUST NOT 信任前端送來的 question／answer。欄位 MUST 至少包含 `request_id`、`question`、`answer`、`answer_source`、`status`、`notice`、`response_snapshot`、`snapshot_version`、`system_version`、`client_key_hash`、`is_demo`、`created_at`、`expires_at`。`response_snapshot` MUST 使用欄位 allowlist，只保留問題、回答、notice、引用／判決／法規來源的顯示欄位、retrieval、pipeline_flow 與模型／耗時；MUST NOT 儲存判決 `full_text`、LLM prompt、messages、contexts、API key、絕對路徑、內部 host／port／URL 或 collection 名稱。
+- **FR-185**: `system_version` MUST 記錄 `git_commit`、`law_dataset_version_id`、`judgment_snapshot_id`、`judgment_index_version_id`、`legal_article_index_version_id`、`decision_trace_version`、`prompt_version`、`llm_model`、`embedding_model` 與 `reranker_model`。無法取得的值 MUST 記為 `null` 或 `unknown`，不得捏造。
+- **FR-186**: 系統 MUST 新增 `rag_feedback`、`rag_feedback_reasons`、`rag_feedback_events`。`rag_feedback` MUST 有 `(request_id, client_key_hash)` 唯一約束，讓同一則回答對同一訪客只有一筆 active 回饋；`rag_feedback_reasons` MUST 以 `(feedback_id, reason_code)` 為主鍵；`rag_feedback_events` MUST 記錄建立、修改與 triage 的稽核事件。回饋 MUST 保存送出當時的 `snapshot`、`snapshot_version` 與 `system_version` 副本，避免 interaction 到期後無法重現。
+- **FR-187**: 回饋狀態 MUST 為 `new`／`triaged`／`planned`／`resolved`／`dismissed`；嚴重度 MUST 為 `low`／`medium`／`high`；並 MUST 有 `actionable`、`expected_behavior`、`linked_question_id`、`linked_pr_url`、`reviewed_by`、`review_comment` 與 `reviewed_at` 欄位。`expected_behavior` MUST 由人工 triage 填寫，MUST NOT 由 LLM 或代理自行猜測。
+
+### 回饋能力與 API
+
+- **FR-188**: 每次 RAG 回應（含 SSE 最終 result）MUST 附帶 `request_id` 與 `feedback` capability，至少包含 `token`、`expires_at`；token MUST 為 HMAC 簽章並綁定 `request_id`、`iat` 與 `exp`。token 預設有效期 MUST 為 7 天，`rag_interactions` 預設保留 180 天。簽章秘密 MUST 優先使用 `JUDGMENT_FEEDBACK_SECRET`，其次 `AUTH_SESSION_SECRET`、`JUDGMENT_ADMIN_TOKEN`；皆未設定時 MAY 使用 process-local 隨機秘密，但重啟後舊 token 會失效。
+- **FR-189**: `POST /api/rag/feedback` MUST 只接受 `request_id`、`feedback_token`、`sentiment`、`reasons`、`comment`；MUST NOT 接受前端 question／answer。sentiment MUST 為 `satisfied`／`unsatisfied`；不滿意 MUST 至少選一個 allowlist 原因；comment MUST ≤ 4,000 字並以純文字呈現。Token 無效／與 request 不符 MUST 回 403；request 不存在 MUST 回 404；token 或 interaction 過期 MUST 回 410；同一訪客在 15 分鐘內重送 MUST 更新原 row、`revision += 1` 並寫入 event，超過 15 分鐘 MUST 回 409。滿意與不滿意都 MUST 收集，才能計算不滿意率。
+- **FR-190**: `POST /api/rag/feedback` MUST 分類為 `DEMO_ACTION` 並映射到 `rag` feature；展示關閉或 `rag` feature 關閉時 MUST 回 403 且不得寫 DB。展示訪客寫入 MUST 受每 IP 每分鐘／每小時／每日限流、全站每日筆數上限、Origin／CSRF 與 body 大小限制；超過限制 MUST 回 429 並帶 `Retry-After`。admin MUST 可寫入；讀取、triage 與匯出 MUST 為 `ADMIN_ONLY`／`ADMIN_WRITE`。`GET /export`、`GET /stats` MUST 在 `GET /{feedback_id}` 之前註冊，避免被當成 id。
+- **FR-191**: 管理端 MUST 提供 `GET /api/rag/feedback`、`GET /api/rag/feedback/stats`、`GET /api/rag/feedback/{id}`、`GET /api/rag/feedback/export`、`PATCH /api/rag/feedback/{id}`。列表 MUST 支援 sentiment、status、reason、severity、actionable、keyword、request_id 與日期篩選；明細 MUST 回傳完整重現快照、reasons、events、system_version 與三欄 triage 資料。匯出 MUST 為 JSONL，預設只含不滿意回饋，且 MUST NOT 包含原始 `comment`；MUST 包含 `reason_codes`、人工填寫的 `expected_behavior`、問題、回答、去敏 retrieval／decisions 與 system_version。
+
+### 使用者介面
+
+- **FR-192**: RAG 回答工具列 MUST 新增滿意度按鈕（圖示，非 emoji），並保留既有複製／分享／重新生成。按「回應良好」MUST 直接送出 `satisfied`；按「回應欠佳」MUST 開啟 modal，提供白話原因複選（引用或條號有誤、答案不完整、不是我問的、不該拒答卻拒答、回應太慢或出錯、內容沒有幫助或無法使用、風格或語氣、安全或法律疑慮、其他）與選填留言。Modal MUST 提醒「請勿輸入個人資料」、回饋保留 180 天或結案後 180 天，以及原始留言不會直接進代理提示。送出後 MUST 在該回答顯示已回饋狀態，同一則回答再次送出 MUST 更新原回饋。按鈕 MUST 可鍵盤操作、符合 CSP（不得使用 inline handler）、390px viewport MUST 無水平溢出。沒有 `feedback.token` 的舊回答或分享快照 MUST 隱藏回饋按鈕，MUST NOT 顯示偽造的可用狀態。
+- **FR-193**: `#/quality` MUST 新增「使用者回饋」tab（admin-only）。列表 MUST 顯示時間、滿意度、原因、問題摘要、answer_source、狀態、嚴重度與可行動；明細 MUST 重現使用者問題泡泡、回答全文、notice、判決引用、法規來源、retrieval、Pipeline waterfall 與 decisions、系統版本、使用者原因與留言。管理者 MUST 能更新 status、severity、actionable、expected_behavior 與 review_comment。展示訪客 MUST 只看到鎖定說明，MUST NOT 取得任何回饋資料。代理匯出按鈕 MUST 只下載 JSONL，不得把原始留言放入檔案。
+- **FR-194**: 保留與隱私文案 MUST 同步：`rag_interactions` 與 `rag_feedback` 預設 180 天；已結案回饋 MUST 自結案時間起再保留 180 天（取較晚者）。每日背景維護 MUST 清理過期 interactions、feedback、reasons 與 events。RAG 頁隱私文案 MUST 說明提問與回答快照 180 天、使用者回饋 180 天或結案後 180 天、安全稽核 180 天；備份輪替仍為 90 天營運政策。
+- **FR-195**: OpenCode 自動改善 MUST 只處理人工 triage 後、標記 `actionable=true` 且具 `expected_behavior` 的回饋；MUST 在隔離 worktree／sandbox 執行，MUST NOT 讀 production secrets／DB／內部網路，MUST 只產生 PR、MUST NOT 自動 merge。原始留言 MUST 視為不可信資料且不得放入代理提示；holdout 題庫 MUST NOT 匯出。代理 MUST NOT 修改或刪除既有測試來讓 CI 通過；認證、路由分類、展示政策、CI、備份腳本、DB schema 與測試／holdout MUST 由 CODEOWNERS 保護並人工審核。第一階段只允許修改程式與測試；prompt／規則變更 MUST 走提案流程。
+
+### 驗收
+
+- **SC-108**: 完成一則 RAG 回答後，回應 MUST 含 `request_id` 與 `feedback.token`；資料庫 MUST 有一筆 `rag_interactions`，其 `response_snapshot.question`／`answer` 與畫面一致。前端 POST feedback 時只送 request_id、token、sentiment、reasons、comment；即使前端自行改 question／answer，DB 快照 MUST 不變。送出 👎 後 `rag_feedback` MUST 只有一筆 `(request_id, client_key_hash)`，15 分鐘內再次送出 MUST 更新同一筆且 `revision` 增加；超過 15 分鐘 MUST 回 409。
+- **SC-109**: 展示關閉時，`POST /api/rag/feedback` MUST 回 403 且 DB 不新增 row；展示開啟且 `rag` 開啟時，訪客可用有效 token 送出；訪客呼叫 `GET /api/rag/feedback`、`GET /api/rag/feedback/stats`、明細或匯出 MUST 被拒，admin 才可讀取。token 無效／不符回 403、request 不存在回 404、過期回 410；同一 IP 超過限流或全站超過每日上限 MUST 回 429。
+- **SC-110**: 管理者在 `#/quality` 的「使用者回饋」可看到不滿意回饋列表與統計（總數、不滿意數、不滿意率、待處理、可行動）；點擊一筆 MUST 顯示問題、回答、notice、判決引用、法規來源、Pipeline 與 decisions、原因與留言。儲存 triage 後列表／明細 MUST 更新，並新增 `rag_feedback_events`。匯出 JSONL MUST 含 reason codes、expected_behavior、問題、回答與去敏 trace，MUST NOT 含 comment；檔案 MUST 不含 `/Users/`、`/home/`、內部 host／port、collection、prompt、messages 或 API key。
+- **SC-111**: 390px viewport 下 RAG 回饋 modal 與資料品質回饋列表 MUST 無水平溢出，console error MUST 為 0；所有回饋按鈕 MUST 可用 Tab／Enter／Space 操作，modal MUST 可用 Escape 關閉；HTML MUST NOT 使用 inline event handler。
+- **SC-112**: `uv run pytest`、`uv run ruff check .`、Node 測試與 `node --check frontend/assets/js/app.js` MUST 通過；`scripts/build_frontend.py` 重建後 standalone frontend MUST 包含相同回饋 UI，且分享 payload MUST NOT 包含 feedback token。

@@ -39,12 +39,14 @@ from judgment.models import (
     LawDatasetVersion,
     LawDocument,
     OllamaHost,
+    RagFeedback,
     SecurityAuditEvent,
 )
 from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
 from judgment.web import processing as processing_module
 from judgment.web.app import create_app, route_policy_guard
+from judgment.web.feedback import make_feedback_token
 from judgment.web.auth import (
     make_session_token,
     make_signed_token,
@@ -738,6 +740,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "adminTokenForRequest" in api_js.text
     assert "authMe" in api_js.text
     assert "getAuthApiBase" in api_js.text
+    assert "ragFeedbackCreate" in api_js.text
+    assert "ragFeedbackList" in api_js.text
+    assert "/api/rag/feedback/export" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
     )[1].split("});", 1)[0]
@@ -754,6 +759,22 @@ def test_static_console_is_served(web_client) -> None:
     assert "renderRagDecisionList" in performance_js.text
     assert "renderRagPipelineWaterfall" in performance_js.text
     assert "未評估" in performance_js.text
+    feedback_js = web_client.get("/assets/js/pages/feedback.js")
+    assert feedback_js.status_code == 200
+    assert "createFeedbackController" in feedback_js.text
+    assert "預期行為" in feedback_js.text
+    assert "ragFeedbackUpdate" in feedback_js.text
+    assert "不含原始留言" in feedback_js.text
+    rag_js = web_client.get("/assets/js/pages/rag.js")
+    assert rag_js.status_code == 200
+    assert "rag-feedback-dialog" in rag_js.text
+    assert "FEEDBACK_REASON_OPTIONS" in rag_js.text
+    assert "data-rag-answer-action=\"feedback\"" in rag_js.text
+    assert "使用者回饋保留 180 天" in rag_js.text
+    quality_js = web_client.get("/assets/js/pages/quality.js")
+    assert quality_js.status_code == 200
+    assert "createFeedbackController" in quality_js.text
+    assert "data-quality-tab=\"feedback\"" in quality_js.text
     app_js = web_client.get("/assets/js/app.js")
     assert app_js.status_code == 200
     assert 'DEFAULT_ROUTE = "home"' in app_js.text
@@ -786,6 +807,10 @@ def test_static_console_is_served(web_client) -> None:
     assert "font-size: 12px" in css.text
     assert ".rag-user-bubble.is-editing" in css.text
     assert ".rag-user-edit" in css.text
+    assert ".rag-feedback-dialog" in css.text
+    assert ".rag-feedback-reasons" in css.text
+    assert ".rag-feedback-workspace" in css.text
+    assert ".rag-feedback-replay-answer" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -2089,6 +2114,8 @@ def test_rag_stream_emits_live_steps_and_result(web_client, monkeypatch) -> None
     assert "測試回答 [1]" in body
     assert "event: result" in body
     assert '"pipeline_flow"' in body
+    assert '"feedback"' in body
+    assert '"request_id"' in body
     assert body.index("event: partial") < body.index("event: result")
     assert body.index("event: token") < body.index("event: result")
 
@@ -2814,6 +2841,164 @@ def test_request_validation(web_client) -> None:
 
     rag = web_client.post("/api/rag/query", json={"question": ""})
     assert rag.status_code == 422
+
+
+def test_rag_feedback_round_trip_uses_server_snapshot(web_client) -> None:
+    response = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    )
+    assert response.status_code == 200
+    answer = response.json()
+    request_id = answer["request_id"]
+    token = answer["feedback"]["token"]
+    assert request_id
+    assert token
+
+    created = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": request_id,
+            "feedback_token": token,
+            "sentiment": "unsatisfied",
+            "reasons": ["wrong_citation", "incomplete"],
+            "comment": "引用條號不對，而且沒有回答問題。",
+        },
+    )
+    assert created.status_code == 201, created.text
+    feedback = created.json()
+    assert feedback["request_id"] == request_id
+    assert feedback["sentiment"] == "unsatisfied"
+    assert feedback["reasons"] == ["wrong_citation", "incomplete"]
+    assert feedback["revision"] == 1
+
+    listing = web_client.get(
+        "/api/rag/feedback",
+        params={"sentiment": "unsatisfied", "keyword": request_id},
+    )
+    assert listing.status_code == 200
+    payload = listing.json()
+    assert payload["total"] == 1
+    assert payload["stats"]["unsatisfied"] >= 1
+    assert payload["items"][0]["question"] == "銀行法如何規範吸收存款？"
+
+    detail = web_client.get(f"/api/rag/feedback/{feedback['id']}")
+    assert detail.status_code == 200
+    snapshot = detail.json()["snapshot"]
+    assert snapshot["question"] == "銀行法如何規範吸收存款？"
+    assert snapshot["answer"]
+    assert snapshot["pipeline_flow"]["decisions"]
+    assert "/Users/" not in json.dumps(snapshot, ensure_ascii=False)
+    flow_json = json.dumps(
+        snapshot.get("pipeline_flow") or {}, ensure_ascii=False
+    ).lower()
+    assert '"prompt":' not in flow_json
+    assert '"messages":' not in flow_json
+    assert '"contexts":' not in flow_json
+
+    exported = web_client.get(
+        "/api/rag/feedback/export",
+        params={"sentiment": "unsatisfied"},
+    )
+    assert exported.status_code == 200
+    rows = [
+        json.loads(line)
+        for line in exported.text.splitlines()
+        if line.strip()
+    ]
+    row = next(item for item in rows if item["request_id"] == request_id)
+    assert row["reason_codes"] == ["wrong_citation", "incomplete"]
+    assert "comment" not in row
+    assert row["question"] == "銀行法如何規範吸收存款？"
+
+    triaged = web_client.patch(
+        f"/api/rag/feedback/{feedback['id']}",
+        json={
+            "status": "planned",
+            "severity": "high",
+            "actionable": True,
+            "expected_behavior": "只引用判決中實際出現的條號，並說明日期範圍。",
+            "review_comment": "交由回歸測試處理。",
+        },
+    )
+    assert triaged.status_code == 200
+    triaged_payload = triaged.json()
+    assert triaged_payload["status"] == "planned"
+    assert triaged_payload["severity"] == "high"
+    assert triaged_payload["actionable"] is True
+    assert triaged_payload["events"]
+
+    edited = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": request_id,
+            "feedback_token": token,
+            "sentiment": "satisfied",
+            "reasons": [],
+            "comment": "",
+        },
+    )
+    assert edited.status_code == 201, edited.text
+    assert edited.json()["revision"] == 2
+    assert edited.json()["sentiment"] == "satisfied"
+    assert edited.json()["reasons"] == []
+
+    with web_client.app.state.session_factory() as session:
+        assert len(session.scalars(select(RagFeedback)).all()) == 1
+
+
+def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    request_id = answer["request_id"]
+
+    tampered = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": request_id,
+            "feedback_token": f"{answer['feedback']['token']}x",
+            "sentiment": "satisfied",
+            "reasons": [],
+            "comment": "",
+        },
+    )
+    assert tampered.status_code == 403
+    assert tampered.json()["code"] == "invalid_feedback_token"
+
+    expired_token = make_feedback_token(
+        request_id,
+        web_client.app.state.settings,
+        issued_at=datetime.now(timezone.utc) - timedelta(days=8),
+        ttl_seconds=60,
+    )
+    expired = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": request_id,
+            "feedback_token": expired_token,
+            "sentiment": "satisfied",
+            "reasons": [],
+            "comment": "",
+        },
+    )
+    assert expired.status_code == 410
+    assert expired.json()["code"] == "feedback_expired"
+
+    missing = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": "missing-request-id",
+            "feedback_token": make_feedback_token(
+                "missing-request-id", web_client.app.state.settings
+            ),
+            "sentiment": "satisfied",
+            "reasons": [],
+            "comment": "",
+        },
+    )
+    assert missing.status_code == 404
 
 
 def test_rag_share_snapshot_round_trip(web_client) -> None:
@@ -3666,7 +3851,7 @@ def test_every_registered_route_keeps_public_or_denied_boundary(web_client) -> N
                     path,
                     response.status_code,
                 )
-            elif policy in {"DEMO_READ", "DEMO_QUERY"}:
+            elif policy in {"DEMO_READ", "DEMO_QUERY", "DEMO_ACTION"}:
                 assert response.status_code == 403, (
                     method,
                     path,

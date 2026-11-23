@@ -17,6 +17,10 @@
 | `JUDGMENT_ALLOW_LOCAL_ADMIN_BYPASS` | `0` |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` |
 | `PERFORMANCE_RETENTION_DAYS` | `90`（目前 UI 文案寫 90 天；若改值，前端文案要同步） |
+| `JUDGMENT_FEEDBACK_SECRET` | 專用 HMAC secret；未設定時退回 `AUTH_SESSION_SECRET`／`JUDGMENT_ADMIN_TOKEN`，但建議獨立設定 |
+| `RAG_INTERACTION_RETENTION_DAYS` | `180`（server-side 回答快照；與 UI 文案同步） |
+| `RAG_FEEDBACK_RETENTION_DAYS` | `180`（回饋與結案後保留；與 UI 文案同步） |
+| `RAG_FEEDBACK_TOKEN_TTL_SECONDS` | `604800`（7 天回饋 token 有效期） |
 | `TRUSTED_HOSTS` | 只列實際 hostname；不要把 `*` 放進 production |
 
 訪客查詢唯讀角色：
@@ -35,6 +39,8 @@
    - `GET /api/quality`、`/api/processing`、`/api/performance`、`/api/status` 回 200
    - `GET /api/performance?process=RAG%20問答` 不含已知問題／答案
    - `GET /api/processing` 不含 `/Users/`
+   - 訪客可用 RAG 回答的 `feedback.token` 送出 `POST /api/rag/feedback`（201），但 `GET /api/rag/feedback` 回 401
+   - 展示關閉後同一個 feedback 端點回 403 `demo_closed`，且 DB 不新增 row
    - 已移除的 demo 路由（題庫、下載狀態、processing plan 等）回 401
    - `/api/catalog` 的 `detail` 不可含 `127.0.0.1`、內網 host 或絕對路徑；回歸測試：`test_demo_catalog_sanitizes_internal_endpoints`
 

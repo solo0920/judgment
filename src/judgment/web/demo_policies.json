@@ -14,6 +14,7 @@
     "GET /api/status": "status",
     "POST /api/query": "data",
     "GET /api/rag/share/{share_id}": "rag",
+    "POST /api/rag/feedback": "rag",
     "POST /api/rag/query": "rag",
     "POST /api/rag/query/stream": "rag",
     "POST /api/rag/share": "rag"

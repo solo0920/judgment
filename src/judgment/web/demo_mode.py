@@ -517,6 +517,23 @@ def sanitize_public_pipeline_flow(flow: Any) -> Dict[str, Any]:
     }
 
 
+def sanitize_feedback_snapshot(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Scrub a feedback replay snapshot before it is stored.
+
+    Feedback snapshots are admin-only, but they are also copied between tables
+    and exported by operators.  Absolute paths, internal endpoints, secrets,
+    collection names and host identifiers must never enter the feedback store.
+    """
+
+    return _scrub_share_paths(
+        _scrub_absolute_paths(
+            _scrub_internal_endpoints(
+                sanitize_infrastructure(dict(payload))
+            )
+        )
+    )
+
+
 def sanitize_rag_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     cleaned = dict(result)
     trace = cleaned.pop("pipeline_flow", None)
