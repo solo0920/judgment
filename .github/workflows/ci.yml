@@ -46,7 +46,7 @@ jobs:
       - name: Build standalone frontend
         run: uv run python scripts/build_frontend.py --api-base https://api-mbp.ragdemo.win
       - name: Frontend security tests
-        run: node --test tests/frontend_security.test.mjs
+        run: node --test tests/*.test.mjs
 
   security:
     runs-on: ubuntu-latest
