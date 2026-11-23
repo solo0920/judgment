@@ -147,6 +147,92 @@ function optionLabel(options, code) {
   return found ? found[1] : code || "—";
 }
 
+function reviewReasonLabel(reason) {
+  const text = String(reason || "");
+  if (text === "unreviewed_recent") return "尚未檢視";
+  if (text.startsWith("status:")) return `狀態 ${text.split(":")[1] || ""}`;
+  if (text.startsWith("retrieval:")) {
+    return `檢索 ${text.split(":").slice(1).join(":")}`;
+  }
+  if (text.startsWith("rerank:")) {
+    return `Rerank ${text.split(":").slice(1).join(":")}`;
+  }
+  if (text.startsWith("citation_audit:")) {
+    return `引用 ${text.split(":").slice(1).join(":")}`;
+  }
+  if (text.startsWith("degraded:")) return "降級回答";
+  if (text === "missing_answer") return "沒有回答文字";
+  if (text === "answer_source:retrieval") return "只有檢索結果";
+  if (text === "scope_probe:notice") return "範圍邊界";
+  return text;
+}
+
+function renderReviewQueue(queue, candidate) {
+  const rows = Array.isArray(queue) ? queue : [];
+  const detail = candidate
+    ? `<div class="rag-feedback-review-detail" data-review-request="${escapeHtml(candidate.request_id)}">
+        <div class="rag-feedback-review-head">
+          <div>
+            <div class="report-kicker">ACTIVE LEARNING SAMPLE</div>
+            <div class="report-title">${escapeHtml(candidate.question || "（沒有問題文字）")}</div>
+            <div class="report-sub">${escapeHtml(formatDateTime(candidate.created_at))} · request_id <span class="mono">${escapeHtml(candidate.request_id)}</span> · 風險 ${formatNumber(candidate.risk_score)}</div>
+          </div>
+          <div class="rag-feedback-detail-head-actions">
+            ${statusBadge("info", candidate.answer_source || "—")}
+            ${statusBadge("neutral", candidate.status || "—")}
+            <button class="judgment-dialog-close" type="button" data-review-action="close" aria-label="關閉抽樣明細">${icon("x", 14)}</button>
+          </div>
+        </div>
+        <div class="rag-feedback-review-reasons">
+          ${(candidate.reasons || []).map((reason) => `<span class="badge badge-warn">${escapeHtml(reviewReasonLabel(reason))}</span>`).join(" ")}
+        </div>
+        <pre class="rag-feedback-replay-answer">${escapeHtml(candidate.answer_preview || "（沒有回答文字）")}</pre>
+        ${candidate.snapshot?.notice ? `<div class="answer-notice">${escapeHtml(candidate.snapshot.notice)}</div>` : ""}
+        <div class="rag-feedback-detail-grid">
+          <div><span class="muted">檢索狀態</span><strong>${escapeHtml(candidate.retrieval?.status || "—")}</strong></div>
+          <div><span class="muted">檢索筆數</span><strong>${formatNumber(candidate.retrieval?.hits || 0)}</strong></div>
+          <div><span class="muted">Top score</span><strong>${escapeHtml(candidate.retrieval?.top_score ?? "—")}</strong></div>
+          <div><span class="muted">LLM</span><strong>${escapeHtml(candidate.llm_model || "—")}</strong></div>
+        </div>
+        <div class="rag-feedback-triage-actions">
+          <button class="btn btn-primary btn-sm" type="button" data-review-action="mark" data-review-status="reviewed">${icon("check", 13)}<span>標記已檢視</span></button>
+          <button class="btn btn-secondary btn-sm" type="button" data-review-action="mark" data-review-status="dismissed"><span>略過</span></button>
+        </div>
+      </div>`
+    : "";
+  return `<div class="rag-feedback-review-queue">
+    <div class="rag-feedback-issues-head">
+      <div>
+        <div class="report-section-title">主動學習抽樣</div>
+        <p class="rag-feedback-issues-note">從尚未收到回饋的回答中，優先挑出降級、零命中、引用異常、rerank 異常與低分數邊界案例。</p>
+      </div>
+      <div class="rag-feedback-detail-head-actions">
+        <span class="badge badge-neutral badge-mono">${formatNumber(rows.length)} 筆</span>
+        <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="refresh-review">${icon("refresh", 13)}<span>重新抽樣</span></button>
+      </div>
+    </div>
+    ${rows.length
+      ? `<div class="rag-feedback-review-list">${rows
+          .map(
+            (row) => `<button type="button" class="rag-feedback-review-row${candidate?.request_id === row.request_id ? " is-active" : ""}"
+              data-review-open="${escapeHtml(row.request_id)}">
+              <span class="rag-feedback-review-main">
+                <strong>${escapeHtml(questionExcerpt(row.question, 92))}</strong>
+                <small>${escapeHtml(row.answer_source || "—")} · ${escapeHtml(row.status || "—")} · ${escapeHtml(formatDateTime(row.created_at))}</small>
+              </span>
+              <span class="rag-feedback-review-risk">
+                <span class="badge badge-warn">風險 ${formatNumber(row.risk_score)}</span>
+                ${(row.reasons || []).slice(0, 2).map((reason) => `<span class="badge badge-neutral">${escapeHtml(reviewReasonLabel(reason))}</span>`).join("")}
+              </span>
+            </button>`,
+          )
+          .join("")}</div>`
+      : '<p class="cell-empty">目前沒有需要主動抽樣的案例。</p>'}
+    ${detail}
+  </div>`;
+}
+
+
 function renderIssuePanel(issues, filters) {
   const rows = Array.isArray(issues) ? issues : [];
   const activeId = String(filters?.issue_id || "");
@@ -647,6 +733,8 @@ export function createFeedbackController(container, { onStats } = {}) {
   let rerun = null;
   let issues = [];
   let evaluation = null;
+  let reviewQueue = [];
+  let reviewCandidate = null;
   let disposed = false;
 
   const notifyStats = (stats) => {
@@ -664,6 +752,7 @@ export function createFeedbackController(container, { onStats } = {}) {
         <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="refresh">${icon("refresh", 13)}<span>重新整理</span></button>
       </div>
       <div class="report-section" data-feedback-stats></div>
+      <div class="report-section" data-feedback-review-queue></div>
       <div class="report-section" data-feedback-issues></div>
       <div class="report-section" data-feedback-filter-slot></div>
       <div class="report-section" data-feedback-list></div>
@@ -675,6 +764,9 @@ export function createFeedbackController(container, { onStats } = {}) {
   const render = () => {
     if (!payload || disposed) return;
     const statsBox = container.querySelector("[data-feedback-stats]");
+    const reviewBox = container.querySelector(
+      "[data-feedback-review-queue]",
+    );
     const issueBox = container.querySelector("[data-feedback-issues]");
     const filterBox = container.querySelector("[data-feedback-filter-slot]");
     const listBox = container.querySelector("[data-feedback-list]");
@@ -683,6 +775,12 @@ export function createFeedbackController(container, { onStats } = {}) {
     );
     const detailBox = container.querySelector("[data-feedback-detail-slot]");
     if (statsBox) statsBox.innerHTML = renderStats(payload.stats || {});
+    if (reviewBox) {
+      reviewBox.innerHTML = renderReviewQueue(
+        reviewQueue,
+        reviewCandidate,
+      );
+    }
     if (issueBox) issueBox.innerHTML = renderIssuePanel(issues, filters);
     if (filterBox) filterBox.innerHTML = renderFilterForm(payload, filters);
     if (listBox) listBox.innerHTML = renderList(payload, selectedId);
@@ -695,6 +793,16 @@ export function createFeedbackController(container, { onStats } = {}) {
         : "";
     }
     notifyStats(payload.stats || {});
+  };
+
+  const loadReviewQueue = async () => {
+    try {
+      const data = await api.ragReviewQueue({ limit: 10 });
+      reviewQueue = Array.isArray(data?.candidates) ? data.candidates : [];
+    } catch (error) {
+      reviewQueue = [];
+    }
+    if (!disposed) render();
   };
 
   const loadIssues = async () => {
@@ -887,6 +995,11 @@ export function createFeedbackController(container, { onStats } = {}) {
         }
         return;
       }
+      if (action === "refresh-review") {
+        await loadReviewQueue();
+        toast("已重新抽樣。", "ok", 3200);
+        return;
+      }
       if (action === "create-issue") {
         const feedbackId = actionButton.dataset.feedbackId;
         const form = actionButton.closest("[data-feedback-triage]");
@@ -965,6 +1078,44 @@ export function createFeedbackController(container, { onStats } = {}) {
         return;
       }
     }
+    const reviewAction = event.target.closest("[data-review-action]");
+    if (reviewAction) {
+      const action = reviewAction.dataset.reviewAction;
+      if (action === "close") {
+        reviewCandidate = null;
+        render();
+        return;
+      }
+      if (action === "mark" && reviewCandidate) {
+        setBusy(reviewAction, true, "儲存中…");
+        try {
+          await api.ragReviewMark(reviewCandidate.request_id, {
+            status: reviewAction.dataset.reviewStatus || "reviewed",
+          });
+          reviewCandidate = null;
+          await loadReviewQueue();
+          render();
+          toast("已更新主動抽樣狀態。", "ok", 4200);
+        } catch (error) {
+          toast(error.message || "更新抽樣狀態失敗。", "danger");
+        } finally {
+          setBusy(reviewAction, false);
+        }
+        return;
+      }
+    }
+    const reviewOpen = event.target.closest("[data-review-open]");
+    if (reviewOpen) {
+      try {
+        reviewCandidate = await api.ragReviewCandidate(
+          reviewOpen.dataset.reviewOpen,
+        );
+        render();
+      } catch (error) {
+        toast(error.message || "無法讀取抽樣明細。", "danger");
+      }
+      return;
+    }
     const evaluationRow = event.target.closest(
       "[data-feedback-evaluate-open]",
     );
@@ -997,10 +1148,12 @@ export function createFeedbackController(container, { onStats } = {}) {
       if (disposed) return;
       render();
       void loadIssues();
+      void loadReviewQueue();
       return load();
     },
     refresh() {
       void loadIssues();
+      void loadReviewQueue();
       return load();
     },
     dispose() {

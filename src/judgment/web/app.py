@@ -196,9 +196,12 @@ from .feedback import (
     feedback_count_since,
     feedback_stats,
     get_feedback,
+    get_review_candidate,
     list_feedback,
     list_feedback_evaluations,
     list_feedback_issues,
+    list_review_candidates,
+    mark_review_candidate,
     promote_feedback_to_question_bank,
     record_feedback_export,
     rerun_feedback,
@@ -400,6 +403,10 @@ class RagFeedbackIssueCreateRequest(BaseModel):
     description: str = Field(default="", max_length=4000)
     root_cause_stage: str = Field(default="unknown", max_length=32)
     severity: Literal["low", "medium", "high"] = "medium"
+
+
+class RagReviewCandidateRequest(BaseModel):
+    status: Literal["reviewed", "dismissed", "new"] = "reviewed"
 
 
 class RagFeedbackEvaluateRequest(BaseModel):
@@ -1335,6 +1342,9 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
     "/api/rag/feedback/evaluate": "RAG 回饋批次評估",
     "/api/rag/feedback/evaluations": "RAG 回饋評估報告",
+    "/api/rag/feedback/review-queue": "RAG 主動抽樣佇列",
+    "/api/rag/feedback/review-queue/{request_id}": "RAG 主動抽樣明細",
+    "/api/rag/feedback/review-queue/{request_id}/review": "RAG 主動抽樣審查",
     "/api/rag/feedback/{feedback_id}": "RAG 回饋明細",
     "/api/rag/feedback/{feedback_id}/promote": "RAG 回饋轉題庫 draft",
     "/api/rag/feedback/{feedback_id}/rerun": "RAG 回饋用目前系統重跑",
@@ -5115,6 +5125,45 @@ def create_app(
         payload = list_feedback_evaluations(
             app.state.session_factory, limit=limit
         )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/rag/feedback/review-queue")
+    def rag_review_queue(
+        limit: int = 20,
+        scan_limit: int = 500,
+    ) -> JSONResponse:
+        payload = list_review_candidates(
+            app.state.session_factory,
+            limit=limit,
+            scan_limit=scan_limit,
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/rag/feedback/review-queue/{request_id}")
+    def rag_review_candidate(request_id: str) -> JSONResponse:
+        try:
+            payload = get_review_candidate(
+                app.state.session_factory, request_id
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/feedback/review-queue/{request_id}/review")
+    def rag_review_candidate_mark(
+        request_id: str,
+        request: RagReviewCandidateRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        try:
+            payload = mark_review_candidate(
+                app.state.session_factory,
+                request_id,
+                status=request.status,
+                actor=_demo_actor(http_request),
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/rag/feedback")
