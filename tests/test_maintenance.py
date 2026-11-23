@@ -10,6 +10,7 @@ from judgment.models import (
     Base,
     PerformanceRecord,
     RagFeedback,
+    RagFeedbackEvaluation,
     RagFeedbackEvent,
     RagFeedbackIssue,
     RagFeedbackReason,
@@ -117,7 +118,24 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             status="open",
             updated_at=now,
         )
-        session.add_all([expired_feedback, current_feedback, expired_issue, current_issue])
+        expired_evaluation = RagFeedbackEvaluation(
+            total=1,
+            status="completed",
+            created_at=now - timedelta(days=200),
+        )
+        current_evaluation = RagFeedbackEvaluation(
+            total=1,
+            status="completed",
+            created_at=now,
+        )
+        session.add_all([
+            expired_feedback,
+            current_feedback,
+            expired_issue,
+            current_issue,
+            expired_evaluation,
+            current_evaluation,
+        ])
         session.flush()
         session.add_all(
             [
@@ -141,6 +159,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_interactions": 1,
         "rag_feedback": 1,
         "rag_feedback_issues": 1,
+        "rag_feedback_evaluations": 1,
     }
     with factory() as session:
         assert len(session.scalars(select(PerformanceRecord)).all()) == 1
@@ -160,6 +179,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         assert [row.title for row in session.scalars(select(RagFeedbackIssue)).all()] == [
             "current issue"
         ]
+        assert len(session.scalars(select(RagFeedbackEvaluation)).all()) == 1
 
     assert run_retention_maintenance(factory) == {
         "performance_records": 0,
@@ -168,6 +188,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_interactions": 0,
         "rag_feedback": 0,
         "rag_feedback_issues": 0,
+        "rag_feedback_evaluations": 0,
     }
 
 
@@ -183,4 +204,5 @@ def test_daily_maintenance_failure_is_non_blocking() -> None:
         "rag_interactions": 0,
         "rag_feedback": 0,
         "rag_feedback_issues": 0,
+        "rag_feedback_evaluations": 0,
     }

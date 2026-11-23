@@ -191,11 +191,13 @@ from .feedback import (
     FEEDBACK_REASONS,
     FeedbackError,
     create_feedback_issue,
+    evaluate_feedback_batch,
     export_agent_feedback,
     feedback_count_since,
     feedback_stats,
     get_feedback,
     list_feedback,
+    list_feedback_evaluations,
     list_feedback_issues,
     promote_feedback_to_question_bank,
     record_feedback_export,
@@ -398,6 +400,12 @@ class RagFeedbackIssueCreateRequest(BaseModel):
     description: str = Field(default="", max_length=4000)
     root_cause_stage: str = Field(default="unknown", max_length=32)
     severity: Literal["low", "medium", "high"] = "medium"
+
+
+class RagFeedbackEvaluateRequest(BaseModel):
+    feedback_ids: List[int] = Field(default_factory=list, max_length=20)
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    limit: int = Field(default=10, ge=1, le=20)
 
 
 class RagFeedbackIssueUpdateRequest(BaseModel):
@@ -1325,6 +1333,8 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback-issues": "RAG 回饋問題群組",
     "/api/rag/feedback-issues/{issue_id}": "RAG 回饋問題群組明細",
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
+    "/api/rag/feedback/evaluate": "RAG 回饋批次評估",
+    "/api/rag/feedback/evaluations": "RAG 回饋評估報告",
     "/api/rag/feedback/{feedback_id}": "RAG 回饋明細",
     "/api/rag/feedback/{feedback_id}/promote": "RAG 回饋轉題庫 draft",
     "/api/rag/feedback/{feedback_id}/rerun": "RAG 回饋用目前系統重跑",
@@ -5078,6 +5088,33 @@ def create_app(
             )
         except FeedbackError as exc:
             return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/feedback/evaluate")
+    def rag_feedback_evaluate(
+        request: RagFeedbackEvaluateRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        try:
+            payload = evaluate_feedback_batch(
+                app.state.session_factory,
+                runtime_settings(
+                    app.state.settings, app.state.session_factory
+                ),
+                feedback_ids=request.feedback_ids,
+                filters=request.filters,
+                limit=request.limit,
+                actor=_demo_actor(http_request),
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/rag/feedback/evaluations")
+    def rag_feedback_evaluations(limit: int = 20) -> JSONResponse:
+        payload = list_feedback_evaluations(
+            app.state.session_factory, limit=limit
+        )
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/rag/feedback")

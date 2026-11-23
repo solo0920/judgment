@@ -1173,6 +1173,23 @@ class RagFeedbackEvent(Base):
     )
 
 
+class RagFeedbackEvaluation(Base):
+    __tablename__ = "rag_feedback_evaluations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    filters = Column(JSON, nullable=False, default=dict)
+    feedback_ids = Column(JSON, nullable=False, default=list)
+    total = Column(Integer, nullable=False, default=0)
+    summary = Column(JSON, nullable=False, default=dict)
+    results = Column(JSON, nullable=False, default=list)
+    status = Column(String(24), nullable=False, default="completed")
+    created_by = Column(String(120), nullable=False, default="")
+    duration_ms = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+
+
 class RagFeedbackExport(Base):
     __tablename__ = "rag_feedback_exports"
 

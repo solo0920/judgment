@@ -1469,6 +1469,22 @@ export const api = {
     );
   },
 
+  ragFeedbackEvaluate(payload) {
+    return request("/api/rag/feedback/evaluate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 600000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackEvaluations(limit = 20) {
+    return request(
+      `/api/rag/feedback/evaluations?limit=${encodeURIComponent(limit)}`,
+      { timeout: 30000, trackClient: false },
+    );
+  },
+
   async ragFeedbackExport(params = {}) {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

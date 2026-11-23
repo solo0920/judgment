@@ -747,7 +747,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "ragFeedbackPromote" in api_js.text
     assert "ragFeedbackRerun" in api_js.text
     assert "ragFeedbackIssues" in api_js.text
+    assert "ragFeedbackEvaluate" in api_js.text
     assert "/api/rag/feedback-issues" in api_js.text
+    assert "/api/rag/feedback/evaluate" in api_js.text
     assert "/api/rag/feedback/export" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
@@ -779,6 +781,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "問題群組（Issue）" in feedback_js.text
     assert "data-feedback-issue-id" in feedback_js.text
     assert "建立並連結" in feedback_js.text
+    assert "批次重跑評估" in feedback_js.text
+    assert "rag-feedback-evaluation" in feedback_js.text
     assert "ragFeedbackUpdate" in feedback_js.text
     assert "rag-feedback-choice-pill" in feedback_js.text
     assert 'type="radio" name="status"' in feedback_js.text
@@ -839,6 +843,7 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-citation-verdict" in css.text
     assert ".rag-feedback-issue-link" in css.text
     assert ".rag-feedback-issues" in css.text
+    assert ".rag-feedback-evaluation-row" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -3250,6 +3255,43 @@ def test_feedback_issue_grouping_and_export(web_client) -> None:
     assert row["issue"]["linked_pr_url"].endswith("/pr/1")
 
 
+def test_feedback_batch_evaluation_is_stored(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    feedback = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": answer["request_id"],
+            "feedback_token": answer["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "comment": "",
+        },
+    ).json()
+
+    evaluated = web_client.post(
+        "/api/rag/feedback/evaluate",
+        json={
+            "filters": {"request_id": answer["request_id"]},
+            "limit": 5,
+        },
+    )
+    assert evaluated.status_code == 200, evaluated.text
+    payload = evaluated.json()
+    assert payload["total"] == 1
+    assert payload["summary"]["succeeded"] == 1
+    assert payload["results"][0]["feedback_id"] == feedback["id"]
+    assert "diff" in payload["results"][0]
+
+    listing = web_client.get("/api/rag/feedback/evaluations").json()
+    assert any(
+        row["id"] == payload["id"] for row in listing["evaluations"]
+    )
+    assert all("results" not in row for row in listing["evaluations"])
+
+
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
     answer = web_client.post(
         "/api/rag/query",
@@ -4241,6 +4283,14 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
             "PATCH", "/api/rag/feedback-issues/{issue_id}", policies
         )
         == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for("POST", "/api/rag/feedback/evaluate", policies)
+        == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for("GET", "/api/rag/feedback/evaluations", policies)
+        == "ADMIN_ONLY"
     )
     assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"
     assert policy_for("POST", "/api/auth/sse-ticket", policies) == "AUTH_READ"
