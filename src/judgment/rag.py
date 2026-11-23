@@ -22,8 +22,10 @@ from .law_rag import (
     _extract_article_refs,
     build_insurance_responsibility_framework,
     extract_stat_entity,
+    financial_law_scope_answer,
     is_article_count_question,
     is_citation_stats_question,
+    is_financial_law_list_question,
     is_financial_query,
     is_history_question,
     is_law_first_question,
@@ -3483,6 +3485,79 @@ def answer_question(
             alias_target = None
         if alias_target:
             search_collection = settings.judgment_vector_alias
+
+    if is_financial_law_list_question(question):
+        scope_answer = financial_law_scope_answer(
+            question, settings.judgment_law_list
+        )
+        scope_mode = str(scope_answer.get("mode") or "list")
+        record_decision(
+            "scope.whitelist",
+            stage="parsing",
+            question="問題是在問 99 項金融法規白名單或拒絕原因嗎？",
+            method="law_rag.is_financial_law_list_question",
+            options=[
+                _decision_option(
+                    "list",
+                    "列出 99 項金融法規／命令",
+                    selected=scope_mode == "list",
+                    reason=(
+                        "問題直接詢問金融法規白名單"
+                        if scope_mode == "list"
+                        else "不是直接列出白名單"
+                    ),
+                ),
+                _decision_option(
+                    "refusal",
+                    "解釋拒絕回答的依據",
+                    selected=scope_mode == "refusal",
+                    reason=(
+                        "問題詢問為何被拒絕或要求依據"
+                        if scope_mode == "refusal"
+                        else "不是拒絕原因題"
+                    ),
+                ),
+                _decision_option(
+                    "unavailable",
+                    "白名單無法讀取",
+                    selected=scope_mode == "unavailable",
+                    reason=(
+                        "找不到金融法規白名單"
+                        if scope_mode == "unavailable"
+                        else "白名單可讀取"
+                    ),
+                ),
+            ],
+            selected=scope_mode,
+            result={
+                "count": int(scope_answer.get("count") or 0),
+                "source": "documents/金融法規.md",
+            },
+        )
+        return {
+            "status": "operational",
+            "answer": str(scope_answer.get("answer") or ""),
+            "notice": (
+                "本回答由金融法規白名單直接整理，未經 LLM；"
+                "這不是法律意見。"
+            ),
+            "citations": [],
+            "judgments": [],
+            "law_sources": [],
+            "matched_terms": [],
+            "answer_source": "structured",
+            "llm_model": None,
+            "embedding_model": settings.embedding_model or None,
+            "retrieval": {
+                "status": "scope_whitelist",
+                "mode": scope_mode,
+                "hits": 0,
+                "whitelist_count": int(scope_answer.get("count") or 0),
+                "source": "documents/金融法規.md",
+            },
+            "coverage": coverage,
+            "duration_ms": _elapsed_ms(started),
+        }
 
     law_sources: List[Dict[str, Any]] = []
     law_stats: Dict[str, Any] = {}

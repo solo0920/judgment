@@ -2106,21 +2106,41 @@ _FINANCIAL_QUERY_TERMS = (
 
 
 @lru_cache(maxsize=8)
-def load_financial_law_names(path: str) -> frozenset[str]:
-    """Load the 99-law whitelist, including aliases and base names."""
+def load_financial_law_entries(path: str) -> Tuple[str, ...]:
+    """Load the 99 raw entries from the financial-law whitelist.
+
+    This intentionally does not add aliases; the returned tuple is the exact
+    list users see when they ask what the 99-law scope contains.
+    """
 
     source = Path(path).expanduser()
     try:
         lines = source.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return frozenset()
-    names: set[str] = set()
+        return ()
+    entries: List[str] = []
     for line in lines:
         raw = line.strip()
         if not raw or raw.startswith("#"):
             continue
         name = re.split(r"[（(]", raw, 1)[0].strip()
         if len(name) < 2 or not re.search(r"[\u4e00-\u9fff]", name):
+            continue
+        entries.append(raw)
+    return tuple(entries)
+
+
+@lru_cache(maxsize=8)
+def load_financial_law_names(path: str) -> frozenset[str]:
+    """Load the 99-law whitelist, including aliases and base names."""
+
+    entries = load_financial_law_entries(path)
+    if not entries:
+        return frozenset()
+    names: set[str] = set()
+    for entry in entries:
+        name = re.split(r"[（(]", entry, 1)[0].strip()
+        if not name:
             continue
         names.add(name)
         names.add(_normalize(name))
@@ -2150,6 +2170,99 @@ def is_financial_query(
     if any(name and name in text for name in names):
         return True
     return any(term in text for term in _FINANCIAL_QUERY_TERMS)
+
+
+_WHITELIST_QUERY_RE = re.compile(
+    r"(?:99|九十九)\s*(?:項|條|個)?\s*(?:金融|相關)*\s*(?:法規|法律|命令)"
+    r"|(?:金融|相關)*\s*(?:法規|法律|命令)\s*"
+    r"(?:有(?:哪|那)些|清單|白名單|範圍)(?:[？?。！!]|$)"
+)
+_REFUSAL_EXPLANATION_RE = re.compile(
+    r"(?:為什麼|為何|原因|理由|依據).{0,30}"
+    r"(?:拒絕|不能回答|無法回答|未回答|不回答|不行|未對應|不在範圍|沒有回答)"
+    r"|(?:拒絕|未對應|不在範圍|不能回答|無法回答).{0,30}"
+    r"(?:為什麼|為何|原因|理由|依據)"
+)
+_REFUSAL_CONTEXT_TERMS = (
+    "99",
+    "九十九",
+    "金融法規",
+    "本系統",
+    "剛剛",
+    "剛才",
+    "上一個",
+    "這個問題",
+    "拒絕回答",
+)
+
+
+def is_financial_law_list_question(question: str) -> bool:
+    """Return True when the user asks for the 99-law scope or refusal basis."""
+
+    text = _normalize(question)
+    if _WHITELIST_QUERY_RE.search(text):
+        return True
+    if _REFUSAL_EXPLANATION_RE.search(text):
+        return any(term in text for term in _REFUSAL_CONTEXT_TERMS)
+    return False
+
+
+def financial_law_scope_answer(
+    question: str,
+    law_list_path: Path,
+) -> Dict[str, Any]:
+    """Return a deterministic explanation of the financial-law whitelist.
+
+    The answer must never call the LLM: the scope is defined by a static
+    whitelist, and the user is asking for the rule/basis rather than a legal
+    analysis.
+    """
+
+    entries = load_financial_law_entries(str(law_list_path))
+    text = _normalize(question)
+    refusal_mode = bool(_REFUSAL_EXPLANATION_RE.search(text))
+    if not entries:
+        return {
+            "answer": (
+                "目前無法讀取金融法規白名單，因此無法列出 99 項法規／命令。"
+                "請確認 documents/金融法規.md 存在且可讀取。"
+            ),
+            "count": 0,
+            "mode": "unavailable",
+        }
+    count = len(entries)
+    lines = [
+        (
+            "您問的是本系統的金融法規範圍。"
+            if not refusal_mode
+            else "若上一題的訊息是「未對應 99 項金融相關法規」，系統依據的是金融法規白名單與金融關鍵詞判斷，不是任意推測。"
+        ),
+        (
+            f"本系統目前納入判決檢索與 RAG 範圍的是金融法規白名單中的 {count} 項法規／命令；"
+            "這裡的「99」不是某一部法律的第 99 條。"
+        ),
+        "",
+        f"白名單來源：{Path(law_list_path).name}",
+        f"以下為目前 {count} 項法規／命令：",
+    ]
+    lines.extend(f"{index}. {name}" for index, name in enumerate(entries, 1))
+    lines.append("")
+    lines.append(
+        "判斷方式：問題文字或檢索到的法規名稱必須命中上述白名單，"
+        "或命中銀行、證券、保險、洗錢等金融關鍵詞；否則系統會回覆"
+        "「未對應 99 項金融相關法規」並拒絕生成判決 RAG 回答。"
+    )
+    if refusal_mode:
+        lines.append(
+            "若上一題的訊息是「無法確認：本系統目前不支援這類統計或排序查詢」，"
+            "則是因為沒有可用的結構化 handler，與這 99 項白名單無關。"
+        )
+    lines.append("這不是法律意見。")
+    return {
+        "answer": "\n".join(lines),
+        "count": count,
+        "mode": "refusal" if refusal_mode else "list",
+    }
 
 
 def _law_overview_answer(source: Mapping[str, Any]) -> str:

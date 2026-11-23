@@ -57,6 +57,7 @@ from judgment.law_rag import (
     _law_name_matches_text,
     _rrf_fuse,
     build_insurance_responsibility_framework,
+    is_financial_law_list_question,
     is_financial_query,
     is_law_first_question,
     is_law_overview_question,
@@ -461,6 +462,57 @@ def test_financial_query_scope_uses_99_law_list() -> None:
         law_list,
     )
     assert not is_financial_query("離婚後的扶養費怎麼算？", [], law_list)
+
+
+def test_financial_law_whitelist_question_is_answered_without_llm() -> None:
+    assert is_financial_law_list_question(
+        "此問題未對應 99 項金融相關法規，是那99條?"
+    )
+    assert is_financial_law_list_question("為什麼這個問題被拒絕回答?")
+    assert is_financial_law_list_question("金融法規有哪些?")
+    assert not is_financial_law_list_question("金融法規有哪些罰則?")
+    assert not is_financial_law_list_question("公司法第99條是什麼?")
+
+    flow = start_flow(
+        request_id="whitelist-decision-test",
+        entrypoint="/api/rag/query",
+    )
+    try:
+        payload = answer_question(
+            session_factory=_session_factory(),
+            question="此問題未對應 99 項金融相關法規，是那99條?",
+            settings=_settings(),
+        )
+    finally:
+        trace = flow.finish(status="success")
+        clear_flow()
+
+    assert payload["answer_source"] == "structured"
+    assert payload["llm_model"] is None
+    assert payload["judgments"] == []
+    assert payload["retrieval"]["status"] == "scope_whitelist"
+    assert payload["retrieval"]["whitelist_count"] == 99
+    assert "99 項法規／命令" in payload["answer"]
+    assert "不是某一部法律的第 99 條" in payload["answer"]
+    assert "證券投資信託及顧問法" in payload["answer"]
+    decisions = {item["id"]: item for item in trace["decisions"]}
+    assert decisions["scope.whitelist"]["selected"] == "list"
+    assert decisions["scope.whitelist"]["result"]["count"] == 99
+
+
+def test_refusal_explanation_returns_basis_and_whitelist() -> None:
+    payload = answer_question(
+        session_factory=_session_factory(),
+        question="為什麼這個問題不能回答?",
+        settings=_settings(),
+    )
+
+    assert payload["answer_source"] == "structured"
+    assert payload["retrieval"]["status"] == "scope_whitelist"
+    assert payload["retrieval"]["mode"] == "refusal"
+    assert "金融法規白名單" in payload["answer"]
+    assert "銀行、證券、保險、洗錢" in payload["answer"]
+    assert "民法" in payload["answer"]
 
 
 def test_non_financial_question_returns_scope_notice(tmp_path: Path) -> None:
