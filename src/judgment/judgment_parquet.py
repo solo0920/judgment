@@ -151,6 +151,23 @@ def latest_judgment_parquet(data_dir: Path) -> Optional[Path]:
     return candidates[0][3]
 
 
+def _jid_month(jid: str) -> str:
+    """Extract YYYYMM from a JID such as TPHV,110,上易,688,20210928,1."""
+
+    for part in str(jid or "").split(","):
+        part = part.strip()
+        if len(part) >= 8 and part[:8].isdigit():
+            return part[:6]
+    return ""
+
+
+def _archive_month_from_path(path: Path) -> str:
+    try:
+        return path.parents[2].name[:6]
+    except IndexError:
+        return ""
+
+
 def get_judgment_from_parquet(
     data_dir: Path,
     jid: str,
@@ -158,34 +175,49 @@ def get_judgment_from_parquet(
     key = str(jid or "").strip()
     if not key:
         raise ValueError("jid 不可為空")
-    paths = raw_judgment_files(data_dir)
-    if not paths:
+    all_paths = raw_judgment_files(data_dir)
+    if not all_paths:
         raise FileNotFoundError(
             "尚未產生原始判決 Parquet；請先執行 judgment-import-judgments --raw-only。"
         )
+    month = _jid_month(key)
+    narrowed = (
+        [
+            path
+            for path in all_paths
+            if _archive_month_from_path(path) == month
+        ]
+        if month
+        else []
+    )
+    paths = narrowed or all_paths
+
+    columns = [
+        "jid",
+        "jyear",
+        "jcase",
+        "jno",
+        "jdate",
+        "court",
+        "court_normalized",
+        "title",
+        "pdf_url",
+        "source_archive",
+        "content_hash",
+        "full_text_length",
+        "matched_laws",
+        "citations",
+        "citation_count",
+        "raw_json",
+    ]
+
+    def read(selected: List[Path]):
+        return ds.dataset(
+            [str(path) for path in selected], format="parquet"
+        ).to_table(filter=ds.field("jid") == key, columns=columns)
+
     try:
-        dataset = ds.dataset([str(path) for path in paths], format="parquet")
-        table = dataset.to_table(
-            filter=ds.field("jid") == key,
-            columns=[
-                "jid",
-                "jyear",
-                "jcase",
-                "jno",
-                "jdate",
-                "court",
-                "court_normalized",
-                "title",
-                "pdf_url",
-                "source_archive",
-                "content_hash",
-                "full_text_length",
-                "matched_laws",
-                "citations",
-                "citation_count",
-                "raw_json",
-            ],
-        )
+        table = read(paths)
     except Exception as exc:
         raise LookupError(
             f"無法從原始 Parquet 讀取判決：{exc.__class__.__name__}: {exc}"
