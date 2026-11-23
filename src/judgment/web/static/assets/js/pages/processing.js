@@ -227,6 +227,17 @@ const DOWNLOAD_FORCE_CONFIRMATIONS = {
     "仍要強制重新下載判決 RAR 嗎？（不會自動匯入 PostgreSQL 或建立 Qdrant 索引）",
 };
 
+// Workflows that must have a detected pending update before their primary
+// action is enabled.  Download workflows use the online update record; index
+// workflows use the live staleness/backlog check from the processing snapshot.
+const DETECTED_UPDATE_WORKFLOWS = new Set([
+  "law_download",
+  "order_download",
+  "judgment_download",
+  "legal_index_versions",
+  "index_versions",
+]);
+
 const WORKFLOW_SCOPE_NOTES = {
   law_download:
     "流程範圍：下載 ZIP → 原始 Parquet；內容有變更才解析條文並更新 PostgreSQL。法規 RAG 直接查詢 PostgreSQL，不寫入 Qdrant；IndexedDB 只保存瀏覽器提問紀錄。",
@@ -5597,14 +5608,11 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
   const lastRun = activeRun || workflow.last_run || null;
   const starting = pendingWorkflowId === workflow.id;
   const busy = Boolean(activeRun) || starting;
-  const downloadWorkflow = [
-    "law_download",
-    "order_download",
-    "judgment_download",
-  ].includes(workflow.id);
+  const downloadWorkflow = DOWNLOAD_WORKFLOW_SOURCES[workflow.id] !== undefined;
+  const requiresDetectedUpdate = DETECTED_UPDATE_WORKFLOWS.has(workflow.id);
   const updateConsumed = isUpdateConsumed(workflow.id);
   const updateAvailable =
-    !downloadWorkflow ||
+    !requiresDetectedUpdate ||
     (Boolean(workflow.update_available) && !updateConsumed);
   const canRunWorkflow = Boolean(workflow.can_run) && !busy;
   const canRun = canRunWorkflow && updateAvailable;
@@ -5614,11 +5622,13 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
       ? workflow.start_blocked_reason ||
         "目前有其他處理程序執行中，請稍後再試。"
       : !updateAvailable
-        ? workflow.update_status?.status === "error"
-          ? "版本檢查失敗，請先按「檢查更新」。"
-          : workflow.update_status?.status === "up_to_date"
-            ? "目前已是最新版本，沒有可更新內容。"
-            : "請先按「檢查更新」，確認是否有新版。"
+        ? downloadWorkflow
+          ? workflow.update_status?.status === "error"
+            ? "版本檢查失敗，請先按「檢查更新」。"
+            : workflow.update_status?.status === "up_to_date"
+              ? "目前已是最新版本，沒有可更新內容。"
+              : "請先按「檢查更新」，確認是否有新版。"
+          : "目前未偵測到可重建的索引內容。"
         : "";
   const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
   const updateCount = updateConsumed
