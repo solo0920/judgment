@@ -795,7 +795,17 @@ function lawSourceCard(source, index) {
     `<span class="badge ${source.source_type === "order" ? "badge-warn" : "badge-info"}">${escapeHtml(sourceLabel)}</span>`,
     level ? escapeHtml(level) : "",
     source.law_category ? escapeHtml(source.law_category) : "",
-    source.article_count ? `${formatNumber(source.article_count)} 條` : "",
+    source.article_live || source.article_count
+      ? `${formatNumber(
+          source.article_live || source.article_count,
+        )} 條生效${
+          source.article_deleted
+            ? `（共 ${formatNumber(
+                source.article_total || source.article_count,
+              )} 條號，已刪除 ${formatNumber(source.article_deleted)} 條）`
+            : ""
+        }`
+      : "",
     source.law_modified_date ? `異動 ${formatDate(source.law_modified_date)}` : "",
     citationUsageLabel(source),
   ]

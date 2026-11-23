@@ -60,7 +60,9 @@ from judgment.law_rag import (
     is_law_overview_question,
     is_related_laws_question,
     judgment_law_stats,
+    law_article_boundary_question,
     law_sources_for_question,
+    _law_article_metadata,
     select_law_articles,
     structured_law_answer,
 )
@@ -2707,6 +2709,122 @@ def test_judgment_law_stats_degrades_on_timeout(monkeypatch) -> None:
     assert stats["timeout"] is True
     assert stats["laws"] == []
     assert stats["judgment_count"] == 0
+
+
+def test_law_article_boundary_question_mapping() -> None:
+    assert law_article_boundary_question("公司法最後一條是什麼內容?") == "last"
+    assert law_article_boundary_question("公司法第一條是什麼?") == "first"
+    assert law_article_boundary_question("公司法有幾條") == ""
+
+
+def test_law_article_metadata_counts_deleted_and_boundaries() -> None:
+    meta = _law_article_metadata(
+        [
+            {"article_type": "C", "article_no": "", "article_content": "第一章"},
+            {
+                "article_type": "A",
+                "article_no": "第 1 條",
+                "article_content": "第一條內容",
+            },
+            {
+                "article_type": "A",
+                "article_no": "第 2 條",
+                "article_content": "（刪除）",
+            },
+            {
+                "article_type": "A",
+                "article_no": "第 449 條",
+                "article_content": "本法自公布日施行。",
+            },
+        ]
+    )
+    assert meta["article_total"] == 3
+    assert meta["article_deleted"] == 1
+    assert meta["article_live"] == 2
+    assert meta["first_article"]["article_no"] == "第 1 條"
+    assert meta["last_article"]["article_no"] == "第 449 條"
+
+
+def test_company_law_boundary_and_count_answers(tmp_path: Path, monkeypatch) -> None:
+    session_factory = _session_factory()
+    _seed_laws(session_factory)
+    with session_factory() as session:
+        version = LawDatasetVersion(
+            source_type="law",
+            source_url="https://example.test/law-company",
+            update_date="2026/11/13",
+            content_sha256="e" * 64,
+            raw_json_sha256="f" * 64,
+            zip_sha256="a" * 64,
+            zip_path="/tmp/company.zip",
+            parquet_path="/tmp/company.parquet",
+            law_count=1,
+            article_count=534,
+            is_current=True,
+        )
+        session.add(version)
+        session.flush()
+        session.add(
+            LawDocument(
+                source_type="law",
+                law_key="https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=J0080001",
+                law_name="公司法",
+                article_count=534,
+                law_level="法律",
+                law_modified_date="20251226",
+                content_hash="e" * 64,
+                first_seen_version_id=version.id,
+                last_seen_version_id=version.id,
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    content = {
+        "article_count": 534,
+        "law_articles": [
+            {
+                "article_type": "A",
+                "article_no": "第 1 條",
+                "article_content": "本法所稱公司，謂以營利為目的。",
+            },
+            {
+                "article_type": "A",
+                "article_no": "第 448 條",
+                "article_content": "（刪除）",
+            },
+            {
+                "article_type": "A",
+                "article_no": "第 449 條",
+                "article_content": "本法除另有規定外，自公布日施行。",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "judgment.law_rag.load_law_contents",
+        lambda law_data_dir, records: {("law", "公司法"): content},
+    )
+    settings = _settings(law_data_dir=tmp_path)
+
+    last = answer_question(
+        session_factory=session_factory,
+        question="公司法最後一條是什麼內容?",
+        settings=settings,
+    )
+    assert last["answer_source"] == "structured"
+    assert "第 449 條" in last["answer"]
+    assert "自公布日施行" in last["answer"]
+
+    count = answer_question(
+        session_factory=session_factory,
+        question="公司法有幾條",
+        settings=settings,
+    )
+    assert count["answer_source"] == "structured"
+    assert "3 個條號" in count["answer"]
+    assert "1 條已刪除" in count["answer"]
+    assert "現行有效 2 條" in count["answer"]
+    assert "最後一條是 第 449 條" in count["answer"]
 
 
 def test_related_life_and_property_insurance_laws(tmp_path: Path) -> None:
