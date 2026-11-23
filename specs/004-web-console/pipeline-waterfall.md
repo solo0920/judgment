@@ -6,7 +6,7 @@
 
 **Last Updated**: 2026-11-23
 
-**Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 回答底部與後端處理流程、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline、`#/home` 的即時摘要載入 Pipeline，以及未來新增的任何 pipeline waterfall。
+**Applies To**: 所有以時間軸呈現 pipeline／flow 執行順序的視圖，包含 `#/rag` 後端處理流程收合面板（內含完整 RAG Pipeline card）、`#/performance` 的 RAG Pipeline、效能 Flow、測試 Flow、`#/processing` 的判決向量索引 Pipeline、判決匯入與下載 workflow 流程進度、`#/status` 的服務總覽載入 Pipeline、`#/home` 的即時摘要載入 Pipeline，以及未來新增的任何 pipeline waterfall。
 
 **Related Requirements**: FR-119、FR-120、FR-121、FR-147、FR-155、FR-162、FR-166、FR-167、FR-168、SC-075、SC-084、SC-085、SC-090
 
@@ -37,7 +37,7 @@
 ### 2.1 MUST 使用本規格
 
 - RAG 查詢的 Parsing／Embedding／Qdrant／Reranker／Context／LLM／Response 流程；結構化法規查詢改用 Parsing／法規檢索與統計／法條載入／Response，不得把未執行的標準階段列成「未記錄」。
-- `#/rag` 完成後的後端處理流程 MUST 使用同一份 canonical `pipeline_flow` stages 與 `decisions[]`；raw `FlowTrace.segments`（含 `http.request`、`rag.answer_question`、巢狀 `rag.extract_excerpt`）MUST NOT 被當成頂層 waterfall 階段，只能出現在展開明細或除錯 JSON。
+- `#/rag` 完成後的後端處理流程收合面板 MUST 直接嵌入該次完整 canonical RAG Pipeline card，使用同一份 `pipeline_flow` stages 與 `decisions[]`；回答底部 MUST NOT 再重複第二份相同 card。raw `FlowTrace.segments`（含 `http.request`、`rag.answer_question`、巢狀 `rag.extract_excerpt`）MUST NOT 被當成頂層 waterfall 階段，只能出現在展開明細或除錯 JSON。
 - 判決向量索引的 Ollama 測試／Blue-Green 版本／向量複製／金融判決索引／驗證／alias 切換流程。
 - 效能報表的 Flow 紀錄與測試 Flow。
 - `#/status` 的服務總覽載入 Pipeline。
