@@ -15,7 +15,7 @@ import pyarrow.parquet as pq
 from sqlalchemy import or_, select, text
 from sqlalchemy.exc import OperationalError
 
-from .models import JudgmentDocument, LawDocument
+from .models import JudgmentDocument, LawDatasetVersion, LawDocument
 from .observability import traced
 
 logger = logging.getLogger(__name__)
@@ -971,6 +971,16 @@ def _format_date(value: Any) -> str:
     return text
 
 
+def _date_ymd(value: Any) -> str:
+    text = str(value or "").strip()
+    match = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", text)
+    if match:
+        return f"{match.group(1)}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+    if re.fullmatch(r"\d{8}", text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text
+
+
 def _article_sort_key(article_no: Any) -> Tuple[int, int]:
     key = _article_ref_key(article_no)
     if not key:
@@ -1000,18 +1010,47 @@ def _law_article_metadata(
             deleted += 1
         else:
             live.append(item)
-    ordered = sorted(
-        live,
+    ordered_all = sorted(
+        rows,
         key=lambda item: _article_sort_key(item.get("article_no")),
     )
-    first = ordered[0] if ordered else (rows[0] if rows else None)
-    last = ordered[-1] if ordered else (rows[-1] if rows else None)
+    ordered = [item for item in ordered_all if item in live]
+    first_slot = ordered_all[0] if ordered_all else None
+    last_slot = ordered_all[-1] if ordered_all else None
+    first = ordered[0] if ordered else (first_slot)
+    last = ordered[-1] if ordered else (last_slot)
+    zhi_rows = [
+        item
+        for item in rows
+        if "-" in str(item.get("article_no") or "")
+        or "之" in str(item.get("article_no") or "")
+    ]
+    bases = [_article_sort_key(item.get("article_no"))[0] for item in rows]
     return {
         "article_total": len(rows),
         "article_deleted": deleted,
         "article_live": len(live),
+        "zhi_count": len(zhi_rows),
+        "zhi_example": str(
+            zhi_rows[0].get("article_no") if zhi_rows else ""
+        ).strip(),
+        "max_base": max(bases) if bases else 0,
         "first_article": dict(first) if first else None,
         "last_article": dict(last) if last else None,
+        "first_slot": dict(first_slot) if first_slot else None,
+        "last_slot": dict(last_slot) if last_slot else None,
+        "first_slot_deleted": bool(
+            first_slot
+            and str(first_slot.get("article_content") or "")
+            .strip()
+            .startswith("（刪除）")
+        ),
+        "last_slot_deleted": bool(
+            last_slot
+            and str(last_slot.get("article_content") or "")
+            .strip()
+            .startswith("（刪除）")
+        ),
     }
 
 
@@ -1034,6 +1073,23 @@ def law_article_boundary_question(question: str) -> str:
     return ""
 
 
+_UNSUPPORTED_STATS_RE = re.compile(
+    r"(有幾|多少|共有|總共|第幾|最早|最近|哪一年|何年|哪天|修正日期|最近一次|幾章|幾款|幾項)"
+)
+
+
+def is_unsupported_statistics_question(question: str) -> bool:
+    """Detect quantity/order questions with no matching structured rule."""
+
+    if (
+        is_article_count_question(question)
+        or law_article_boundary_question(question)
+        or is_history_question(question)
+    ):
+        return False
+    return bool(_UNSUPPORTED_STATS_RE.search(_normalize(question)))
+
+
 def law_boundary_answer(
     question: str,
     source: Mapping[str, Any],
@@ -1047,13 +1103,55 @@ def law_boundary_answer(
     ).strip()
     if not article_no or not content:
         return None
-    label = "最後一條" if which == "last" else "第一條"
+    slot_key = "last_slot" if which == "last" else "first_slot"
+    slot_deleted = bool(source.get(f"{which}_slot_deleted"))
+    slot = source.get(slot_key) or {}
+    slot_no = str(slot.get("article_no") or "").strip()
+    slot_content = re.sub(
+        r"\s+", " ", str(slot.get("article_content") or "")
+    ).strip()
+    if which == "last":
+        label = "最後一條有效條文" if slot_deleted else "最後一條"
+        slot_label = "最後一個條號"
+    else:
+        label = "第一條有效條文" if slot_deleted else "第一條"
+        slot_label = "第一個條號"
     index = int(source.get("index") or 1)
+    date = _date_ymd(source.get("dataset_update_date"))
+    provenance = f"依本系統資料版本（{date}）" if date else "依本系統資料版本"
+    deleted_note = ""
+    if slot_deleted and slot_no and slot_no != article_no:
+        deleted_note = f"（{slot_label}{slot_no}已刪除：{slot_content}）"
     return (
-        f"{source.get('law_name') or '該法規'}的{label}是{article_no}："
-        f"{content} [{index}]。"
-        "條文內容以全國法規資料庫公告為準；這不是法律意見。"
+        f"{source.get('law_name') or '該法規'}的{label}是{article_no}"
+        f"{deleted_note}：{content} [{index}]。"
+        f"{provenance}，條文內容以全國法規資料庫公告為準；這不是法律意見。"
     )
+
+
+def _dataset_update_date(session_factory: Any, source_type: str) -> str:
+    """Return the current law dataset version date for answer provenance."""
+
+    try:
+        with session_factory() as session:
+            version = session.scalars(
+                select(LawDatasetVersion)
+                .where(
+                    LawDatasetVersion.source_type == source_type,
+                    LawDatasetVersion.is_current.is_(True),
+                )
+                .order_by(LawDatasetVersion.id.desc())
+                .limit(1)
+            ).first()
+        if version is None:
+            return ""
+        return str(
+            getattr(version, "update_date", "")
+            or getattr(version, "downloaded_at", "")
+            or ""
+        )
+    except Exception:
+        return ""
 
 
 def build_law_source(
@@ -1068,6 +1166,7 @@ def build_law_source(
     dense_scores: Optional[Mapping[str, float]] = None,
     dense_weight: float = 0.2,
     rrf_k: int = 60,
+    dataset_update_date: str = "",
 ) -> Dict[str, Any]:
     content = content or {}
     histories = str(
@@ -1103,6 +1202,14 @@ def build_law_source(
         "article_live": article_meta["article_live"] or article_count,
         "first_article": article_meta["first_article"],
         "last_article": article_meta["last_article"],
+        "first_slot": article_meta["first_slot"],
+        "last_slot": article_meta["last_slot"],
+        "first_slot_deleted": article_meta["first_slot_deleted"],
+        "last_slot_deleted": article_meta["last_slot_deleted"],
+        "zhi_count": article_meta["zhi_count"],
+        "zhi_example": article_meta["zhi_example"],
+        "max_base": article_meta["max_base"],
+        "dataset_update_date": dataset_update_date,
         "law_modified_date": content.get("law_modified_date")
         or record.law_modified_date,
         "law_effective_date": content.get("law_effective_date")
@@ -1183,10 +1290,16 @@ def is_citation_stats_question(question: str) -> bool:
 
 
 def is_article_count_question(question: str) -> bool:
+    text = _normalize(question)
+    # 章／節／款／項層級的數量不是全法條文數，交給統計防護處理。
+    if re.search(r"(章|節|款|項).{0,8}(有幾|多少|幾)", text) or re.search(
+        r"(有幾|多少|幾).{0,8}(章|節|款|項)", text
+    ):
+        return False
     return bool(
         re.search(
             r"(多少|幾|共有|總共)\s*(條|條文)|條文數|有多少條",
-            _normalize(question),
+            text,
         )
     )
 
@@ -1796,6 +1909,10 @@ def law_sources_for_question(
     if not records:
         return []
     contents = load_law_contents(law_data_dir, records)
+    dataset_date = _dataset_update_date(
+        session_factory,
+        str(records[0].source_type or "") if records else "",
+    )
     sources: List[Dict[str, Any]] = []
     for record in records[:effective_limit]:
         content = contents.get((record.source_type, record.law_name)) or contents.get(
@@ -1820,6 +1937,7 @@ def law_sources_for_question(
                 dense_scores=dense_by_law.get(record.law_name),
                 dense_weight=dense_weight,
                 rrf_k=rrf_k,
+                dataset_update_date=dataset_date,
             )
         )
     return sources
@@ -2128,7 +2246,8 @@ def structured_law_answer(
         return _law_overview_answer(primary)
     if is_article_count_question(question):
         label = primary["source_label"]
-        date = _format_date(primary.get("law_modified_date")) or "未載明"
+        dataset_date = _date_ymd(primary.get("dataset_update_date"))
+        modified_date = _format_date(primary.get("law_modified_date")) or "未載明"
         article_total = int(
             primary.get("article_total") or primary.get("article_count") or 0
         )
@@ -2137,19 +2256,27 @@ def structured_law_answer(
         last_no = str(
             (primary.get("last_article") or {}).get("article_no") or ""
         ).strip()
+        zhi_count = int(primary.get("zhi_count") or 0)
+        zhi_example = str(primary.get("zhi_example") or "").strip()
+        detail = f"現行有效 {article_live} 條"
         if article_deleted:
-            detail = (
-                f"共有 {article_total} 個條號，其中 {article_deleted} 條已刪除，"
-                f"現行有效 {article_live} 條"
+            detail += (
+                f"（條號共 {article_total}，其中 {article_deleted} 條已刪除）"
             )
         else:
-            detail = f"目前共有 {article_total} 條條文"
-        if last_no:
+            detail += f"（條號共 {article_total}）"
+        if zhi_count and zhi_example:
+            detail += f"；條號含『之』條（如{zhi_example}）"
+        if primary.get("last_slot_deleted") and last_no:
+            detail += f"，最後一條有效條文是 {last_no}"
+        elif last_no:
             detail += f"，最後一條是 {last_no}"
+        provenance = (
+            f"資料截至 {dataset_date}" if dataset_date else "資料截至本系統版本日"
+        )
         return (
             f"{primary['law_name']}{detail} [{primary['index']}]。"
-            f"這是{label}資料庫依全國法規資料庫 API 條號計算的結果，"
-            f"資料最後異動日為 {date}。"
+            f"{provenance}，來源：全國法規資料庫；該{label}最後異動日為 {modified_date}。"
         )
     if is_history_question(question):
         promulgation = primary.get("first_promulgation")
