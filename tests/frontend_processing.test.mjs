@@ -59,3 +59,53 @@ test("workflow intro keeps one action set and collapses execution details", () =
       html.indexOf('data-processing-action="run-workflow"'),
   );
 });
+
+test("download update stays locked until a check finds an update", () => {
+  const base = {
+    id: "law_download",
+    label: "法規下載",
+    description: "比對並下載最新法規 ZIP。",
+    branch: "law",
+    program: "judgment-law-download --source law",
+    script: "src/judgment/law_download/cli.py",
+    command: ["python", "-m", "judgment.law_download.cli", "--source", "law"],
+    can_run: true,
+    progress: { stages: [], active_stage: "" },
+    recent_runs: [],
+    update_history: [],
+    index_timelines: [],
+  };
+  const locked = workflowPanelMarkup({
+    ...base,
+    update_available: false,
+    update_status: { status: "up_to_date" },
+  });
+  assert.match(
+    locked,
+    /data-processing-action="run-workflow"[\s\S]{0,180}disabled/,
+  );
+  assert.equal(
+    locked.includes("目前已是最新版本，沒有可更新內容。"),
+    true,
+  );
+
+  const unchecked = workflowPanelMarkup({
+    ...base,
+    update_available: false,
+    update_status: {},
+  });
+  assert.equal(
+    unchecked.includes("請先按「檢查更新」，確認是否有新版。"),
+    true,
+  );
+
+  const available = workflowPanelMarkup({
+    ...base,
+    update_available: true,
+    update_status: { status: "update_available" },
+  });
+  assert.doesNotMatch(
+    available,
+    /data-processing-action="run-workflow"[\s\S]{0,160}disabled/,
+  );
+});

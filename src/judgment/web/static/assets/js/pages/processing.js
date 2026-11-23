@@ -5575,11 +5575,26 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
   const lastRun = activeRun || workflow.last_run || null;
   const starting = pendingWorkflowId === workflow.id;
   const busy = Boolean(activeRun) || starting;
-  const canRun = Boolean(workflow.can_run) && !busy;
+  const downloadWorkflow = [
+    "law_download",
+    "order_download",
+    "judgment_download",
+  ].includes(workflow.id);
+  const updateAvailable = !downloadWorkflow || Boolean(workflow.update_available);
+  const canRunWorkflow = Boolean(workflow.can_run) && !busy;
+  const canRun = canRunWorkflow && updateAvailable;
   const disabledReason = busy
     ? "此流程正在執行中。"
-    : workflow.start_blocked_reason ||
-      "目前有其他處理程序執行中，請稍後再試。";
+    : !workflow.can_run
+      ? workflow.start_blocked_reason ||
+        "目前有其他處理程序執行中，請稍後再試。"
+      : !updateAvailable
+        ? workflow.update_status?.status === "error"
+          ? "版本檢查失敗，請先按「檢查更新」。"
+          : workflow.update_status?.status === "up_to_date"
+            ? "目前已是最新版本，沒有可更新內容。"
+            : "請先按「檢查更新」，確認是否有新版。"
+        : "";
   const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
   const updateCount =
     Number(workflow.update_count) ||
