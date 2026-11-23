@@ -767,6 +767,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "createFeedbackController" in feedback_js.text
     assert "預期行為" in feedback_js.text
     assert "ragFeedbackUpdate" in feedback_js.text
+    assert "rag-feedback-choice-pill" in feedback_js.text
+    assert 'type="radio" name="status"' in feedback_js.text
+    assert 'type="radio" name="severity"' in feedback_js.text
     assert "不含原始留言" in feedback_js.text
     rag_js = web_client.get("/assets/js/pages/rag.js")
     assert rag_js.status_code == 200
@@ -814,6 +817,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-reasons" in css.text
     assert ".rag-feedback-workspace" in css.text
     assert ".rag-feedback-replay-answer" in css.text
+    assert ".rag-feedback-choice-pill input:checked + span" in css.text
+    assert ".rag-feedback-choice-row" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
