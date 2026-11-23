@@ -116,6 +116,28 @@ def test_relative_range_violations_use_exact_dates() -> None:
     assert violations({"jdate": "20261123"}, parsed) == []
 
 
+def test_relative_number_is_not_parsed_as_single_year() -> None:
+    parsed = parse_judgment_query(
+        "近80年判決",
+        today=date(2026, 11, 23),
+    )
+    assert parsed.year_from is None
+    assert parsed.year_to is None
+    assert parsed.date_from == "1946-11-23"
+    assert parsed.date_to == "2026-11-23"
+
+
+def test_relative_within_supports_chinese_and_arabic_numbers() -> None:
+    for text, expected in (
+        ("三年內判決", "2023-11-23"),
+        ("最近2年判決", "2024-11-23"),
+        ("過去12個月判決", "2025-11-23"),
+    ):
+        parsed = parse_judgment_query(text, today=date(2026, 11, 23))
+        assert parsed.date_from == expected
+        assert parsed.date_to == "2026-11-23"
+
+
 class FakeFacetStore:
     def __init__(self, titles):
         self.titles = titles

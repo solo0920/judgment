@@ -1418,7 +1418,11 @@ def _judgment_list_answer(
     meta = filter_meta or {}
     if meta.get("courts"):
         criteria.append("法院＝" + "／".join(meta["courts"]))
-    if meta.get("year_from") is not None:
+    if meta.get("date_from") and meta.get("date_to"):
+        criteria.append(
+            f"裁判日期＝{meta['date_from']}～{meta['date_to']}"
+        )
+    elif meta.get("year_from") is not None:
         criteria.append(
             f"裁判年份＝{meta['year_from']}–{meta['year_to']}"
         )
@@ -3929,7 +3933,8 @@ def answer_question(
 
     if qdrant_available:
         should_apply_filters = bool(
-            parsed_query.year_from is not None
+            parsed_query.date_from is not None
+            or parsed_query.year_from is not None
             or parsed_query.courts
             or (parsed_query.topics and judgment_list_hint)
         )

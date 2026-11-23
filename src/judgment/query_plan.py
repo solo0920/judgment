@@ -42,9 +42,19 @@ def build_query_plan(
     it requires reindexing every judgment.
     """
 
+    # A relative date range is a hard filter, but it is not enough by itself
+    # to enumerate a topic-specific list: "近二年違約交割判決" still needs
+    # semantic retrieval.  Only court/year/title filters can safely scroll the
+    # whole matching range.
+    enumerable_filter = bool(
+        parsed_query.courts
+        or parsed_query.topics
+        or parsed_query.year_from is not None
+    )
     if (
         judgment_list_hint
         and query_filter
+        and enumerable_filter
         and not law_first_hint
     ):
         return QueryPlan(
