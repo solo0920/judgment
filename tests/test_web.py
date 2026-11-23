@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
+from judgment.judgment_parquet import _jid_month
 from judgment.models import (
     AppSetting,
     Base,
@@ -2151,6 +2152,12 @@ def test_rerank_system_test_endpoints(web_client, monkeypatch) -> None:
     tested = web_client.post("/api/rerank/test")
     assert tested.status_code == 200
     assert tested.json()["status"] == "operational"
+
+
+def test_jid_month_extraction() -> None:
+    assert _jid_month("TPHV,110,上易,688,20210928,1") == "202109"
+    assert _jid_month("TPDM,103,金訴,7,20141020,1") == "201410"
+    assert _jid_month("NOPE,1,訴,1") == ""
 
 
 def test_judgment_parquet_source_reads_full_text(web_client) -> None:

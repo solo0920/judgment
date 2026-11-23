@@ -439,7 +439,7 @@
 - **FR-093**: 測試模式的主要回答 MUST 優先使用 `LLM_MODEL`，其次使用第一個通過引用驗證的模型；全部失敗時 MUST 降級為 `retrieval_only`。
 - **FR-094**: 測試模式中的個別模型失敗（例如 HTTP 400）MUST 記錄為 failed step，不得中斷其他模型；測試狀態 MAY 為 `partial`。
 - **FR-095**: 測試模式開關 MUST 位於 `#/status` 的「系統測試」分類或 `#/tests`；header 不再提供電源或測試模式膠囊開關。後端電源 MUST 由 `./up.sh`／`./down.sh` 或本機電源控制器管理。
-- **FR-096**: 判決 Parquet 匯出 workflow（`python -m judgment.judgment_parquet`）MAY 將 `judgment_documents` 匯出為過濾後的 Parquet 快照；但 `GET /api/judgment?source=parquet`、資料頁與 Schema 模式 MUST 讀取原始判決 Parquet（`parquet/raw_judgments/.../raw.parquet`），找不到時回傳 404 並提示先建立原始備份。
+- **FR-096**: 判決 Parquet 匯出 workflow（`python -m judgment.judgment_parquet`）MAY 將 `judgment_documents` 匯出為過濾後的 Parquet 快照；但 `GET /api/judgment?source=parquet`、資料頁與 Schema 模式 MUST 讀取原始判決 Parquet（`parquet/raw_judgments/.../raw.parquet`），找不到時回傳 404 並提示先建立原始備份。JID 含 8 位裁判日期時，MUST 以該日期的 `YYYYMM` 限定只讀取對應月份的 `raw.parquet`；目前資料中 `issue_month` 與 `jdate` 前 6 位 100% 一致，未parse 出月份時才退回完整 dataset。此規則 MUST 讓單筆判決讀取從全庫 371 檔／45 GB 的 8–10 秒降到 1 秒內，查無資料亦同。
 - **FR-097**: RAG 引用卡 MUST 可點擊案號標題（`citation-head`）開啟原文，點擊後 MUST 以 dialog 顯示原始判決 Parquet 中的完整判決、案號、法院、日期、案由、命中法規與 PDF 連結；不得以 PostgreSQL 或虛構內容冒充 Parquet；dialog MUST 可透過右上角 X、「返回回答」或點擊 dialog 外部關閉。
 - **FR-098**: RAG 一般模式 MUST 使用可設定的快速 profile（程式預設 `RAG_TOP_K=4`、`RAG_RERANK_ENABLED=false`；目前 `.env` 覆寫為 `RAG_TOP_K=8`、`RAG_RERANK_ENABLED=true`、`LLM_MODEL=gemma3:4b`。`RAG_SCORE_THRESHOLD=0.35`、`RAG_MAX_CONTEXT_CHARS=4000`、`LLM_NUM_CTX=4096`、`LLM_NUM_PREDICT=384`、`LLM_KEEP_ALIVE=-1`；程式未設定 LLM 時只回傳檢索結果），並 MUST 允許改回 27B 品質模式；測試模式不受快速 profile 限制。
 - **FR-099**: RAG 回答標頭 MUST 在狀態與耗時旁顯示實際使用的 LLM 模型名稱；測試模式 MUST 顯示 `test_run.primary_model`，tooltip MUST 同時提供 LLM 與 embedding 模型資訊。
