@@ -1,10 +1,10 @@
 # 2026-11-22 完整 Restore Drill
 
-- 狀態：**通過**（隔離還原；production 未停機）
-- 備份來源：`/Volumes/T500_2TB/judgment-backup-20261121-1846`
-- Manifest 時間：`2026-11-21T11:28:04Z`
-- Manifest git：`d739379142eaa859f342444e92a1277142a02822`
-- 還原目標：內部磁碟、scratch DB、第二個 Qdrant container
+- 狀態：**通過**（隔離 drill＋正式 `restore.sh` end-to-end）
+- 備份來源：`/Volumes/T500_2TB/judgment-backup-20261121-1846`（隔離 drill）與 `judgment-backup-20261122-1500`（正式 restore）
+- Manifest 時間：`2026-11-21T11:28:04Z`／`2026-11-22T15:38:52Z`
+- Manifest git：`d739379142eaa859f342444e92a1277142a02822`／`e608f4ba71d246a81abf8cd75838f735b26fff6b`
+- 還原目標：內部磁碟、scratch DB、第二個 Qdrant container；最後在正式 project 執行 `down.sh` → `restore.sh` → `up.sh`
 - 執行環境：macOS、Docker Desktop、PostgreSQL 16、Qdrant 1.19.1
 
 ## 1. 備份完整性
@@ -86,23 +86,57 @@ Checksum 驗證耗時：`2026-11-22T14:11:04Z` → `14:13:24Z`（2 分 20 秒）
 - Manifest 總 bytes 為 123,070,644,224；差 3,564,467 bytes 是備份排除的 Apple metadata，不是資料差異
 - 還原後 `data/` 已清理，未保留 115 GB 複本
 
-## 6. 隔離與清理
+## 6. 隔離 drill 與清理
 
-- Production 全程未停機；`/api/health` 仍為 200
+- 隔離 drill 期間 production 未停機；正式 end-to-end restore 有停機，見 §7
 - PostgreSQL 使用 scratch DB `judgment_restore_drill`，完成後 drop
 - Qdrant 使用第二個 container `judgment-qdrant-restore`（port 56333），完成後移除
 - `data/` 複本完成 SHA 驗證後刪除
 - globals dump 保留在 `/Volumes/T500_2TB/judgment-globals-20261122`
 - 小型 log／counts／SHA manifest 保留在 `.run/restore-drill-20261122`（不進 Git）
 
-## 7. 發現與後續
+## 7. 正式 `down.sh` → `restore.sh` → `up.sh`
 
-1. **舊備份已過期**：這是 2026-11-21 11:28Z 的快照，缺少之後新增的 table、audit 與 trigram indexes。正式依賴前必須使用最新完整備份。
-2. 本次以元件隔離方式還原（PG scratch DB、第二個 Qdrant、獨立 data 目錄），沒有直接執行 `restore.sh` 的 `down.sh`，以避免停 production；`restore.sh` 的 schema／ownership 路徑已另行測過。
+2026-11-22 `22:58:24Z` 執行 `down.sh`，production 預期中斷。第一次以 `judgment-backup-20261122-1500` 執行 `restore.sh` 失敗：
+
+- `restore.sh` 只 drop `public`，但備份還包含 `legal_term_benchmark` 與 `legal_term_evidence`；`CREATE SCHEMA legal_term_benchmark` 因已存在而中止。
+- 修正：restore 前同時 drop `public`、`legal_term_benchmark`、`legal_term_evidence`。
+
+第二次重跑在 PostgreSQL 還原與 ownership transfer 成功後中止：
+
+- Bash 3.2 把 `$APP_DB_ROLE；` 的全形分號視為變數名稱的一部分，`set -u` 報 `unbound variable`，因此 Qdrant／data／`up.sh` 尚未執行。
+- 修正：`restore.sh`／`backup.sh` 所有 `$VAR` 緊接非 ASCII 字元的位置改成 `${VAR}`。
+- 新增 `tests/test_restore_script.py`，檢查 shell 語法、brace 展開與非 `public` schema drop。
+
+第三次完整 restore：
+
+| 階段 | 時間 |
+| --- | --- |
+| `restore.sh` 開始 | `2026-11-22T23:26:20Z` |
+| `restore.sh` 完成（含 `up.sh`） | `2026-11-22T23:54:43Z` |
+| 耗時 | **28 分 23 秒** |
+| Production downtime（含兩次失敗與修正） | **56 分 19 秒**（22:58:24 → 23:54:43） |
+
+恢復後驗證：
+
+- `/api/health` 200；demo disabled；匿名 `/api/rag/query`／`/api/status` 403
+- 34 tables、167 indexes；`judgment_app` ownership 34/34
+- `judgment_documents=4,714,969`、`judgment_change_events=3,976,282`、`law_documents=11,805`、`law_article_versions=473,933`
+- Qdrant `judgments_current` → `judgments_v005`，4,714,967 points
+- data：judgments 1,388 files／122,820,150,754 bytes；laws 16 files／246,929,003 bytes，與備份一致
+- `demo_reader` grants 已重新套用；`data_dir`、`parquet_path`、未授權 table、`pg_read_file` 仍被拒絕
+- `GET /api/admin/security-audit` 200；admin token 未出現在回應
+- RAG smoke：`/api/rag/query` 200、`answer_source=llm`、`retrieval.status=ok`
+- `up.sh` 的 `uv sync` 會移除 dev packages；已用 `uv sync --frozen --extra dev` 恢復本機測試工具，production runtime 不受影響
+
+## 8. 發現與後續
+
+1. **舊備份已過期**：這是 2026-11-21 11:28Z 的快照，缺少之後新增的 table、audit 與 trigram indexes；正式依賴前必須使用最新完整備份。
+2. **`restore.sh` 已修正兩個實際 bug**：非 `public` schema 未先 drop，以及 Bash 3.2 對 `$VAR；` 的變數解析。已加入 `tests/test_restore_script.py` 防止回歸。
 3. `age -d | pg_restore --list` 的 SIGPIPE 是 `pg_restore --list` 讀完 TOC 後關閉管線造成；實際 restore 成功。
-4. 建議在這次 drill 後重新執行完整備份，讓安全網包含 2026-11-22 的 schema 與資料。
+4. 已在 drill 後建立並驗證最新完整備份；正式還原使用這份備份，而不是舊的 2026-11-21 快照。
 
-## 8. 最新備份（已驗證）
+## 9. 最新備份（已驗證）
 
 本次 drill 後已建立新的完整備份：
 

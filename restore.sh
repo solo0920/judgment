@@ -368,7 +368,7 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
   if [[ "$PG_DUMP_REL" == *.age ]]; then
     need age
     AGE_IDENTITY="${BACKUP_AGE_IDENTITY:-$HOME/.config/judgment/age.key}"
-    [[ -f "$AGE_IDENTITY" ]] || die "找不到 age identity：$AGE_IDENTITY（請設定 BACKUP_AGE_IDENTITY）"
+    [[ -f "$AGE_IDENTITY" ]] || die "找不到 age identity：${AGE_IDENTITY}（請設定 BACKUP_AGE_IDENTITY）"
     PG_RESTORE_TMP="$(mktemp -t judgment-pg-restore.XXXXXX)"
     age -d -i "$AGE_IDENTITY" -o "$PG_RESTORE_TMP" "$PG_DUMP" \
       || die "age 解密 PostgreSQL dump 失敗"
@@ -381,10 +381,10 @@ if [[ "$SKIP_POSTGRES" != "1" ]]; then
     psql -U "$PG_USER" -d "$PG_DB" -tAc \
     "select 1 from pg_roles where rolname = '$APP_DB_ROLE';" 2>/dev/null | tr -d '[:space:]')"
   [[ "$ROLE_EXISTS" == "1" ]] \
-    || die "找不到 $APP_DB_ROLE；請先建立 NOSUPERUSER 應用角色再還原"
+    || die "找不到 ${APP_DB_ROLE}；請先建立 NOSUPERUSER 應用角色再還原"
   pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
-    -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' >/dev/null
+    -c 'DROP SCHEMA IF EXISTS public CASCADE; DROP SCHEMA IF EXISTS legal_term_benchmark CASCADE; DROP SCHEMA IF EXISTS legal_term_evidence CASCADE; CREATE SCHEMA public;' >/dev/null
   pg_compose_exec "$PG_SERVICE" \
     pg_restore -U "$PG_USER" -d "$PG_DB" \
     --no-owner --no-privileges --exit-on-error < "$PG_RESTORE_FILE"
@@ -407,7 +407,7 @@ BEGIN
   END LOOP;
 END \$\$;
 SQL
-  echo "已將 public tables／sequences 轉移給 $APP_DB_ROLE；pg_restore --no-privileges 不會還原 demo_reader grants，請依 demo-config-runbook.md 重新套用。" >&2
+  echo "已將 public tables／sequences 轉移給 ${APP_DB_ROLE}；pg_restore --no-privileges 不會還原 demo_reader grants，請依 demo-config-runbook.md 重新套用。" >&2
   JUDGMENT_COUNT="$(pg_compose_exec "$PG_SERVICE" \
     psql -U "$PG_USER" -d "$PG_DB" -tAc \
     'select count(*) from judgment_documents;' 2>/dev/null || echo '?')"
