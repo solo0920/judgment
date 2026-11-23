@@ -5232,6 +5232,39 @@ button.chip:hover {
   max-width: 100%;
 }
 
+.rag-user-bubble.is-editing {
+  width: var(--rag-edit-width, auto);
+  max-width: 100%;
+  cursor: text;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.55),
+    var(--shadow-xs);
+}
+
+.rag-user-edit {
+  display: block;
+  width: 100%;
+  min-height: 1.65em;
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  caret-color: #fff;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  resize: none;
+  white-space: pre-wrap;
+}
+
+.rag-user-edit::selection {
+  background: rgba(255, 255, 255, 0.35);
+}
+
 .rag-user-actions,
 .rag-answer-actions {
   display: flex;

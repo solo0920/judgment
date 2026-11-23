@@ -3218,6 +3218,105 @@ export async function render(root) {
     }
   };
 
+  let activeQuestionEdit = null;
+
+  const cancelQuestionEdit = ({ restoreFocus = true } = {}) => {
+    const current = activeQuestionEdit;
+    if (!current) return;
+    activeQuestionEdit = null;
+    const { bubble, turnElement, originalQuestion, width, maxWidth } = current;
+    if (bubble) {
+      bubble.classList.remove("is-editing");
+      bubble.style.removeProperty("--rag-edit-width");
+      bubble.style.width = width;
+      bubble.style.maxWidth = maxWidth;
+      bubble.textContent = originalQuestion;
+    }
+    if (restoreFocus) {
+      const editButton = turnElement?.querySelector(
+        '[data-rag-question-action="edit"]',
+      );
+      if (editButton instanceof HTMLElement) {
+        editButton.focus({ preventScroll: true });
+      }
+    }
+  };
+
+  const beginQuestionEdit = (turnElement, question) => {
+    cancelQuestionEdit({ restoreFocus: false });
+    const bubble = turnElement?.querySelector(".rag-user-bubble");
+    if (!bubble) return;
+    const originalQuestion = String(question || bubble.textContent || "").trim();
+    if (!originalQuestion) return;
+    const width = bubble.style.width;
+    const maxWidth = bubble.style.maxWidth;
+    const measured = Math.max(160, bubble.getBoundingClientRect().width || 0);
+    const textarea = document.createElement("textarea");
+    textarea.className = "rag-user-edit";
+    textarea.value = originalQuestion;
+    textarea.rows = 1;
+    textarea.setAttribute("aria-label", "編輯問題");
+    bubble.classList.add("is-editing");
+    bubble.style.setProperty("--rag-edit-width", `${measured}px`);
+    bubble.textContent = "";
+    bubble.appendChild(textarea);
+    activeQuestionEdit = {
+      bubble,
+      turnElement,
+      textarea,
+      originalQuestion,
+      width,
+      maxWidth,
+    };
+    const resize = () => {
+      textarea.style.height = "auto";
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    textarea.addEventListener("input", resize);
+    textarea.addEventListener("keydown", async (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelQuestionEdit();
+        return;
+      }
+      if (event.key !== "Enter" || event.shiftKey) return;
+      event.preventDefault();
+      const edited = textarea.value.trim();
+      if (!edited) {
+        toast("請先輸入問題。", "warn");
+        textarea.focus();
+        return;
+      }
+      if (submit.disabled || followupSubmit.disabled) {
+        toast("目前仍在檢索中，請稍後再試。", "warn");
+        return;
+      }
+      const inConversation = conversationActive;
+      cancelQuestionEdit({ restoreFocus: false });
+      await runQuestion(edited, {
+        fresh: !inConversation,
+        source: inConversation ? "followup" : "hero",
+      });
+    });
+    textarea.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (
+          activeQuestionEdit?.textarea === textarea &&
+          document.activeElement !== textarea
+        ) {
+          cancelQuestionEdit({ restoreFocus: false });
+        }
+      }, 0);
+    });
+    requestAnimationFrame(() => {
+      resize();
+      textarea.focus({ preventScroll: true });
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+    });
+  };
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     runQuestion(input.value, { fresh: true, source: "hero" });
@@ -3303,14 +3402,7 @@ export async function render(root) {
         return;
       }
       if (action === "edit") {
-        const editTarget = conversationActive ? followupInput : input;
-        if (conversationActive) showFollowup();
-        editTarget.value = question;
-        if (conversationActive) resizeFollowupInput();
-        else resizeInput();
-        editTarget.scrollIntoView({ behavior: "smooth", block: "center" });
-        editTarget.focus({ preventScroll: true });
-        editTarget.setSelectionRange(question.length, question.length);
+        beginQuestionEdit(turnElement, question);
         return;
       }
       if (action === "reask") {

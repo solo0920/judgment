@@ -784,6 +784,8 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-wf-decision-option.is-skipped" in css.text
     assert ".rag-process-body > .rag-wf-card" in css.text
     assert "font-size: 12px" in css.text
+    assert ".rag-user-bubble.is-editing" in css.text
+    assert ".rag-user-edit" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -4327,6 +4329,9 @@ def test_rag_question_and_answer_actions_are_bundled() -> None:
     assert "finish(true, payload)" in source_js
     assert "buildFlowWaterfallStages" not in source_js
     assert "pipelineSection" not in source_js
+    assert "beginQuestionEdit" in source_js
+    assert "rag-user-edit" in source_js
+    assert "editTarget.value = question" not in source_js
     for script in (source_js, bundle_js):
         assert "data-rag-question-action" in script
         assert "data-rag-answer-action" in script
