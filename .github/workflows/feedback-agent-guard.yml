@@ -1,0 +1,27 @@
+name: Feedback agent guard
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  agent-guard:
+    name: agent-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject protected changes on feedback branches
+        if: startsWith(github.head_ref, 'feedback/')
+        run: >-
+          python3 scripts/check_feedback_agent_changes.py
+          --base origin/${{ github.base_ref }}
+          --head ${{ github.sha }}
+      - name: Human branch — no agent guard needed
+        if: ${{ !startsWith(github.head_ref, 'feedback/') }}
+        run: echo "Not a feedback/* branch; skipping agent guard."
