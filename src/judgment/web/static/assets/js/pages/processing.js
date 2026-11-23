@@ -5570,7 +5570,7 @@ function ollamaPriorityMarkup(hostsData, loading, error) {
     <p class="processing-ollama-hint">拖移或使用箭頭調整 embedding 優先順序；目前主機無法使用時，會依序自動改用下一台（各台需具備相同的 embedding 模型），直到有主機回傳向量。</p>`;
 }
 
-function workflowPanelMarkup(workflow, workflowContext = {}) {
+export function workflowPanelMarkup(workflow, workflowContext = {}) {
   const activeRun = workflow.active_run || null;
   const lastRun = activeRun || workflow.last_run || null;
   const starting = pendingWorkflowId === workflow.id;
@@ -5613,27 +5613,46 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
       ? activeStage.label || activeStage.key || ""
       : "";
   const runStatusLabel = starting && !activeRun ? "啟動中" : "執行中";
-  const executionInfo = `<section class="report-card processing-card">
-      <div class="side-card-head">
-        <span class="side-card-title">${icon(WORKFLOW_ICONS[workflow.id] || "terminal", 14)}執行資訊</span>
-        <span class="badge badge-neutral badge-mono">${escapeHtml(workflow.branch || "")}</span>
-      </div>
+  const executionDetails = `<details class="processing-workflow-details">
+      <summary>
+        <span class="processing-workflow-details-title">${icon(
+          WORKFLOW_ICONS[workflow.id] || "terminal",
+          14,
+        )}執行資訊</span>
+      </summary>
       <div class="processing-workflow-command-grid">
         <span>程式</span><code>${escapeHtml(workflow.program || "—")}</code>
         <span>Shell／入口</span><code>${escapeHtml(workflow.script || "—")}</code>
-        <span>實際命令</span><code class="processing-workflow-command">${escapeHtml(command || "—")}</code>
+        <span>實際命令</span><code class="processing-workflow-command">${escapeHtml(
+          command || "—",
+        )}</code>
       </div>
-      ${
-        OLLAMA_PRIORITY_WORKFLOWS.has(workflow.id)
-          ? '<div class="processing-embedding-strip-slot" data-processing-embedding-strip data-preserve-children></div>'
-          : ""
-      }
+      <div class="side-card-foot">
+        執行結果會寫入共用處理狀態檔，可從處理總覽查看。
+      </div>
+    </details>`;
+  const introNotice = `<div class="notice notice-info processing-workflow-intro">
+      <span class="notice-icon" aria-hidden="true">i</span>
+      <div class="notice-body">
+        <div class="processing-workflow-intro-head">
+          <div>
+            <strong>${escapeHtml(workflow.label)}</strong>
+            <p>${escapeHtml(workflow.description || "")}</p>
+          </div>
+          <span class="badge badge-neutral badge-mono">${escapeHtml(
+            workflow.branch || "",
+          )}</span>
+        </div>
       <div class="processing-workflow-actions">
         <button class="btn btn-primary btn-sm" type="button"
           data-processing-action="run-workflow"
           data-workflow-id="${escapeHtml(workflow.id)}"
           ${canRun ? "" : "disabled"}
-          ${canRun ? "" : `title="${escapeHtml(disabledReason)}"`}>
+          title="${escapeHtml(
+            canRun
+              ? "立即執行；會先計算總大小與預估時間"
+              : disabledReason,
+          )}">
           ${busy ? '<span class="spinner" aria-hidden="true"></span>' : icon("play", 14)}<span>${busy ? runStatusLabel : "執行此流程"}</span>
         </button>
         ${
@@ -5726,60 +5745,45 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
             </div>`
           : ""
       }
-      <div class="side-card-foot">
-        執行結果會寫入共用處理狀態檔，可從處理總覽查看。
+
+        ${
+          OLLAMA_PRIORITY_WORKFLOWS.has(workflow.id)
+            ? '<div class="processing-embedding-strip-slot" data-processing-embedding-strip data-preserve-children></div>'
+            : ""
+        }
+        ${
+          workflow.update_available
+            ? `<div class="processing-inline-update" role="status" data-processing-update-notice>
+                ${icon("refresh", 13)}
+                <span class="processing-inline-update-copy">
+                  <strong>${escapeHtml(
+                    updateOrigin,
+                  )}偵測到可更新內容</strong>
+                  <small>偵測機制：${escapeHtml(
+                    updateMechanism,
+                  )}${updateCheckedAt ? ` · 檢查時間 ${escapeHtml(
+                    updateCheckedAt,
+                  )}` : ""}</small>
+                  <span data-processing-update-message>${escapeHtml(
+                    updateMessage,
+                  )}</span>
+                </span>
+                ${
+                  updateCount > 0
+                    ? `<span class="badge badge-warn badge-mono" data-processing-update-count>${icon(
+                        "refresh",
+                        10,
+                      )}${formatNumber(updateCount)}</span>`
+                    : '<span class="badge badge-warn">可更新</span>'
+                }
+              </div>`
+            : ""
+        }
+        ${executionDetails}
       </div>
-    </section>`;
+    </div>`;
   return `<div class="processing-workflow-panel">
-    ${notice({
-      tone: "info",
-      title: workflow.label,
-      text: workflow.description || "",
-    })}
-    ${
-      workflow.update_available
-        ? `<div class="processing-update-notice" role="status" data-processing-update-notice>
-            <span class="processing-update-notice-icon">${icon(
-              "refresh",
-              14,
-            )}</span>
-            <span class="processing-update-notice-copy">
-              <strong>${escapeHtml(
-                updateOrigin,
-              )}偵測到可更新內容</strong>
-              <span class="processing-update-mechanism">偵測機制：${escapeHtml(
-                updateMechanism,
-              )}${updateCheckedAt ? ` · 檢查時間 ${escapeHtml(updateCheckedAt)}` : ""}</span>
-              <span class="processing-update-message" data-processing-update-message>${escapeHtml(
-                updateMessage,
-              )}</span>
-            </span>
-            ${
-              updateCount > 0
-                ? `<span class="badge badge-warn badge-mono" data-processing-update-count>${icon(
-                    "refresh",
-                    10,
-                  )}${formatNumber(updateCount)}</span>`
-                : '<span class="badge badge-warn">可更新</span>'
-            }
-            <button class="btn btn-primary btn-sm processing-update-action" type="button"
-              data-processing-action="run-workflow"
-              data-workflow-id="${escapeHtml(workflow.id)}"
-              ${canRun ? "" : "disabled"}
-              title="${escapeHtml(
-                canRun
-                  ? "立即執行；會先計算總大小與預估時間"
-                  : disabledReason,
-              )}">
-              ${
-                busy
-                  ? '<span class="spinner" aria-hidden="true"></span>'
-                  : icon("download", 14)
-              }<span>${busy ? runStatusLabel : "更新"}</span>
-            </button>
-          </div>`
-        : ""
-    }
+    ${introNotice}
     ${
       ["legal_index_versions", "law_download", "order_download"].includes(
         workflow.id,
@@ -5792,7 +5796,6 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
           })
         : ""
     }
-    ${workflow.id === "normalize_courts" ? executionInfo : ""}
     ${
       workflow.id === "normalize_courts"
         ? courtCheckMarkup(workflowContext)
@@ -5803,7 +5806,6 @@ function workflowPanelMarkup(workflow, workflowContext = {}) {
         ? lawVersionCheckMarkup(workflowContext)
         : ""
     }
-    ${workflow.id !== "normalize_courts" ? executionInfo : ""}
     ${workflowProgressMarkup(workflow)}
     ${
       workflow.id === "judgment_parquet" ? judgmentParquetHelpMarkup() : ""
