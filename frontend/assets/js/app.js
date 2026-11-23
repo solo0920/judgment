@@ -3680,20 +3680,32 @@ ${Me}`)}return de.status==="error"&&E(de.message||"\u7248\u672C\u6AA2\u67E5\u593
     <div class="report-section">
       <div class="report-section-title">\u7BA1\u7406\u8005 triage</div>
       <form class="rag-feedback-triage" data-feedback-triage>
-        <label>\u72C0\u614B
-          <select class="input" name="status">
-            ${["new","triaged","planned","resolved","dismissed"].map(o=>`<option value="${o}" ${e.status===o?"selected":""}>${r(wi[o]||o)}</option>`).join("")}
-          </select>
-        </label>
-        <label>\u56B4\u91CD\u5EA6
-          <select class="input" name="severity">
-            ${["low","medium","high"].map(o=>`<option value="${o}" ${e.severity===o?"selected":""}>${r(sc[o]||o)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="rag-feedback-filter-check">
-          <input type="checkbox" name="actionable" ${e.actionable?"checked":""} />
-          <span>\u53EF\u884C\u52D5 / \u8F49 regression</span>
-        </label>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>\u72C0\u614B</legend>
+            <div class="rag-feedback-choice-options">
+              ${["new","triaged","planned","resolved","dismissed"].map(o=>`<label class="rag-feedback-choice-pill">
+                <input type="radio" name="status" value="${o}" ${e.status===o?"checked":""} />
+                <span>${r(wi[o]||o)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+        </div>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>\u56B4\u91CD\u5EA6</legend>
+            <div class="rag-feedback-choice-options">
+              ${["low","medium","high"].map(o=>`<label class="rag-feedback-choice-pill">
+                <input type="radio" name="severity" value="${o}" ${e.severity===o?"checked":""} />
+                <span>${r(sc[o]||o)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+          <label class="rag-feedback-filter-check">
+            <input type="checkbox" name="actionable" ${e.actionable?"checked":""} />
+            <span>\u53EF\u884C\u52D5 / \u8F49 regression</span>
+          </label>
+        </div>
         <label class="rag-feedback-triage-wide">\u9810\u671F\u884C\u70BA\uFF08\u6703\u9032\u4EE3\u7406 JSONL\uFF0C\u4E0D\u542B\u539F\u59CB\u7559\u8A00\uFF09
           <textarea class="input" name="expected_behavior" rows="3" maxlength="4000">${r(e.expected_behavior||"")}</textarea>
         </label>

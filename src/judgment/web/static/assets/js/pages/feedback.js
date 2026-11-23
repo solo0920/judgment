@@ -261,20 +261,32 @@ function renderDetail(detail) {
     <div class="report-section">
       <div class="report-section-title">管理者 triage</div>
       <form class="rag-feedback-triage" data-feedback-triage>
-        <label>狀態
-          <select class="input" name="status">
-            ${["new", "triaged", "planned", "resolved", "dismissed"].map((status) => `<option value="${status}" ${detail.status === status ? "selected" : ""}>${escapeHtml(STATUS_LABELS[status] || status)}</option>`).join("")}
-          </select>
-        </label>
-        <label>嚴重度
-          <select class="input" name="severity">
-            ${["low", "medium", "high"].map((severity) => `<option value="${severity}" ${detail.severity === severity ? "selected" : ""}>${escapeHtml(SEVERITY_LABELS[severity] || severity)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="rag-feedback-filter-check">
-          <input type="checkbox" name="actionable" ${detail.actionable ? "checked" : ""} />
-          <span>可行動 / 轉 regression</span>
-        </label>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>狀態</legend>
+            <div class="rag-feedback-choice-options">
+              ${["new", "triaged", "planned", "resolved", "dismissed"].map((status) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="status" value="${status}" ${detail.status === status ? "checked" : ""} />
+                <span>${escapeHtml(STATUS_LABELS[status] || status)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+        </div>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>嚴重度</legend>
+            <div class="rag-feedback-choice-options">
+              ${["low", "medium", "high"].map((severity) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="severity" value="${severity}" ${detail.severity === severity ? "checked" : ""} />
+                <span>${escapeHtml(SEVERITY_LABELS[severity] || severity)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+          <label class="rag-feedback-filter-check">
+            <input type="checkbox" name="actionable" ${detail.actionable ? "checked" : ""} />
+            <span>可行動 / 轉 regression</span>
+          </label>
+        </div>
         <label class="rag-feedback-triage-wide">預期行為（會進代理 JSONL，不含原始留言）
           <textarea class="input" name="expected_behavior" rows="3" maxlength="4000">${escapeHtml(detail.expected_behavior || "")}</textarea>
         </label>
