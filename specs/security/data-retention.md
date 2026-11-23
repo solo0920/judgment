@@ -11,6 +11,7 @@
 | RAG 使用者回饋 | PostgreSQL `rag_feedback`（含 reasons／events） | 180 天；已結案自結案起再 180 天（`RAG_FEEDBACK_RETENTION_DAYS`） | 每日背景維護刪除 `expires_at` 到期資料 |
 | RAG 回饋問題群組 | PostgreSQL `rag_feedback_issues` | 無 feedback 且超過 180 天未更新時刪除 | 每日背景維護刪除孤兒 issue |
 | RAG 批次評估報告 | PostgreSQL `rag_feedback_evaluations` | 180 天 | 每日背景維護刪除過期報告 |
+| RAG A/B 實驗報告 | PostgreSQL `rag_feedback_experiments` | 180 天 | 每日背景維護刪除過期報告 |
 | RAG 提問／回答與效能紀錄 | PostgreSQL `performance_records` | 90 天（`PERFORMANCE_RETENTION_DAYS`） | 每日背景維護＋每 200 次寫入備援清理 |
 | 安全稽核事件 | PostgreSQL `security_audit_events` | 180 天 | 每日背景維護＋每 200 次寫入備援清理 |
 | 公開分享快照 | PostgreSQL `rag_share_snapshots` | 7 天 | 每日背景維護＋建立新分享時清理 |
@@ -45,5 +46,6 @@ run_retention_maintenance()
   ├─ prune_rag_interactions()      # 180 天
   ├─ prune_rag_feedback()          # 180 天／結案後 180 天
   ├─ prune_rag_feedback_issues()   # 無 feedback 且 180 天未更新
-  └─ prune_rag_feedback_evaluations() # 180 天
+  ├─ prune_rag_feedback_evaluations() # 180 天
+  └─ prune_rag_feedback_experiments()  # 180 天
 ```

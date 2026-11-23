@@ -1501,6 +1501,22 @@ export const api = {
     );
   },
 
+  ragFeedbackExperiment(payload) {
+    return request("/api/rag/feedback/experiments", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 900000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackExperiments(limit = 20) {
+    return request(
+      `/api/rag/feedback/experiments?limit=${encodeURIComponent(limit)}`,
+      { timeout: 30000, trackClient: false },
+    );
+  },
+
   ragFeedbackEvaluate(payload) {
     return request("/api/rag/feedback/evaluate", {
       method: "POST",

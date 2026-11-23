@@ -12,6 +12,7 @@ from judgment.models import (
     RagFeedback,
     RagFeedbackEvaluation,
     RagFeedbackEvent,
+    RagFeedbackExperiment,
     RagFeedbackIssue,
     RagFeedbackReason,
     RagInteraction,
@@ -128,6 +129,14 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             status="completed",
             created_at=now,
         )
+        expired_experiment = RagFeedbackExperiment(
+            status="completed",
+            created_at=now - timedelta(days=200),
+        )
+        current_experiment = RagFeedbackExperiment(
+            status="completed",
+            created_at=now,
+        )
         session.add_all([
             expired_feedback,
             current_feedback,
@@ -135,6 +144,8 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             current_issue,
             expired_evaluation,
             current_evaluation,
+            expired_experiment,
+            current_experiment,
         ])
         session.flush()
         session.add_all(
@@ -160,6 +171,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_feedback": 1,
         "rag_feedback_issues": 1,
         "rag_feedback_evaluations": 1,
+        "rag_feedback_experiments": 1,
     }
     with factory() as session:
         assert len(session.scalars(select(PerformanceRecord)).all()) == 1
@@ -180,6 +192,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
             "current issue"
         ]
         assert len(session.scalars(select(RagFeedbackEvaluation)).all()) == 1
+        assert len(session.scalars(select(RagFeedbackExperiment)).all()) == 1
 
     assert run_retention_maintenance(factory) == {
         "performance_records": 0,
@@ -189,6 +202,7 @@ def test_daily_maintenance_applies_documented_retention() -> None:
         "rag_feedback": 0,
         "rag_feedback_issues": 0,
         "rag_feedback_evaluations": 0,
+        "rag_feedback_experiments": 0,
     }
 
 
@@ -205,4 +219,5 @@ def test_daily_maintenance_failure_is_non_blocking() -> None:
         "rag_feedback": 0,
         "rag_feedback_issues": 0,
         "rag_feedback_evaluations": 0,
+        "rag_feedback_experiments": 0,
     }

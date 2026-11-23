@@ -311,6 +311,7 @@ function renderFilterForm(payload, filters) {
       <button class="btn btn-ghost btn-sm" type="button" data-feedback-action="reset">清除</button>
       <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="export">${icon("download", 13)}<span>匯出代理 JSONL</span></button>
       <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="evaluate">${icon("refresh", 13)}<span>批次重跑評估</span></button>
+      <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="experiment">${icon("sliders", 13)}<span>A/B 參數實驗</span></button>
     </div>
   </form>`;
 }
@@ -535,6 +536,74 @@ function renderEvaluation(evaluation) {
 }
 
 
+function renderExperiment(experiment) {
+  if (!experiment) return "";
+  const variants = Array.isArray(experiment.variants)
+    ? experiment.variants
+    : [];
+  const results = Array.isArray(experiment.results)
+    ? experiment.results
+    : [];
+  const summaryByVariant = experiment.summary || {};
+  return `<div class="report-card rag-feedback-experiment" data-feedback-experiment="${experiment.id}">
+    <div class="report-head">
+      <div class="report-title-group">
+        <div class="report-kicker">OFFLINE A/B PARAMETER EXPERIMENT</div>
+        <div class="report-title">A/B 參數實驗 #${experiment.id}</div>
+        <div class="report-sub">${formatNumber(experiment.feedback_ids?.length || 0)} 筆回饋 · ${formatNumber(variants.length)} 個變體 · ${escapeHtml(formatDuration(experiment.duration_ms || 0))}</div>
+      </div>
+      <div class="rag-feedback-detail-head-actions">
+        ${statusBadge("info", "離線比較")}
+      </div>
+    </div>
+    <div class="report-section">
+      <div class="table-wrap">
+        <table class="data-table is-compact rag-feedback-experiment-table">
+          <thead><tr>
+            <th>變體</th><th>參數</th><th>成功</th><th>答案變更</th>
+            <th>來源變更</th><th>目前引用平均</th><th>平均耗時</th>
+          </tr></thead>
+          <tbody>
+            ${variants
+              .map((variant, index) => {
+                const summary =
+                  summaryByVariant[variant.name] ||
+                  results[index]?.summary ||
+                  {};
+                const overrides = variant.overrides || {};
+                const overrideText = Object.keys(overrides).length
+                  ? Object.entries(overrides)
+                      .map(([key, value]) => `${key}=${value}`)
+                      .join(" · ")
+                  : "目前設定";
+                const succeeded = Number(summary.succeeded || 0);
+                const avgCitations = succeeded
+                  ? (Number(summary.current_citations_total || 0) / succeeded).toFixed(1)
+                  : "—";
+                return `<tr>
+                  <td><strong>${escapeHtml(variant.name)}</strong></td>
+                  <td class="mono">${escapeHtml(overrideText)}</td>
+                  <td>${formatNumber(succeeded)} / ${formatNumber(Number(summary.failed || 0) + succeeded)}</td>
+                  <td>${formatNumber(summary.answer_changed || 0)}</td>
+                  <td>${formatNumber(summary.answer_source_changed || 0)}</td>
+                  <td>${escapeHtml(avgCitations)}</td>
+                  <td>${escapeHtml(formatDuration(summary.avg_duration_ms || 0))}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="rag-feedback-issues-note">這是離線差異比較，不是自動判定哪個變體正確；仍需人工 expected behavior 與 benchmark 驗收。</p>
+      <details class="rag-feedback-raw">
+        <summary>完整實驗 JSON</summary>
+        <pre>${escapeHtml(JSON.stringify(experiment, null, 2))}</pre>
+      </details>
+    </div>
+  </div>`;
+}
+
+
 function renderDetail(detail, issues = []) {
   const snapshot = detail?.snapshot || {};
   const flow = snapshot.pipeline_flow;
@@ -733,6 +802,7 @@ export function createFeedbackController(container, { onStats } = {}) {
   let rerun = null;
   let issues = [];
   let evaluation = null;
+  let experiment = null;
   let reviewQueue = [];
   let reviewCandidate = null;
   let disposed = false;
@@ -757,6 +827,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       <div class="report-section" data-feedback-filter-slot></div>
       <div class="report-section" data-feedback-list></div>
       <div data-feedback-evaluation-slot></div>
+      <div data-feedback-experiment-slot></div>
       <div data-feedback-detail-slot></div>
     </div>`;
   };
@@ -773,6 +844,9 @@ export function createFeedbackController(container, { onStats } = {}) {
     const evaluationBox = container.querySelector(
       "[data-feedback-evaluation-slot]",
     );
+    const experimentBox = container.querySelector(
+      "[data-feedback-experiment-slot]",
+    );
     const detailBox = container.querySelector("[data-feedback-detail-slot]");
     if (statsBox) statsBox.innerHTML = renderStats(payload.stats || {});
     if (reviewBox) {
@@ -786,6 +860,9 @@ export function createFeedbackController(container, { onStats } = {}) {
     if (listBox) listBox.innerHTML = renderList(payload, selectedId);
     if (evaluationBox) {
       evaluationBox.innerHTML = renderEvaluation(evaluation);
+    }
+    if (experimentBox) {
+      experimentBox.innerHTML = renderExperiment(experiment);
     }
     if (detailBox) {
       detailBox.innerHTML = detail
@@ -864,6 +941,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       actionable: data.get("actionable") ? "1" : "",
     };
     evaluation = null;
+    experiment = null;
     page = 1;
   };
 
@@ -956,6 +1034,27 @@ export function createFeedbackController(container, { onStats } = {}) {
         if (page >= Number(payload?.pages || 1)) return;
         page += 1;
         await load();
+        return;
+      }
+      if (action === "experiment") {
+        setBusy(actionButton, true, "實驗中…");
+        try {
+          experiment = await api.ragFeedbackExperiment({
+            filters,
+            limit: 5,
+            variants: EXPERIMENT_PRESETS,
+          });
+          render();
+          toast(
+            `已完成 ${formatNumber(experiment.feedback_ids?.length || 0)} 筆 A/B 參數實驗。`,
+            "ok",
+            6200,
+          );
+        } catch (error) {
+          toast(error.message || "A/B 實驗失敗。", "danger");
+        } finally {
+          setBusy(actionButton, false);
+        }
         return;
       }
       if (action === "evaluate") {
@@ -1134,6 +1233,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       detail = null;
       rerun = null;
       evaluation = null;
+      experiment = null;
       await load();
       return;
     }

@@ -11,6 +11,7 @@ from ..observability import prune_performance_records
 from .feedback import (
     prune_rag_feedback,
     prune_rag_feedback_evaluations,
+    prune_rag_feedback_experiments,
     prune_rag_feedback_issues,
     prune_rag_interactions,
 )
@@ -48,6 +49,9 @@ def run_retention_maintenance(session_factory) -> Dict[str, int]:
         "rag_feedback": prune_rag_feedback(session_factory),
         "rag_feedback_issues": prune_rag_feedback_issues(session_factory),
         "rag_feedback_evaluations": prune_rag_feedback_evaluations(
+            session_factory
+        ),
+        "rag_feedback_experiments": prune_rag_feedback_experiments(
             session_factory
         ),
     }

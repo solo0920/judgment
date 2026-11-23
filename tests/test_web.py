@@ -748,6 +748,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "ragFeedbackRerun" in api_js.text
     assert "ragFeedbackIssues" in api_js.text
     assert "ragFeedbackEvaluate" in api_js.text
+    assert "ragFeedbackExperiment" in api_js.text
     assert "ragReviewQueue" in api_js.text
     assert "/api/rag/feedback-issues" in api_js.text
     assert "/api/rag/feedback/evaluate" in api_js.text
@@ -785,6 +786,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "建立並連結" in feedback_js.text
     assert "批次重跑評估" in feedback_js.text
     assert "rag-feedback-evaluation" in feedback_js.text
+    assert "A/B 參數實驗" in feedback_js.text
+    assert "rag-feedback-experiment" in feedback_js.text
     assert "主動學習抽樣" in feedback_js.text
     assert "data-review-open" in feedback_js.text
     assert "標記已檢視" in feedback_js.text
@@ -849,6 +852,7 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-issue-link" in css.text
     assert ".rag-feedback-issues" in css.text
     assert ".rag-feedback-evaluation-row" in css.text
+    assert ".rag-feedback-experiment-table" in css.text
     assert ".rag-feedback-review-row" in css.text
     assert ".rag-feedback-review-detail" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
@@ -3337,6 +3341,61 @@ def test_active_learning_review_queue(web_client) -> None:
     )
 
 
+def test_feedback_parameter_experiment_is_stored(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": answer["request_id"],
+            "feedback_token": answer["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "comment": "",
+        },
+    )
+
+    experiment = web_client.post(
+        "/api/rag/feedback/experiments",
+        json={
+            "filters": {"request_id": answer["request_id"]},
+            "limit": 5,
+            "variants": [
+                {"name": "Baseline", "overrides": {}},
+                {"name": "Top K 8", "overrides": {"rag_top_k": 8}},
+            ],
+        },
+    )
+    assert experiment.status_code == 200, experiment.text
+    payload = experiment.json()
+    assert len(payload["variants"]) == 2
+    assert payload["feedback_ids"] == [
+        web_client.get("/api/rag/feedback").json()["items"][0]["id"]
+    ]
+    assert set(payload["summary"]) == {"Baseline", "Top K 8"}
+    assert payload["summary"]["Baseline"]["succeeded"] == 1
+    assert len(payload["results"]) == 2
+
+    listing = web_client.get("/api/rag/feedback/experiments").json()
+    assert any(
+        row["id"] == payload["id"] for row in listing["experiments"]
+    )
+    assert all("results" not in row for row in listing["experiments"])
+
+    invalid = web_client.post(
+        "/api/rag/feedback/experiments",
+        json={
+            "variants": [
+                {"name": "bad", "overrides": {"rag_top_k": 999}}
+            ],
+        },
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["code"] == "invalid_experiment_override_range"
+
+
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
     answer = web_client.post(
         "/api/rag/query",
@@ -4332,6 +4391,14 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert (
         policy_for("POST", "/api/rag/feedback/evaluate", policies)
         == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for("POST", "/api/rag/feedback/experiments", policies)
+        == "ADMIN_WRITE"
+    )
+    assert (
+        policy_for("GET", "/api/rag/feedback/experiments", policies)
+        == "ADMIN_ONLY"
     )
     assert (
         policy_for("GET", "/api/rag/feedback/evaluations", policies)
