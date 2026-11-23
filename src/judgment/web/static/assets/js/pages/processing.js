@@ -65,7 +65,10 @@ const STATUS_META = {
   skipped: { label: "略過", tone: "idle" },
   pending: { label: "等待", tone: "idle" },
   idle: { label: "待命", tone: "idle" },
-  no_change: { label: "無變更", tone: "info" },
+  // A terminal no-change result is still a completed download check.
+  // Keep the run badge consistent with success; the run message explains
+  // whether content was actually updated or unchanged.
+  no_change: { label: "完成", tone: "ok" },
   operational: { label: "正常", tone: "ok" },
   degraded: { label: "降級", tone: "warn" },
   unavailable: { label: "無法取得", tone: "danger" },

@@ -129,6 +129,53 @@ test("download update stays locked until a check finds an update", () => {
   }
 });
 
+test("download run badges use one completion label", () => {
+  for (const id of ["law_download", "order_download", "judgment_download"]) {
+    const html = workflowPanelMarkup({
+      id,
+      label: "下載流程",
+      description: "下載流程。",
+      branch: id === "judgment_download" ? "judgment" : id.replace("_download", ""),
+      program: "judgment-download",
+      script: "src/judgment/download.py",
+      command: ["python", "-m", "judgment.download"],
+      can_run: true,
+      update_available: false,
+      update_status: { status: "up_to_date" },
+      progress: { stages: [], active_stage: "" },
+      recent_runs: [
+        {
+          id: "run-success",
+          status: "success",
+          started_at: "2026-11-23T01:00:00Z",
+          duration_ms: 1000,
+          message: "已更新為版本 #6。",
+        },
+        {
+          id: "run-no-change",
+          status: "no_change",
+          started_at: "2026-11-23T00:00:00Z",
+          duration_ms: 800,
+          message: "線上內容未變更。",
+        },
+      ],
+      last_run: {
+        id: "run-no-change",
+        status: "no_change",
+        started_at: "2026-11-23T00:00:00Z",
+        duration_ms: 800,
+        message: "線上內容未變更。",
+      },
+      update_history: [],
+      index_timelines: [],
+    });
+    assert.equal(html.includes("無變更"), false, `${id} should not expose a separate no-change badge`);
+    assert.match(html, /badge-ok[^>]*>.*?完成/s);
+    assert.equal(html.includes("線上內容未變更。"), true);
+    assert.equal(html.includes("已更新為版本 #6。"), true);
+  }
+});
+
 test("index update stays locked until a rebuild is detected", () => {
   for (const id of ["legal_index_versions", "index_versions"]) {
     const base = {

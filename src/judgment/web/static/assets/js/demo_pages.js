@@ -214,7 +214,7 @@ export async function renderDemoProcessing(root) {
       stale: "已中止",
       interrupted: "中斷",
       partial: "部分完成",
-      no_change: "無變更",
+      no_change: "完成",
       pending: "待執行",
     }[value] || value || "—";
   };
