@@ -8253,6 +8253,20 @@ export async function render(root) {
       event.stopPropagation();
     }
     const action = button.dataset.processingAction;
+    if (
+      action === "run-workflow" &&
+      lastSnapshot?.capabilities?.can_start_workflow === false
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      toast(
+        lastSnapshot.capabilities.start_blocked_reason ||
+          "目前有處理程序執行中，請稍後再試。",
+        "info",
+        5000,
+      );
+      return;
+    }
     if (action === "refresh") {
       refresh({ silent: false, cached: demoReadOnly });
     }
