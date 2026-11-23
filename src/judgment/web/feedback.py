@@ -26,6 +26,7 @@ from ..models import (
     RagFeedback,
     RagFeedbackEvent,
     RagFeedbackExport,
+    RagFeedbackIssue,
     RagFeedbackReason,
     RagInteraction,
 )
@@ -111,6 +112,14 @@ CITATION_VERDICTS: Dict[str, str] = {
     "irrelevant": "與答案無關",
     "wrong": "內容或條號錯誤",
     "unsure": "不確定",
+}
+
+ISSUE_STATUSES: Dict[str, str] = {
+    "open": "待處理",
+    "triaged": "已分類",
+    "planned": "已排入",
+    "resolved": "已解決",
+    "dismissed": "不處理",
 }
 
 SNAPSHOT_VERSION = 1
@@ -756,6 +765,7 @@ def serialize_feedback(
             else None
         ),
         "citation_verdicts": row.citation_verdicts or {},
+        "issue_id": row.issue_id,
         "linked_question_id": row.linked_question_id,
         "linked_pr_url": row.linked_pr_url,
         "reviewed_by": row.reviewed_by,
@@ -811,6 +821,16 @@ def _feedback_filters(statement, filters: Mapping[str, Any]):
         statement = statement.where(RagFeedback.severity == severity)
     if filters.get("actionable") in {True, "1", "true", "yes"}:
         statement = statement.where(RagFeedback.actionable.is_(True))
+    issue_id = str(filters.get("issue_id") or "").strip()
+    if issue_id:
+        try:
+            statement = statement.where(
+                RagFeedback.issue_id == int(issue_id)
+            )
+        except (TypeError, ValueError) as exc:
+            raise FeedbackError(
+                422, "invalid_issue_id", "問題群組編號不正確。"
+            ) from exc
     root_cause = str(filters.get("root_cause_stage") or "").strip()
     if root_cause:
         statement = statement.where(
@@ -996,6 +1016,37 @@ def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
             .where(RagFeedback.expected_refusal != "unspecified")
             .group_by(RagFeedback.expected_refusal)
         ).all()
+        open_issues = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedbackIssue)
+                .where(
+                    RagFeedbackIssue.status.notin_(("resolved", "dismissed"))
+                )
+            )
+            or 0
+        )
+        issue_rows = session.execute(
+            select(
+                RagFeedbackIssue.id,
+                RagFeedbackIssue.title,
+                RagFeedbackIssue.status,
+                RagFeedbackIssue.root_cause_stage,
+                func.count(RagFeedback.id),
+            )
+            .outerjoin(
+                RagFeedback,
+                RagFeedback.issue_id == RagFeedbackIssue.id,
+            )
+            .group_by(
+                RagFeedbackIssue.id,
+                RagFeedbackIssue.title,
+                RagFeedbackIssue.status,
+                RagFeedbackIssue.root_cause_stage,
+            )
+            .order_by(func.count(RagFeedback.id).desc())
+            .limit(20)
+        ).all()
     return {
         "total": total,
         "satisfied": satisfied,
@@ -1035,7 +1086,219 @@ def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
         "by_expected_refusal": {
             str(code): int(count) for code, count in expected_refusal_rows
         },
+        "open_issues": open_issues,
+        "by_issue": [
+            {
+                "id": int(issue_id),
+                "title": str(title),
+                "status": str(status),
+                "root_cause_stage": str(stage),
+                "count": int(count),
+            }
+            for issue_id, title, status, stage, count in issue_rows
+        ],
     }
+
+
+def serialize_issue(
+    row: RagFeedbackIssue,
+    *,
+    feedback_count: int = 0,
+) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "description": row.description,
+        "root_cause_stage": row.root_cause_stage or "unknown",
+        "status": row.status or "open",
+        "severity": row.severity or "medium",
+        "linked_pr_url": row.linked_pr_url or "",
+        "created_by": row.created_by or "",
+        "feedback_count": int(feedback_count or 0),
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+    }
+
+
+def list_feedback_issues(
+    session_factory: sessionmaker[Session],
+    *,
+    status: str = "",
+    root_cause_stage: str = "",
+    limit: int = 100,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        statement = select(RagFeedbackIssue)
+        if status:
+            statement = statement.where(RagFeedbackIssue.status == status)
+        if root_cause_stage:
+            statement = statement.where(
+                RagFeedbackIssue.root_cause_stage == root_cause_stage
+            )
+        rows = session.scalars(
+            statement.order_by(RagFeedbackIssue.updated_at.desc()).limit(
+                max(1, min(500, int(limit)))
+            )
+        ).all()
+        counts = {
+            int(issue_id): int(count)
+            for issue_id, count in session.execute(
+                select(RagFeedback.issue_id, func.count())
+                .where(RagFeedback.issue_id.isnot(None))
+                .group_by(RagFeedback.issue_id)
+            ).all()
+        }
+        return {
+            "issues": [
+                serialize_issue(
+                    row, feedback_count=counts.get(int(row.id), 0)
+                )
+                for row in rows
+            ],
+            "status_options": [
+                {"code": code, "label": label}
+                for code, label in ISSUE_STATUSES.items()
+            ],
+            "root_cause_options": [
+                {"code": code, "label": label}
+                for code, label in ROOT_CAUSE_STAGES.items()
+            ],
+        }
+
+
+def create_feedback_issue(
+    session_factory: sessionmaker[Session],
+    *,
+    title: str,
+    description: str,
+    root_cause_stage: str,
+    severity: str,
+    actor: str,
+) -> Dict[str, Any]:
+    title = str(title or "").strip()
+    if len(title) < 4:
+        raise FeedbackError(
+            422, "issue_title_required", "問題群組標題至少需要 4 個字。"
+        )
+    if len(title) > 300:
+        raise FeedbackError(
+            422, "issue_title_too_long", "問題群組標題最多 300 字。"
+        )
+    stage = str(root_cause_stage or "unknown").strip()
+    if stage not in ROOT_CAUSE_STAGES:
+        raise FeedbackError(422, "invalid_root_cause_stage", "錯誤階段不正確。")
+    severity = str(severity or "medium").strip()
+    if severity not in SEVERITIES:
+        raise FeedbackError(422, "invalid_severity", "嚴重度不正確。")
+    with session_factory() as session:
+        row = RagFeedbackIssue(
+            title=title,
+            description=str(description or "").strip()[:4000],
+            root_cause_stage=stage,
+            status="open",
+            severity=severity,
+            created_by=str(actor or "")[:120],
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return serialize_issue(row)
+
+
+def update_feedback_issue(
+    session_factory: sessionmaker[Session],
+    issue_id: int,
+    updates: Mapping[str, Any],
+) -> Dict[str, Any]:
+    allowed = {
+        "title",
+        "description",
+        "root_cause_stage",
+        "status",
+        "severity",
+        "linked_pr_url",
+    }
+    unknown = sorted(set(updates) - allowed)
+    if unknown:
+        raise FeedbackError(
+            422,
+            "invalid_issue_field",
+            f"不支援的問題群組欄位：{', '.join(unknown)}",
+        )
+    with session_factory() as session:
+        row = session.get(RagFeedbackIssue, int(issue_id))
+        if row is None:
+            raise FeedbackError(404, "issue_not_found", "找不到這個問題群組。")
+        if "title" in updates:
+            title = str(updates.get("title") or "").strip()
+            if len(title) < 4 or len(title) > 300:
+                raise FeedbackError(
+                    422, "invalid_issue_title", "問題群組標題需為 4–300 字。"
+                )
+            row.title = title
+        if "description" in updates:
+            row.description = str(updates.get("description") or "").strip()[:4000]
+        if "root_cause_stage" in updates:
+            stage = str(updates.get("root_cause_stage") or "").strip()
+            if stage not in ROOT_CAUSE_STAGES:
+                raise FeedbackError(
+                    422, "invalid_root_cause_stage", "錯誤階段不正確。"
+                )
+            row.root_cause_stage = stage
+        if "status" in updates:
+            status = str(updates.get("status") or "").strip()
+            if status not in ISSUE_STATUSES:
+                raise FeedbackError(
+                    422, "invalid_issue_status", "問題群組狀態不正確。"
+                )
+            row.status = status
+        if "severity" in updates:
+            severity = str(updates.get("severity") or "").strip()
+            if severity not in SEVERITIES:
+                raise FeedbackError(
+                    422, "invalid_severity", "嚴重度不正確。"
+                )
+            row.severity = severity
+        if "linked_pr_url" in updates:
+            row.linked_pr_url = str(
+                updates.get("linked_pr_url") or ""
+            ).strip()[:1000]
+        session.commit()
+        session.refresh(row)
+        count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.issue_id == row.id)
+            )
+            or 0
+        )
+        return serialize_issue(row, feedback_count=count)
+
+
+def _attach_issue(
+    session: Session,
+    row: RagFeedback,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    issue = (
+        session.get(RagFeedbackIssue, int(row.issue_id))
+        if row.issue_id
+        else None
+    )
+    if issue is None:
+        payload["issue"] = None
+        return payload
+    issue_count = int(
+        session.scalar(
+            select(func.count())
+            .select_from(RagFeedback)
+            .where(RagFeedback.issue_id == issue.id)
+        )
+        or 0
+    )
+    payload["issue"] = serialize_issue(issue, feedback_count=issue_count)
+    return payload
 
 
 def get_feedback(
@@ -1052,7 +1315,11 @@ def get_feedback(
             .order_by(RagFeedbackEvent.created_at.desc())
             .limit(50)
         ).all()
-        payload = serialize_feedback(row, reasons, include_snapshot=True)
+        payload = _attach_issue(
+            session,
+            row,
+            serialize_feedback(row, reasons, include_snapshot=True),
+        )
         payload["events"] = [
             {
                 "id": event.id,
@@ -1462,6 +1729,7 @@ def update_feedback(
         "expected_date_from",
         "expected_date_to",
         "citation_verdicts",
+        "issue_id",
         "review_comment",
         "linked_pr_url",
         "linked_question_id",
@@ -1551,6 +1819,17 @@ def update_feedback(
             row.citation_verdicts = _normalize_citation_verdicts(
                 updates.get("citation_verdicts")
             )
+        if "issue_id" in updates:
+            value = updates.get("issue_id")
+            if value in {None, ""}:
+                row.issue_id = None
+            else:
+                issue_id = int(value)
+                if session.get(RagFeedbackIssue, issue_id) is None:
+                    raise FeedbackError(
+                        422, "issue_not_found", "連結的問題群組不存在。"
+                    )
+                row.issue_id = issue_id
         if "review_comment" in updates:
             text = str(updates.get("review_comment") or "").strip()
             if len(text) > COMMENT_MAX_LENGTH:
@@ -1597,7 +1876,11 @@ def update_feedback(
         session.commit()
         session.refresh(row)
         reasons = _reasons_for(session, [int(row.id)]).get(int(row.id), [])
-        payload = serialize_feedback(row, reasons, include_snapshot=True)
+        payload = _attach_issue(
+            session,
+            row,
+            serialize_feedback(row, reasons, include_snapshot=True),
+        )
         payload["events"] = [
             {
                 "id": event.id,
@@ -1676,6 +1959,19 @@ def export_agent_feedback(
             for row in rows
             if row.linked_question_id
         }
+        issue_ids = {
+            int(row.issue_id) for row in rows if row.issue_id
+        }
+        issue_map = {}
+        if issue_ids:
+            issue_map = {
+                int(issue.id): issue
+                for issue in session.scalars(
+                    select(RagFeedbackIssue).where(
+                        RagFeedbackIssue.id.in_(issue_ids)
+                    )
+                ).all()
+            }
         holdout_ids: set[int] = set()
         if linked_ids:
             holdout_ids = {
@@ -1725,6 +2021,22 @@ def export_agent_feedback(
                         else None
                     ),
                     "citation_verdicts": row.citation_verdicts or {},
+                    "issue": (
+                        {
+                            "id": int(issue_map[int(row.issue_id)].id),
+                            "title": issue_map[int(row.issue_id)].title,
+                            "root_cause_stage": (
+                                issue_map[int(row.issue_id)].root_cause_stage
+                            ),
+                            "status": issue_map[int(row.issue_id)].status,
+                            "linked_pr_url": (
+                                issue_map[int(row.issue_id)].linked_pr_url
+                            ),
+                        }
+                        if row.issue_id
+                        and int(row.issue_id) in issue_map
+                        else None
+                    ),
                     "severity": row.severity,
                     "actionable": bool(row.actionable),
                     "linked_question_id": linked_id,
@@ -1796,6 +2108,33 @@ def prune_rag_interactions(
             return int(result.rowcount or 0)
     except Exception:
         logger.warning("RAG interaction retention failed", exc_info=True)
+        return 0
+
+
+def prune_rag_feedback_issues(
+    session_factory: Optional[sessionmaker[Session]],
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    if session_factory is None:
+        return 0
+    current = _aware(now or _utcnow()) or _utcnow()
+    cutoff = current - timedelta(days=180)
+    try:
+        with session_factory() as session:
+            linked = select(RagFeedback.issue_id).where(
+                RagFeedback.issue_id.isnot(None)
+            )
+            result = session.execute(
+                delete(RagFeedbackIssue).where(
+                    RagFeedbackIssue.updated_at < cutoff,
+                    RagFeedbackIssue.id.notin_(linked),
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+    except Exception:
+        logger.warning("RAG feedback issue retention failed", exc_info=True)
         return 0
 
 

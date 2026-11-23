@@ -1012,6 +1012,35 @@ class RagInteraction(Base):
     )
 
 
+class RagFeedbackIssue(Base):
+    __tablename__ = "rag_feedback_issues"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(Text, nullable=False, default="")
+    description = Column(Text, nullable=False, default="")
+    root_cause_stage = Column(
+        String(32), nullable=False, default="unknown", index=True
+    )
+    status = Column(String(24), nullable=False, default="open", index=True)
+    severity = Column(String(16), nullable=False, default="medium")
+    linked_pr_url = Column(Text, nullable=False, default="")
+    created_by = Column(String(120), nullable=False, default="")
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_rag_feedback_issues_stage_status",
+            "root_cause_stage",
+            "status",
+        ),
+    )
+
+
 class RagFeedback(Base):
     __tablename__ = "rag_feedback"
 
@@ -1056,6 +1085,12 @@ class RagFeedback(Base):
     expected_date_from = Column(Date, nullable=True)
     expected_date_to = Column(Date, nullable=True)
     citation_verdicts = Column(JSON, nullable=False, default=dict)
+    issue_id = Column(
+        Integer,
+        ForeignKey("rag_feedback_issues.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     linked_question_id = Column(
         Integer,
         ForeignKey("question_bank_items.id", ondelete="SET NULL"),

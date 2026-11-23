@@ -1389,6 +1389,40 @@ export const api = {
     });
   },
 
+  ragFeedbackIssues(params = {}) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === "") continue;
+      query.set(key, String(value));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request(`/api/rag/feedback-issues${suffix}`, {
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackIssueCreate(payload) {
+    return request("/api/rag/feedback-issues", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeout: 30000,
+      trackClient: false,
+    });
+  },
+
+  ragFeedbackIssueUpdate(issueId, payload) {
+    return request(
+      `/api/rag/feedback-issues/${encodeURIComponent(issueId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+        timeout: 30000,
+        trackClient: false,
+      },
+    );
+  },
+
   ragFeedbackDetail(feedbackId) {
     return request(
       `/api/rag/feedback/${encodeURIComponent(feedbackId)}`,

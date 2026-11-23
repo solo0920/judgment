@@ -190,17 +190,20 @@ from .client_ip import (
 from .feedback import (
     FEEDBACK_REASONS,
     FeedbackError,
+    create_feedback_issue,
     export_agent_feedback,
     feedback_count_since,
     feedback_stats,
     get_feedback,
     list_feedback,
+    list_feedback_issues,
     promote_feedback_to_question_bank,
     record_feedback_export,
     rerun_feedback,
     record_interaction,
     submit_feedback,
     update_feedback,
+    update_feedback_issue,
 )
 from .demo_mode import (
     DemoConflict,
@@ -384,9 +387,28 @@ class RagFeedbackUpdateRequest(BaseModel):
     expected_date_from: Optional[str] = Field(default=None, max_length=10)
     expected_date_to: Optional[str] = Field(default=None, max_length=10)
     citation_verdicts: Optional[Dict[str, Any]] = None
+    issue_id: Optional[int] = Field(default=None, ge=1)
     review_comment: Optional[str] = Field(default=None, max_length=4000)
     linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
     linked_question_id: Optional[int] = Field(default=None, ge=1)
+
+
+class RagFeedbackIssueCreateRequest(BaseModel):
+    title: str = Field(min_length=4, max_length=300)
+    description: str = Field(default="", max_length=4000)
+    root_cause_stage: str = Field(default="unknown", max_length=32)
+    severity: Literal["low", "medium", "high"] = "medium"
+
+
+class RagFeedbackIssueUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=4, max_length=300)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    root_cause_stage: Optional[str] = Field(default=None, max_length=32)
+    status: Optional[
+        Literal["open", "triaged", "planned", "resolved", "dismissed"]
+    ] = None
+    severity: Optional[Literal["low", "medium", "high"]] = None
+    linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
 
 
 _RAG_SHARE_TTL_HOURS = 24 * 7
@@ -1300,6 +1322,8 @@ API_ENDPOINT_LABELS = {
     "/api/rag/share/{share_id}": "讀取 RAG 分享對話",
     "/api/rag/feedback": "RAG 使用者回饋",
     "/api/rag/feedback/stats": "RAG 回饋統計",
+    "/api/rag/feedback-issues": "RAG 回饋問題群組",
+    "/api/rag/feedback-issues/{issue_id}": "RAG 回饋問題群組明細",
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
     "/api/rag/feedback/{feedback_id}": "RAG 回饋明細",
     "/api/rag/feedback/{feedback_id}/promote": "RAG 回饋轉題庫 draft",
@@ -5009,6 +5033,53 @@ def create_app(
             },
         )
 
+    @app.get("/api/rag/feedback-issues")
+    def rag_feedback_issues(
+        status: str = "",
+        root_cause_stage: str = "",
+        limit: int = 100,
+    ) -> JSONResponse:
+        payload = list_feedback_issues(
+            app.state.session_factory,
+            status=status,
+            root_cause_stage=root_cause_stage,
+            limit=limit,
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/feedback-issues")
+    def rag_feedback_issue_create(
+        request: RagFeedbackIssueCreateRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        try:
+            payload = create_feedback_issue(
+                app.state.session_factory,
+                title=request.title,
+                description=request.description,
+                root_cause_stage=request.root_cause_stage,
+                severity=request.severity,
+                actor=_demo_actor(http_request),
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, status_code=201)
+
+    @app.patch("/api/rag/feedback-issues/{issue_id}")
+    def rag_feedback_issue_update(
+        issue_id: int,
+        request: RagFeedbackIssueUpdateRequest,
+    ) -> JSONResponse:
+        try:
+            payload = update_feedback_issue(
+                app.state.session_factory,
+                issue_id,
+                request.model_dump(exclude_unset=True),
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
     @app.get("/api/rag/feedback")
     def rag_feedback_list(
         page: int = Query(1, ge=1),
@@ -5017,6 +5088,7 @@ def create_app(
         status: str = "",
         severity: str = "",
         reason: str = "",
+        issue_id: str = "",
         root_cause_stage: str = "",
         answer_verdict: str = "",
         expected_refusal: str = "",
@@ -5034,6 +5106,7 @@ def create_app(
                     "status": status,
                     "severity": severity,
                     "reason": reason,
+                    "issue_id": issue_id,
                     "root_cause_stage": root_cause_stage,
                     "answer_verdict": answer_verdict,
                     "expected_refusal": expected_refusal,
