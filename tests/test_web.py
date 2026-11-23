@@ -745,6 +745,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "ragFeedbackCreate" in api_js.text
     assert "ragFeedbackList" in api_js.text
     assert "ragFeedbackPromote" in api_js.text
+    assert "ragFeedbackRerun" in api_js.text
     assert "/api/rag/feedback/export" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
@@ -767,6 +768,12 @@ def test_static_console_is_served(web_client) -> None:
     assert "createFeedbackController" in feedback_js.text
     assert "人工建議 Agent 修正的方向 prompt" in feedback_js.text
     assert "審查備註（僅管理者可見）" in feedback_js.text
+    assert "主要錯誤階段" in feedback_js.text
+    assert "答案判定" in feedback_js.text
+    assert "用目前系統重跑" in feedback_js.text
+    assert "data-citation-verdict" in feedback_js.text
+    assert "citation_verdicts" in feedback_js.text
+    assert "rag-feedback-rerun" in feedback_js.text
     assert "ragFeedbackUpdate" in feedback_js.text
     assert "rag-feedback-choice-pill" in feedback_js.text
     assert 'type="radio" name="status"' in feedback_js.text
@@ -820,6 +827,9 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-replay-answer" in css.text
     assert ".rag-feedback-choice-pill input:checked + span" in css.text
     assert ".rag-feedback-choice-row" in css.text
+    assert ".rag-feedback-attribution" in css.text
+    assert ".rag-feedback-rerun-grid" in css.text
+    assert ".rag-feedback-citation-verdict" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
     assert ".processing-month-stage.is-download" in css.text
     assert ".processing-month-stage.is-prepared" in css.text
@@ -3059,6 +3069,95 @@ def test_feedback_promote_requires_triage_and_shared_visibility(
     )
     assert export_with_holdout.status_code == 200
     assert len(export_with_holdout.json()["items"]) == 1
+
+
+def test_feedback_structured_triage_export_and_rerun(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    feedback = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": answer["request_id"],
+            "feedback_token": answer["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["wrong_citation"],
+            "comment": "不應出現在代理匯出。",
+        },
+    ).json()
+    updated = web_client.patch(
+        f"/api/rag/feedback/{feedback['id']}",
+        json={
+            "status": "triaged",
+            "actionable": True,
+            "expected_behavior": "日期條件必須套用並顯示實際範圍。",
+            "root_cause_stage": "query_parse",
+            "answer_verdict": "partial",
+            "expected_answer_mode": "structured",
+            "expected_refusal": "should_answer",
+            "expected_date_from": "2024-11-24",
+            "expected_date_to": "2026-11-24",
+            "citation_verdicts": {
+                "law:銀行法:第 1 條": "supports",
+                "jid:TEST,001": "wrong",
+                "missing": True,
+            },
+            "review_comment": "內部備註不進 JSONL。",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    detail = updated.json()
+    assert detail["root_cause_stage"] == "query_parse"
+    assert detail["answer_verdict"] == "partial"
+    assert detail["expected_answer_mode"] == "structured"
+    assert detail["expected_refusal"] == "should_answer"
+    assert detail["expected_date_from"] == "2024-11-24"
+    assert detail["expected_date_to"] == "2026-11-24"
+    assert detail["citation_verdicts"]["jid:TEST,001"] == "wrong"
+    assert detail["citation_verdicts"]["missing"] is True
+
+    stats = web_client.get("/api/rag/feedback/stats").json()
+    assert stats["by_root_cause"][0]["code"] == "query_parse"
+    assert stats["by_answer_verdict"][0]["code"] == "partial"
+    assert stats["by_expected_refusal"]["should_answer"] == 1
+
+    invalid_date = web_client.patch(
+        f"/api/rag/feedback/{feedback['id']}",
+        json={"expected_date_from": "2026/11/24"},
+    )
+    assert invalid_date.status_code == 422
+
+    export = web_client.get(
+        "/api/rag/feedback/export",
+        params={"sentiment": "unsatisfied"},
+    )
+    rows = [
+        json.loads(line)
+        for line in export.text.splitlines()
+        if line.strip()
+    ]
+    row = next(item for item in rows if item["feedback_id"] == feedback["id"])
+    assert row["root_cause_stage"] == "query_parse"
+    assert row["answer_verdict"] == "partial"
+    assert row["expected_answer_mode"] == "structured"
+    assert row["expected_refusal"] == "should_answer"
+    assert row["expected_date_from"] == "2024-11-24"
+    assert row["citation_verdicts"]["missing"] is True
+    assert "comment" not in row
+    assert "review_comment" not in row
+
+    rerun = web_client.post(
+        f"/api/rag/feedback/{feedback['id']}/rerun"
+    )
+    assert rerun.status_code == 200, rerun.text
+    rerun_payload = rerun.json()
+    assert rerun_payload["question"] == "銀行法如何規範吸收存款？"
+    assert "previous" in rerun_payload
+    assert "current" in rerun_payload
+    assert "answer_changed" in rerun_payload["diff"]
+    assert "citations_added" in rerun_payload["diff"]
+    assert "laws_added" in rerun_payload["diff"]
 
 
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:

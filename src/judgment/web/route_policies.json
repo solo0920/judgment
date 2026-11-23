@@ -130,6 +130,7 @@
     "POST /api/question-bank/items/{item_id}/submit": "ADMIN_WRITE",
     "POST /api/question-bank/revalidate": "ADMIN_WRITE",
     "POST /api/rag/feedback/{feedback_id}/promote": "ADMIN_WRITE",
+    "POST /api/rag/feedback/{feedback_id}/rerun": "ADMIN_WRITE",
     "GET /api/rag/share/{share_id}": "DEMO_READ",
     "POST /api/rag/feedback": "DEMO_ACTION",
     "POST /api/rag/query": "DEMO_QUERY",

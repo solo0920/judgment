@@ -20790,3 +20790,118 @@ a.auth-menu-item {
     min-height: 34px;
   }
 }
+
+.rag-feedback-attribution {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.rag-feedback-attribution label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.rag-feedback-citation-verdict {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.rag-feedback-citation-verdict .input {
+  min-height: 28px;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+@media (max-width: 980px) {
+  .rag-feedback-attribution {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .rag-feedback-attribution {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rag-feedback-rerun {
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--info) 28%, var(--line));
+}
+
+.rag-feedback-rerun-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rag-feedback-rerun-grid > div {
+  min-width: 0;
+}
+
+.rag-feedback-rerun-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rag-feedback-rerun-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+@media (max-width: 720px) {
+  .rag-feedback-rerun-grid,
+  .rag-feedback-rerun-lists {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rag-feedback-attribution-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.rag-feedback-attribution-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(80px, 2fr) 44px;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.rag-feedback-attribution-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.rag-feedback-attribution-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.rag-feedback-attribution-row strong {
+  color: var(--ink);
+  text-align: right;
+}
