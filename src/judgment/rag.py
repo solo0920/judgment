@@ -1521,7 +1521,14 @@ def _keyword_list_payload(
                 list(parsed_query.courts)
             )
         )
-    if parsed_query.year_from is not None:
+    if parsed_query.date_from is not None and parsed_query.date_to is not None:
+        filters.append(
+            JudgmentDocument.jdate.between(
+                parsed_query.date_from.replace("-", ""),
+                parsed_query.date_to.replace("-", ""),
+            )
+        )
+    elif parsed_query.year_from is not None:
         filters.append(
             JudgmentDocument.jdate.between(
                 f"{parsed_query.year_from}0101",
@@ -1829,7 +1836,11 @@ def _empty_judgment_list_payload(
     criteria: List[str] = []
     if parsed_query.courts:
         criteria.append("法院 " + "／".join(parsed_query.courts))
-    if parsed_query.year_from is not None:
+    if parsed_query.date_from is not None and parsed_query.date_to is not None:
+        criteria.append(
+            f"裁判日期 {parsed_query.date_from}～{parsed_query.date_to}"
+        )
+    elif parsed_query.year_from is not None:
         criteria.append(
             f"裁判年份 {parsed_query.year_from}–{parsed_query.year_to}"
         )
@@ -1837,9 +1848,14 @@ def _empty_judgment_list_payload(
         criteria.append("案由含 " + "／".join(parsed_query.topics))
     condition = "、".join(criteria) or "指定條件"
     if filter_meta.get("title_unresolved"):
+        date_text = (
+            f"裁判日期 {parsed_query.date_from}～{parsed_query.date_to}"
+            if parsed_query.date_from
+            else f"裁判年份 {parsed_query.year_from}–{parsed_query.year_to}"
+        )
         answer = (
             f"在法院 {('／'.join(parsed_query.courts) or '指定範圍')}、"
-            f"裁判年份 {parsed_query.year_from}–{parsed_query.year_to}、"
+            f"{date_text}、"
             f"案由含 {'／'.join(parsed_query.topics)} 的範圍內，"
             "查無案由符合的判決。"
             "系統沒有改用未套用條件的向量結果，因此不會列出無關案件。"
@@ -3619,6 +3635,8 @@ def answer_question(
                 "courts": list(parsed_query.courts),
                 "year_from": parsed_query.year_from,
                 "year_to": parsed_query.year_to,
+                "date_from": parsed_query.date_from,
+                "date_to": parsed_query.date_to,
             },
         ):
             payload = _keyword_list_payload(
