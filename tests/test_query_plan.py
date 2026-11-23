@@ -40,6 +40,19 @@ def test_query_plan_structured_semantic() -> None:
     assert plan.enumerate is False
 
 
+def test_query_plan_relative_date_only_uses_filtered_semantic_retrieval() -> None:
+    plan = _plan(
+        "近二年證券違約交割的判決有那些",
+        query_filter=True,
+        list_hint=True,
+    )
+    assert plan.intent == "structured_semantic"
+    assert plan.structured is True
+    assert plan.dense is True
+    assert plan.enumerate is False
+    assert plan.reason == "semantic question with hard court/date/topic filters"
+
+
 def test_query_plan_law_first() -> None:
     plan = _plan(
         "銀行法對從業人員有哪些規定",

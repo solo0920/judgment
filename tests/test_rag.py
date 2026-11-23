@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -11,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
+from judgment.query_parser import parse_judgment_query
 from judgment.judgment_index import (
     build_index_text,
     cached_index_staleness,
@@ -1413,6 +1415,116 @@ def test_answer_question_suggests_database_for_all_results() -> None:
     assert "資料庫查詢" in payload["notice"]
     assert "全部" in payload["notice"]
     assert "前 1 筆" in payload["notice"]
+
+
+def test_relative_date_filter_reaches_vector_search_and_list_answer() -> None:
+    today = date.today()
+    question = "近二年返還借款的判決有那些?"
+    parsed = parse_judgment_query(question, today=today)
+    assert parsed.date_from is not None
+    assert parsed.date_to is not None
+
+    old_day = date(today.year - 3, 1, 1)
+    old_jid = (
+        f"TPDV,{old_day.year - 1911},訴,90,"
+        f"{old_day.strftime('%Y%m%d')},1"
+    )
+    new_jid = (
+        f"TPDV,{today.year - 1911},訴,91,"
+        f"{today.strftime('%Y%m%d')},1"
+    )
+
+    session_factory = _session_factory()
+    with session_factory() as session:
+        for jid, day in ((old_jid, old_day), (new_jid, today)):
+            text = (
+                f"臺灣臺北地方法院民事判決 {jid}\n"
+                "原告主張被告向其借款，屆期未清償，"
+                "依消費借貸法律關係請求返還借款。"
+            )
+            session.add(
+                JudgmentDocument(
+                    jid=jid,
+                    jyear=str(day.year - 1911),
+                    jcase="訴",
+                    jno=jid.split(",")[3],
+                    jdate=day.strftime("%Y%m%d"),
+                    court="臺灣臺北地方法院民事",
+                    court_normalized="臺灣臺北地方法院",
+                    title="返還借款",
+                    full_text=text,
+                    full_text_length=len(text),
+                    content_hash=jid,
+                    matched_laws=["民法"],
+                    matched_laws_text="民法",
+                    citations=[],
+                    citation_count=0,
+                    source_archive="test.rar",
+                )
+            )
+        session.commit()
+
+    class RecordingStore(FakeStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.filters = []
+
+        def search(self, collection, vector, **kwargs):
+            self.filters.append(kwargs.get("query_filter"))
+            return [
+                {
+                    "score": 0.95,
+                    "payload": {
+                        "jid": old_jid,
+                        "court": "臺灣臺北地方法院",
+                        "title": "返還借款",
+                        "jdate": old_day.strftime("%Y%m%d"),
+                    },
+                },
+                {
+                    "score": 0.93,
+                    "payload": {
+                        "jid": new_jid,
+                        "court": "臺灣臺北地方法院",
+                        "title": "返還借款",
+                        "jdate": today.strftime("%Y%m%d"),
+                    },
+                },
+            ]
+
+    store = RecordingStore()
+    payload = answer_question(
+        session_factory=session_factory,
+        question=question,
+        settings=_settings(
+            qdrant_url="http://qdrant.test",
+            embedding_url="http://ollama.test",
+        ),
+        store=store,
+        embedder=FakeEmbedder(),
+        enable_law_retrieval=False,
+    )
+
+    assert store.filters
+    date_condition = next(
+        item
+        for item in store.filters[0]["must"]
+        if item["key"] == "jdate_num"
+    )
+    assert date_condition["range"] == {
+        "gte": int(parsed.date_from.replace("-", "")),
+        "lte": int(parsed.date_to.replace("-", "")),
+    }
+    assert [item["jid"] for item in payload["judgments"]] == [new_jid]
+    assert old_jid not in payload["answer"]
+    assert (
+        f"裁判日期＝{parsed.date_from}～{parsed.date_to}"
+        in payload["answer"]
+    )
+    assert payload["retrieval"]["query_filters"]["date_from"] == (
+        parsed.date_from
+    )
+    assert payload["retrieval"]["retrieval_mode"] == "vector"
 
 
 def test_answer_question_reranks_candidates_and_traces_provider(

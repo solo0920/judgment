@@ -199,15 +199,17 @@ def parse_judgment_query(
         end = _to_ad(int(match.group(2)))
         if start is not None and end is not None:
             parsed.year_from, parsed.year_to = sorted((start, end))
-    if parsed.year_from is None:
+    # 相對時間（近二年／最近兩年／三年內…）優先於單一年份解析。
+    # 否則「近80年」會被 _YEAR_ONE 誤讀成西元 1980 年代。
+    relative = _RELATIVE_RANGE.search(text) or _RELATIVE_WITHIN.search(text)
+    if parsed.year_from is None and relative is None:
         match = _YEAR_ONE.search(text)
         if match:
             year = _to_ad(int(match.group(1)))
             if year is not None:
                 parsed.year_from = parsed.year_to = year
 
-    # 相對時間（近二年／最近兩年／三年內…）轉成絕對日期範圍。
-    relative = _RELATIVE_RANGE.search(text) or _RELATIVE_WITHIN.search(text)
+    # 相對時間轉成以今日為終點的絕對日期範圍。
     if relative and parsed.year_from is None:
         count = _chinese_int(relative.group(1))
         unit = relative.group(2)

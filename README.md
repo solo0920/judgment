@@ -501,7 +501,7 @@ Pilot 題庫檔位於 `data/benchmarks/pilot_30.json`；執行 `uv run python sc
 
 ### 原始判決 Parquet 與原判決連結
 
-點擊 RAG 判決引用卡的案號標題（`citation-head`）會直接從原始判決 Parquet 讀取完整判決，不再只連到外部 PDF。若問題包含「所有／全部／列出／清單／近 N 年所有判決」等完整列表意圖，RAG 會在 `notice` 顯示本次候選數、實際保留的前 N 筆，並建議改用「資料庫查詢」頁面的判決分類，以案由、關鍵字與裁判日期範圍篩選或匯出 CSV／JSON；避免使用者誤以為 top-K 引用就是全部判決。「近二年／最近兩年／三年內」等相對時間會在 query parser 轉成以今日為終點的絕對日期範圍，同時套用 PostgreSQL `jdate`、Qdrant `jdate_num` 與 keyword list 的硬條件，不會回傳超出範圍的舊判決。
+點擊 RAG 判決引用卡的案號標題（`citation-head`）會直接從原始判決 Parquet 讀取完整判決，不再只連到外部 PDF。若問題包含「所有／全部／列出／清單／近 N 年所有判決」等完整列表意圖，RAG 會在 `notice` 顯示本次候選數、實際保留的前 N 筆，並建議改用「資料庫查詢」頁面的判決分類，以案由、關鍵字與裁判日期範圍篩選或匯出 CSV／JSON；避免使用者誤以為 top-K 引用就是全部判決。「近二年／最近兩年／三年內」等相對時間會在 query parser 轉成以今日為終點的絕對日期範圍，同時套用 PostgreSQL `jdate`、Qdrant `jdate_num` 與 keyword list 的硬條件，不會回傳超出範圍的舊判決。若問題只有相對日期、沒有法院／年份／案由等可列舉條件，系統仍會用套用日期 filter 的向量檢索找出語意相近的判決，不會把日期範圍內全部判決都當成命中清單。
 
 - 輸出：`data/judgments/parquet/raw_judgments/<archive>/<YYYYMMDD>/<snapshot>/raw.parquet`
 - `raw_json` 保留未修改的原始 JSON 文字；同一份 Parquet 另含案號、法院、案由、裁判日期、命中法規與引用等查詢欄位。
@@ -1361,7 +1361,7 @@ RAG 現在會區分「法規條文題」與「判決檢索題」：
   - 判決卡的引用 chips 以判決實際 `citations` 顯示「法規＋條號＋項次」（例如 `銀行法第125條第1項、第3項`）；點擊可開啟該條完整條文。上方已顯示法規檢索結果時，不再重複下方的法規來源卡。
 - 「銀行法對從業人員有那些規定？」這類問句不再被誤判為「列出相關法規」；`那些規定` 不會觸發 related-laws 清單，也不會提前清空已選出的法規 articles。
 - 純判決列表題（例如「在板橋地方法院相關詐騙的判決有那些」）採 judgment-first，直接產生 `retrieval_list` 清單：每筆列案號、法院、裁判日期、案由與和問題相關的事實句；只保留判決來源，不讓僅因法院名稱命中的法規／命令（例如「地方法院…處務規程」）進入回答，也不以 LLM 改寫案號。
-- 帶條件的判決查詢（法院、年份、案由）會先由 `parse_judgment_query()` 轉成 Qdrant filter：法院使用新北／板橋歷史別名，年份使用整數 `jdate_num` 範圍，案由在該範圍內用 `facet(title)` 動態取得，不寫死「詐欺、詐欺等」清單。列舉題以 `count()` 取得總筆數，再用 `scroll(order_by=jdate_num)` 列前 20 筆；回傳前以 `violations()` 逐筆驗證法院、年份與案由，不符即剔除。
+- 帶條件的判決查詢（法院、年份／相對日期、案由）會先由 `parse_judgment_query()` 轉成 Qdrant filter：法院使用新北／板橋歷史別名，年份或相對日期使用整數 `jdate_num` 範圍，案由在該範圍內用 `facet(title)` 動態取得，不寫死「詐欺、詐欺等」清單。列舉題以 `count()` 取得總筆數，再用 `scroll(order_by=jdate_num)` 列前 20 筆；回傳前以 `violations()` 逐筆驗證法院、年份／日期與案由，不符即剔除。只有相對日期而無法院／年份／案由時，改用套用日期 filter 的向量檢索，不 enumerate 整個日期範圍。
 - `jdate_num` 由 `scripts/backfill_jdate_num.py` 回填；新匯入資料也必須同步寫入 `jdate_num` 與 `source_year`。若沒有回填，年份 filter 會排除舊 points。
 
 ```bash
