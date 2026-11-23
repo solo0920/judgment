@@ -22,6 +22,7 @@
 /scripts/backup.sh @solo0920
 /scripts/restore.sh @solo0920
 /scripts/deploy_web_macos.sh @solo0920
+/scripts/check_feedback_agent_changes.py @solo0920
 
 # Evaluation assets: agents must not edit tests or holdout data
 /tests/ @solo0920
