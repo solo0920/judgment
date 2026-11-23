@@ -971,6 +971,91 @@ def _format_date(value: Any) -> str:
     return text
 
 
+def _article_sort_key(article_no: Any) -> Tuple[int, int]:
+    key = _article_ref_key(article_no)
+    if not key:
+        return (0, 0)
+    parts = key.split("-")
+    base = int(parts[0]) if parts[0].isdigit() else 0
+    suffix = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    return (base, suffix)
+
+
+def _law_article_metadata(
+    articles: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Derive article-slot / effective-article / boundary metadata."""
+
+    rows = [
+        item
+        for item in articles or []
+        if str(item.get("article_type") or "").strip().upper() == "A"
+        and str(item.get("article_no") or "").strip()
+    ]
+    live: List[Mapping[str, Any]] = []
+    deleted = 0
+    for item in rows:
+        content = str(item.get("article_content") or "").strip()
+        if content.startswith("（刪除）"):
+            deleted += 1
+        else:
+            live.append(item)
+    ordered = sorted(
+        live,
+        key=lambda item: _article_sort_key(item.get("article_no")),
+    )
+    first = ordered[0] if ordered else (rows[0] if rows else None)
+    last = ordered[-1] if ordered else (rows[-1] if rows else None)
+    return {
+        "article_total": len(rows),
+        "article_deleted": deleted,
+        "article_live": len(live),
+        "first_article": dict(first) if first else None,
+        "last_article": dict(last) if last else None,
+    }
+
+
+_BOUNDARY_FIRST_RE = re.compile(
+    r"(第一條|第\s*1\s*條|首條|最先一條|最早一條|第一個條文)"
+)
+_BOUNDARY_LAST_RE = re.compile(
+    r"(最後一條|末條|最後一個條文|最後的條文|最終條|最後一條條文)"
+)
+
+
+def law_article_boundary_question(question: str) -> str:
+    """Map common phrasings to a first/last article query code."""
+
+    text = _normalize(question)
+    if _BOUNDARY_LAST_RE.search(text):
+        return "last"
+    if _BOUNDARY_FIRST_RE.search(text):
+        return "first"
+    return ""
+
+
+def law_boundary_answer(
+    question: str,
+    source: Mapping[str, Any],
+    which: str,
+) -> Optional[str]:
+    article_key = "last_article" if which == "last" else "first_article"
+    article = source.get(article_key) or {}
+    article_no = str(article.get("article_no") or "").strip()
+    content = re.sub(
+        r"\s+", " ", str(article.get("article_content") or "")
+    ).strip()
+    if not article_no or not content:
+        return None
+    label = "最後一條" if which == "last" else "第一條"
+    index = int(source.get("index") or 1)
+    return (
+        f"{source.get('law_name') or '該法規'}的{label}是{article_no}："
+        f"{content} [{index}]。"
+        "條文內容以全國法規資料庫公告為準；這不是法律意見。"
+    )
+
+
 def build_law_source(
     record: LawDocument,
     content: Optional[Dict[str, Any]],
@@ -1001,6 +1086,7 @@ def build_law_source(
         rrf_k=rrf_k,
     )
     promulgation = parse_first_promulgation(histories)
+    article_meta = _law_article_metadata(content.get("law_articles") or [])
     return {
         "kind": "law",
         "index": 0,
@@ -1012,6 +1098,11 @@ def build_law_source(
         "law_category": content.get("law_category") or record.law_category,
         "law_url": content.get("law_url") or record.law_url,
         "article_count": article_count,
+        "article_total": article_meta["article_total"] or article_count,
+        "article_deleted": article_meta["article_deleted"],
+        "article_live": article_meta["article_live"] or article_count,
+        "first_article": article_meta["first_article"],
+        "last_article": article_meta["last_article"],
         "law_modified_date": content.get("law_modified_date")
         or record.law_modified_date,
         "law_effective_date": content.get("law_effective_date")
@@ -1027,10 +1118,19 @@ def build_law_source(
 
 
 def law_source_text(source: Dict[str, Any]) -> str:
+    article_total = int(
+        source.get("article_total") or source.get("article_count") or 0
+    )
+    article_live = int(source.get("article_live") or article_total)
+    article_deleted = int(source.get("article_deleted") or 0)
+    count_text = f"{article_total} 條（現行有效 {article_live} 條"
+    if article_deleted:
+        count_text += f"，已刪除 {article_deleted} 條"
+    count_text += "）"
     lines = [
         f"{source['source_label']}：{source['law_name']}"
         f"（{source.get('law_level') or '位階未載明'}；"
-        f"{int(source.get('article_count') or 0)} 條；"
+        f"{count_text}；"
         f"最後異動 {_format_date(source.get('law_modified_date')) or '未載明'}）"
     ]
     promulgation = source.get("first_promulgation")
@@ -1083,7 +1183,12 @@ def is_citation_stats_question(question: str) -> bool:
 
 
 def is_article_count_question(question: str) -> bool:
-    return bool(re.search(r"(多少|幾)\s*(條|條文)|條文數|總共.{0,8}條", _normalize(question)))
+    return bool(
+        re.search(
+            r"(多少|幾|共有|總共)\s*(條|條文)|條文數|有多少條",
+            _normalize(question),
+        )
+    )
 
 
 def is_history_question(question: str) -> bool:
@@ -2014,14 +2119,37 @@ def structured_law_answer(
     if not law_sources:
         return None
     primary = _primary_law_source(question, law_sources)
+    boundary = law_article_boundary_question(question)
+    if boundary:
+        answer = law_boundary_answer(question, primary, boundary)
+        if answer:
+            return answer
     if is_law_overview_question(question, law_sources):
         return _law_overview_answer(primary)
     if is_article_count_question(question):
         label = primary["source_label"]
         date = _format_date(primary.get("law_modified_date")) or "未載明"
+        article_total = int(
+            primary.get("article_total") or primary.get("article_count") or 0
+        )
+        article_live = int(primary.get("article_live") or article_total)
+        article_deleted = int(primary.get("article_deleted") or 0)
+        last_no = str(
+            (primary.get("last_article") or {}).get("article_no") or ""
+        ).strip()
+        if article_deleted:
+            detail = (
+                f"共有 {article_total} 個條號，其中 {article_deleted} 條已刪除，"
+                f"現行有效 {article_live} 條"
+            )
+        else:
+            detail = f"目前共有 {article_total} 條條文"
+        if last_no:
+            detail += f"，最後一條是 {last_no}"
         return (
-            f"{primary['law_name']}目前共有 {int(primary.get('article_count') or 0)} 條條文"
-            f" [{primary['index']}]。這是{label}資料庫的現行條文數，資料最後異動日為 {date}。"
+            f"{primary['law_name']}{detail} [{primary['index']}]。"
+            f"這是{label}資料庫依全國法規資料庫 API 條號計算的結果，"
+            f"資料最後異動日為 {date}。"
         )
     if is_history_question(question):
         promulgation = primary.get("first_promulgation")
