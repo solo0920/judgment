@@ -149,6 +149,7 @@ def test_update_error_does_not_claim_update(
         label="命令",
     )
     assert result["update_available"] is False
+    assert "沒有可用的上次檢查紀錄" in result["message"]
     status = update_status(session_factory)
     assert status["sources"]["order"]["status"] == "error"
     assert status["update_count"] == 0
@@ -181,7 +182,43 @@ def test_update_error_preserves_previous_update_flag(
         label="法規",
     )
     assert result["update_available"] is True
+    assert "上次檢查" in result["message"]
+    assert "當時偵測到可更新內容" in result["message"]
     status = update_status(session_factory)
     assert status["sources"]["law"]["status"] == "error"
     assert status["sources"]["law"]["update_available"] is True
     assert status["update_count"] == 1
+    assert status["sources"]["law"]["details"]["previous_message"] == "previous update"
+
+
+def test_update_http_500_reports_previous_check(monkeypatch) -> None:
+    from judgment.update_records import record_update
+
+    session_factory = _session_factory()
+    record_update(
+        session_factory,
+        source_type="order",
+        source_url="https://example.test/order",
+        status="update_available",
+        update_available=True,
+        message="命令遠端 ZIP 大小變更",
+    )
+    monkeypatch.setattr(
+        update_checks,
+        "_remote_headers",
+        lambda url, timeout=30.0: (500, {}),
+    )
+    result = update_checks.check_law_order_source(
+        session_factory,
+        source_type="order",
+        url="https://example.test/order",
+        fallback_filename="ChOrder.json.zip",
+        label="命令",
+    )
+    assert result["update_available"] is True
+    assert result["retryable"] is True
+    assert "HTTP 500" in result["message"]
+    assert "上次檢查" in result["message"]
+    assert "目前保留上次的更新狀態" in result["message"]
+    status = update_status(session_factory)
+    assert status["sources"]["order"]["details"]["retryable"] is True
