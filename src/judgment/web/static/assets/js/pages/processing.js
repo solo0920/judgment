@@ -2737,9 +2737,10 @@ function workflowNavMarkup(snapshot, activeWorkflowId) {
               showUpdateCount
                 ? `<span class="badge badge-warn badge-mono processing-update-count" title="${escapeHtml(
                     updateTitle,
-                  )}">${icon("refresh", 10)}${formatNumber(
-                    updateCount,
-                  )}</span>`
+                  )}">${icon(
+                    item.id === "judgment_import" ? "download" : "refresh",
+                    10,
+                  )}${formatNumber(updateCount)}</span>`
                 : statusBadge(item.status)
             }
           </button>`;
