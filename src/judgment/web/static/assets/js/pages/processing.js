@@ -5630,6 +5630,13 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
               : "請先按「檢查更新」，確認是否有新版。"
           : "目前未偵測到可重建的索引內容。"
         : "";
+  const runActionTitle = canRun
+    ? workflow.id === "legal_index_versions"
+      ? "立即重建法規／命令索引；完成驗證後切換 alias"
+      : workflow.id === "index_versions"
+        ? "立即建立或接續判決向量索引；完成驗證後切換 alias"
+        : "立即更新；會先檢查版本並計算總大小與預估時間"
+    : disabledReason;
   const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
   const updateCount = updateConsumed
     ? 0
@@ -5711,11 +5718,7 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
           data-processing-action="run-workflow"
           data-workflow-id="${escapeHtml(workflow.id)}"
           ${canRun ? "" : "disabled"}
-          title="${escapeHtml(
-            canRun
-              ? "立即更新；會先檢查版本並計算總大小與預估時間"
-              : disabledReason,
-          )}">
+          title="${escapeHtml(runActionTitle)}">
           ${busy ? '<span class="spinner" aria-hidden="true"></span>' : icon("play", 14)}<span>${busy ? runStatusLabel : "更新"}</span>
         </button>
         ${

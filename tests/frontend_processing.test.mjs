@@ -161,6 +161,10 @@ test("index update stays locked until a rebuild is detected", () => {
       `${id} should explain why the update is locked`,
     );
     assert.equal(locked.includes("processing-inline-update"), false);
+    assert.equal(
+      locked.includes('title="目前未偵測到可重建的索引內容。"'),
+      true,
+    );
 
     const available = workflowPanelMarkup({
       ...base,
@@ -175,5 +179,6 @@ test("index update stays locked until a rebuild is detected", () => {
       `${id} should be enabled when a rebuild is detected`,
     );
     assert.equal(available.includes("processing-inline-update"), true);
+    assert.match(available, /title="立即(重建法規／命令|建立或接續判決向量)索引/);
   }
 });
