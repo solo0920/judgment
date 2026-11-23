@@ -190,6 +190,7 @@ from .client_ip import (
 from .feedback import (
     FEEDBACK_REASONS,
     FeedbackError,
+    build_quality_report,
     create_feedback_issue,
     evaluate_feedback_batch,
     export_agent_feedback,
@@ -1352,6 +1353,7 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback/evaluate": "RAG 回饋批次評估",
     "/api/rag/feedback/evaluations": "RAG 回饋評估報告",
     "/api/rag/feedback/experiments": "RAG 回饋 A/B 實驗",
+    "/api/rag/feedback/report": "RAG 品質週報",
     "/api/rag/feedback/review-queue": "RAG 主動抽樣佇列",
     "/api/rag/feedback/review-queue/{request_id}": "RAG 主動抽樣明細",
     "/api/rag/feedback/review-queue/{request_id}/review": "RAG 主動抽樣審查",
@@ -5201,6 +5203,13 @@ def create_app(
     def rag_feedback_experiments(limit: int = 20) -> JSONResponse:
         payload = list_feedback_experiments(
             app.state.session_factory, limit=limit
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/rag/feedback/report")
+    def rag_feedback_report(days: int = 7) -> JSONResponse:
+        payload = build_quality_report(
+            app.state.session_factory, days=days
         )
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 

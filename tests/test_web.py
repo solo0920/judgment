@@ -749,6 +749,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "ragFeedbackIssues" in api_js.text
     assert "ragFeedbackEvaluate" in api_js.text
     assert "ragFeedbackExperiment" in api_js.text
+    assert "ragQualityReport" in api_js.text
     assert "ragReviewQueue" in api_js.text
     assert "/api/rag/feedback-issues" in api_js.text
     assert "/api/rag/feedback/evaluate" in api_js.text
@@ -788,6 +789,8 @@ def test_static_console_is_served(web_client) -> None:
     assert "rag-feedback-evaluation" in feedback_js.text
     assert "A/B 參數實驗" in feedback_js.text
     assert "rag-feedback-experiment" in feedback_js.text
+    assert "品質週報" in feedback_js.text
+    assert "rag-feedback-report" in feedback_js.text
     assert "主動學習抽樣" in feedback_js.text
     assert "data-review-open" in feedback_js.text
     assert "標記已檢視" in feedback_js.text
@@ -853,6 +856,7 @@ def test_static_console_is_served(web_client) -> None:
     assert ".rag-feedback-issues" in css.text
     assert ".rag-feedback-evaluation-row" in css.text
     assert ".rag-feedback-experiment-table" in css.text
+    assert ".rag-feedback-report-alert" in css.text
     assert ".rag-feedback-review-row" in css.text
     assert ".rag-feedback-review-detail" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
@@ -3396,6 +3400,35 @@ def test_feedback_parameter_experiment_is_stored(web_client) -> None:
     assert invalid.json()["code"] == "invalid_experiment_override_range"
 
 
+def test_feedback_quality_report_includes_alerts_and_markdown(web_client) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": answer["request_id"],
+            "feedback_token": answer["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "comment": "",
+        },
+    )
+    report = web_client.get(
+        "/api/rag/feedback/report", params={"days": 30}
+    )
+    assert report.status_code == 200, report.text
+    payload = report.json()
+    assert payload["period"]["days"] == 30
+    assert payload["totals"]["feedback"] >= 1
+    assert payload["totals"]["unsatisfied"] >= 1
+    assert payload["alerts"]
+    assert payload["daily"]
+    assert "RAG 品質週報" in payload["markdown"]
+    assert payload["markdown"].count("不滿意") >= 1
+
+
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
     answer = web_client.post(
         "/api/rag/query",
@@ -4398,6 +4431,10 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     )
     assert (
         policy_for("GET", "/api/rag/feedback/experiments", policies)
+        == "ADMIN_ONLY"
+    )
+    assert (
+        policy_for("GET", "/api/rag/feedback/report", policies)
         == "ADMIN_ONLY"
     )
     assert (

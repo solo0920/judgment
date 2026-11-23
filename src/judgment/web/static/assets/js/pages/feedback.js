@@ -312,6 +312,7 @@ function renderFilterForm(payload, filters) {
       <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="export">${icon("download", 13)}<span>匯出代理 JSONL</span></button>
       <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="evaluate">${icon("refresh", 13)}<span>批次重跑評估</span></button>
       <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="experiment">${icon("sliders", 13)}<span>A/B 參數實驗</span></button>
+      <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="report">${icon("activity", 13)}<span>品質週報</span></button>
     </div>
   </form>`;
 }
@@ -604,6 +605,86 @@ function renderExperiment(experiment) {
 }
 
 
+function renderQualityReport(report) {
+  if (!report) return "";
+  const totals = report.totals || {};
+  const alerts = Array.isArray(report.alerts) ? report.alerts : [];
+  const roots = Array.isArray(report.by_root_cause)
+    ? report.by_root_cause
+    : [];
+  const daily = Array.isArray(report.daily) ? report.daily : [];
+  const alertTone = { info: "info", warning: "warn", danger: "danger" };
+  return `<div class="report-card rag-feedback-report" data-feedback-report>
+    <div class="report-head">
+      <div class="report-title-group">
+        <div class="report-kicker">QUALITY REPORT</div>
+        <div class="report-title">品質週報（最近 ${formatNumber(report.period?.days || 7)} 天）</div>
+        <div class="report-sub">${escapeHtml(formatDateTime(report.generated_at))} · ${escapeHtml(report.period?.start || "")} ～ ${escapeHtml(report.period?.end || "")}</div>
+      </div>
+      <div class="rag-feedback-detail-head-actions">
+        <button class="btn btn-secondary btn-sm" type="button" data-feedback-action="download-report">${icon("download", 13)}<span>下載 Markdown</span></button>
+      </div>
+    </div>
+    <div class="report-section">
+      <div class="metric-grid quality-coverage-grid rag-feedback-report-metrics">
+        <div class="metric-card"><div class="metric-label">回饋</div><div class="metric-value">${formatNumber(totals.feedback || 0)}</div><div class="metric-desc">不滿意 ${formatNumber(totals.unsatisfied || 0)}</div></div>
+        <div class="metric-card"><div class="metric-label">不滿意率</div><div class="metric-value">${totals.unsatisfied_rate == null ? "—" : `${Number(totals.unsatisfied_rate).toFixed(1)}%`}</div><div class="metric-desc">前期 ${totals.previous_unsatisfied_rate == null ? "—" : `${Number(totals.previous_unsatisfied_rate).toFixed(1)}%`}</div></div>
+        <div class="metric-card"><div class="metric-label">可行動</div><div class="metric-value">${formatNumber(totals.actionable || 0)}</div><div class="metric-desc">待處理 ${formatNumber(totals.untriaged_actionable || 0)}</div></div>
+        <div class="metric-card"><div class="metric-label">Issue</div><div class="metric-value">${formatNumber(totals.open_issues || 0)}</div><div class="metric-desc">未結案</div></div>
+        <div class="metric-card"><div class="metric-label">待審抽樣</div><div class="metric-value">${formatNumber(totals.unreviewed_reviews || 0)}</div><div class="metric-desc">主動學習佇列</div></div>
+        <div class="metric-card"><div class="metric-label">評估／實驗</div><div class="metric-value">${formatNumber(totals.evaluations || 0)} / ${formatNumber(totals.experiments || 0)}</div><div class="metric-desc">本期報告</div></div>
+      </div>
+      <div class="rag-feedback-report-alerts">
+        ${alerts.length
+          ? alerts
+              .map(
+                (alert) => `<div class="rag-feedback-report-alert is-${alertTone[alert.level] || "info"}">
+                  ${statusBadge(alert.level === "danger" ? "danger" : alert.level === "warning" ? "warning" : "info", alert.level)}
+                  <span>${escapeHtml(alert.message)}</span>
+                </div>`,
+              )
+              .join("")
+          : '<p class="cell-empty">沒有警示。</p>'}
+      </div>
+      <div class="rag-feedback-report-grid">
+        <div>
+          <div class="report-section-title">錯誤階段</div>
+          ${roots.length
+            ? roots
+                .map(
+                  (row) => `<div class="rag-feedback-attribution-row">
+                    <span>${escapeHtml(row.label || row.code)}</span>
+                    <span class="rag-feedback-attribution-track"><i style="width:${Math.max(2, (Number(row.count) || 0) / Math.max(...roots.map((item) => Number(item.count) || 0), 1) * 100)}%"></i></span>
+                    <strong>${formatNumber(row.count)}</strong>
+                  </div>`,
+                )
+                .join("")
+            : '<p class="cell-empty">尚未標註。</p>'}
+        </div>
+        <div>
+          <div class="report-section-title">每日趨勢</div>
+          ${daily.length
+            ? daily
+                .map(
+                  (row) => `<div class="rag-feedback-daily-row">
+                    <span>${escapeHtml(row.date)}</span>
+                    <span class="rag-feedback-attribution-track"><i style="width:${Math.max(2, (Number(row.unsatisfied) || 0) / Math.max(Number(row.total) || 1, 1) * 100)}%"></i></span>
+                    <strong>${formatNumber(row.unsatisfied)} / ${formatNumber(row.total)}</strong>
+                  </div>`,
+                )
+                .join("")
+            : '<p class="cell-empty">沒有資料。</p>'}
+        </div>
+      </div>
+      <details class="rag-feedback-raw">
+        <summary>Markdown 報告</summary>
+        <pre>${escapeHtml(report.markdown || "")}</pre>
+      </details>
+    </div>
+  </div>`;
+}
+
+
 function renderDetail(detail, issues = []) {
   const snapshot = detail?.snapshot || {};
   const flow = snapshot.pipeline_flow;
@@ -803,6 +884,7 @@ export function createFeedbackController(container, { onStats } = {}) {
   let issues = [];
   let evaluation = null;
   let experiment = null;
+  let qualityReport = null;
   let reviewQueue = [];
   let reviewCandidate = null;
   let disposed = false;
@@ -828,6 +910,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       <div class="report-section" data-feedback-list></div>
       <div data-feedback-evaluation-slot></div>
       <div data-feedback-experiment-slot></div>
+      <div data-feedback-report-slot></div>
       <div data-feedback-detail-slot></div>
     </div>`;
   };
@@ -847,6 +930,9 @@ export function createFeedbackController(container, { onStats } = {}) {
     const experimentBox = container.querySelector(
       "[data-feedback-experiment-slot]",
     );
+    const reportBox = container.querySelector(
+      "[data-feedback-report-slot]",
+    );
     const detailBox = container.querySelector("[data-feedback-detail-slot]");
     if (statsBox) statsBox.innerHTML = renderStats(payload.stats || {});
     if (reviewBox) {
@@ -863,6 +949,9 @@ export function createFeedbackController(container, { onStats } = {}) {
     }
     if (experimentBox) {
       experimentBox.innerHTML = renderExperiment(experiment);
+    }
+    if (reportBox) {
+      reportBox.innerHTML = renderQualityReport(qualityReport);
     }
     if (detailBox) {
       detailBox.innerHTML = detail
@@ -1034,6 +1123,28 @@ export function createFeedbackController(container, { onStats } = {}) {
         if (page >= Number(payload?.pages || 1)) return;
         page += 1;
         await load();
+        return;
+      }
+      if (action === "report") {
+        setBusy(actionButton, true, "產生中…");
+        try {
+          qualityReport = await api.ragQualityReport(7);
+          render();
+          toast("已產生最近 7 天品質週報。", "ok", 5200);
+        } catch (error) {
+          toast(error.message || "品質週報產生失敗。", "danger");
+        } finally {
+          setBusy(actionButton, false);
+        }
+        return;
+      }
+      if (action === "download-report") {
+        if (!qualityReport?.markdown) return;
+        downloadText(
+          `rag-quality-report-${new Date().toISOString().slice(0, 10)}.md`,
+          qualityReport.markdown,
+          "text/markdown;charset=utf-8",
+        );
         return;
       }
       if (action === "experiment") {
