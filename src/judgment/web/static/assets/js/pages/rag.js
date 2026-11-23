@@ -806,6 +806,9 @@ function lawSourceCard(source, index) {
             : ""
         }`
       : "",
+    source.dataset_update_date
+      ? `資料截至 ${formatDate(source.dataset_update_date)}`
+      : "",
     source.law_modified_date ? `異動 ${formatDate(source.law_modified_date)}` : "",
     citationUsageLabel(source),
   ]

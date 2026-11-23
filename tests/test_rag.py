@@ -61,6 +61,8 @@ from judgment.law_rag import (
     is_related_laws_question,
     judgment_law_stats,
     law_article_boundary_question,
+    law_boundary_answer,
+    is_unsupported_statistics_question,
     law_sources_for_question,
     _law_article_metadata,
     select_law_articles,
@@ -2743,6 +2745,44 @@ def test_law_article_metadata_counts_deleted_and_boundaries() -> None:
     assert meta["article_live"] == 2
     assert meta["first_article"]["article_no"] == "第 1 條"
     assert meta["last_article"]["article_no"] == "第 449 條"
+    assert meta["first_slot"]["article_no"] == "第 1 條"
+    assert meta["last_slot"]["article_no"] == "第 449 條"
+    assert meta["first_slot_deleted"] is False
+    assert meta["last_slot_deleted"] is False
+    assert meta["zhi_count"] == 0
+
+
+def test_law_boundary_answer_marks_deleted_slot() -> None:
+    answer = law_boundary_answer(
+        "民事訴訟法最後一條是什麼?",
+        {
+            "law_name": "民事訴訟法",
+            "index": 1,
+            "dataset_update_date": "2026/11/13 上午 12:00:00",
+            "last_article": {
+                "article_no": "第 631 條",
+                "article_content": "當事人得為訴訟上之行為。",
+            },
+            "last_slot_deleted": True,
+            "last_slot": {
+                "article_no": "第 640 條",
+                "article_content": "（刪除）",
+            },
+        },
+        "last",
+    )
+    assert answer is not None
+    assert "最後一條有效條文是第 631 條" in answer
+    assert "最後一個條號第 640 條已刪除：（刪除）" in answer
+    assert "資料版本（2026-11-13）" in answer
+
+
+def test_unsupported_statistics_question_detection() -> None:
+    assert is_unsupported_statistics_question("公司法第三章有幾條?")
+    assert is_unsupported_statistics_question("最近一次修正是哪天?")
+    assert is_unsupported_statistics_question("這部法有幾章?")
+    assert not is_unsupported_statistics_question("公司法有幾條")
+    assert not is_unsupported_statistics_question("證券交易法對內線交易有什麼規範？")
 
 
 def test_company_law_boundary_and_count_answers(tmp_path: Path, monkeypatch) -> None:
@@ -2790,6 +2830,11 @@ def test_company_law_boundary_and_count_answers(tmp_path: Path, monkeypatch) -> 
             },
             {
                 "article_type": "A",
+                "article_no": "第 156-1 條",
+                "article_content": "本條為之條範例。",
+            },
+            {
+                "article_type": "A",
                 "article_no": "第 448 條",
                 "article_content": "（刪除）",
             },
@@ -2821,10 +2866,12 @@ def test_company_law_boundary_and_count_answers(tmp_path: Path, monkeypatch) -> 
         settings=settings,
     )
     assert count["answer_source"] == "structured"
-    assert "3 個條號" in count["answer"]
+    assert "現行有效 3 條" in count["answer"]
+    assert "條號共 4" in count["answer"]
     assert "1 條已刪除" in count["answer"]
-    assert "現行有效 2 條" in count["answer"]
+    assert "條號含『之』條（如第 156-1 條）" in count["answer"]
     assert "最後一條是 第 449 條" in count["answer"]
+    assert "資料截至" in count["answer"]
 
 
 def test_related_life_and_property_insurance_laws(tmp_path: Path) -> None:

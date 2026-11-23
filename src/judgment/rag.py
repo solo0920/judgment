@@ -29,6 +29,7 @@ from .law_rag import (
     is_law_first_question,
     is_law_overview_question,
     is_related_laws_question,
+    is_unsupported_statistics_question,
     law_article_boundary_question,
     judgment_law_stats,
     law_source_text,
@@ -3727,6 +3728,27 @@ def answer_question(
                 "coverage": coverage,
                 "duration_ms": _elapsed_ms(started),
             }
+
+    if is_unsupported_statistics_question(question):
+        return {
+            "status": "retrieval_only",
+            "answer": "無法確認：本系統目前不支援這類統計或排序查詢。",
+            "notice": "本回答由規則引擎產生；請改用「有幾條」「第一條」「最後一條」等已支援的問法，或查閱官方法規資料庫。",
+            "citations": [],
+            "judgments": [],
+            "law_sources": law_sources,
+            "matched_terms": [],
+            "answer_source": "structured",
+            "llm_model": None,
+            "embedding_model": settings.embedding_model or None,
+            "retrieval": {
+                "status": "unsupported_statistics",
+                "law_hits": len(law_sources),
+                "hits": 0,
+            },
+            "coverage": coverage,
+            "duration_ms": _elapsed_ms(started),
+        }
 
     if not is_financial_query(
         question, law_sources, settings.judgment_law_list
