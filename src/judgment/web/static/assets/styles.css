@@ -21183,3 +21183,23 @@ a.auth-menu-item {
     justify-content: flex-start;
   }
 }
+
+.rag-feedback-experiment {
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--info) 28%, var(--line));
+}
+
+.rag-feedback-experiment-table td {
+  font-size: 11.5px;
+}
+
+.rag-feedback-experiment-table td:nth-child(2) {
+  max-width: 340px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .rag-feedback-experiment-table {
+    min-width: 640px;
+  }
+}

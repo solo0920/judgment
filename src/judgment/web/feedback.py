@@ -9,6 +9,7 @@ import os
 import secrets
 import threading
 import time
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from typing import (
     Any,
@@ -35,6 +36,7 @@ from ..models import (
     RagFeedback,
     RagFeedbackEvaluation,
     RagFeedbackEvent,
+    RagFeedbackExperiment,
     RagFeedbackExport,
     RagFeedbackIssue,
     RagFeedbackReason,
@@ -1833,6 +1835,298 @@ def evaluate_feedback_batch(
         return serialize_evaluation(row, include_results=True)
 
 
+EXPERIMENT_OVERRIDES: Dict[str, Tuple[type, Any, Any]] = {
+    "rag_top_k": (int, 1, 50),
+    "rag_rerank_enabled": (bool, False, True),
+    "rag_max_context_chars": (int, 500, 20_000),
+    "rag_law_first_judgment_limit": (int, 0, 10),
+    "rag_law_article_limit": (int, 1, 20),
+    "rag_law_article_limit_law_first": (int, 1, 20),
+    "rag_law_vector_enabled": (bool, False, True),
+    "rag_score_threshold": (float, 0.0, 1.0),
+    "rag_law_score_threshold": (float, 0.0, 1.0),
+    "llm_num_predict": (int, 64, 2048),
+    "llm_num_ctx": (int, 2048, 32768),
+    "llm_model": (str, 1, 200),
+}
+
+
+def _normalize_experiment_variants(
+    variants: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not variants:
+        raise FeedbackError(
+            422, "experiment_variants_required", "至少需要一個實驗變體。"
+        )
+    if len(variants) > 5:
+        raise FeedbackError(
+            422, "too_many_experiment_variants", "實驗變體最多 5 個。"
+        )
+    normalized: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in variants:
+        if not isinstance(raw, Mapping):
+            raise FeedbackError(
+                422, "invalid_experiment_variant", "實驗變體格式不正確。"
+            )
+        name = str(raw.get("name") or "").strip()
+        if not name or len(name) > 80:
+            raise FeedbackError(
+                422, "invalid_experiment_name", "實驗變體名稱需為 1–80 字。"
+            )
+        if name in seen:
+            raise FeedbackError(
+                422, "duplicate_experiment_name", "實驗變體名稱不可重複。"
+            )
+        seen.add(name)
+        overrides = raw.get("overrides") or {}
+        if not isinstance(overrides, Mapping):
+            raise FeedbackError(
+                422, "invalid_experiment_overrides", "實驗參數格式不正確。"
+            )
+        clean: Dict[str, Any] = {}
+        for key, value in overrides.items():
+            if key not in EXPERIMENT_OVERRIDES:
+                raise FeedbackError(
+                    422,
+                    "unsupported_experiment_override",
+                    f"不支援的實驗參數：{key}",
+                )
+            kind, minimum, maximum = EXPERIMENT_OVERRIDES[key]
+            try:
+                if kind is bool:
+                    parsed = bool(value)
+                elif kind is int:
+                    parsed = int(value)
+                elif kind is float:
+                    parsed = float(value)
+                else:
+                    parsed = str(value).strip()
+            except (TypeError, ValueError) as exc:
+                raise FeedbackError(
+                    422,
+                    "invalid_experiment_override_value",
+                    f"實驗參數 {key} 的值不正確。",
+                ) from exc
+            if kind in {int, float} and not (
+                float(minimum) <= float(parsed) <= float(maximum)
+            ):
+                raise FeedbackError(
+                    422,
+                    "invalid_experiment_override_range",
+                    f"實驗參數 {key} 超出允許範圍。",
+                )
+            if kind is str and len(parsed) < int(minimum):
+                raise FeedbackError(
+                    422,
+                    "invalid_experiment_override_value",
+                    f"實驗參數 {key} 不可空白。",
+                )
+            clean[key] = parsed
+        normalized.append({"name": name, "overrides": clean})
+    return normalized
+
+
+def serialize_experiment(
+    row: RagFeedbackExperiment,
+    *,
+    include_results: bool = False,
+) -> Dict[str, Any]:
+    payload = {
+        "id": row.id,
+        "filters": row.filters or {},
+        "feedback_ids": row.feedback_ids or [],
+        "variants": row.variants or [],
+        "summary": row.summary or {},
+        "status": row.status,
+        "created_by": row.created_by,
+        "duration_ms": int(row.duration_ms or 0),
+        "created_at": _iso(row.created_at),
+    }
+    if include_results:
+        payload["results"] = row.results or []
+    return payload
+
+
+def run_feedback_experiment(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    variants: Sequence[Mapping[str, Any]],
+    feedback_ids: Optional[Sequence[int]] = None,
+    filters: Optional[Mapping[str, Any]] = None,
+    limit: int = 5,
+    actor: str = "",
+) -> Dict[str, Any]:
+    normalized_variants = _normalize_experiment_variants(variants)
+    filters = dict(filters or {})
+    requested_limit = max(1, min(10, int(limit or 5)))
+    started = time.perf_counter()
+    with session_factory() as session:
+        if feedback_ids:
+            selected = [int(value) for value in feedback_ids][:requested_limit]
+        else:
+            statement = _feedback_filters(select(RagFeedback.id), filters)
+            selected = [
+                int(value)
+                for value in session.scalars(
+                    statement.order_by(RagFeedback.created_at.desc()).limit(
+                        requested_limit
+                    )
+                ).all()
+            ]
+        existing = set(
+            int(value)
+            for value in session.scalars(
+                select(RagFeedback.id).where(
+                    RagFeedback.id.in_(selected)
+                )
+            ).all()
+        )
+        selected = [value for value in selected if value in existing]
+
+    variant_runs: List[Dict[str, Any]] = []
+    summary_by_variant: Dict[str, Any] = {}
+    for variant in normalized_variants:
+        name = variant["name"]
+        overrides = variant["overrides"]
+        try:
+            variant_settings = replace(settings, **overrides)
+        except TypeError as exc:
+            raise FeedbackError(
+                422,
+                "invalid_experiment_override",
+                f"實驗參數無法套用：{exc}",
+            ) from exc
+        summary = {
+            "succeeded": 0,
+            "failed": 0,
+            "answer_changed": 0,
+            "answer_source_changed": 0,
+            "status_changed": 0,
+            "retrieval_mode_changed": 0,
+            "citations_added_total": 0,
+            "citations_removed_total": 0,
+            "laws_added_total": 0,
+            "laws_removed_total": 0,
+            "current_citations_total": 0,
+            "current_laws_total": 0,
+            "avg_duration_ms": 0.0,
+        }
+        duration_total = 0.0
+        cases: List[Dict[str, Any]] = []
+        for feedback_id in selected:
+            try:
+                rerun = rerun_feedback(
+                    session_factory, variant_settings, feedback_id
+                )
+                diff = rerun.get("diff") or {}
+                current = rerun.get("current") or {}
+                citations = current.get("citations") or []
+                laws = current.get("law_sources") or []
+                summary["succeeded"] += 1
+                for key in (
+                    "answer_changed",
+                    "answer_source_changed",
+                    "status_changed",
+                    "retrieval_mode_changed",
+                ):
+                    if diff.get(key):
+                        summary[key] += 1
+                summary["citations_added_total"] += len(
+                    diff.get("citations_added") or []
+                )
+                summary["citations_removed_total"] += len(
+                    diff.get("citations_removed") or []
+                )
+                summary["laws_added_total"] += len(
+                    diff.get("laws_added") or []
+                )
+                summary["laws_removed_total"] += len(
+                    diff.get("laws_removed") or []
+                )
+                summary["current_citations_total"] += len(citations)
+                summary["current_laws_total"] += len(laws)
+                duration = float(current.get("duration_ms") or 0)
+                duration_total += duration
+                cases.append(
+                    {
+                        "feedback_id": feedback_id,
+                        "question": rerun.get("question") or "",
+                        "status": "success",
+                        "diff": diff,
+                        "current": {
+                            "answer_source": current.get("answer_source")
+                            or "",
+                            "retrieval_mode": current.get("retrieval_mode")
+                            or "",
+                            "duration_ms": current.get("duration_ms"),
+                            "citation_count": len(citations),
+                            "law_count": len(laws),
+                        },
+                    }
+                )
+            except Exception as exc:
+                summary["failed"] += 1
+                cases.append(
+                    {
+                        "feedback_id": feedback_id,
+                        "question": "",
+                        "status": "failed",
+                        "error": f"{exc.__class__.__name__}: {exc}",
+                        "diff": {},
+                    }
+                )
+        if summary["succeeded"]:
+            summary["avg_duration_ms"] = round(
+                duration_total / summary["succeeded"], 1
+            )
+        variant_runs.append(
+            {
+                "name": name,
+                "overrides": overrides,
+                "summary": summary,
+                "cases": cases,
+            }
+        )
+        summary_by_variant[name] = summary
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    with session_factory() as session:
+        row = RagFeedbackExperiment(
+            filters=filters,
+            feedback_ids=selected,
+            variants=normalized_variants,
+            summary=summary_by_variant,
+            results=variant_runs,
+            status="completed" if selected else "empty",
+            created_by=str(actor or "")[:120],
+            duration_ms=int(duration_ms),
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return serialize_experiment(row, include_results=True)
+
+
+def list_feedback_experiments(
+    session_factory: sessionmaker[Session],
+    *,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        rows = session.scalars(
+            select(RagFeedbackExperiment)
+            .order_by(RagFeedbackExperiment.created_at.desc())
+            .limit(max(1, min(100, int(limit))))
+        ).all()
+        return {
+            "experiments": [
+                serialize_experiment(row) for row in rows
+            ]
+        }
+
+
 def list_feedback_evaluations(
     session_factory: sessionmaker[Session],
     *,
@@ -2506,6 +2800,29 @@ def prune_rag_interactions(
             return int(result.rowcount or 0)
     except Exception:
         logger.warning("RAG interaction retention failed", exc_info=True)
+        return 0
+
+
+def prune_rag_feedback_experiments(
+    session_factory: Optional[sessionmaker[Session]],
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    if session_factory is None:
+        return 0
+    current = _aware(now or _utcnow()) or _utcnow()
+    cutoff = current - timedelta(days=180)
+    try:
+        with session_factory() as session:
+            result = session.execute(
+                delete(RagFeedbackExperiment).where(
+                    RagFeedbackExperiment.created_at < cutoff
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+    except Exception:
+        logger.warning("RAG feedback experiment retention failed", exc_info=True)
         return 0
 
 
