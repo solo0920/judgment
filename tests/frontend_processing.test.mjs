@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  clearUpdateConsumed,
+  markUpdateConsumed,
   newRunVisible,
   workflowPanelMarkup,
 } from "../src/judgment/web/static/assets/js/pages/processing.js";
@@ -108,4 +110,21 @@ test("download update stays locked until a check finds an update", () => {
     available,
     /data-processing-action="run-workflow"[\s\S]{0,160}disabled/,
   );
+
+  markUpdateConsumed("law_download");
+  try {
+    const consumed = workflowPanelMarkup({
+      ...base,
+      update_available: true,
+      update_status: { status: "update_available" },
+    });
+    assert.match(
+      consumed,
+      /data-processing-action="run-workflow"[\s\S]{0,180}disabled/,
+    );
+    assert.equal(consumed.includes("processing-inline-update"), false);
+    assert.equal(consumed.includes("請先按「檢查更新」"), true);
+  } finally {
+    clearUpdateConsumed("law_download");
+  }
 });
