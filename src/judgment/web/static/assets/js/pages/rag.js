@@ -1813,6 +1813,12 @@ export async function render(root) {
     if (turnIndex >= 0 && conversationTurns[turnIndex]?.payload) {
       conversationTurns[turnIndex].payload.feedback_sentiment = sentiment;
     }
+    if (currentConversationId) {
+      void updateHistoryEntry(currentConversationId, {
+        turns: conversationTurns,
+        updated_at: new Date().toISOString(),
+      });
+    }
     turnElement
       .querySelectorAll('[data-rag-answer-action="feedback"]')
       .forEach((button) => {
