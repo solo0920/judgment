@@ -35,6 +35,18 @@ const SHARE_CONTENT_PARAM = "contentId";
 const SHARE_HASH_PATH = "rag/share";
 const FRIEND_SHARE_URL = "https://judgment.ragdemo.win";
 
+const FEEDBACK_REASON_OPTIONS = [
+  ["wrong_citation", "引用或條號有誤"],
+  ["incomplete", "答案不完整"],
+  ["wrong_question", "不是我問的"],
+  ["wrong_refusal", "不該拒答卻拒答"],
+  ["slow_or_error", "回應太慢或出錯"],
+  ["not_helpful", "內容沒有幫助或無法使用"],
+  ["tone_style", "風格或語氣"],
+  ["safety_legal", "安全或法律疑慮"],
+  ["other", "其他"],
+];
+
 const EXAMPLES = [
   "金融消費者保護法如何處理金融消費爭議？",
   "證券交易法對內線交易有什麼規範？",
@@ -59,12 +71,22 @@ function emptyConversationMarkup() {
   return `<section class="card answer-card rag-empty-answer">${answerPlaceholder()}</section>`;
 }
 
-function answerActionsMarkup(question) {
+function answerActionsMarkup(question, payload = {}) {
   const safeQuestion = escapeHtml(question);
+  const feedback = payload?.feedback || {};
+  const canFeedback = Boolean(feedback.token);
+  const sentiment = String(payload?.feedback_sentiment || "");
+  const feedbackButtons = canFeedback
+    ? `<span class="rag-feedback-divider" aria-hidden="true"></span>
+      <button class="rag-answer-action rag-feedback-action${sentiment === "satisfied" ? " is-selected" : ""}" type="button" data-rag-answer-action="feedback" data-sentiment="satisfied" data-question="${safeQuestion}" title="回應良好" aria-label="回應良好" aria-pressed="${sentiment === "satisfied"}">${icon("thumbUp", 15)}<span class="sr-only">回應良好</span></button>
+      <button class="rag-answer-action rag-feedback-action${sentiment === "unsatisfied" ? " is-selected" : ""}" type="button" data-rag-answer-action="feedback" data-sentiment="unsatisfied" data-question="${safeQuestion}" title="回應欠佳" aria-label="回應欠佳" aria-pressed="${sentiment === "unsatisfied"}">${icon("thumbDown", 15)}<span class="sr-only">回應欠佳</span></button>`
+    : "";
   return `<div class="rag-answer-actions" role="group" aria-label="回答操作">
     <button class="rag-answer-action" type="button" data-rag-answer-action="copy" data-question="${safeQuestion}" title="複製回答" aria-label="複製回答">${icon("copy", 15)}<span class="sr-only">複製回答</span></button>
     <button class="rag-answer-action" type="button" data-rag-answer-action="share" data-question="${safeQuestion}" title="建立公開連結" aria-label="建立公開連結">${icon("share", 15)}<span class="sr-only">建立公開連結</span></button>
     <button class="rag-answer-action" type="button" data-rag-answer-action="reask" data-question="${safeQuestion}" title="重新生成回答" aria-label="重新生成回答">${icon("refresh", 15)}<span class="sr-only">重新生成回答</span></button>
+    ${feedbackButtons}
+    ${canFeedback ? `<span class="rag-feedback-note" data-rag-feedback-note>${sentiment ? "已收到回饋" : "這則回答有幫助嗎？"}</span>` : ""}
   </div>`;
 }
 
@@ -301,6 +323,9 @@ function compactAnswerPayload(payload) {
     show_sources: payload.show_sources,
     pipeline_flow: payload.pipeline_flow || null,
     test_run: payload.test_run || null,
+    request_id: payload.request_id || "",
+    feedback: payload.feedback || null,
+    feedback_sentiment: payload.feedback_sentiment || "",
     partial: false,
     streaming: false,
   };
@@ -1412,7 +1437,7 @@ function renderAnswer(question, payload, processHtml = "") {
     </div>
     <div class="answer-body">${renderAnswerBody(
       payload,
-      answerActionsMarkup(question),
+      answerActionsMarkup(question, payload),
     )}</div>`;
 }
 
@@ -1585,7 +1610,7 @@ export async function render(root) {
             <div class="rag-library-empty">讀取本機紀錄中…</div>
           </div>
           <div class="rag-library-foot" id="rag-storage-note">
-            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答文字 90 天、安全稽核事件 180 天；備份依 90 天輪替政策由維運刪除，程式不自動刪除備份。
+            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答快照 180 天、使用者回饋 180 天或結案後 180 天、安全稽核事件 180 天；備份依 90 天輪替政策由維運刪除，程式不自動刪除備份。
           </div>
         </section>
       </aside>
@@ -1612,7 +1637,7 @@ export async function render(root) {
         <textarea class="ask-input" id="rag-question" name="question" rows="3"
           maxlength="500" placeholder="例如：金融消費者保護法如何處理金融消費爭議？"
           aria-describedby="rag-input-help"></textarea>
-        <p class="ask-privacy-note">請勿輸入個人資料；提問與回答保留 90 天、安全稽核保留 180 天；備份依 90 天輪替政策管理。</p>
+        <p class="ask-privacy-note">請勿輸入個人資料；提問與回答快照保留 180 天、使用者回饋保留 180 天或結案後 180 天、安全稽核保留 180 天；備份依 90 天輪替政策管理。</p>
         <div class="ask-footer">
           <div class="ask-hints" id="rag-input-help">
             <span><kbd>Enter</kbd> 送出</span>
@@ -1656,6 +1681,7 @@ export async function render(root) {
     <div class="rag-history-menu" id="rag-history-menu" role="menu" hidden></div>
     <dialog id="rag-judgment-dialog" class="judgment-dialog"></dialog>
     <dialog id="rag-law-dialog" class="judgment-dialog law-dialog"></dialog>
+    <dialog id="rag-feedback-dialog" class="judgment-dialog rag-feedback-dialog"></dialog>
   </section>`;
 
   const form = root.querySelector("#rag-form");
@@ -1687,6 +1713,7 @@ export async function render(root) {
   const historyMenu = root.querySelector("#rag-history-menu");
   const judgmentDialog = root.querySelector("#rag-judgment-dialog");
   const lawDialog = root.querySelector("#rag-law-dialog");
+  const feedbackDialog = root.querySelector("#rag-feedback-dialog");
   const modeNotice = root.querySelector("#rag-mode-notice");
   const syncDialogScrollLock = () => {
     document.documentElement.classList.toggle(
@@ -1696,6 +1723,7 @@ export async function render(root) {
   };
   judgmentDialog?.addEventListener("close", syncDialogScrollLock);
   lawDialog?.addEventListener("close", syncDialogScrollLock);
+  feedbackDialog?.addEventListener("close", syncDialogScrollLock);
   let flowStream = null;
   let activeTestFlow = null;
   let lastTestFlowSignature;
@@ -1764,6 +1792,166 @@ export async function render(root) {
         button.dataset.question = question;
       });
   };
+
+  const feedbackPayloadFor = (turnElement) => {
+    const payload = turnPayloads.get(turnElement) || {};
+    return {
+      payload,
+      requestId: String(payload.request_id || "").trim(),
+      token: String(payload.feedback?.token || "").trim(),
+    };
+  };
+
+  const markFeedback = (turnElement, sentiment) => {
+    if (!turnElement) return;
+    turnElement.dataset.feedbackSentiment = sentiment;
+    const payload = turnPayloads.get(turnElement);
+    if (payload) payload.feedback_sentiment = sentiment;
+    const turnIndex = Array.from(
+      turnsBox.querySelectorAll(".rag-turn"),
+    ).indexOf(turnElement);
+    if (turnIndex >= 0 && conversationTurns[turnIndex]?.payload) {
+      conversationTurns[turnIndex].payload.feedback_sentiment = sentiment;
+    }
+    turnElement
+      .querySelectorAll('[data-rag-answer-action="feedback"]')
+      .forEach((button) => {
+        const selected = button.dataset.sentiment === sentiment;
+        button.classList.toggle("is-selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      });
+    const note = turnElement.querySelector("[data-rag-feedback-note]");
+    if (note) {
+      note.textContent =
+        sentiment === "satisfied"
+          ? "已收到回饋：滿意"
+          : "已收到回饋：不滿意";
+    }
+  };
+
+  const sendFeedback = async (
+    turnElement,
+    { sentiment, reasons = [], comment = "" },
+  ) => {
+    const { requestId, token } = feedbackPayloadFor(turnElement);
+    if (!requestId || !token) {
+      toast("這則回答已超過可回饋期限。", "warn");
+      return false;
+    }
+    try {
+      await api.ragFeedbackCreate({
+        request_id: requestId,
+        feedback_token: token,
+        sentiment,
+        reasons,
+        comment,
+      });
+      markFeedback(turnElement, sentiment);
+      toast(
+        sentiment === "satisfied" ? "謝謝，已記錄滿意回饋。" : "已送出回饋，謝謝。",
+        "ok",
+      );
+      return true;
+    } catch (error) {
+      if (error.status === 410) {
+        toast("此回答已超過回饋期限。", "warn", 5200);
+      } else if (error.status === 409) {
+        toast("此回饋已超過 15 分鐘修改期限。", "warn", 5200);
+      } else {
+        toast(error.message || "回饋送出失敗，請稍後再試。", "danger");
+      }
+      return false;
+    }
+  };
+
+  const closeFeedbackDialog = () => {
+    if (feedbackDialog?.open) feedbackDialog.close();
+    feedbackDialog?.classList.remove("is-open");
+  };
+
+  const openFeedbackDialog = (turnElement) => {
+    if (!feedbackDialog || disposed) return;
+    const reasons = FEEDBACK_REASON_OPTIONS.map(
+      ([code, label]) => `<label class="rag-feedback-option">
+        <input type="checkbox" name="feedback_reason" value="${escapeHtml(code)}" />
+        <span>${escapeHtml(label)}</span>
+      </label>`,
+    ).join("");
+    feedbackDialog.innerHTML = `<div class="judgment-dialog-head">
+        <div>
+          <div class="report-kicker">ANSWER FEEDBACK</div>
+          <h2>哪裡需要改進？</h2>
+        </div>
+        <button class="judgment-dialog-close" type="button"
+          data-rag-feedback-action="cancel" aria-label="關閉回饋">${icon("x", 14)}</button>
+      </div>
+      <form class="judgment-dialog-body rag-feedback-form" data-rag-feedback-form>
+        <p class="rag-feedback-intro">請選擇不滿意的原因，可補充說明。這則回饋會連結到當時的問題、回答與 Pipeline 快照，供管理者重現。</p>
+        <fieldset class="rag-feedback-reasons">
+          <legend class="sr-only">不滿意原因</legend>
+          ${reasons}
+        </fieldset>
+        <label class="rag-feedback-comment-label" for="rag-feedback-comment">補充說明（選填）</label>
+        <textarea class="input rag-feedback-comment" id="rag-feedback-comment"
+          name="comment" rows="4" maxlength="4000"
+          placeholder="例如：引用條號錯誤、日期範圍不對、回答沒有回答到問題…"></textarea>
+        <p class="rag-feedback-privacy">請勿輸入個人資料。回饋與回答快照保留 180 天，或結案後 180 天；原始留言只供管理者檢視，不會直接放進自動改善代理的提示。</p>
+        <div class="rag-feedback-error" data-rag-feedback-error hidden></div>
+        <div class="judgment-dialog-actions">
+          <button class="btn btn-secondary" type="button" data-rag-feedback-action="cancel">取消</button>
+          <button class="btn btn-primary" type="submit" data-rag-feedback-submit>送出回饋</button>
+        </div>
+      </form>`;
+    feedbackDialog._turnElement = turnElement;
+    feedbackDialog.classList.add("is-open");
+    if (!feedbackDialog.open) feedbackDialog.showModal();
+    feedbackDialog
+      .querySelector('input[name="feedback_reason"]')
+      ?.focus({ preventScroll: true });
+  };
+
+  feedbackDialog?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-rag-feedback-action]")?.dataset
+      .ragFeedbackAction;
+    if (action === "cancel") {
+      closeFeedbackDialog();
+      return;
+    }
+    if (event.target === feedbackDialog) closeFeedbackDialog();
+  });
+
+  feedbackDialog?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.target.closest("[data-rag-feedback-form]");
+    if (!form) return;
+    const selected = Array.from(
+      form.querySelectorAll('input[name="feedback_reason"]:checked'),
+    ).map((input) => input.value);
+    const comment = String(form.elements.comment?.value || "").trim();
+    if (!selected.length) {
+      const errorBox = form.querySelector("[data-rag-feedback-error]");
+      if (errorBox) {
+        errorBox.hidden = false;
+        errorBox.textContent = "請至少選一個原因。";
+      }
+      form.querySelector('input[name="feedback_reason"]')?.focus();
+      return;
+    }
+    const turnElement = feedbackDialog._turnElement;
+    if (!turnElement) {
+      closeFeedbackDialog();
+      return;
+    }
+    const submitButton = form.querySelector("[data-rag-feedback-submit]");
+    setBusy(submitButton, true, "送出中…");
+    const ok = await sendFeedback(turnElement, {
+      sentiment: "unsatisfied",
+      reasons: selected,
+      comment,
+    });
+    setBusy(submitButton, false);
+    if (ok) closeFeedbackDialog();
+  });
 
   const renderStoredConversation = () => {
     turnsBox.innerHTML = conversationTurns.length
@@ -2073,6 +2261,7 @@ export async function render(root) {
     renderLibrary();
     if (judgmentDialog?.open) judgmentDialog.close();
     if (lawDialog?.open) lawDialog.close();
+    closeFeedbackDialog();
     input.focus();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -2407,7 +2596,7 @@ export async function render(root) {
       renderLibrary();
       storageNote.textContent =
         storageMode() === "indexeddb"
-          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答文字 90 天、安全稽核事件 180 天；備份依 90 天輪替政策管理。"
+          ? "歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答快照 180 天、使用者回饋 180 天或結案後 180 天、安全稽核事件 180 天；備份依 90 天輪替政策管理。"
           : "瀏覽器儲存不可用，提問紀錄只保留在本次工作階段。";
     } catch (error) {
       if (disposed) return;
@@ -3451,6 +3640,16 @@ export async function render(root) {
       const question = String(target?.dataset.question || "").trim();
       const turnElement = target?.closest(".rag-turn");
       if (!question || !turnElement) return;
+      if (action === "feedback") {
+        releaseActionFocus(true);
+        const sentiment = target.dataset.sentiment;
+        if (sentiment === "satisfied") {
+          await sendFeedback(turnElement, { sentiment: "satisfied" });
+        } else {
+          openFeedbackDialog(turnElement);
+        }
+        return;
+      }
       if (action === "copy") {
         try {
           const text = questionAction ? question : answerTextFor(turnElement);
@@ -3731,6 +3930,7 @@ export async function render(root) {
     disposed = true;
     stopFlowUpdates();
     closeHistoryMenu();
+    closeFeedbackDialog();
     document.removeEventListener("click", onDocumentClick);
     document.removeEventListener("keydown", onDocumentKeydown);
     window.removeEventListener("scroll", onWindowScroll, {

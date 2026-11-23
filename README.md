@@ -1150,7 +1150,7 @@ AUTH_COOKIE_SECURE=auto
 - 工作階段 token 含 `jti` 與 `sv`（session epoch）；絕對 TTL 12 小時（`AUTH_SESSION_TTL_SECONDS=43200`）。登出會撤銷該 `jti`；「登出所有裝置」會推進該帳號的 epoch，讓所有既有 cookie 立即失效。部署 SESSION-01 前簽發、沒有 `sv` 的舊 token 一律視為無效。跨站 `POST /api/auth/logout`／`logout-all` 會被拒絕。
 - 登入後 header 會顯示帳號名稱與登出選單；`/api/auth/me` 回傳目前工作階段，`/api/auth/logout` 會清除 cookie，`POST /api/auth/logout-all` 會撤銷該帳號所有裝置的工作階段。
 - 安全稽核寫入 `security_audit_events`，涵蓋 Google 登入成功／失敗、logout、logout-all、admin token 與 admin 寫入；`GET /api/admin/security-audit` 可讀取最近事件。事件保留 180 天，只記 path 不記 query string；未驗證失敗事件有每日上限，稽核失敗不會阻擋原請求。
-- 資料保留矩陣與備份例外見 [`specs/security/data-retention.md`](specs/security/data-retention.md)：RAG 提問／回答 90 天、安全稽核 180 天、分享快照 7 天；備份依 90 天輪替政策由維運刪除。
+- 資料保留矩陣與備份例外見 [`specs/security/data-retention.md`](specs/security/data-retention.md)：RAG server-side 回答快照與使用者回饋 180 天（已結案回饋自結案起再 180 天）、效能紀錄 90 天、安全稽核 180 天、分享快照 7 天；備份依 90 天輪替政策由維運刪除。
 - 未設定 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 時，header 仍會顯示登入按鈕，但會提示 Google 登入尚未設定；原有管理權杖與本機管理模式不受影響。
 
 目前程式與文件的對照基準見 [`docs/code-alignment-2026-11-21.md`](docs/code-alignment-2026-11-21.md)。安全驗收狀態與證據見 [`specs/security/security-acceptance-matrix.md`](specs/security/security-acceptance-matrix.md)；2026-11-22 的資安提升評估與整改路線圖見 [`specs/security/security-improvement-assessment-2026-11-22.md`](specs/security/security-improvement-assessment-2026-11-22.md)；主應用 DB 角色 provision／回滾見 [`specs/security/app-db-role-runbook.md`](specs/security/app-db-role-runbook.md)。未完成的部署項不會因程式測試通過而標成 verified。
@@ -1199,13 +1199,13 @@ RAG 的資料流如下：
 1. 提問時先從 PostgreSQL `law_documents` 比對問題中的法規／命令名稱與常見簡稱（例如「證交法」對應「證券交易法」），取出 metadata；再從原始法規 Parquet 讀取條文、沿革與制定日期。若問題沒有直接寫出法規名稱，會以法律概念索引找出對應法規（例如「內線交易」對應證券交易法）。條文排名不是只看名稱或 2-gram 次數，而是結合法規概念展開（例如「內線交易」展開為「實際知悉」、「重大影響其股票價格」、「未公開」與第 157-1、171 條）、條號 regex、CJK BM25 與詞組覆蓋率；法規與命令都會納入檢索。前端「法規／命令檢索結果」中的法規名稱、各條文與命中詞彙都可直接點擊開啟完整原文。
 2. 若問題是「有多少條文」、「何時開始有」、「最後一條／第一條」或「最常觸犯什麼法條」，系統會以法規 metadata、條文與判決引用統計直接產生可驗證的結構化回答；「最後／第一」會轉為首末條查詢碼，回傳最後／第一條**有效**條文的條號與內容（若該端條號已刪除，模板會補上已刪除條號與內容），並標示「依本系統資料版本（資料截至日）」。「有幾條／共有」以現行有效數為第一個數字，再補條號總數、已刪除數與「之」條說明（例如公司法現行有效 436 條、條號共 534、已刪除 98 條、含第 156-1 條等之條、最後一條第 449 條），法規最後異動日為輔。一般法律問題的回答本文不附這些統計；來源卡一律保留「N 條生效（共 M 條號，已刪除 K 條）」與資料版本日。「第三章有幾條」「最近一次修正是哪天」「這部法有幾章」等未命中規則的統計／排序問句會直接回「無法確認：本系統目前不支援這類統計或排序查詢」，不交給 LLM 猜測。
 3. 若問題只輸入法規名稱（例如「證券交易法」）、「介紹證券交易法」或「證交法是什麼」，系統會回傳法規簡介：立法目的、主管機關、章節架構與核心條文；此路徑不呼叫 LLM，也不以判決清單取代法規介紹。官方名稱有「中華民國」前綴時，也接受常用簡稱（例如「刑法」對應「中華民國刑法」）。
-4. 判決 RAG 只處理與 `documents/金融法規.md` 的 99 項金融相關法規有關的問題；若問題與清單及金融詞彙無關，系統不生成判決 RAG 回答，會回覆「本RAG提問功能主要以金融相關判決為主」。若使用者追問「是哪 99 項？」或「為什麼被拒絕？」，系統會直接列出 99 項法規／命令白名單與判斷依據，不會把「99」誤解成某部法律的第 99 條，也不呼叫 LLM。
-3. 判決端仍從 PostgreSQL `judgment_documents` 取出判決，保留法院、裁判日期、案由與命中法規，並擷取全文頭尾視窗（預設 1,600 字）作為文件級 embedding 文字。
-4. 以本機 Ollama `bge-m3`（1024 維）產生向量；版本化索引寫入 `judgments_vNNN`，正式查詢經 `judgments_current` alias。每筆判決一個 point，point id 由案號決定，重跑可覆寫而不會重複；`judgment_documents` 是未啟用版本化索引時的 legacy／default collection。
-5. 在 `judgment_vector_index` 記錄 `jid`、`version_id`、collection、模型、content hash、index text／payload hash 與維度；重跑時跳過未變更的判決，因此索引可中斷後繼續。
-6. 判決提問以同一個 `bge-m3` 將問題轉為向量，從 Qdrant 取 Top K（預設 4）且高於相似度門檻（預設 0.35）的判決，再從 PostgreSQL 取回全文並挑選與問題詞彙最相關的段落。
-7. 將法規／命令條文、判決片段與嚴格系統提示交給 Ollama LLM（快速預設 `gemma3:4b`，可改 `gemma3:27b`）。回答必須標註 `[1]`、`[2]` 等來源編號；若缺少有效引用、引用越界或模型回傳空回答，系統會先以嚴格提示重試一次；仍失敗則降級為只顯示檢索結果，不保留推測內容。
-8. 若問題與檢索資料無關，模型可明確回答「檢索到的資料不足以回答」；此類拒絕回答不要求引用編號，但不得憑空產生案號。
+4. 判決 RAG 只處理與 `documents/金融法規.md` 的 99 項金融相關法規有關的問題；若問題與清單及金融詞彙無關，系統不生成判決 RAG 回答，會回覆「本RAG提問功能主要以金融相關判決為主」。若使用者追問「是哪 99 項？」或「為什麼被拒絕？」，系統會直接列出 99 項法規／命令白名單與判斷依據，不會把「99」誤解成某部法律的第 99 條，也不呼叫 LLM。RAG 回應會附帶 server-side `request_id` 與短效 `feedback.token`；前端只送這兩個識別碼與回饋內容，問題與答案一律由後端 `rag_interactions.response_snapshot` 取回，不接受前端改寫。回答下方提供滿意／不滿意按鈕；不滿意可選白話原因並留言。同一則回答對同一訪客只保留一筆 active 回饋，15 分鐘內可修改並增加 revision。回饋與快照預設保留 180 天（結案後再 180 天），完整契約見 `specs/004-web-console/spec.md` 的「RAG 使用者回饋與品質改善」。
+5. 判決端仍從 PostgreSQL `judgment_documents` 取出判決，保留法院、裁判日期、案由與命中法規，並擷取全文頭尾視窗（預設 1,600 字）作為文件級 embedding 文字。
+6. 以本機 Ollama `bge-m3`（1024 維）產生向量；版本化索引寫入 `judgments_vNNN`，正式查詢經 `judgments_current` alias。每筆判決一個 point，point id 由案號決定，重跑可覆寫而不會重複；`judgment_documents` 是未啟用版本化索引時的 legacy／default collection。
+7. 在 `judgment_vector_index` 記錄 `jid`、`version_id`、collection、模型、content hash、index text／payload hash 與維度；重跑時跳過未變更的判決，因此索引可中斷後繼續。
+8. 判決提問以同一個 `bge-m3` 將問題轉為向量，從 Qdrant 取 Top K（預設 4）且高於相似度門檻（預設 0.35）的判決，再從 PostgreSQL 取回全文並挑選與問題詞彙最相關的段落。
+9. 將法規／命令條文、判決片段與嚴格系統提示交給 Ollama LLM（快速預設 `gemma3:4b`，可改 `gemma3:27b`）。回答必須標註 `[1]`、`[2]` 等來源編號；若缺少有效引用、引用越界或模型回傳空回答，系統會先以嚴格提示重試一次；仍失敗則降級為只顯示檢索結果，不保留推測內容。
+10. 若問題與檢索資料無關，模型可明確回答「檢索到的資料不足以回答」；此類拒絕回答不要求引用編號，但不得憑空產生案號。
 
 ```bash
 # 只統計候選判決，不呼叫 Ollama 或 Qdrant

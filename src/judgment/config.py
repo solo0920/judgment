@@ -80,6 +80,16 @@ class Settings:
     demo_poll_rate_per_minute: int = 120
     demo_poll_rate_per_hour: int = 3000
     demo_poll_rate_per_day: int = 20000
+    demo_feedback_rate_per_minute: int = 10
+    demo_feedback_rate_per_hour: int = 60
+    demo_feedback_rate_per_day: int = 200
+    demo_feedback_daily_limit: int = 1000
+    rag_feedback_edit_seconds: int = 900
+    rag_feedback_token_ttl_seconds: int = 7 * 24 * 60 * 60
+    rag_interaction_retention_days: int = 180
+    rag_feedback_retention_days: int = 180
+    rag_prompt_version: str = "rag-system-prompt-v1"
+    feedback_secret: str = ""
     demo_query_timeout_seconds: float = 10.0
     demo_query_max_page_size: int = 50
     demo_query_max_total: int = 100
@@ -289,6 +299,37 @@ class Settings:
             demo_poll_rate_per_day=_env_int(
                 "JUDGMENT_DEMO_POLL_RATE_PER_DAY", 20000
             ),
+            demo_feedback_rate_per_minute=_env_int(
+                "JUDGMENT_DEMO_FEEDBACK_RATE_PER_MINUTE", 10
+            ),
+            demo_feedback_rate_per_hour=_env_int(
+                "JUDGMENT_DEMO_FEEDBACK_RATE_PER_HOUR", 60
+            ),
+            demo_feedback_rate_per_day=_env_int(
+                "JUDGMENT_DEMO_FEEDBACK_RATE_PER_DAY", 200
+            ),
+            demo_feedback_daily_limit=_env_int(
+                "JUDGMENT_DEMO_FEEDBACK_DAILY_LIMIT", 1000
+            ),
+            rag_feedback_edit_seconds=_env_int(
+                "RAG_FEEDBACK_EDIT_SECONDS", 900
+            ),
+            rag_feedback_token_ttl_seconds=_env_int(
+                "RAG_FEEDBACK_TOKEN_TTL_SECONDS", 7 * 24 * 60 * 60
+            ),
+            rag_interaction_retention_days=_env_int(
+                "RAG_INTERACTION_RETENTION_DAYS", 180
+            ),
+            rag_feedback_retention_days=_env_int(
+                "RAG_FEEDBACK_RETENTION_DAYS", 180
+            ),
+            rag_prompt_version=(
+                os.getenv("RAG_PROMPT_VERSION", "").strip()
+                or "rag-system-prompt-v1"
+            ),
+            feedback_secret=os.getenv(
+                "JUDGMENT_FEEDBACK_SECRET", ""
+            ).strip(),
             demo_query_timeout_seconds=_env_float(
                 "JUDGMENT_DEMO_QUERY_TIMEOUT_SECONDS", 10.0
             ),

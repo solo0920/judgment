@@ -187,6 +187,18 @@ from .client_ip import (
     effective_client_ip,
     suspicious_proxy_chain,
 )
+from .feedback import (
+    FEEDBACK_REASONS,
+    FeedbackError,
+    export_agent_feedback,
+    feedback_count_since,
+    feedback_stats,
+    get_feedback,
+    list_feedback,
+    record_interaction,
+    submit_feedback,
+    update_feedback,
+)
 from .demo_mode import (
     DemoConflict,
     DemoRateLimiter,
@@ -317,6 +329,26 @@ class RagRequest(BaseModel):
 class RagShareRequest(BaseModel):
     title: str = Field(default="", max_length=200)
     turns: List[Dict[str, Any]] = Field(min_length=1, max_length=30)
+
+
+class RagFeedbackRequest(BaseModel):
+    request_id: str = Field(min_length=8, max_length=64)
+    feedback_token: str = Field(min_length=16, max_length=512)
+    sentiment: Literal["satisfied", "unsatisfied"]
+    reasons: List[str] = Field(default_factory=list, max_length=8)
+    comment: str = Field(default="", max_length=4000)
+
+
+class RagFeedbackUpdateRequest(BaseModel):
+    status: Optional[
+        Literal["new", "triaged", "planned", "resolved", "dismissed"]
+    ] = None
+    severity: Optional[Literal["low", "medium", "high"]] = None
+    actionable: Optional[bool] = None
+    expected_behavior: Optional[str] = Field(default=None, max_length=4000)
+    review_comment: Optional[str] = Field(default=None, max_length=4000)
+    linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
+    linked_question_id: Optional[int] = Field(default=None, ge=1)
 
 
 _RAG_SHARE_TTL_HOURS = 24 * 7
@@ -757,6 +789,31 @@ def _demo_check(
                 per_hour=settings.demo_query_rate_per_hour,
                 per_day=settings.demo_query_rate_per_day,
             )
+    elif policy == "DEMO_ACTION":
+        day_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        if (
+            settings.demo_feedback_daily_limit > 0
+            and feedback_count_since(
+                request.app.state.session_factory, day_start
+            )
+            >= settings.demo_feedback_daily_limit
+        ):
+            return _demo_error(
+                429,
+                "今日回饋數量已達上限，請明天再試。",
+                code="feedback_daily_limit",
+                feature=feature,
+                retry_after=3600,
+            )
+        retry_after = request.app.state.demo_limiter.check(
+            rate_key,
+            "feedback",
+            per_minute=settings.demo_feedback_rate_per_minute,
+            per_hour=settings.demo_feedback_rate_per_hour,
+            per_day=settings.demo_feedback_rate_per_day,
+        )
     else:
         retry_after = request.app.state.demo_limiter.check(
             rate_key,
@@ -1203,6 +1260,10 @@ API_ENDPOINT_LABELS = {
     "/api/rag/query/stream": "RAG 問答 SSE",
     "/api/rag/share": "建立 RAG 分享連結",
     "/api/rag/share/{share_id}": "讀取 RAG 分享對話",
+    "/api/rag/feedback": "RAG 使用者回饋",
+    "/api/rag/feedback/stats": "RAG 回饋統計",
+    "/api/rag/feedback/export": "RAG 回饋代理匯出",
+    "/api/rag/feedback/{feedback_id}": "RAG 回饋明細",
     "/api/question-bank/stats": "題庫統計",
     "/api/question-bank/items": "題庫題目",
     "/api/question-bank/tags": "題庫標籤",
@@ -1303,6 +1364,45 @@ def _api_endpoint_catalog(app: FastAPI) -> List[Dict[str, Any]]:
         )
     )
     return entries
+
+
+def _feedback_capture(
+    *,
+    session_factory: Any,
+    settings: Settings,
+    request: Request,
+    request_id: str,
+    question: str,
+    result: Dict[str, Any],
+    pipeline_flow: Optional[Dict[str, Any]],
+    is_demo: bool,
+) -> None:
+    """Attach the signed feedback capability without failing the answer."""
+
+    info = record_interaction(
+        session_factory,
+        settings,
+        request_id=request_id,
+        question=question,
+        result=result,
+        pipeline_flow=pipeline_flow,
+        client_ip=str(
+            getattr(request.state, "client_ip", "") or effective_client_ip(request)
+        ),
+        is_demo=is_demo,
+    )
+    if not info:
+        return
+    result["request_id"] = request_id
+    result["feedback"] = info
+
+
+def _feedback_error_response(exc: FeedbackError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": exc.code},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _rag_response_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -4807,6 +4907,152 @@ def create_app(
             }
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/rag/feedback/stats")
+    def rag_feedback_stats() -> JSONResponse:
+        payload = feedback_stats(app.state.session_factory)
+        payload["reason_options"] = [
+            {"code": code, "label": label}
+            for code, label in FEEDBACK_REASONS.items()
+        ]
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/rag/feedback/export")
+    def rag_feedback_export(
+        sentiment: str = "unsatisfied",
+        status: str = "",
+        severity: str = "",
+        reason: str = "",
+        keyword: str = "",
+        from_date: str = "",
+        to_date: str = "",
+        limit: int = 500,
+    ) -> Response:
+        filters = {
+            "sentiment": sentiment,
+            "status": status,
+            "severity": severity,
+            "reason": reason,
+            "keyword": keyword,
+            "from_date": from_date,
+            "to_date": to_date,
+        }
+        try:
+            rows = export_agent_feedback(
+                app.state.session_factory,
+                filters=filters,
+                limit=limit,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        body = "\n".join(
+            json.dumps(row, ensure_ascii=False, default=str) for row in rows
+        )
+        if body:
+            body += "\n"
+        return Response(
+            content=body,
+            media_type="application/x-ndjson; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": (
+                    'attachment; filename="rag-feedback-agent.jsonl"'
+                ),
+            },
+        )
+
+    @app.get("/api/rag/feedback")
+    def rag_feedback_list(
+        page: int = Query(1, ge=1),
+        page_size: int = Query(25, ge=1, le=200),
+        sentiment: str = "",
+        status: str = "",
+        severity: str = "",
+        reason: str = "",
+        keyword: str = "",
+        request_id: str = "",
+        from_date: str = "",
+        to_date: str = "",
+        actionable: str = "",
+    ) -> JSONResponse:
+        try:
+            payload = list_feedback(
+                app.state.session_factory,
+                filters={
+                    "sentiment": sentiment,
+                    "status": status,
+                    "severity": severity,
+                    "reason": reason,
+                    "keyword": keyword,
+                    "request_id": request_id,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "actionable": actionable,
+                },
+                page=page,
+                page_size=page_size,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        payload["stats"] = feedback_stats(app.state.session_factory)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/rag/feedback/{feedback_id}")
+    def rag_feedback_detail(feedback_id: int) -> JSONResponse:
+        try:
+            payload = get_feedback(
+                app.state.session_factory, feedback_id
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.patch("/api/rag/feedback/{feedback_id}")
+    def rag_feedback_update(
+        feedback_id: int,
+        request: RagFeedbackUpdateRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        updates = request.model_dump(exclude_unset=True)
+        try:
+            payload = update_feedback(
+                app.state.session_factory,
+                feedback_id,
+                updates,
+                actor=_demo_actor(http_request),
+                settings=app.state.settings,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/feedback")
+    def rag_feedback_create(
+        request: RagFeedbackRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        try:
+            payload = submit_feedback(
+                app.state.session_factory,
+                app.state.settings,
+                request_id=request.request_id,
+                feedback_token=request.feedback_token,
+                sentiment=request.sentiment,
+                reasons=request.reasons,
+                comment=request.comment,
+                client_ip=str(
+                    getattr(http_request.state, "client_ip", "")
+                    or effective_client_ip(http_request)
+                ),
+                is_demo=_is_demo_visitor(http_request),
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(
+            payload,
+            status_code=201,
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.post("/api/rag/query")
     def rag_query(request: RagRequest, http_request: Request) -> Dict[str, Any]:
         demo_visitor = _is_demo_visitor(http_request)
@@ -4817,14 +5063,19 @@ def create_app(
                 function="rag_query",
                 params={"question_length": len(request.question)},
             ):
+                live_settings = runtime_settings(
+                    app.state.settings, app.state.session_factory
+                )
                 result = answer_question(
                     session_factory=app.state.session_factory,
                     question=request.question,
-                    settings=runtime_settings(
-                        app.state.settings, app.state.session_factory
-                    ),
+                    settings=live_settings,
                 )
                 flow = current_flow()
+                request_id = str(
+                    getattr(http_request.state, "request_id", "")
+                    or _incoming_request_id(http_request)
+                )
                 if flow is not None:
                     flow.set_metadata("question", request.question)
                     flow.set_metadata("answer", result.get("answer") or "")
@@ -4846,6 +5097,16 @@ def create_app(
                     result["pipeline_flow"] = _rag_pipeline_snapshot(
                         flow, app.state.session_factory
                     )
+                _feedback_capture(
+                    session_factory=app.state.session_factory,
+                    settings=live_settings,
+                    request=http_request,
+                    request_id=request_id,
+                    question=request.question,
+                    result=result,
+                    pipeline_flow=result.get("pipeline_flow"),
+                    is_demo=demo_visitor,
+                )
                 if demo_visitor:
                     add_demo_usage(
                         app.state.session_factory,
@@ -4921,13 +5182,14 @@ def create_app(
             status = "success"
             error_message = None
             result: Optional[Dict[str, Any]] = None
+            live_settings = runtime_settings(
+                app.state.settings, app.state.session_factory
+            )
             try:
                 result = answer_question(
                     session_factory=app.state.session_factory,
                     question=request.question,
-                    settings=runtime_settings(
-                        app.state.settings, app.state.session_factory
-                    ),
+                    settings=live_settings,
                     on_partial=emit_partial,
                     on_token=emit_token,
                     on_token_reset=reset_token,
@@ -4977,6 +5239,16 @@ def create_app(
                     result["pipeline_flow"] = _rag_pipeline_snapshot(
                         flow, app.state.session_factory
                     )
+                    _feedback_capture(
+                        session_factory=app.state.session_factory,
+                        settings=live_settings,
+                        request=http_request,
+                        request_id=request_id,
+                        question=request.question,
+                        result=result,
+                        pipeline_flow=result.get("pipeline_flow"),
+                        is_demo=demo_visitor,
+                    )
                     result = demo_result(result)
                     loop.call_soon_threadsafe(queue.put_nowait, ("result", result))
                 else:
@@ -5021,6 +5293,7 @@ def create_app(
             retrieval_ticket = None
             llm_ticket = None
             llm_started: Optional[float] = None
+            live_settings = app.state.settings
             try:
                 live_settings = runtime_settings(
                     app.state.settings, app.state.session_factory
@@ -5388,6 +5661,16 @@ def create_app(
                 if result is not None:
                     result["pipeline_flow"] = _rag_pipeline_snapshot(
                         flow, app.state.session_factory
+                    )
+                    _feedback_capture(
+                        session_factory=app.state.session_factory,
+                        settings=live_settings,
+                        request=http_request,
+                        request_id=request_id,
+                        question=request.question,
+                        result=result,
+                        pipeline_flow=result.get("pipeline_flow"),
+                        is_demo=demo_visitor,
                     )
                     result = demo_result(result)
                     queue.put_nowait(("result", result))

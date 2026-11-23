@@ -1,0 +1,1200 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import os
+import secrets
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+
+from sqlalchemy import Text, cast, delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
+
+from ..config import Settings
+from ..index_versions import active_version
+from ..legal_index import active_legal_version
+from ..models import (
+    JudgmentSnapshot,
+    LawDatasetVersion,
+    QuestionBankItem,
+    RagFeedback,
+    RagFeedbackEvent,
+    RagFeedbackReason,
+    RagInteraction,
+)
+from .client_ip import hashed_client_ip_key
+from .demo_mode import sanitize_feedback_snapshot
+
+logger = logging.getLogger(__name__)
+
+FEEDBACK_REASONS: Dict[str, str] = {
+    "wrong_citation": "引用或條號有誤",
+    "incomplete": "答案不完整",
+    "wrong_question": "不是我問的",
+    "wrong_refusal": "不該拒答卻拒答",
+    "slow_or_error": "回應太慢或出錯",
+    "not_helpful": "內容沒有幫助或無法使用",
+    "tone_style": "風格或語氣",
+    "safety_legal": "安全或法律疑慮",
+    "other": "其他",
+}
+
+FEEDBACK_STATUSES = (
+    "new",
+    "triaged",
+    "planned",
+    "resolved",
+    "dismissed",
+)
+FEEDBACK_STATUS_LABELS = {
+    "new": "待處理",
+    "triaged": "已分類",
+    "planned": "已排入",
+    "resolved": "已解決",
+    "dismissed": "不處理",
+}
+SEVERITIES = ("low", "medium", "high")
+SEVERITY_LABELS = {"low": "低", "medium": "中", "high": "高"}
+
+SNAPSHOT_VERSION = 1
+SNAPSHOT_MAX_BYTES = 256 * 1024
+COMMENT_MAX_LENGTH = 4000
+_FALLBACK_SECRET = secrets.token_urlsafe(32)
+
+_VERSION_CACHE_LOCK = threading.Lock()
+_VERSION_CACHE: Dict[str, Any] = {"expires_at": 0.0, "value": {}}
+
+_PRIVATE_TRACE_KEYS = frozenset(
+    {
+        "question",
+        "answer",
+        "prompt",
+        "prompts",
+        "messages",
+        "context",
+        "contexts",
+        "full_text",
+        "raw_text",
+        "positive_jids",
+        "negative_jids",
+        "excluded_jids",
+    }
+)
+
+_JUDGMENT_KEYS = (
+    "index",
+    "jid",
+    "court",
+    "jdate",
+    "title",
+    "score",
+    "snippet",
+    "matched_laws",
+    "law_citations",
+    "citation_count",
+    "pdf_url",
+    "used_for_generation",
+)
+_LAW_SOURCE_KEYS = (
+    "index",
+    "law_name",
+    "law_level",
+    "source_label",
+    "article_no",
+    "article_count",
+    "snippet",
+    "text",
+    "matched_terms",
+    "score",
+    "used_for_generation",
+)
+_REFERENCE_KEYS = (
+    "jid",
+    "court",
+    "jdate",
+    "title",
+    "score",
+    "matched_laws",
+)
+_SNAPSHOT_KEYS = (
+    "question",
+    "answer",
+    "status",
+    "answer_source",
+    "notice",
+    "matched_terms",
+    "law_answer",
+    "law_framework",
+    "llm_model",
+    "embedding_model",
+    "duration_ms",
+    "show_sources",
+    "rerank_degraded",
+    "degraded_reason",
+    "citation_retry",
+    "citation_audit",
+    "coverage",
+)
+
+
+class FeedbackError(Exception):
+    """A feedback request failure with an HTTP status and stable code."""
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        detail: str,
+    ) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.code = code
+        self.detail = detail
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    aware = _aware(value)
+    return aware.isoformat() if aware else None
+
+
+def _secret(settings: Settings) -> str:
+    return str(
+        settings.feedback_secret
+        or settings.auth_session_secret
+        or settings.admin_token
+        or _FALLBACK_SECRET
+    )
+
+
+def _client_hash(client_ip: str, settings: Settings) -> str:
+    return hashed_client_ip_key(client_ip, _secret(settings))
+
+
+def _b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _b64decode(value: str) -> bytes:
+    padded = value + ("=" * (-len(value) % 4))
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def make_feedback_token(
+    request_id: str,
+    settings: Settings,
+    *,
+    issued_at: Optional[datetime] = None,
+    ttl_seconds: Optional[int] = None,
+) -> str:
+    """Return a signed capability token bound to one RAG request."""
+
+    now = _aware(issued_at or _utcnow()) or _utcnow()
+    ttl = max(
+        1,
+        int(
+            ttl_seconds
+            if ttl_seconds is not None
+            else settings.rag_feedback_token_ttl_seconds
+        ),
+    )
+    payload = {
+        "v": 1,
+        "rid": str(request_id),
+        "iat": int(now.timestamp()),
+        "exp": int(now.timestamp()) + ttl,
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
+    body = _b64encode(raw)
+    signature = hmac.new(
+        _secret(settings).encode("utf-8"),
+        body.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{body}.{_b64encode(signature)}"
+
+
+def parse_feedback_token(token: str, settings: Settings) -> Optional[Dict[str, Any]]:
+    """Validate the token signature and return its payload.
+
+    Expiry is checked separately by the caller so the API can distinguish an
+    expired capability (410) from a forged or malformed one (403).
+    """
+
+    try:
+        body, signature = str(token or "").split(".", 1)
+        expected = hmac.new(
+            _secret(settings).encode("utf-8"),
+            body.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(signature, _b64encode(expected)):
+            return None
+        payload = json.loads(_b64decode(body).decode("utf-8"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("v") != 1:
+        return None
+    if not str(payload.get("rid") or ""):
+        return None
+    return payload
+
+
+def _trim_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep the replay under the configured per-row size budget."""
+
+    encoded = json.dumps(snapshot, ensure_ascii=False, default=str)
+    if len(encoded.encode("utf-8")) <= SNAPSHOT_MAX_BYTES:
+        return snapshot
+
+    snapshot.pop("reference_judgments", None)
+    for key in ("citations", "judgments", "law_sources"):
+        rows = snapshot.get(key)
+        if isinstance(rows, list):
+            snapshot[key] = rows[:20]
+            for row in snapshot[key]:
+                if isinstance(row, dict):
+                    for text_key in ("snippet", "text", "law_answer"):
+                        value = row.get(text_key)
+                        if isinstance(value, str) and len(value) > 600:
+                            row[text_key] = value[:600]
+    encoded = json.dumps(snapshot, ensure_ascii=False, default=str)
+    if len(encoded.encode("utf-8")) <= SNAPSHOT_MAX_BYTES:
+        return snapshot
+
+    snapshot.pop("law_framework", None)
+    snapshot.pop("law_answer", None)
+    flow = snapshot.get("pipeline_flow")
+    if isinstance(flow, dict):
+        segments = flow.get("segments")
+        if isinstance(segments, list):
+            flow["segments"] = [
+                {key: value for key, value in segment.items() if key != "params"}
+                if isinstance(segment, dict)
+                else segment
+                for segment in segments
+            ]
+        decisions = flow.get("decisions")
+        if isinstance(decisions, list):
+            flow["decisions"] = decisions[:100]
+    return snapshot
+
+
+def _strip_private_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_private_keys(item)
+            for key, item in value.items()
+            if key not in _PRIVATE_TRACE_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_private_keys(item) for item in value]
+    return value
+
+
+def _pick(value: Mapping[str, Any], keys: Sequence[str]) -> Dict[str, Any]:
+    return {key: value[key] for key in keys if key in value}
+
+
+def build_interaction_snapshot(
+    question: str,
+    result: Mapping[str, Any],
+    pipeline_flow: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Build the admin-only replay snapshot from the server result."""
+
+    snapshot = _pick(result, _SNAPSHOT_KEYS)
+    snapshot["question"] = str(question or "")
+    snapshot["citations"] = [
+        _pick(item, _JUDGMENT_KEYS)
+        for item in result.get("citations") or []
+        if isinstance(item, Mapping)
+    ]
+    snapshot["judgments"] = [
+        _pick(item, _JUDGMENT_KEYS)
+        for item in result.get("judgments") or []
+        if isinstance(item, Mapping)
+    ]
+    snapshot["reference_judgments"] = [
+        _pick(item, _REFERENCE_KEYS)
+        for item in result.get("reference_judgments") or []
+        if isinstance(item, Mapping)
+    ]
+    snapshot["law_sources"] = [
+        _pick(item, _LAW_SOURCE_KEYS)
+        for item in result.get("law_sources") or []
+        if isinstance(item, Mapping)
+    ]
+    if isinstance(result.get("retrieval"), Mapping):
+        snapshot["retrieval"] = _strip_private_keys(
+            dict(result["retrieval"])
+        )
+    if isinstance(pipeline_flow, Mapping):
+        snapshot["pipeline_flow"] = _strip_private_keys(
+            dict(pipeline_flow)
+        )
+    clean = sanitize_feedback_snapshot(snapshot)
+    return _trim_snapshot(clean)
+
+
+def _database_versions(
+    session_factory: Optional[sessionmaker[Session]],
+    settings: Settings,
+) -> Dict[str, Any]:
+    now = time.monotonic()
+    with _VERSION_CACHE_LOCK:
+        if now < float(_VERSION_CACHE["expires_at"] or 0):
+            return dict(_VERSION_CACHE["value"])
+    versions: Dict[str, Any] = {
+        "law_dataset_version_id": None,
+        "judgment_snapshot_id": None,
+        "judgment_index_version_id": None,
+        "legal_article_index_version_id": None,
+    }
+    if session_factory is not None:
+        try:
+            with session_factory() as session:
+                versions["law_dataset_version_id"] = session.scalar(
+                    select(func.max(LawDatasetVersion.id))
+                )
+                versions["judgment_snapshot_id"] = session.scalar(
+                    select(func.max(JudgmentSnapshot.id))
+                )
+            judgment_index = active_version(
+                session_factory, alias_name=settings.judgment_vector_alias
+            )
+            if judgment_index:
+                versions["judgment_index_version_id"] = judgment_index.get(
+                    "version_id"
+                )
+            legal_index = active_legal_version(
+                session_factory,
+                alias_name=settings.legal_article_vector_alias,
+            )
+            if legal_index:
+                versions["legal_article_index_version_id"] = legal_index.get(
+                    "version_id"
+                )
+        except Exception:
+            logger.debug("feedback system version lookup failed", exc_info=True)
+    with _VERSION_CACHE_LOCK:
+        _VERSION_CACHE["expires_at"] = now + 60.0
+        _VERSION_CACHE["value"] = dict(versions)
+    return versions
+
+
+def system_version(
+    session_factory: Optional[sessionmaker[Session]],
+    settings: Settings,
+    *,
+    result: Optional[Mapping[str, Any]] = None,
+    pipeline_flow: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    versions = _database_versions(session_factory, settings)
+    result = result or {}
+    flow = pipeline_flow or {}
+    return {
+        "git_commit": (
+            os.getenv("JUDGMENT_GIT_COMMIT", "").strip()
+            or os.getenv("GIT_COMMIT", "").strip()
+            or "unknown"
+        ),
+        **versions,
+        "decision_trace_version": flow.get("decision_version", 1),
+        "prompt_version": settings.rag_prompt_version or "unknown",
+        "llm_model": result.get("llm_model") or settings.llm_model or "",
+        "embedding_model": (
+            result.get("embedding_model") or settings.embedding_model or ""
+        ),
+        "reranker_model": settings.rerank_model or "",
+    }
+
+
+def record_interaction(
+    session_factory: Optional[sessionmaker[Session]],
+    settings: Settings,
+    *,
+    request_id: str,
+    question: str,
+    result: Mapping[str, Any],
+    pipeline_flow: Optional[Mapping[str, Any]],
+    client_ip: str,
+    is_demo: bool,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Persist a replay snapshot and return the feedback capability.
+
+    This is best-effort and must never fail the RAG response.  A duplicate
+    request id (for example a retried stream) updates the existing snapshot.
+    """
+
+    request_id = str(request_id or "").strip()
+    if not request_id or session_factory is None:
+        return {}
+    created_at = _aware(now or _utcnow()) or _utcnow()
+    expires_at = created_at + timedelta(
+        days=max(1, int(settings.rag_interaction_retention_days))
+    )
+    snapshot = build_interaction_snapshot(
+        question, result, pipeline_flow
+    )
+    version = system_version(
+        session_factory,
+        settings,
+        result=result,
+        pipeline_flow=pipeline_flow,
+    )
+    try:
+        client_hash = _client_hash(client_ip, settings)
+    except Exception:
+        client_hash = ""
+    try:
+        with session_factory() as session:
+            row = session.scalars(
+                select(RagInteraction).where(
+                    RagInteraction.request_id == request_id
+                )
+            ).first()
+            if row is None:
+                row = RagInteraction(
+                    request_id=request_id,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                )
+                session.add(row)
+            row.question = str(question or "")
+            row.answer = str(result.get("answer") or "")
+            row.answer_source = str(result.get("answer_source") or "")[:32]
+            row.status = str(result.get("status") or "")[:32]
+            row.notice = str(result.get("notice") or "")
+            row.response_snapshot = snapshot
+            row.snapshot_version = SNAPSHOT_VERSION
+            row.system_version = version
+            row.client_key_hash = client_hash
+            row.is_demo = bool(is_demo)
+            row.expires_at = expires_at
+            session.commit()
+    except Exception:
+        logger.warning("RAG interaction snapshot write failed", exc_info=True)
+        return {}
+    token = make_feedback_token(request_id, settings, issued_at=created_at)
+    payload = parse_feedback_token(token, settings) or {}
+    return {
+        "token": token,
+        "expires_at": datetime.fromtimestamp(
+            int(payload.get("exp") or 0), tz=timezone.utc
+        ).isoformat(),
+        "editable_seconds": max(0, int(settings.rag_feedback_edit_seconds)),
+    }
+
+
+def _reason_codes(reasons: Iterable[str]) -> List[str]:
+    result: List[str] = []
+    for value in reasons:
+        code = str(value or "").strip()
+        if not code:
+            continue
+        if code not in FEEDBACK_REASONS:
+            raise FeedbackError(
+                422,
+                "invalid_feedback_reason",
+                f"未知的回饋原因：{code}",
+            )
+        if code not in result:
+            result.append(code)
+    return result
+
+
+def submit_feedback(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    request_id: str,
+    feedback_token: str,
+    sentiment: str,
+    reasons: Iterable[str],
+    comment: str,
+    client_ip: str,
+    is_demo: bool,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Create or update one feedback row for a RAG answer."""
+
+    request_id = str(request_id or "").strip()
+    sentiment = str(sentiment or "").strip().lower()
+    if sentiment not in {"satisfied", "unsatisfied"}:
+        raise FeedbackError(422, "invalid_sentiment", "回饋必須是滿意或不滿意。")
+    payload = parse_feedback_token(feedback_token, settings)
+    if payload is None:
+        raise FeedbackError(
+            403, "invalid_feedback_token", "回饋連結無效，請重新取得回答。"
+        )
+    if str(payload.get("rid") or "") != request_id:
+        raise FeedbackError(
+            403, "feedback_token_mismatch", "回饋連結與這則回答不符。"
+        )
+    current = _aware(now or _utcnow()) or _utcnow()
+    if int(payload.get("exp") or 0) <= int(current.timestamp()):
+        raise FeedbackError(
+            410, "feedback_expired", "此回答已超過回饋期限。"
+        )
+
+    codes = _reason_codes(reasons)
+    text = str(comment or "").strip()
+    if len(text) > COMMENT_MAX_LENGTH:
+        raise FeedbackError(422, "comment_too_long", "留言最多 4000 字。")
+    if sentiment == "unsatisfied" and not codes:
+        raise FeedbackError(
+            422, "feedback_reason_required", "請至少選一個不滿意的原因。"
+        )
+
+    with session_factory() as session:
+        interaction = session.scalars(
+            select(RagInteraction).where(
+                RagInteraction.request_id == request_id
+            )
+        ).first()
+        if interaction is None:
+            raise FeedbackError(
+                404, "interaction_not_found", "找不到這則回答的快照。"
+            )
+        interaction_expires = _aware(interaction.expires_at)
+        if interaction_expires and interaction_expires <= current:
+            raise FeedbackError(
+                410, "feedback_expired", "此回答已超過回饋期限。"
+            )
+        client_hash = _client_hash(client_ip, settings)
+        row = session.scalars(
+            select(RagFeedback).where(
+                RagFeedback.request_id == request_id,
+                RagFeedback.client_key_hash == client_hash,
+            )
+        ).first()
+        created = row is None
+        if row is None:
+            row = RagFeedback(
+                interaction_id=interaction.id,
+                request_id=request_id,
+                client_key_hash=client_hash,
+                sentiment=sentiment,
+                primary_reason=codes[0] if codes else "",
+                comment=text,
+                snapshot=interaction.response_snapshot or {},
+                snapshot_version=int(interaction.snapshot_version or 1),
+                system_version=interaction.system_version or {},
+                is_demo=bool(is_demo),
+                status="new",
+                severity="medium",
+                actionable=False,
+                created_at=current,
+                editable_until=current
+                + timedelta(
+                    seconds=max(0, int(settings.rag_feedback_edit_seconds))
+                ),
+                expires_at=current
+                + timedelta(
+                    days=max(1, int(settings.rag_feedback_retention_days))
+                ),
+            )
+            session.add(row)
+            session.flush()
+        else:
+            if _aware(row.editable_until) and _aware(row.editable_until) < current:
+                raise FeedbackError(
+                    409,
+                    "feedback_edit_window_closed",
+                    "此回饋已超過 15 分鐘修改期限。",
+                )
+            row.revision = int(row.revision or 1) + 1
+            row.updated_at = current
+            session.execute(
+                delete(RagFeedbackReason).where(
+                    RagFeedbackReason.feedback_id == row.id
+                )
+            )
+        row.sentiment = sentiment
+        row.primary_reason = codes[0] if codes else ""
+        row.comment = text
+        row.snapshot = interaction.response_snapshot or {}
+        row.snapshot_version = int(interaction.snapshot_version or 1)
+        row.system_version = interaction.system_version or {}
+        row.is_demo = bool(is_demo)
+        row.expires_at = max(
+            _aware(row.expires_at) or current,
+            current
+            + timedelta(
+                days=max(1, int(settings.rag_feedback_retention_days))
+            ),
+        )
+        for code in codes:
+            session.add(
+                RagFeedbackReason(feedback_id=row.id, reason_code=code)
+            )
+        session.add(
+            RagFeedbackEvent(
+                feedback_id=row.id,
+                event_type="created" if created else "updated",
+                from_status="" if created else row.status,
+                to_status=row.status,
+                actor="visitor" if is_demo else "user",
+                comment="",
+            )
+        )
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise FeedbackError(
+                409, "feedback_conflict", "回饋已存在，請重新整理後再試。"
+            ) from exc
+        session.refresh(row)
+        return serialize_feedback(row, codes)
+
+
+def serialize_feedback(
+    row: RagFeedback,
+    reasons: Optional[Sequence[str]] = None,
+    *,
+    include_snapshot: bool = False,
+) -> Dict[str, Any]:
+    snapshot = row.snapshot or {}
+    payload = {
+        "id": row.id,
+        "request_id": row.request_id,
+        "sentiment": row.sentiment,
+        "reasons": list(reasons or []),
+        "primary_reason": row.primary_reason,
+        "comment": row.comment,
+        "revision": int(row.revision or 1),
+        "editable_until": _iso(row.editable_until),
+        "status": row.status,
+        "severity": row.severity,
+        "actionable": bool(row.actionable),
+        "expected_behavior": row.expected_behavior,
+        "linked_question_id": row.linked_question_id,
+        "linked_pr_url": row.linked_pr_url,
+        "reviewed_by": row.reviewed_by,
+        "review_comment": row.review_comment,
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+        "reviewed_at": _iso(row.reviewed_at),
+        "is_demo": bool(row.is_demo),
+        "question": str(snapshot.get("question") or ""),
+        "answer_source": str(snapshot.get("answer_source") or ""),
+        "answer_status": str(snapshot.get("status") or ""),
+        "llm_model": str(snapshot.get("llm_model") or ""),
+        "duration_ms": snapshot.get("duration_ms"),
+        "system_version": row.system_version or {},
+    }
+    if include_snapshot:
+        payload["snapshot"] = snapshot
+        payload["events"] = []
+    return payload
+
+
+def _reasons_for(
+    session: Session, feedback_ids: Sequence[int]
+) -> Dict[int, List[str]]:
+    if not feedback_ids:
+        return {}
+    rows = session.execute(
+        select(
+            RagFeedbackReason.feedback_id,
+            RagFeedbackReason.reason_code,
+        ).where(RagFeedbackReason.feedback_id.in_(feedback_ids))
+    ).all()
+    grouped: Dict[int, List[str]] = {}
+    for feedback_id, reason_code in rows:
+        grouped.setdefault(int(feedback_id), []).append(str(reason_code))
+    order = {code: index for index, code in enumerate(FEEDBACK_REASONS)}
+    for feedback_id, codes in grouped.items():
+        grouped[feedback_id] = sorted(
+            codes, key=lambda code: order.get(code, len(order))
+        )
+    return grouped
+
+
+def _feedback_filters(statement, filters: Mapping[str, Any]):
+    sentiment = str(filters.get("sentiment") or "").strip()
+    if sentiment:
+        statement = statement.where(RagFeedback.sentiment == sentiment)
+    status = str(filters.get("status") or "").strip()
+    if status:
+        statement = statement.where(RagFeedback.status == status)
+    severity = str(filters.get("severity") or "").strip()
+    if severity:
+        statement = statement.where(RagFeedback.severity == severity)
+    if filters.get("actionable") in {True, "1", "true", "yes"}:
+        statement = statement.where(RagFeedback.actionable.is_(True))
+    reason = str(filters.get("reason") or "").strip()
+    if reason:
+        statement = statement.where(
+            RagFeedback.id.in_(
+                select(RagFeedbackReason.feedback_id).where(
+                    RagFeedbackReason.reason_code == reason
+                )
+            )
+        )
+    request_id = str(filters.get("request_id") or "").strip()
+    if request_id:
+        statement = statement.where(RagFeedback.request_id == request_id)
+    keyword = str(filters.get("keyword") or "").strip()
+    if keyword:
+        pattern = f"%{keyword}%"
+        statement = statement.where(
+            or_(
+                RagFeedback.request_id.ilike(pattern),
+                RagFeedback.comment.ilike(pattern),
+                RagFeedback.expected_behavior.ilike(pattern),
+                cast(RagFeedback.snapshot, Text).ilike(pattern),
+            )
+        )
+    date_from = filters.get("from_date")
+    if date_from:
+        statement = statement.where(
+            RagFeedback.created_at
+            >= datetime.combine(
+                _parse_date(date_from), datetime.min.time(), tzinfo=timezone.utc
+            )
+        )
+    date_to = filters.get("to_date")
+    if date_to:
+        statement = statement.where(
+            RagFeedback.created_at
+            <= datetime.combine(
+                _parse_date(date_to), datetime.max.time(), tzinfo=timezone.utc
+            )
+        )
+    return statement
+
+
+def _parse_date(value: Any):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        text = value.strip()
+        for fmt in ("%Y-%m-%d", "%Y%m%d", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+    raise FeedbackError(422, "invalid_date", "日期格式必須是 YYYY-MM-DD。")
+
+
+def list_feedback(
+    session_factory: sessionmaker[Session],
+    *,
+    filters: Optional[Mapping[str, Any]] = None,
+    page: int = 1,
+    page_size: int = 25,
+) -> Dict[str, Any]:
+    filters = filters or {}
+    current_page = max(1, int(page or 1))
+    size = max(1, min(200, int(page_size or 25)))
+    with session_factory() as session:
+        statement = _feedback_filters(select(RagFeedback), filters)
+        total = int(
+            session.scalar(
+                select(func.count()).select_from(statement.subquery())
+            )
+            or 0
+        )
+        rows = session.scalars(
+            statement.order_by(RagFeedback.created_at.desc())
+            .offset((current_page - 1) * size)
+            .limit(size)
+        ).all()
+        reasons = _reasons_for(session, [int(row.id) for row in rows])
+        items = [
+            serialize_feedback(row, reasons.get(int(row.id), []))
+            for row in rows
+        ]
+    return {
+        "items": items,
+        "page": current_page,
+        "page_size": size,
+        "total": total,
+        "pages": max(1, (total + size - 1) // size),
+        "filters": dict(filters),
+        "reason_options": [
+            {"code": code, "label": label}
+            for code, label in FEEDBACK_REASONS.items()
+        ],
+        "status_options": [
+            {"code": code, "label": FEEDBACK_STATUS_LABELS[code]}
+            for code in FEEDBACK_STATUSES
+        ],
+        "severity_options": [
+            {"code": code, "label": SEVERITY_LABELS[code]}
+            for code in SEVERITIES
+        ],
+    }
+
+
+def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
+    with session_factory() as session:
+        total = int(
+            session.scalar(select(func.count()).select_from(RagFeedback)) or 0
+        )
+        satisfied = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.sentiment == "satisfied")
+            )
+            or 0
+        )
+        unsatisfied = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.sentiment == "unsatisfied")
+            )
+            or 0
+        )
+        new_count = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.status == "new")
+            )
+            or 0
+        )
+        actionable = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.actionable.is_(True))
+            )
+            or 0
+        )
+        reason_rows = session.execute(
+            select(
+                RagFeedbackReason.reason_code,
+                func.count(),
+            )
+            .group_by(RagFeedbackReason.reason_code)
+            .order_by(func.count().desc())
+        ).all()
+        status_rows = session.execute(
+            select(RagFeedback.status, func.count()).group_by(RagFeedback.status)
+        ).all()
+    return {
+        "total": total,
+        "satisfied": satisfied,
+        "unsatisfied": unsatisfied,
+        "unsatisfied_rate": (
+            round(unsatisfied / total * 100, 2) if total else None
+        ),
+        "new": new_count,
+        "actionable": actionable,
+        "by_reason": [
+            {
+                "code": str(code),
+                "label": FEEDBACK_REASONS.get(str(code), str(code)),
+                "count": int(count),
+            }
+            for code, count in reason_rows
+        ],
+        "by_status": {
+            str(code): int(count) for code, count in status_rows
+        },
+    }
+
+
+def get_feedback(
+    session_factory: sessionmaker[Session], feedback_id: int
+) -> Dict[str, Any]:
+    with session_factory() as session:
+        row = session.get(RagFeedback, int(feedback_id))
+        if row is None:
+            raise FeedbackError(404, "feedback_not_found", "找不到這筆回饋。")
+        reasons = _reasons_for(session, [int(row.id)]).get(int(row.id), [])
+        events = session.scalars(
+            select(RagFeedbackEvent)
+            .where(RagFeedbackEvent.feedback_id == int(row.id))
+            .order_by(RagFeedbackEvent.created_at.desc())
+            .limit(50)
+        ).all()
+        payload = serialize_feedback(row, reasons, include_snapshot=True)
+        payload["events"] = [
+            {
+                "id": event.id,
+                "event_type": event.event_type,
+                "from_status": event.from_status,
+                "to_status": event.to_status,
+                "actor": event.actor,
+                "comment": event.comment,
+                "created_at": _iso(event.created_at),
+            }
+            for event in events
+        ]
+        return payload
+
+
+def update_feedback(
+    session_factory: sessionmaker[Session],
+    feedback_id: int,
+    updates: Mapping[str, Any],
+    *,
+    actor: str,
+    settings: Settings,
+) -> Dict[str, Any]:
+    allowed = {
+        "status",
+        "severity",
+        "actionable",
+        "expected_behavior",
+        "review_comment",
+        "linked_pr_url",
+        "linked_question_id",
+    }
+    unknown = sorted(set(updates) - allowed)
+    if unknown:
+        raise FeedbackError(
+            422,
+            "invalid_feedback_field",
+            f"不支援的回饋欄位：{', '.join(unknown)}",
+        )
+    with session_factory() as session:
+        row = session.get(RagFeedback, int(feedback_id))
+        if row is None:
+            raise FeedbackError(404, "feedback_not_found", "找不到這筆回饋。")
+        before = row.status
+        if "status" in updates:
+            status = str(updates.get("status") or "").strip()
+            if status not in FEEDBACK_STATUSES:
+                raise FeedbackError(422, "invalid_status", "回饋狀態不正確。")
+            row.status = status
+        if "severity" in updates:
+            severity = str(updates.get("severity") or "").strip()
+            if severity not in SEVERITIES:
+                raise FeedbackError(422, "invalid_severity", "嚴重度不正確。")
+            row.severity = severity
+        if "actionable" in updates:
+            row.actionable = bool(updates.get("actionable"))
+        if "expected_behavior" in updates:
+            text = str(updates.get("expected_behavior") or "").strip()
+            if len(text) > COMMENT_MAX_LENGTH:
+                raise FeedbackError(
+                    422, "expected_behavior_too_long", "預期行為最多 4000 字。"
+                )
+            row.expected_behavior = text
+        if "review_comment" in updates:
+            text = str(updates.get("review_comment") or "").strip()
+            if len(text) > COMMENT_MAX_LENGTH:
+                raise FeedbackError(
+                    422, "review_comment_too_long", "審查備註最多 4000 字。"
+                )
+            row.review_comment = text
+        if "linked_pr_url" in updates:
+            row.linked_pr_url = str(updates.get("linked_pr_url") or "").strip()[:1000]
+        if "linked_question_id" in updates:
+            value = updates.get("linked_question_id")
+            if value in {None, ""}:
+                row.linked_question_id = None
+            else:
+                question_id = int(value)
+                if session.get(QuestionBankItem, question_id) is None:
+                    raise FeedbackError(
+                        422,
+                        "linked_question_not_found",
+                        "連結的題庫題目不存在。",
+                    )
+                row.linked_question_id = question_id
+        now = _utcnow()
+        row.reviewed_by = str(actor or "")[:120]
+        row.reviewed_at = now
+        row.updated_at = now
+        row.expires_at = max(
+            _aware(row.expires_at) or now,
+            now
+            + timedelta(days=max(1, int(settings.rag_feedback_retention_days))),
+        )
+        session.add(
+            RagFeedbackEvent(
+                feedback_id=row.id,
+                event_type="triaged",
+                from_status=before,
+                to_status=row.status,
+                actor=str(actor or "")[:120],
+                comment=str(updates.get("review_comment") or "")[
+                    :COMMENT_MAX_LENGTH
+                ],
+            )
+        )
+        session.commit()
+        session.refresh(row)
+        reasons = _reasons_for(session, [int(row.id)]).get(int(row.id), [])
+        payload = serialize_feedback(row, reasons, include_snapshot=True)
+        payload["events"] = [
+            {
+                "id": event.id,
+                "event_type": event.event_type,
+                "from_status": event.from_status,
+                "to_status": event.to_status,
+                "actor": event.actor,
+                "comment": event.comment,
+                "created_at": _iso(event.created_at),
+            }
+            for event in session.scalars(
+                select(RagFeedbackEvent)
+                .where(RagFeedbackEvent.feedback_id == int(row.id))
+                .order_by(RagFeedbackEvent.created_at.desc())
+                .limit(50)
+            ).all()
+        ]
+        return payload
+
+
+def feedback_count_since(
+    session_factory: Optional[sessionmaker[Session]],
+    since: datetime,
+) -> int:
+    if session_factory is None:
+        return 0
+    try:
+        with session_factory() as session:
+            return int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(RagFeedback)
+                    .where(RagFeedback.created_at >= since)
+                )
+                or 0
+            )
+    except Exception:
+        logger.warning("feedback daily count failed", exc_info=True)
+        return 0
+
+
+def export_agent_feedback(
+    session_factory: sessionmaker[Session],
+    *,
+    filters: Optional[Mapping[str, Any]] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """Return the structured, comment-free export used for agent proposals.
+
+    The free-text comment is intentionally excluded: anonymous visitors can
+    write it and it will be read by an agent that can change code.  Operators
+    read the original comment in the admin UI instead.
+    """
+
+    filters = dict(filters or {})
+    filters.setdefault("sentiment", "unsatisfied")
+    with session_factory() as session:
+        statement = _feedback_filters(select(RagFeedback), filters)
+        rows = session.scalars(
+            statement.order_by(RagFeedback.created_at.asc()).limit(
+                max(1, min(2000, int(limit)))
+            )
+        ).all()
+        reasons = _reasons_for(session, [int(row.id) for row in rows])
+        result: List[Dict[str, Any]] = []
+        for row in rows:
+            snapshot = row.snapshot or {}
+            retrieval = snapshot.get("retrieval") or {}
+            flow = snapshot.get("pipeline_flow") or {}
+            result.append(
+                {
+                    "feedback_id": row.id,
+                    "request_id": row.request_id,
+                    "created_at": _iso(row.created_at),
+                    "sentiment": row.sentiment,
+                    "reason_codes": reasons.get(int(row.id), []),
+                    "expected_behavior": row.expected_behavior,
+                    "severity": row.severity,
+                    "actionable": bool(row.actionable),
+                    "question": str(snapshot.get("question") or ""),
+                    "answer": str(snapshot.get("answer") or ""),
+                    "answer_source": snapshot.get("answer_source") or "",
+                    "answer_status": snapshot.get("status") or "",
+                    "trace": {
+                        "retrieval_status": retrieval.get("status"),
+                        "retrieval_mode": retrieval.get("mode"),
+                        "query_filters": retrieval.get("query_filters"),
+                        "decisions": flow.get("decisions") or [],
+                        "decision_version": flow.get("decision_version", 1),
+                    },
+                    "system_version": row.system_version or {},
+                }
+            )
+        return result
+
+
+def prune_rag_interactions(
+    session_factory: Optional[sessionmaker[Session]],
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    if session_factory is None:
+        return 0
+    current = _aware(now or _utcnow()) or _utcnow()
+    try:
+        with session_factory() as session:
+            result = session.execute(
+                delete(RagInteraction).where(
+                    RagInteraction.expires_at < current
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+    except Exception:
+        logger.warning("RAG interaction retention failed", exc_info=True)
+        return 0
+
+
+def prune_rag_feedback(
+    session_factory: Optional[sessionmaker[Session]],
+    *,
+    now: Optional[datetime] = None,
+) -> int:
+    if session_factory is None:
+        return 0
+    current = _aware(now or _utcnow()) or _utcnow()
+    try:
+        with session_factory() as session:
+            expired = select(RagFeedback.id).where(
+                RagFeedback.expires_at < current
+            )
+            ids = list(session.scalars(expired).all())
+            if not ids:
+                return 0
+            session.execute(
+                delete(RagFeedbackReason).where(
+                    RagFeedbackReason.feedback_id.in_(ids)
+                )
+            )
+            session.execute(
+                delete(RagFeedbackEvent).where(
+                    RagFeedbackEvent.feedback_id.in_(ids)
+                )
+            )
+            result = session.execute(
+                delete(RagFeedback).where(RagFeedback.id.in_(ids))
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+    except Exception:
+        logger.warning("RAG feedback retention failed", exc_info=True)
+        return 0
