@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -2674,6 +2675,8 @@ def test_judgment_law_stats_samples_and_caches(monkeypatch) -> None:
     assert first["judgment_count"] == 100
     assert first["sampled"] is True
     assert first["matched_by"] == "full_text"
+    assert first["limit_rows"] == 100
+    assert first["timeout"] is False
     assert first["laws"][0]["law_name"] == "證券交易法"
 
     import judgment.law_rag as law_rag
@@ -2689,6 +2692,21 @@ def test_judgment_law_stats_samples_and_caches(monkeypatch) -> None:
     cached = judgment_law_stats(session_factory, "證券營業員")
     assert cached["judgment_count"] == 100
     assert cached["sampled"] is True
+
+
+def test_judgment_law_stats_degrades_on_timeout(monkeypatch) -> None:
+    import judgment.law_rag as law_rag
+
+    def timeout(*args, **kwargs):
+        raise OperationalError(
+            "canceling statement due to statement timeout", None, None
+        )
+
+    monkeypatch.setattr(law_rag, "_compute_judgment_law_stats", timeout)
+    stats = judgment_law_stats(_session_factory(), "證券營業員")
+    assert stats["timeout"] is True
+    assert stats["laws"] == []
+    assert stats["judgment_count"] == 0
 
 
 def test_related_life_and_property_insurance_laws(tmp_path: Path) -> None:

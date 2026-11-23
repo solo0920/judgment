@@ -819,7 +819,9 @@ function lawSourceCard(source, index) {
                 stats.judgment_count || 0,
               )} 筆`
         }</span>
-        <span>本法規被引用 ${formatNumber(stats.law_count || 0)} 次</span>
+        <span>${stats.sampled ? "取樣中" : "本法規"}被引用 ${formatNumber(
+          stats.law_count || 0,
+        )} 次</span>
       </div>`
     : "";
   const lawKey = source.law_key || "";
