@@ -997,6 +997,10 @@ class RagInteraction(Base):
     response_snapshot = Column(JSON, nullable=False, default=dict)
     snapshot_version = Column(SmallInteger, nullable=False, default=1)
     system_version = Column(JSON, nullable=False, default=dict)
+    conversation_id = Column(
+        String(64), nullable=False, default="", index=True
+    )
+    turn_index = Column(Integer, nullable=False, default=0)
     client_key_hash = Column(String(64), nullable=False, default="", index=True)
     is_demo = Column(Boolean, nullable=False, default=False)
     review_status = Column(
@@ -1057,9 +1061,13 @@ class RagFeedback(Base):
         index=True,
     )
     request_id = Column(String(64), nullable=False, index=True)
+    conversation_id = Column(
+        String(64), nullable=False, default="", index=True
+    )
     client_key_hash = Column(String(64), nullable=False, default="", index=True)
 
     sentiment = Column(String(16), nullable=False)
+    feedback_scope = Column(String(16), nullable=False, default="turn")
     primary_reason = Column(String(40), nullable=False, default="")
     comment = Column(Text, nullable=False, default="")
 
@@ -1209,6 +1217,34 @@ class RagFeedbackExperiment(Base):
     duration_ms = Column(Integer, nullable=False, default=0)
     created_at = Column(
         DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+
+
+class RagHoldoutRotation(Base):
+    __tablename__ = "rag_holdout_rotations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(Integer, nullable=False, index=True)
+    item_version = Column(Integer, nullable=False, default=1)
+    direction = Column(String(16), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    reason = Column(Text, nullable=False, default="")
+    signals = Column(JSON, nullable=False, default=dict)
+    created_by = Column(String(120), nullable=False, default="")
+    reviewed_by = Column(String(120), nullable=False, default="")
+    review_comment = Column(Text, nullable=False, default="")
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_rag_holdout_rotation_status_created", "status", "created_at"),
+        Index("ix_rag_holdout_rotation_item_direction", "item_id", "direction"),
     )
 
 

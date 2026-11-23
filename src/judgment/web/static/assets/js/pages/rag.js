@@ -1566,6 +1566,7 @@ export async function render(root) {
   let lastQuestion = "";
   let requestSeq = 0;
   let currentConversationId = null;
+  let serverConversationId = null;
   let conversationTurns = [];
   let conversationActive = false;
   let testMode = false;
@@ -1730,6 +1731,15 @@ export async function render(root) {
   let openHistoryMenuId = null;
   let openHistoryMenuTrigger = null;
 
+  const newServerConversationId = () => {
+    try {
+      if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    } catch (error) {
+      /* fall through */
+    }
+    return `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
   const resizeInput = () => {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
@@ -1837,7 +1847,7 @@ export async function render(root) {
 
   const sendFeedback = async (
     turnElement,
-    { sentiment, reasons = [], comment = "" },
+    { sentiment, reasons = [], comment = "", feedbackScope = "turn" },
   ) => {
     const { requestId, token } = feedbackPayloadFor(turnElement);
     if (!requestId || !token) {
@@ -1851,6 +1861,7 @@ export async function render(root) {
         sentiment,
         reasons,
         comment,
+        feedback_scope: feedbackScope,
       });
       markFeedback(turnElement, sentiment);
       toast(
@@ -1893,6 +1904,20 @@ export async function render(root) {
       </div>
       <form class="judgment-dialog-body rag-feedback-form" data-rag-feedback-form>
         <p class="rag-feedback-intro">請選擇不滿意的原因，可補充說明。這則回饋會連結到當時的問題、回答與 Pipeline 快照，供管理者重現。</p>
+        <fieldset class="rag-feedback-scope">
+          <legend>回饋範圍</legend>
+          <div class="rag-feedback-scope-options">
+            <label class="rag-feedback-option">
+              <input type="radio" name="feedback_scope" value="turn" checked />
+              <span>這一輪回答</span>
+            </label>
+            <label class="rag-feedback-option">
+              <input type="radio" name="feedback_scope" value="conversation" />
+              <span>整段對話</span>
+            </label>
+          </div>
+          <p class="rag-feedback-scope-hint">整段對話適合回報「前面答對、後續追問卻答錯」或整串回答都不符合需求的情況。</p>
+        </fieldset>
         <fieldset class="rag-feedback-reasons">
           <legend class="sr-only">不滿意原因</legend>
           ${reasons}
@@ -1934,6 +1959,10 @@ export async function render(root) {
       form.querySelectorAll('input[name="feedback_reason"]:checked'),
     ).map((input) => input.value);
     const comment = String(form.elements.comment?.value || "").trim();
+    const feedbackScope =
+      String(form.elements.feedback_scope?.value || "turn") === "conversation"
+        ? "conversation"
+        : "turn";
     if (!selected.length) {
       const errorBox = form.querySelector("[data-rag-feedback-error]");
       if (errorBox) {
@@ -1954,6 +1983,7 @@ export async function render(root) {
       sentiment: "unsatisfied",
       reasons: selected,
       comment,
+      feedbackScope,
     });
     setBusy(submitButton, false);
     if (ok) closeFeedbackDialog();
@@ -1993,6 +2023,7 @@ export async function render(root) {
         .filter((turn) => turn.question);
       if (!turns.length) throw new Error("分享內容是空的。");
       currentConversationId = null;
+      serverConversationId = null;
       conversationTurns = turns;
       lastQuestion = turns[turns.length - 1]?.question || "";
       setConversationMode(true);
@@ -2066,6 +2097,7 @@ export async function render(root) {
     stopFlowUpdates();
     paintTestFlow(null);
     currentConversationId = entry.id ?? null;
+    serverConversationId = entry.server_conversation_id || null;
     conversationTurns = turns.map((turn) => ({ ...turn }));
     lastQuestion =
       conversationTurns[conversationTurns.length - 1]?.question || "";
@@ -2254,6 +2286,7 @@ export async function render(root) {
     paintTestFlow(null);
     lastQuestion = "";
     currentConversationId = null;
+    serverConversationId = null;
     conversationTurns = [];
     setConversationMode(false);
     hideFollowup();
@@ -2654,6 +2687,7 @@ export async function render(root) {
         turns,
         detail,
         payload: summary,
+        server_conversation_id: serverConversationId || "",
         updated_at: updatedAt,
       });
       if (!updated) {
@@ -2666,6 +2700,9 @@ export async function render(root) {
           payload: summary,
           updated_at: updatedAt,
         });
+        await updateHistoryEntry(id, {
+          server_conversation_id: serverConversationId || "",
+        });
         applyId(id);
       }
     } else {
@@ -2677,6 +2714,9 @@ export async function render(root) {
         turns,
         payload: summary,
         updated_at: updatedAt,
+      });
+      await updateHistoryEntry(id, {
+        server_conversation_id: serverConversationId || "",
       });
       applyId(id);
     }
@@ -3324,10 +3364,12 @@ export async function render(root) {
       replaceIndex >= 0;
     if (!replacing && (fresh || !conversationActive)) {
       currentConversationId = null;
+      serverConversationId = newServerConversationId();
       conversationTurns = [];
       turnsBox.innerHTML = "";
       renderLibrary();
     }
+    if (!serverConversationId) serverConversationId = newServerConversationId();
     const requestToken = ++requestSeq;
     const isStale = () => disposed || requestToken !== requestSeq;
     const projectId = activeProjectId;
@@ -3424,8 +3466,12 @@ export async function render(root) {
     };
     try {
       const payload = testMode
-        ? await api.rag(trimmed, { testMode })
+        ? await api.rag(trimmed, {
+            testMode,
+            conversationId: serverConversationId,
+          })
         : await api.ragStream(trimmed, {
+            conversationId: serverConversationId,
             onStep: (event) => {
               if (!isStale()) processController?.step(event);
             },

@@ -88,6 +88,14 @@ class Settings:
     rag_feedback_token_ttl_seconds: int = 7 * 24 * 60 * 60
     rag_interaction_retention_days: int = 180
     rag_feedback_retention_days: int = 180
+    rag_quality_report_slack_webhook: str = ""
+    rag_quality_report_email_to: tuple[str, ...] = ()
+    rag_quality_report_smtp_host: str = ""
+    rag_quality_report_smtp_port: int = 587
+    rag_quality_report_smtp_user: str = ""
+    rag_quality_report_smtp_password: str = ""
+    rag_quality_report_email_from: str = ""
+    rag_quality_report_console_url: str = ""
     rag_prompt_version: str = "rag-system-prompt-v1"
     feedback_secret: str = ""
     demo_query_timeout_seconds: float = 10.0
@@ -323,6 +331,30 @@ class Settings:
             rag_feedback_retention_days=_env_int(
                 "RAG_FEEDBACK_RETENTION_DAYS", 180
             ),
+            rag_quality_report_slack_webhook=os.getenv(
+                "RAG_QUALITY_REPORT_SLACK_WEBHOOK", ""
+            ).strip(),
+            rag_quality_report_email_to=_env_csv(
+                "RAG_QUALITY_REPORT_EMAIL_TO", ()
+            ),
+            rag_quality_report_smtp_host=os.getenv(
+                "RAG_QUALITY_REPORT_SMTP_HOST", ""
+            ).strip(),
+            rag_quality_report_smtp_port=_env_int(
+                "RAG_QUALITY_REPORT_SMTP_PORT", 587
+            ),
+            rag_quality_report_smtp_user=os.getenv(
+                "RAG_QUALITY_REPORT_SMTP_USER", ""
+            ).strip(),
+            rag_quality_report_smtp_password=os.getenv(
+                "RAG_QUALITY_REPORT_SMTP_PASSWORD", ""
+            ).strip(),
+            rag_quality_report_email_from=os.getenv(
+                "RAG_QUALITY_REPORT_EMAIL_FROM", ""
+            ).strip(),
+            rag_quality_report_console_url=os.getenv(
+                "RAG_QUALITY_REPORT_CONSOLE_URL", ""
+            ).strip(),
             rag_prompt_version=(
                 os.getenv("RAG_PROMPT_VERSION", "").strip()
                 or "rag-system-prompt-v1"

@@ -187,6 +187,12 @@ from .client_ip import (
     effective_client_ip,
     suspicious_proxy_chain,
 )
+from .holdout_rotation import (
+    apply_holdout_rotation,
+    list_holdout_rotations,
+    plan_holdout_rotation,
+    reject_holdout_rotation,
+)
 from .feedback import (
     FEEDBACK_REASONS,
     FeedbackError,
@@ -196,6 +202,7 @@ from .feedback import (
     export_agent_feedback,
     feedback_count_since,
     feedback_stats,
+    batch_update_feedback_issue,
     get_feedback,
     get_feedback_issue_detail,
     get_review_candidate,
@@ -339,6 +346,11 @@ class QueryRequest(BaseModel):
 
 class RagRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+    conversation_id: str = Field(
+        default="",
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]*$",
+    )
 
 
 class RagShareRequest(BaseModel):
@@ -352,6 +364,7 @@ class RagFeedbackRequest(BaseModel):
     sentiment: Literal["satisfied", "unsatisfied"]
     reasons: List[str] = Field(default_factory=list, max_length=8)
     comment: str = Field(default="", max_length=4000)
+    feedback_scope: Literal["turn", "conversation"] = "turn"
 
 
 class RagFeedbackUpdateRequest(BaseModel):
@@ -396,6 +409,7 @@ class RagFeedbackUpdateRequest(BaseModel):
     expected_date_from: Optional[str] = Field(default=None, max_length=10)
     expected_date_to: Optional[str] = Field(default=None, max_length=10)
     citation_verdicts: Optional[Dict[str, Any]] = None
+    feedback_scope: Optional[Literal["turn", "conversation"]] = None
     issue_id: Optional[int] = Field(default=None, ge=1)
     review_comment: Optional[str] = Field(default=None, max_length=4000)
     linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
@@ -424,6 +438,26 @@ class RagFeedbackEvaluateRequest(BaseModel):
     feedback_ids: List[int] = Field(default_factory=list, max_length=20)
     filters: Dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(default=10, ge=1, le=20)
+
+
+class RagHoldoutRotationPlanRequest(BaseModel):
+    max_promotions: int = Field(default=3, ge=1, le=10)
+    max_retirements: int = Field(default=3, ge=1, le=10)
+    min_shared: int = Field(default=20, ge=0, le=1000)
+    min_holdout: int = Field(default=20, ge=0, le=1000)
+
+
+class RagHoldoutRotationReviewRequest(BaseModel):
+    review_comment: str = Field(default="", max_length=4000)
+
+
+class RagFeedbackIssueBatchRequest(BaseModel):
+    action: Literal["triage", "plan", "resolve", "dismiss"]
+    feedback_ids: List[int] = Field(default_factory=list, max_length=200)
+    expected_behavior: str = Field(default="", max_length=4000)
+    linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
+    review_comment: str = Field(default="", max_length=4000)
+    actionable: Optional[bool] = None
 
 
 class RagFeedbackIssueUpdateRequest(BaseModel):
@@ -1350,6 +1384,11 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback/stats": "RAG 回饋統計",
     "/api/rag/feedback-issues": "RAG 回饋問題群組",
     "/api/rag/feedback-issues/{issue_id}": "RAG 回饋問題群組詳情與趨勢",
+    "/api/rag/feedback-issues/{issue_id}/batch": "RAG 回饋問題群組批次操作",
+    "/api/rag/holdout-rotations": "Holdout 輪替提案",
+    "/api/rag/holdout-rotations/plan": "產生 Holdout 輪替提案",
+    "/api/rag/holdout-rotations/{rotation_id}/apply": "套用 Holdout 輪替",
+    "/api/rag/holdout-rotations/{rotation_id}/reject": "拒絕 Holdout 輪替",
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
     "/api/rag/feedback/evaluate": "RAG 回饋批次評估",
     "/api/rag/feedback/evaluations": "RAG 回饋評估報告",
@@ -1469,6 +1508,7 @@ def _feedback_capture(
     settings: Settings,
     request: Request,
     request_id: str,
+    conversation_id: str,
     question: str,
     result: Dict[str, Any],
     pipeline_flow: Optional[Dict[str, Any]],
@@ -1480,6 +1520,7 @@ def _feedback_capture(
         session_factory,
         settings,
         request_id=request_id,
+        conversation_id=conversation_id,
         question=question,
         result=result,
         pipeline_flow=pipeline_flow,
@@ -5125,6 +5166,105 @@ def create_app(
             return _feedback_error_response(exc)
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/rag/holdout-rotations")
+    def rag_holdout_rotation_list(
+        status: str = "pending", limit: int = 50
+    ) -> JSONResponse:
+        try:
+            payload = list_holdout_rotations(
+                app.state.session_factory, status=status, limit=limit
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/holdout-rotations/plan")
+    def rag_holdout_rotation_plan(
+        request: RagHoldoutRotationPlanRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        actor = str(
+            getattr(http_request.state, "admin_subject", "") or "admin"
+        )
+        try:
+            payload = plan_holdout_rotation(
+                app.state.session_factory,
+                actor=actor,
+                max_promotions=request.max_promotions,
+                max_retirements=request.max_retirements,
+                min_shared=request.min_shared,
+                min_holdout=request.min_holdout,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/holdout-rotations/{rotation_id}/apply")
+    def rag_holdout_rotation_apply(
+        rotation_id: int,
+        request: RagHoldoutRotationReviewRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        actor = str(
+            getattr(http_request.state, "admin_subject", "") or "admin"
+        )
+        try:
+            payload = apply_holdout_rotation(
+                app.state.session_factory,
+                rotation_id,
+                actor=actor,
+                review_comment=request.review_comment,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/holdout-rotations/{rotation_id}/reject")
+    def rag_holdout_rotation_reject(
+        rotation_id: int,
+        request: RagHoldoutRotationReviewRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        actor = str(
+            getattr(http_request.state, "admin_subject", "") or "admin"
+        )
+        try:
+            payload = reject_holdout_rotation(
+                app.state.session_factory,
+                rotation_id,
+                actor=actor,
+                review_comment=request.review_comment,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/rag/feedback-issues/{issue_id}/batch")
+    def rag_feedback_issue_batch(
+        issue_id: int,
+        request: RagFeedbackIssueBatchRequest,
+        http_request: Request,
+    ) -> JSONResponse:
+        actor = str(
+            getattr(http_request.state, "admin_subject", "") or "admin"
+        )
+        try:
+            payload = batch_update_feedback_issue(
+                app.state.session_factory,
+                issue_id,
+                action=request.action,
+                feedback_ids=request.feedback_ids,
+                expected_behavior=request.expected_behavior,
+                linked_pr_url=request.linked_pr_url,
+                review_comment=request.review_comment,
+                actionable=request.actionable,
+                actor=actor,
+                settings=app.state.settings,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
     @app.post("/api/rag/feedback/evaluate")
     def rag_feedback_evaluate(
         request: RagFeedbackEvaluateRequest,
@@ -5346,6 +5486,7 @@ def create_app(
                 sentiment=request.sentiment,
                 reasons=request.reasons,
                 comment=request.comment,
+                feedback_scope=request.feedback_scope,
                 client_ip=str(
                     getattr(http_request.state, "client_ip", "")
                     or effective_client_ip(http_request)
@@ -5409,6 +5550,7 @@ def create_app(
                     settings=live_settings,
                     request=http_request,
                     request_id=request_id,
+                    conversation_id=request.conversation_id,
                     question=request.question,
                     result=result,
                     pipeline_flow=result.get("pipeline_flow"),
@@ -5551,6 +5693,7 @@ def create_app(
                         settings=live_settings,
                         request=http_request,
                         request_id=request_id,
+                        conversation_id=request.conversation_id,
                         question=request.question,
                         result=result,
                         pipeline_flow=result.get("pipeline_flow"),
@@ -5974,6 +6117,7 @@ def create_app(
                         settings=live_settings,
                         request=http_request,
                         request_id=request_id,
+                        conversation_id=request.conversation_id,
                         question=request.question,
                         result=result,
                         pipeline_flow=result.get("pipeline_flow"),

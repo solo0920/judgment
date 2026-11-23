@@ -15,6 +15,7 @@ from .feedback import (
     prune_rag_feedback_issues,
     prune_rag_interactions,
 )
+from .holdout_rotation import prune_rag_holdout_rotations
 from .security_audit import prune_security_events
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ def run_retention_maintenance(session_factory) -> Dict[str, int]:
             session_factory
         ),
         "rag_feedback_experiments": prune_rag_feedback_experiments(
+            session_factory
+        ),
+        "rag_holdout_rotations": prune_rag_holdout_rotations(
             session_factory
         ),
     }
