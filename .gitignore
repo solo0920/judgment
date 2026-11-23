@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 .run/
 .wrangler/
+.feedback/
 .coverage
 htmlcov/
 .env

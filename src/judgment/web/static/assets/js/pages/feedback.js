@@ -226,6 +226,7 @@ function renderDetail(detail) {
       <div class="rag-feedback-detail-head-actions">
         ${detail.sentiment === "satisfied" ? statusBadge("success", "滿意") : statusBadge("warning", "不滿意")}
         ${statusBadge(STATUS_TONES[detail.status] || "neutral", STATUS_LABELS[detail.status] || detail.status)}
+        ${detail.linked_question_id ? statusBadge("info", `題庫 #${detail.linked_question_id}`) : ""}
       </div>
     </div>
     <div class="report-section">
@@ -234,6 +235,7 @@ function renderDetail(detail) {
         <div><span class="muted">LLM</span><strong>${escapeHtml(detail.llm_model || "—")}</strong></div>
         <div><span class="muted">耗時</span><strong>${escapeHtml(formatDuration(detail.duration_ms || 0))}</strong></div>
         <div><span class="muted">可編輯至</span><strong>${escapeHtml(formatDateTime(detail.editable_until))}</strong></div>
+        <div><span class="muted">題庫 draft</span><strong>${detail.linked_question_id ? `#${detail.linked_question_id} · pending_review` : "尚未建立"}</strong></div>
       </div>
     </div>
     <div class="report-section">
@@ -281,6 +283,12 @@ function renderDetail(detail) {
         </label>
         <div class="rag-feedback-triage-actions">
           <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>儲存 triage</span></button>
+          <button class="btn btn-secondary btn-sm" type="button"
+            data-feedback-action="promote" data-feedback-id="${detail.id}"
+            ${detail.linked_question_id || !detail.actionable || !String(detail.expected_behavior || "").trim() ? "disabled" : ""}
+            title="${detail.linked_question_id ? "已建立題庫 draft" : "需先標記可行動並填寫預期行為"}">
+            ${icon("plus", 13)}<span>${detail.linked_question_id ? `已建立題庫 draft #${detail.linked_question_id}` : "建立題庫 draft"}</span>
+          </button>
         </div>
       </form>
     </div>
@@ -458,6 +466,33 @@ export function createFeedbackController(container, { onStats } = {}) {
           toast("已匯出代理用 JSONL；不含原始留言。", "ok");
         } catch (error) {
           toast(error.message || "匯出失敗。", "danger");
+        } finally {
+          setBusy(actionButton, false);
+        }
+        return;
+      }
+      if (action === "promote") {
+        const feedbackId = actionButton.dataset.feedbackId;
+        setBusy(actionButton, true, "建立中…");
+        try {
+          const result = await api.ragFeedbackPromote(feedbackId);
+          detail = result.feedback;
+          render();
+          toast(
+            result.reused
+              ? `已連結既有題庫 draft #${result.item.id}。`
+              : `已建立題庫 draft #${result.item.id}（pending_review）。`,
+            "ok",
+            6200,
+          );
+          payload = await api.ragFeedbackList({
+            ...filters,
+            page,
+            page_size: 25,
+          });
+          render();
+        } catch (error) {
+          toast(error.message || "建立題庫 draft 失敗。", "danger");
         } finally {
           setBusy(actionButton, false);
         }

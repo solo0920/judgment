@@ -39,6 +39,7 @@ from judgment.models import (
     LawDatasetVersion,
     LawDocument,
     OllamaHost,
+    QuestionBankItem,
     RagFeedback,
     SecurityAuditEvent,
 )
@@ -46,6 +47,7 @@ from judgment.observability import record_performance, trace_segment
 from judgment.processing_state import ProcessingStateStore
 from judgment.web import processing as processing_module
 from judgment.web.app import create_app, route_policy_guard
+from judgment.question_bank import question_fingerprint
 from judgment.web.feedback import make_feedback_token
 from judgment.web.auth import (
     make_session_token,
@@ -742,6 +744,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "getAuthApiBase" in api_js.text
     assert "ragFeedbackCreate" in api_js.text
     assert "ragFeedbackList" in api_js.text
+    assert "ragFeedbackPromote" in api_js.text
     assert "/api/rag/feedback/export" in api_js.text
     stream_fetch = api_js.text.split(
         'apiUrl("/api/rag/query/stream"', 1
@@ -2896,20 +2899,12 @@ def test_rag_feedback_round_trip_uses_server_snapshot(web_client) -> None:
     assert '"messages":' not in flow_json
     assert '"contexts":' not in flow_json
 
-    exported = web_client.get(
+    early_export = web_client.get(
         "/api/rag/feedback/export",
         params={"sentiment": "unsatisfied"},
     )
-    assert exported.status_code == 200
-    rows = [
-        json.loads(line)
-        for line in exported.text.splitlines()
-        if line.strip()
-    ]
-    row = next(item for item in rows if item["request_id"] == request_id)
-    assert row["reason_codes"] == ["wrong_citation", "incomplete"]
-    assert "comment" not in row
-    assert row["question"] == "銀行法如何規範吸收存款？"
+    assert early_export.status_code == 200
+    assert early_export.text.strip() == ""
 
     triaged = web_client.patch(
         f"/api/rag/feedback/{feedback['id']}",
@@ -2928,6 +2923,43 @@ def test_rag_feedback_round_trip_uses_server_snapshot(web_client) -> None:
     assert triaged_payload["actionable"] is True
     assert triaged_payload["events"]
 
+    exported = web_client.get(
+        "/api/rag/feedback/export",
+        params={"sentiment": "unsatisfied"},
+    )
+    assert exported.status_code == 200
+    rows = [
+        json.loads(line)
+        for line in exported.text.splitlines()
+        if line.strip()
+    ]
+    row = next(item for item in rows if item["request_id"] == request_id)
+    assert row["reason_codes"] == ["wrong_citation", "incomplete"]
+    assert "comment" not in row
+    assert row["question"] == "銀行法如何規範吸收存款？"
+    assert row["expected_behavior"].startswith("只引用")
+
+    promoted = web_client.post(
+        f"/api/rag/feedback/{feedback['id']}/promote"
+    )
+    assert promoted.status_code == 201, promoted.text
+    promoted_payload = promoted.json()
+    item = promoted_payload["item"]
+    assert item["status"] == "pending_review"
+    assert item["visibility"] == "shared"
+    assert item["source"] == "user_feedback"
+    assert item["question"] == "銀行法如何規範吸收存款？"
+    assert item["reference_answer"]
+    assert f"rag-feedback-{feedback['id']}" in item["tags"]
+    assert promoted_payload["feedback"]["linked_question_id"] == item["id"]
+
+    promoted_again = web_client.post(
+        f"/api/rag/feedback/{feedback['id']}/promote"
+    )
+    assert promoted_again.status_code == 200
+    assert promoted_again.json()["reused"] is True
+    assert promoted_again.json()["item"]["id"] == item["id"]
+
     edited = web_client.post(
         "/api/rag/feedback",
         json={
@@ -2945,6 +2977,82 @@ def test_rag_feedback_round_trip_uses_server_snapshot(web_client) -> None:
 
     with web_client.app.state.session_factory() as session:
         assert len(session.scalars(select(RagFeedback)).all()) == 1
+
+
+def test_feedback_promote_requires_triage_and_shared_visibility(
+    web_client,
+) -> None:
+    answer = web_client.post(
+        "/api/rag/query",
+        json={"question": "銀行法如何規範吸收存款？"},
+    ).json()
+    created = web_client.post(
+        "/api/rag/feedback",
+        json={
+            "request_id": answer["request_id"],
+            "feedback_token": answer["feedback"]["token"],
+            "sentiment": "unsatisfied",
+            "reasons": ["incomplete"],
+            "comment": "沒有回答完整。",
+        },
+    ).json()
+    early = web_client.post(f"/api/rag/feedback/{created['id']}/promote")
+    assert early.status_code == 422
+    assert early.json()["code"] == "feedback_not_actionable"
+
+    triaged = web_client.patch(
+        f"/api/rag/feedback/{created['id']}",
+        json={"actionable": True},
+    )
+    assert triaged.status_code == 200
+    missing = web_client.post(f"/api/rag/feedback/{created['id']}/promote")
+    assert missing.status_code == 422
+    assert missing.json()["code"] == "expected_behavior_required"
+
+    web_client.patch(
+        f"/api/rag/feedback/{created['id']}",
+        json={"expected_behavior": "回答應列出完整的存款與授信限制。"},
+    )
+    question = "銀行法如何規範吸收存款？"
+    with web_client.app.state.session_factory() as session:
+        session.add(
+            QuestionBankItem(
+                lineage_id="holdout-lineage",
+                fingerprint=question_fingerprint(question),
+                question=question,
+                question_type="general",
+                difficulty="medium",
+                status="accepted",
+                expected_laws=[],
+                expected_articles=[],
+                expected_judgments=[],
+                reference_answer="holdout answer",
+                rubric={},
+                tags=["holdout"],
+                visibility="holdout",
+                source="manual",
+                notes="must not leak",
+                created_by="test",
+                content_hash="holdout",
+            )
+        )
+        session.commit()
+
+    blocked = web_client.post(f"/api/rag/feedback/{created['id']}/promote")
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "feedback_holdout_duplicate"
+
+    export = web_client.get(
+        "/api/question-bank/export", params={"status": "accepted"}
+    )
+    assert export.status_code == 200
+    assert export.json()["items"] == []
+    export_with_holdout = web_client.get(
+        "/api/question-bank/export",
+        params={"status": "accepted", "include_holdout": "true"},
+    )
+    assert export_with_holdout.status_code == 200
+    assert len(export_with_holdout.json()["items"]) == 1
 
 
 def test_rag_feedback_rejects_invalid_or_expired_tokens(web_client) -> None:
@@ -3905,6 +4013,20 @@ def test_protected_route_variants_do_not_bypass_auth(web_client) -> None:
         )
 
 
+def test_codeowners_protect_security_and_evaluation_paths() -> None:
+    owners = Path(".github/CODEOWNERS").read_text(encoding="utf-8")
+    for path in (
+        "/src/judgment/web/auth.py",
+        "/src/judgment/web/route_policies.json",
+        "/src/judgment/web/demo_policies.json",
+        "/.github/",
+        "/tests/",
+        "/src/judgment/models.py",
+    ):
+        assert path in owners
+    assert "@solo0920" in owners
+
+
 def test_route_policies_cover_every_registered_route(web_client) -> None:
     policies = load_route_policies()
     registered = set(registered_route_keys(web_client.app.routes))
@@ -3914,6 +4036,10 @@ def test_route_policies_cover_every_registered_route(web_client) -> None:
     assert policy_for("GET", "/api/status", policies) == "DEMO_READ"
     assert policy_for("POST", "/api/processing/stop", policies) == "ADMIN_WRITE"
     assert policy_for("POST", "/api/rag/query", policies) == "DEMO_QUERY"
+    assert (
+        policy_for("POST", "/api/rag/feedback/{feedback_id}/promote", policies)
+        == "ADMIN_WRITE"
+    )
     assert policy_for("GET", "/api/auth/google/start", policies) == "PUBLIC_AUTH"
     assert policy_for("POST", "/api/auth/sse-ticket", policies) == "AUTH_READ"
     assert policy_for("GET", "/api/unknown", policies) == "ADMIN_ONLY"

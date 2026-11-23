@@ -1,0 +1,28 @@
+# Human review is required for security, policy, CI, schema and evaluation
+# assets. Branch protection must enable "Require review from Code Owners";
+# this file alone does not block a merge.
+*
+@solo0920
+
+# Authentication, authorization and route policy
+/src/judgment/web/auth.py @solo0920
+/src/judgment/web/principal.py @solo0920
+/src/judgment/web/route_policy.py @solo0920
+/src/judgment/web/route_policies.json @solo0920
+/src/judgment/web/demo_policies.json @solo0920
+/src/judgment/web/demo_mode.py @solo0920
+
+# Data model and retention
+/src/judgment/models.py @solo0920
+/src/judgment/db.py @solo0920
+/src/judgment/web/maintenance.py @solo0920
+
+# CI, security scanning and deployment
+/.github/ @solo0920
+/scripts/backup.sh @solo0920
+/scripts/restore.sh @solo0920
+/scripts/deploy_web_macos.sh @solo0920
+
+# Evaluation assets: agents must not edit tests or holdout data
+/tests/ @solo0920
+/specs/benchmarks/ @solo0920
