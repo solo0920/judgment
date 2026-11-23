@@ -138,6 +138,19 @@ let stageOperations = new Map();
 // request is still in flight, so this has to survive outside the click handler.
 let pendingWorkflowId = "";
 let pendingWorkflowBaselineRunId = "";
+const consumedUpdateWorkflows = new Set();
+
+export function markUpdateConsumed(workflowId) {
+  if (workflowId) consumedUpdateWorkflows.add(String(workflowId));
+}
+
+export function clearUpdateConsumed(workflowId) {
+  if (workflowId) consumedUpdateWorkflows.delete(String(workflowId));
+}
+
+export function isUpdateConsumed(workflowId) {
+  return consumedUpdateWorkflows.has(String(workflowId));
+}
 
 const TONE_CLASS = {
   ok: "badge-ok",
@@ -191,6 +204,12 @@ const DOWNLOAD_WORKFLOW_SOURCES = {
   law_download: "law",
   order_download: "order",
   judgment_download: "judgment",
+};
+
+const DOWNLOAD_WORKFLOW_BY_SOURCE = {
+  law: "law_download",
+  order: "order_download",
+  judgment: "judgment_download",
 };
 
 const DOWNLOAD_WORKFLOW_LABELS = {
@@ -5580,7 +5599,10 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
     "order_download",
     "judgment_download",
   ].includes(workflow.id);
-  const updateAvailable = !downloadWorkflow || Boolean(workflow.update_available);
+  const updateConsumed = isUpdateConsumed(workflow.id);
+  const updateAvailable =
+    !downloadWorkflow ||
+    (Boolean(workflow.update_available) && !updateConsumed);
   const canRunWorkflow = Boolean(workflow.can_run) && !busy;
   const canRun = canRunWorkflow && updateAvailable;
   const disabledReason = busy
@@ -5596,9 +5618,10 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
             : "請先按「檢查更新」，確認是否有新版。"
         : "";
   const command = Array.isArray(workflow.command) ? workflow.command.join(" ") : "";
-  const updateCount =
-    Number(workflow.update_count) ||
-    (workflow.update_available ? Number(workflow.pending_count) || 0 : 0);
+  const updateCount = updateConsumed
+    ? 0
+    : Number(workflow.update_count) ||
+      (workflow.update_available ? Number(workflow.pending_count) || 0 : 0);
   const updateOrigin = workflow.update_origin || "更新偵測";
   const updateMechanism =
     workflow.update_mechanism || "既有更新檢查紀錄";
@@ -5767,7 +5790,7 @@ export function workflowPanelMarkup(workflow, workflowContext = {}) {
             : ""
         }
         ${
-          workflow.update_available
+          workflow.update_available && updateAvailable
             ? `<div class="processing-inline-update" role="status" data-processing-update-notice>
                 ${icon("refresh", 13)}
                 <span class="processing-inline-update-copy">
@@ -8059,6 +8082,11 @@ export async function render(root) {
           6000,
         );
       }
+      if (!(result && result.checking)) {
+        for (const type of sources) {
+          clearUpdateConsumed(DOWNLOAD_WORKFLOW_BY_SOURCE[type]);
+        }
+      }
       if (stageId) {
         stageOperations.set(stageId, {
           kind: "check",
@@ -8140,6 +8168,11 @@ export async function render(root) {
       currentWorkflow?.last_run?.id ||
       "";
     pendingWorkflowId = workflowId;
+    if (DOWNLOAD_WORKFLOW_SOURCES[workflowId]) {
+      // The user has started applying this update.  Keep the update button
+      // locked until a later 檢查更新 explicitly finds another version.
+      markUpdateConsumed(workflowId);
+    }
     // Lock the actual button before the first await.  The same pending id
     // also keeps repainted panels disabled while the start request is in
     // flight.
@@ -8210,6 +8243,9 @@ export async function render(root) {
       toast(error.message || "無法啟動工作流程。", "danger", 7000);
     } finally {
       actionBusy = false;
+      if (!started) {
+        clearUpdateConsumed(workflowId);
+      }
       if (!started || pendingWorkflowId !== workflowId) {
         pendingWorkflowId = "";
         pendingWorkflowBaselineRunId = "";
