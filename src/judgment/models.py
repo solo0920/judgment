@@ -1043,6 +1043,19 @@ class RagFeedback(Base):
     severity = Column(String(16), nullable=False, default="medium")
     actionable = Column(Boolean, nullable=False, default=False)
     expected_behavior = Column(Text, nullable=False, default="")
+    root_cause_stage = Column(
+        String(32), nullable=False, default="unknown", index=True
+    )
+    answer_verdict = Column(String(16), nullable=False, default="unknown")
+    expected_answer_mode = Column(
+        String(24), nullable=False, default="unknown"
+    )
+    expected_refusal = Column(
+        String(16), nullable=False, default="unspecified"
+    )
+    expected_date_from = Column(Date, nullable=True)
+    expected_date_to = Column(Date, nullable=True)
+    citation_verdicts = Column(JSON, nullable=False, default=dict)
     linked_question_id = Column(
         Integer,
         ForeignKey("question_bank_items.id", ondelete="SET NULL"),

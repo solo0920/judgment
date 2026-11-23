@@ -9,7 +9,7 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from sqlalchemy import Text, cast, delete, func, or_, select
@@ -68,6 +68,50 @@ FEEDBACK_STATUS_LABELS = {
 }
 SEVERITIES = ("low", "medium", "high")
 SEVERITY_LABELS = {"low": "低", "medium": "中", "high": "高"}
+
+ROOT_CAUSE_STAGES: Dict[str, str] = {
+    "unknown": "尚未判定",
+    "query_parse": "問題解析／日期條件",
+    "financial_scope": "金融範圍判斷",
+    "law_retrieval": "法規／命令檢索",
+    "judgment_retrieval": "判決檢索",
+    "reranker": "Reranker 排序",
+    "context_builder": "Context 組裝",
+    "llm_generation": "LLM 生成",
+    "citation_audit": "引用驗證",
+    "answer_routing": "回答模式路由",
+    "refusal_policy": "拒答政策",
+    "data_quality": "資料品質／版本",
+}
+
+ANSWER_VERDICTS: Dict[str, str] = {
+    "unknown": "尚未判定",
+    "correct": "正確",
+    "partial": "部分正確",
+    "incorrect": "錯誤",
+}
+
+EXPECTED_ANSWER_MODES: Dict[str, str] = {
+    "unknown": "尚未指定",
+    "law_first": "法規優先",
+    "list": "判決列表",
+    "structured": "結構化回答",
+    "semantic": "一般語意問答",
+    "refusal": "應拒答",
+}
+
+EXPECTED_REFUSALS: Dict[str, str] = {
+    "unspecified": "未指定",
+    "should_answer": "應該回答",
+    "should_refuse": "應該拒答",
+}
+
+CITATION_VERDICTS: Dict[str, str] = {
+    "supports": "支持答案",
+    "irrelevant": "與答案無關",
+    "wrong": "內容或條號錯誤",
+    "unsure": "不確定",
+}
 
 SNAPSHOT_VERSION = 1
 SNAPSHOT_MAX_BYTES = 256 * 1024
@@ -697,6 +741,21 @@ def serialize_feedback(
         "severity": row.severity,
         "actionable": bool(row.actionable),
         "expected_behavior": row.expected_behavior,
+        "root_cause_stage": row.root_cause_stage or "unknown",
+        "answer_verdict": row.answer_verdict or "unknown",
+        "expected_answer_mode": row.expected_answer_mode or "unknown",
+        "expected_refusal": row.expected_refusal or "unspecified",
+        "expected_date_from": (
+            row.expected_date_from.isoformat()
+            if row.expected_date_from
+            else None
+        ),
+        "expected_date_to": (
+            row.expected_date_to.isoformat()
+            if row.expected_date_to
+            else None
+        ),
+        "citation_verdicts": row.citation_verdicts or {},
         "linked_question_id": row.linked_question_id,
         "linked_pr_url": row.linked_pr_url,
         "reviewed_by": row.reviewed_by,
@@ -752,6 +811,21 @@ def _feedback_filters(statement, filters: Mapping[str, Any]):
         statement = statement.where(RagFeedback.severity == severity)
     if filters.get("actionable") in {True, "1", "true", "yes"}:
         statement = statement.where(RagFeedback.actionable.is_(True))
+    root_cause = str(filters.get("root_cause_stage") or "").strip()
+    if root_cause:
+        statement = statement.where(
+            RagFeedback.root_cause_stage == root_cause
+        )
+    answer_verdict = str(filters.get("answer_verdict") or "").strip()
+    if answer_verdict:
+        statement = statement.where(
+            RagFeedback.answer_verdict == answer_verdict
+        )
+    expected_refusal = str(filters.get("expected_refusal") or "").strip()
+    if expected_refusal:
+        statement = statement.where(
+            RagFeedback.expected_refusal == expected_refusal
+        )
     reason = str(filters.get("reason") or "").strip()
     if reason:
         statement = statement.where(
@@ -905,6 +979,23 @@ def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
         status_rows = session.execute(
             select(RagFeedback.status, func.count()).group_by(RagFeedback.status)
         ).all()
+        root_cause_rows = session.execute(
+            select(RagFeedback.root_cause_stage, func.count())
+            .where(RagFeedback.root_cause_stage != "unknown")
+            .group_by(RagFeedback.root_cause_stage)
+            .order_by(func.count().desc())
+        ).all()
+        answer_verdict_rows = session.execute(
+            select(RagFeedback.answer_verdict, func.count())
+            .where(RagFeedback.answer_verdict != "unknown")
+            .group_by(RagFeedback.answer_verdict)
+            .order_by(func.count().desc())
+        ).all()
+        expected_refusal_rows = session.execute(
+            select(RagFeedback.expected_refusal, func.count())
+            .where(RagFeedback.expected_refusal != "unspecified")
+            .group_by(RagFeedback.expected_refusal)
+        ).all()
     return {
         "total": total,
         "satisfied": satisfied,
@@ -924,6 +1015,25 @@ def feedback_stats(session_factory: sessionmaker[Session]) -> Dict[str, Any]:
         ],
         "by_status": {
             str(code): int(count) for code, count in status_rows
+        },
+        "by_root_cause": [
+            {
+                "code": str(code),
+                "label": ROOT_CAUSE_STAGES.get(str(code), str(code)),
+                "count": int(count),
+            }
+            for code, count in root_cause_rows
+        ],
+        "by_answer_verdict": [
+            {
+                "code": str(code),
+                "label": ANSWER_VERDICTS.get(str(code), str(code)),
+                "count": int(count),
+            }
+            for code, count in answer_verdict_rows
+        ],
+        "by_expected_refusal": {
+            str(code): int(count) for code, count in expected_refusal_rows
         },
     }
 
@@ -956,6 +1066,124 @@ def get_feedback(
             for event in events
         ]
         return payload
+
+
+def _citation_key(item: Mapping[str, Any]) -> str:
+    jid = str(item.get("jid") or "").strip()
+    if jid:
+        return f"jid:{jid}"
+    law_name = str(item.get("law_name") or "").strip()
+    article_no = str(item.get("article_no") or "").strip()
+    return f"law:{law_name}:{article_no}"
+
+
+def _rerun_view(result: Mapping[str, Any]) -> Dict[str, Any]:
+    citations = [
+        item
+        for item in result.get("citations") or []
+        if isinstance(item, Mapping)
+    ]
+    laws = [
+        item
+        for item in result.get("law_sources") or []
+        if isinstance(item, Mapping)
+    ]
+    return {
+        "answer": str(result.get("answer") or ""),
+        "status": str(result.get("status") or ""),
+        "answer_source": str(result.get("answer_source") or ""),
+        "duration_ms": result.get("duration_ms"),
+        "notice": str(result.get("notice") or ""),
+        "citations": [
+            {
+                "key": _citation_key(item),
+                "jid": item.get("jid") or "",
+                "title": item.get("title") or "",
+                "court": item.get("court") or "",
+                "jdate": item.get("jdate") or "",
+            }
+            for item in citations
+        ],
+        "law_sources": [
+            {
+                "key": _citation_key(item),
+                "law_name": item.get("law_name") or "",
+                "article_no": item.get("article_no") or "",
+                "source_label": item.get("source_label") or "",
+            }
+            for item in laws
+        ],
+        "retrieval_mode": (result.get("retrieval") or {}).get("mode"),
+        "query_filters": (result.get("retrieval") or {}).get(
+            "query_filters"
+        ),
+    }
+
+
+def rerun_feedback(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    feedback_id: int,
+) -> Dict[str, Any]:
+    """Re-run the stored question with the current pipeline (admin only)."""
+
+    with session_factory() as session:
+        row = session.get(RagFeedback, int(feedback_id))
+        if row is None:
+            raise FeedbackError(404, "feedback_not_found", "找不到這筆回饋。")
+        snapshot = row.snapshot or {}
+        question = str(snapshot.get("question") or "").strip()
+        if len(question) < 1:
+            raise FeedbackError(
+                422, "feedback_question_missing", "這筆回饋沒有問題文字。"
+            )
+
+    from ..rag import answer_question
+
+    current = answer_question(
+        session_factory=session_factory,
+        question=question,
+        settings=settings,
+    )
+    previous_view = _rerun_view(snapshot)
+    current_view = _rerun_view(current)
+    previous_keys = {
+        item["key"] for item in previous_view["citations"]
+    }
+    current_keys = {item["key"] for item in current_view["citations"]}
+    previous_law_keys = {
+        item["key"] for item in previous_view["law_sources"]
+    }
+    current_law_keys = {
+        item["key"] for item in current_view["law_sources"]
+    }
+    return {
+        "feedback_id": int(feedback_id),
+        "question": question,
+        "previous": previous_view,
+        "current": current_view,
+        "diff": {
+            "answer_changed": (
+                " ".join(previous_view["answer"].split())
+                != " ".join(current_view["answer"].split())
+            ),
+            "answer_source_changed": (
+                previous_view["answer_source"]
+                != current_view["answer_source"]
+            ),
+            "status_changed": (
+                previous_view["status"] != current_view["status"]
+            ),
+            "retrieval_mode_changed": (
+                previous_view["retrieval_mode"]
+                != current_view["retrieval_mode"]
+            ),
+            "citations_added": sorted(current_keys - previous_keys),
+            "citations_removed": sorted(previous_keys - current_keys),
+            "laws_added": sorted(current_law_keys - previous_law_keys),
+            "laws_removed": sorted(previous_law_keys - current_law_keys),
+        },
+    }
 
 
 def promote_feedback_to_question_bank(
@@ -1045,6 +1273,21 @@ def promote_feedback_to_question_bank(
                 continue
             seen_laws.add(law_name)
             law_refs.append({"law_name": law_name})
+        verdicts = row.citation_verdicts or {}
+        supported_judgments: List[Dict[str, str]] = []
+        seen_jids: set[str] = set()
+        for citation in snapshot.get("citations") or []:
+            if not isinstance(citation, Mapping):
+                continue
+            jid = str(citation.get("jid") or "").strip()
+            if (
+                not jid
+                or jid in seen_jids
+                or verdicts.get(f"jid:{jid}") != "supports"
+            ):
+                continue
+            seen_jids.add(jid)
+            supported_judgments.append({"jid": jid})
 
     if already_linked and existing_item is not None:
         return {
@@ -1064,7 +1307,7 @@ def promote_feedback_to_question_bank(
             "reference_answer": str(snapshot.get("answer") or "").strip(),
             "expected_laws": law_refs,
             "expected_articles": [],
-            "expected_judgments": [],
+            "expected_judgments": supported_judgments,
             "rubric": {
                 "source_feedback_id": int(feedback_id),
                 "must_refuse": False,
@@ -1082,6 +1325,10 @@ def promote_feedback_to_question_bank(
                 f"由 RAG 使用者回饋 #{int(feedback_id)} 建立；"
                 f"request_id={request_id}。"
                 f"原因：{', '.join(reasons) or '未分類'}。"
+                f"錯誤階段：{row.root_cause_stage or 'unknown'}；"
+                f"答案判定：{row.answer_verdict or 'unknown'}；"
+                f"預期回答模式：{row.expected_answer_mode or 'unknown'}；"
+                f"預期拒答判定：{row.expected_refusal or 'unspecified'}。"
                 f"人工建議 Agent 修正方向 prompt：{expected_behavior}。"
                 "此題為 pending_review draft，需人工改寫與驗收；"
                 "未自動進入 holdout，也不含使用者原始留言。"
@@ -1094,8 +1341,9 @@ def promote_feedback_to_question_bank(
                 actor=str(actor or "")[:120],
             )
         except QuestionBankError as exc:
-            if payload["expected_laws"]:
+            if payload["expected_laws"] or payload["expected_judgments"]:
                 payload["expected_laws"] = []
+                payload["expected_judgments"] = []
                 try:
                     item = create_item(
                         session_factory,
@@ -1148,6 +1396,52 @@ def promote_feedback_to_question_bank(
     }
 
 
+def _parse_optional_date(value: Any, field: str) -> Optional[date]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise FeedbackError(
+            422,
+            "invalid_feedback_date",
+            f"{field} 必須是 YYYY-MM-DD。",
+        ) from exc
+
+
+def _normalize_citation_verdicts(value: Any) -> Dict[str, Any]:
+    if value is None or value == "":
+        return {}
+    if not isinstance(value, Mapping):
+        raise FeedbackError(
+            422, "invalid_citation_verdicts", "引用判定格式不正確。"
+        )
+    result: Dict[str, Any] = {}
+    for key, verdict in value.items():
+        name = str(key or "").strip()
+        if not name or len(name) > 240:
+            raise FeedbackError(
+                422, "invalid_citation_key", "引用判定鍵值不正確。"
+            )
+        if name == "missing":
+            result["missing"] = bool(verdict)
+            continue
+        code = str(verdict or "").strip()
+        if code not in CITATION_VERDICTS:
+            raise FeedbackError(
+                422,
+                "invalid_citation_verdict",
+                f"未知的引用判定：{code or '空白'}",
+            )
+        result[name] = code
+    return result
+
+
 def update_feedback(
     session_factory: sessionmaker[Session],
     feedback_id: int,
@@ -1161,6 +1455,13 @@ def update_feedback(
         "severity",
         "actionable",
         "expected_behavior",
+        "root_cause_stage",
+        "answer_verdict",
+        "expected_answer_mode",
+        "expected_refusal",
+        "expected_date_from",
+        "expected_date_to",
+        "citation_verdicts",
         "review_comment",
         "linked_pr_url",
         "linked_question_id",
@@ -1196,6 +1497,60 @@ def update_feedback(
                     422, "expected_behavior_too_long", "人工建議 Agent 修正方向的 prompt 最多 4000 字。"
                 )
             row.expected_behavior = text
+        if "root_cause_stage" in updates:
+            stage = str(updates.get("root_cause_stage") or "").strip()
+            if stage not in ROOT_CAUSE_STAGES:
+                raise FeedbackError(
+                    422, "invalid_root_cause_stage", "錯誤階段不正確。"
+                )
+            row.root_cause_stage = stage
+        if "answer_verdict" in updates:
+            verdict = str(updates.get("answer_verdict") or "").strip()
+            if verdict not in ANSWER_VERDICTS:
+                raise FeedbackError(
+                    422, "invalid_answer_verdict", "答案判定不正確。"
+                )
+            row.answer_verdict = verdict
+        if "expected_answer_mode" in updates:
+            mode = str(updates.get("expected_answer_mode") or "").strip()
+            if mode not in EXPECTED_ANSWER_MODES:
+                raise FeedbackError(
+                    422, "invalid_expected_answer_mode", "預期回答模式不正確。"
+                )
+            row.expected_answer_mode = mode
+        if "expected_refusal" in updates:
+            expected_refusal = str(
+                updates.get("expected_refusal") or ""
+            ).strip()
+            if expected_refusal not in EXPECTED_REFUSALS:
+                raise FeedbackError(
+                    422,
+                    "invalid_expected_refusal",
+                    "預期拒答判定不正確。",
+                )
+            row.expected_refusal = expected_refusal
+        if "expected_date_from" in updates:
+            row.expected_date_from = _parse_optional_date(
+                updates.get("expected_date_from"), "expected_date_from"
+            )
+        if "expected_date_to" in updates:
+            row.expected_date_to = _parse_optional_date(
+                updates.get("expected_date_to"), "expected_date_to"
+            )
+        if (
+            row.expected_date_from
+            and row.expected_date_to
+            and row.expected_date_from > row.expected_date_to
+        ):
+            raise FeedbackError(
+                422,
+                "invalid_feedback_date_range",
+                "預期日期起日不可晚於迄日。",
+            )
+        if "citation_verdicts" in updates:
+            row.citation_verdicts = _normalize_citation_verdicts(
+                updates.get("citation_verdicts")
+            )
         if "review_comment" in updates:
             text = str(updates.get("review_comment") or "").strip()
             if len(text) > COMMENT_MAX_LENGTH:
@@ -1351,6 +1706,25 @@ def export_agent_feedback(
                     "sentiment": row.sentiment,
                     "reason_codes": reasons.get(int(row.id), []),
                     "expected_behavior": row.expected_behavior,
+                    "root_cause_stage": row.root_cause_stage or "unknown",
+                    "answer_verdict": row.answer_verdict or "unknown",
+                    "expected_answer_mode": (
+                        row.expected_answer_mode or "unknown"
+                    ),
+                    "expected_refusal": (
+                        row.expected_refusal or "unspecified"
+                    ),
+                    "expected_date_from": (
+                        row.expected_date_from.isoformat()
+                        if row.expected_date_from
+                        else None
+                    ),
+                    "expected_date_to": (
+                        row.expected_date_to.isoformat()
+                        if row.expected_date_to
+                        else None
+                    ),
+                    "citation_verdicts": row.citation_verdicts or {},
                     "severity": row.severity,
                     "actionable": bool(row.actionable),
                     "linked_question_id": linked_id,

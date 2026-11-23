@@ -1423,6 +1423,18 @@ export const api = {
     );
   },
 
+  ragFeedbackRerun(feedbackId) {
+    return request(
+      `/api/rag/feedback/${encodeURIComponent(feedbackId)}/rerun`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeout: 300000,
+        trackClient: false,
+      },
+    );
+  },
+
   async ragFeedbackExport(params = {}) {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

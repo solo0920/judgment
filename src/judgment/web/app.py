@@ -197,6 +197,7 @@ from .feedback import (
     list_feedback,
     promote_feedback_to_question_bank,
     record_feedback_export,
+    rerun_feedback,
     record_interaction,
     submit_feedback,
     update_feedback,
@@ -348,6 +349,41 @@ class RagFeedbackUpdateRequest(BaseModel):
     severity: Optional[Literal["low", "medium", "high"]] = None
     actionable: Optional[bool] = None
     expected_behavior: Optional[str] = Field(default=None, max_length=4000)
+    root_cause_stage: Optional[
+        Literal[
+            "unknown",
+            "query_parse",
+            "financial_scope",
+            "law_retrieval",
+            "judgment_retrieval",
+            "reranker",
+            "context_builder",
+            "llm_generation",
+            "citation_audit",
+            "answer_routing",
+            "refusal_policy",
+            "data_quality",
+        ]
+    ] = None
+    answer_verdict: Optional[
+        Literal["unknown", "correct", "partial", "incorrect"]
+    ] = None
+    expected_answer_mode: Optional[
+        Literal[
+            "unknown",
+            "law_first",
+            "list",
+            "structured",
+            "semantic",
+            "refusal",
+        ]
+    ] = None
+    expected_refusal: Optional[
+        Literal["unspecified", "should_answer", "should_refuse"]
+    ] = None
+    expected_date_from: Optional[str] = Field(default=None, max_length=10)
+    expected_date_to: Optional[str] = Field(default=None, max_length=10)
+    citation_verdicts: Optional[Dict[str, Any]] = None
     review_comment: Optional[str] = Field(default=None, max_length=4000)
     linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
     linked_question_id: Optional[int] = Field(default=None, ge=1)
@@ -1267,6 +1303,7 @@ API_ENDPOINT_LABELS = {
     "/api/rag/feedback/export": "RAG 回饋代理匯出",
     "/api/rag/feedback/{feedback_id}": "RAG 回饋明細",
     "/api/rag/feedback/{feedback_id}/promote": "RAG 回饋轉題庫 draft",
+    "/api/rag/feedback/{feedback_id}/rerun": "RAG 回饋用目前系統重跑",
     "/api/question-bank/stats": "題庫統計",
     "/api/question-bank/items": "題庫題目",
     "/api/question-bank/tags": "題庫標籤",
@@ -4980,6 +5017,9 @@ def create_app(
         status: str = "",
         severity: str = "",
         reason: str = "",
+        root_cause_stage: str = "",
+        answer_verdict: str = "",
+        expected_refusal: str = "",
         keyword: str = "",
         request_id: str = "",
         from_date: str = "",
@@ -4994,6 +5034,9 @@ def create_app(
                     "status": status,
                     "severity": severity,
                     "reason": reason,
+                    "root_cause_stage": root_cause_stage,
+                    "answer_verdict": answer_verdict,
+                    "expected_refusal": expected_refusal,
                     "keyword": keyword,
                     "request_id": request_id,
                     "from_date": from_date,
@@ -5055,6 +5098,20 @@ def create_app(
             payload,
             status_code=200 if payload.get("reused") else 201,
         )
+
+    @app.post("/api/rag/feedback/{feedback_id}/rerun")
+    def rag_feedback_rerun(feedback_id: int) -> JSONResponse:
+        try:
+            payload = rerun_feedback(
+                app.state.session_factory,
+                runtime_settings(
+                    app.state.settings, app.state.session_factory
+                ),
+                feedback_id,
+            )
+        except FeedbackError as exc:
+            return _feedback_error_response(exc)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/rag/feedback")
     def rag_feedback_create(

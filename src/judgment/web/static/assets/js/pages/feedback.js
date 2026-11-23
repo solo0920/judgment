@@ -41,6 +41,51 @@ const SEVERITY_LABELS = {
   high: "高",
 };
 
+const ROOT_CAUSE_OPTIONS = [
+  ["unknown", "尚未判定"],
+  ["query_parse", "問題解析／日期條件"],
+  ["financial_scope", "金融範圍判斷"],
+  ["law_retrieval", "法規／命令檢索"],
+  ["judgment_retrieval", "判決檢索"],
+  ["reranker", "Reranker 排序"],
+  ["context_builder", "Context 組裝"],
+  ["llm_generation", "LLM 生成"],
+  ["citation_audit", "引用驗證"],
+  ["answer_routing", "回答模式路由"],
+  ["refusal_policy", "拒答政策"],
+  ["data_quality", "資料品質／版本"],
+];
+
+const ANSWER_VERDICT_OPTIONS = [
+  ["unknown", "尚未判定"],
+  ["correct", "正確"],
+  ["partial", "部分正確"],
+  ["incorrect", "錯誤"],
+];
+
+const ANSWER_MODE_OPTIONS = [
+  ["unknown", "尚未指定"],
+  ["law_first", "法規優先"],
+  ["list", "判決列表"],
+  ["structured", "結構化回答"],
+  ["semantic", "一般語意問答"],
+  ["refusal", "應拒答"],
+];
+
+const EXPECTED_REFUSAL_OPTIONS = [
+  ["unspecified", "未指定"],
+  ["should_answer", "應該回答"],
+  ["should_refuse", "應該拒答"],
+];
+
+const CITATION_VERDICT_OPTIONS = [
+  ["", "未標註"],
+  ["supports", "支持答案"],
+  ["irrelevant", "與答案無關"],
+  ["wrong", "內容或條號錯誤"],
+  ["unsure", "不確定"],
+];
+
 function filterValue(filters, key) {
   return String(filters[key] || "");
 }
@@ -63,6 +108,27 @@ function renderStats(stats) {
     <div class="metric-card"><div class="metric-label">不滿意率</div><div class="metric-value">${rate}</div><div class="metric-desc">不滿意 ÷ 總回饋</div></div>
     <div class="metric-card"><div class="metric-label">待處理</div><div class="metric-value">${formatNumber(stats?.new || 0)}</div><div class="metric-desc">狀態為待處理</div></div>
     <div class="metric-card"><div class="metric-label">可行動</div><div class="metric-value">${formatNumber(stats?.actionable || 0)}</div><div class="metric-desc">已標記可轉 regression</div></div>
+  </div>
+  ${renderAttribution(stats)}`;
+}
+
+function renderAttribution(stats) {
+  const rows = Array.isArray(stats?.by_root_cause) ? stats.by_root_cause : [];
+  if (!rows.length) return "";
+  const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
+  return `<div class="rag-feedback-attribution-stats">
+    <div class="report-section-title">錯誤階段分布</div>
+    ${rows
+      .map((row) => {
+        const count = Number(row.count) || 0;
+        const width = Math.max(2, (count / max) * 100);
+        return `<div class="rag-feedback-attribution-row">
+          <span>${escapeHtml(row.label || row.code)}</span>
+          <span class="rag-feedback-attribution-track"><i style="width:${width}%"></i></span>
+          <strong>${formatNumber(count)}</strong>
+        </div>`;
+      })
+      .join("")}
   </div>`;
 }
 
@@ -94,6 +160,12 @@ function renderFilterForm(payload, filters) {
       <select name="severity" class="input">
         <option value="">全部</option>
         ${severities.map((item) => `<option value="${escapeHtml(item.code)}" ${filters.severity === item.code ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+      </select>
+    </label>
+    <label>錯誤階段
+      <select name="root_cause_stage" class="input">
+        <option value="">全部</option>
+        ${ROOT_CAUSE_OPTIONS.map(([code, label]) => `<option value="${code}" ${filters.root_cause_stage === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
       </select>
     </label>
     <label class="rag-feedback-filter-wide">關鍵字
@@ -151,13 +223,35 @@ function renderList(payload, selectedId) {
   </div>`;
 }
 
-function renderCitations(snapshot) {
+function citationKey(item) {
+  const jid = String(item?.jid || "").trim();
+  if (jid) return `jid:${jid}`;
+  return `law:${String(item?.law_name || "").trim()}:${String(
+    item?.article_no || "",
+  ).trim()}`;
+}
+
+function citationVerdictSelect(item, verdicts) {
+  const key = citationKey(item);
+  const current = String(verdicts?.[key] || "");
+  return `<label class="rag-feedback-citation-verdict">來源判定
+    <select class="input" data-citation-verdict data-citation-key="${escapeHtml(key)}">
+      ${CITATION_VERDICT_OPTIONS.map(
+        ([code, label]) =>
+          `<option value="${escapeHtml(code)}" ${current === code ? "selected" : ""}>${escapeHtml(label)}</option>`,
+      ).join("")}
+    </select>
+  </label>`;
+}
+
+function renderCitations(snapshot, detail) {
   const citations = Array.isArray(snapshot?.citations) && snapshot.citations.length
     ? snapshot.citations
     : Array.isArray(snapshot?.judgments)
       ? snapshot.judgments
       : [];
   const laws = Array.isArray(snapshot?.law_sources) ? snapshot.law_sources : [];
+  const verdicts = detail?.citation_verdicts || {};
   return `<div class="rag-feedback-replay-grid">
     <section class="rag-feedback-replay-card">
       <div class="report-section-title">判決引用 ${citations.length} 筆</div>
@@ -171,6 +265,7 @@ function renderCitations(snapshot) {
                 </div>
                 <div class="rag-feedback-citation-meta">${escapeHtml([item.court, item.jdate].filter(Boolean).join(" · "))}</div>
                 ${item.snippet ? `<p>${escapeHtml(item.snippet)}</p>` : ""}
+                ${citationVerdictSelect(item, verdicts)}
               </article>`,
             )
             .join("")
@@ -187,6 +282,7 @@ function renderCitations(snapshot) {
                   <span>${escapeHtml(item.article_no || "")}</span>
                 </div>
                 ${item.snippet || item.text ? `<p>${escapeHtml(item.snippet || item.text)}</p>` : ""}
+                ${citationVerdictSelect(item, verdicts)}
               </article>`,
             )
             .join("")
@@ -194,6 +290,64 @@ function renderCitations(snapshot) {
     </section>
   </div>`;
 }
+
+function renderRerun(result) {
+  if (!result) return "";
+  const diff = result.diff || {};
+  const flags = [
+    ["答案變更", diff.answer_changed],
+    ["來源模式變更", diff.answer_source_changed],
+    ["狀態變更", diff.status_changed],
+    ["檢索模式變更", diff.retrieval_mode_changed],
+  ];
+  const list = (title, values, tone) => `<div class="rag-feedback-rerun-list">
+    <strong>${escapeHtml(title)}</strong>
+    ${(values || []).length
+      ? values.map((value) => `<span class="badge badge-${tone}">${escapeHtml(value)}</span>`).join(" ")
+      : '<span class="cell-empty">無</span>'}
+  </div>`;
+  return `<section class="report-card rag-feedback-rerun" data-feedback-rerun>
+    <div class="report-head">
+      <div class="report-title-group">
+        <div class="report-kicker">CURRENT PIPELINE RERUN</div>
+        <div class="report-title">用目前系統重跑同一題</div>
+        <div class="report-sub">此結果不會覆寫原始快照；用來比較修正前後。</div>
+      </div>
+      <div class="rag-feedback-detail-head-actions">
+        ${flags
+          .map(([label, changed]) =>
+            statusBadge(changed ? "warning" : "success", `${label}：${changed ? "有" : "無"}`),
+          )
+          .join("")}
+      </div>
+    </div>
+    <div class="report-section">
+      <div class="rag-feedback-rerun-grid">
+        <div>
+          <div class="report-section-title">原始回答</div>
+          <pre class="rag-feedback-replay-answer">${escapeHtml(result.previous?.answer || "")}</pre>
+        </div>
+        <div>
+          <div class="report-section-title">目前系統回答</div>
+          <pre class="rag-feedback-replay-answer">${escapeHtml(result.current?.answer || "")}</pre>
+        </div>
+      </div>
+      <div class="rag-feedback-rerun-lists">
+        ${list("新增判決引用", diff.citations_added, "ok")}
+        ${list("移除判決引用", diff.citations_removed, "warn")}
+        ${list("新增法規來源", diff.laws_added, "ok")}
+        ${list("移除法規來源", diff.laws_removed, "warn")}
+      </div>
+      <div class="rag-feedback-detail-grid">
+        <div><span class="muted">原始 answer_source</span><strong>${escapeHtml(result.previous?.answer_source || "—")}</strong></div>
+        <div><span class="muted">目前 answer_source</span><strong>${escapeHtml(result.current?.answer_source || "—")}</strong></div>
+        <div><span class="muted">原始檢索模式</span><strong>${escapeHtml(result.previous?.retrieval_mode || "—")}</strong></div>
+        <div><span class="muted">目前檢索模式</span><strong>${escapeHtml(result.current?.retrieval_mode || "—")}</strong></div>
+      </div>
+    </div>
+  </section>`;
+}
+
 
 function renderDetail(detail) {
   const snapshot = detail?.snapshot || {};
@@ -245,7 +399,7 @@ function renderDetail(detail) {
         <pre class="rag-feedback-replay-answer">${escapeHtml(snapshot.answer || "（沒有回答文字）")}</pre>
         ${snapshot.notice ? `<div class="answer-notice">${escapeHtml(snapshot.notice)}</div>` : ""}
       </div>
-      ${renderCitations(snapshot)}
+      ${renderCitations(snapshot, detail)}
     </div>
     ${waterfall ? `<div class="report-section"><div class="report-section-title">Pipeline 快照</div><div class="rag-process-body">${waterfall}</div></div>` : ""}
     <div class="report-section">
@@ -287,6 +441,50 @@ function renderDetail(detail) {
             <span>可行動 / 轉 regression</span>
           </label>
         </div>
+        <div class="rag-feedback-attribution rag-feedback-triage-wide">
+          <label>主要錯誤階段
+            <select class="input" name="root_cause_stage">
+              ${ROOT_CAUSE_OPTIONS.map(([code, label]) => `<option value="${code}" ${detail.root_cause_stage === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+            </select>
+          </label>
+          <label>預期回答模式
+            <select class="input" name="expected_answer_mode">
+              ${ANSWER_MODE_OPTIONS.map(([code, label]) => `<option value="${code}" ${detail.expected_answer_mode === code ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+            </select>
+          </label>
+          <label>預期日期起
+            <input class="input" type="date" name="expected_date_from" value="${escapeHtml(detail.expected_date_from || "")}" />
+          </label>
+          <label>預期日期迄
+            <input class="input" type="date" name="expected_date_to" value="${escapeHtml(detail.expected_date_to || "")}" />
+          </label>
+        </div>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>答案判定</legend>
+            <div class="rag-feedback-choice-options">
+              ${ANSWER_VERDICT_OPTIONS.map(([code, label]) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="answer_verdict" value="${code}" ${detail.answer_verdict === code ? "checked" : ""} />
+                <span>${escapeHtml(label)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+        </div>
+        <div class="rag-feedback-choice-row rag-feedback-triage-wide">
+          <fieldset class="rag-feedback-choice-group">
+            <legend>預期拒答判定</legend>
+            <div class="rag-feedback-choice-options">
+              ${EXPECTED_REFUSAL_OPTIONS.map(([code, label]) => `<label class="rag-feedback-choice-pill">
+                <input type="radio" name="expected_refusal" value="${code}" ${detail.expected_refusal === code ? "checked" : ""} />
+                <span>${escapeHtml(label)}</span>
+              </label>`).join("")}
+            </div>
+          </fieldset>
+          <label class="rag-feedback-filter-check">
+            <input type="checkbox" name="citation_missing" ${detail.citation_verdicts?.missing ? "checked" : ""} />
+            <span>有應該引用但漏掉的來源</span>
+          </label>
+        </div>
         <label class="rag-feedback-triage-wide">人工建議 Agent 修正的方向 prompt（會進 Agent JSONL，不含原始留言）
           <textarea class="input" name="expected_behavior" rows="3" maxlength="4000"
             placeholder="例：近二年查詢必須顯示實際日期範圍，且只引用該範圍內的判決；查無資料時明確說明，不要生成判決清單。">${escapeHtml(detail.expected_behavior || "")}</textarea>
@@ -297,6 +495,10 @@ function renderDetail(detail) {
         </label>
         <div class="rag-feedback-triage-actions">
           <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>儲存 triage</span></button>
+          <button class="btn btn-secondary btn-sm" type="button"
+            data-feedback-action="rerun" data-feedback-id="${detail.id}">
+            ${icon("refresh", 13)}<span>用目前系統重跑</span>
+          </button>
           <button class="btn btn-secondary btn-sm" type="button"
             data-feedback-action="promote" data-feedback-id="${detail.id}"
             ${detail.linked_question_id || !detail.actionable || !String(detail.expected_behavior || "").trim() ? "disabled" : ""}
@@ -315,6 +517,7 @@ export function createFeedbackController(container, { onStats } = {}) {
   let page = 1;
   let selectedId = null;
   let detail = null;
+  let rerun = null;
   let disposed = false;
 
   const notifyStats = (stats) => {
@@ -347,7 +550,11 @@ export function createFeedbackController(container, { onStats } = {}) {
     if (statsBox) statsBox.innerHTML = renderStats(payload.stats || {});
     if (filterBox) filterBox.innerHTML = renderFilterForm(payload, filters);
     if (listBox) listBox.innerHTML = renderList(payload, selectedId);
-    if (detailBox) detailBox.innerHTML = detail ? renderDetail(detail) : "";
+    if (detailBox) {
+      detailBox.innerHTML = detail
+        ? `${renderDetail(detail)}${renderRerun(rerun)}`
+        : "";
+    }
     notifyStats(payload.stats || {});
   };
 
@@ -377,6 +584,7 @@ export function createFeedbackController(container, { onStats } = {}) {
 
   const loadDetail = async (id) => {
     selectedId = Number(id);
+    rerun = null;
     render();
     try {
       detail = await api.ragFeedbackDetail(selectedId);
@@ -393,6 +601,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       status: String(data.get("status") || ""),
       reason: String(data.get("reason") || ""),
       severity: String(data.get("severity") || ""),
+      root_cause_stage: String(data.get("root_cause_stage") || ""),
       keyword: String(data.get("keyword") || "").trim(),
       actionable: data.get("actionable") ? "1" : "",
     };
@@ -406,6 +615,7 @@ export function createFeedbackController(container, { onStats } = {}) {
       collectFilters(filterForm);
       selectedId = null;
       detail = null;
+      rerun = null;
       await load();
       return;
     }
@@ -414,6 +624,15 @@ export function createFeedbackController(container, { onStats } = {}) {
       event.preventDefault();
       if (!detail) return;
       const data = new FormData(triageForm);
+      const citationVerdicts = {};
+      container
+        .querySelectorAll("[data-citation-verdict]")
+        .forEach((select) => {
+          const verdict = String(select.value || "").trim();
+          const key = String(select.dataset.citationKey || "").trim();
+          if (verdict && key) citationVerdicts[key] = verdict;
+        });
+      if (data.get("citation_missing")) citationVerdicts.missing = true;
       const button = triageForm.querySelector('button[type="submit"]');
       setBusy(button, true, "儲存中…");
       try {
@@ -422,6 +641,17 @@ export function createFeedbackController(container, { onStats } = {}) {
           severity: String(data.get("severity") || ""),
           actionable: Boolean(data.get("actionable")),
           expected_behavior: String(data.get("expected_behavior") || ""),
+          root_cause_stage: String(data.get("root_cause_stage") || "unknown"),
+          answer_verdict: String(data.get("answer_verdict") || "unknown"),
+          expected_answer_mode: String(
+            data.get("expected_answer_mode") || "unknown",
+          ),
+          expected_refusal: String(
+            data.get("expected_refusal") || "unspecified",
+          ),
+          expected_date_from: String(data.get("expected_date_from") || ""),
+          expected_date_to: String(data.get("expected_date_to") || ""),
+          citation_verdicts: citationVerdicts,
           review_comment: String(data.get("review_comment") || ""),
         });
         render();
@@ -480,6 +710,20 @@ export function createFeedbackController(container, { onStats } = {}) {
           toast("已匯出代理用 JSONL；不含原始留言。", "ok");
         } catch (error) {
           toast(error.message || "匯出失敗。", "danger");
+        } finally {
+          setBusy(actionButton, false);
+        }
+        return;
+      }
+      if (action === "rerun") {
+        const feedbackId = actionButton.dataset.feedbackId;
+        setBusy(actionButton, true, "重跑中…");
+        try {
+          rerun = await api.ragFeedbackRerun(feedbackId);
+          render();
+          toast("已完成目前系統重跑，請查看 diff。", "ok", 5200);
+        } catch (error) {
+          toast(error.message || "重跑失敗。", "danger");
         } finally {
           setBusy(actionButton, false);
         }

@@ -284,8 +284,69 @@ def _ensure_demo_settings(engine: Engine) -> None:
         )
 
 
+def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
+    """Add structured triage fields to an existing rag_feedback table."""
+
+    inspector = inspect(engine)
+    if "rag_feedback" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"] for column in inspector.get_columns("rag_feedback")
+    }
+    additions = [
+        (
+            "root_cause_stage",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "root_cause_stage VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+        ),
+        (
+            "answer_verdict",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "answer_verdict VARCHAR(16) NOT NULL DEFAULT 'unknown'",
+        ),
+        (
+            "expected_answer_mode",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "expected_answer_mode VARCHAR(24) NOT NULL DEFAULT 'unknown'",
+        ),
+        (
+            "expected_refusal",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "expected_refusal VARCHAR(16) NOT NULL DEFAULT 'unspecified'",
+        ),
+        (
+            "expected_date_from",
+            "ALTER TABLE rag_feedback ADD COLUMN expected_date_from DATE",
+        ),
+        (
+            "expected_date_to",
+            "ALTER TABLE rag_feedback ADD COLUMN expected_date_to DATE",
+        ),
+        (
+            "citation_verdicts",
+            "ALTER TABLE rag_feedback ADD COLUMN "
+            "citation_verdicts JSON NOT NULL DEFAULT '{}'",
+        ),
+    ]
+    if not additions:
+        return
+    with engine.begin() as connection:
+        for name, statement in additions:
+            if name in columns:
+                continue
+            connection.execute(text(statement))
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_feedback_root_cause_stage "
+                "ON rag_feedback (root_cause_stage)"
+            )
+        )
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    _ensure_rag_feedback_triage_columns(engine)
     _ensure_judgment_court_normalized(engine)
     _ensure_judgment_versioning(engine)
     _ensure_law_version_code(engine)
