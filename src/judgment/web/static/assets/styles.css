@@ -5770,6 +5770,33 @@ button.chip:hover {
   display: none;
 }
 
+.rag-process-body > .rag-wf-card {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rag-process-body > .rag-wf-card .rag-wf-head {
+  padding: 10px 12px;
+}
+
+.rag-process-body > .rag-wf-card .rag-wf-summary {
+  padding: 8px 12px;
+}
+
+.rag-process-body > .rag-wf-card .rag-wf-axis {
+  padding: 8px 12px 2px;
+}
+
+.rag-process-body > .rag-wf-card .rag-wf-stages {
+  padding: 0 12px 8px;
+}
+
+.rag-process-body > .rag-wf-card .rag-wf-hint {
+  padding: 0 12px 10px;
+}
+
 .rag-process-list {
   display: flex;
   flex-direction: column;

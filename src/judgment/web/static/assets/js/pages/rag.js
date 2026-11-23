@@ -11,7 +11,6 @@ import {
   updateHistoryEntry,
 } from "../store.js";
 import {
-  renderRagPipelineStageChart,
   renderRagPipelineWaterfall,
   renderTestFlowPanel,
 } from "./performance.js";
@@ -390,6 +389,34 @@ function processPanelMarkup() {
   </div>`;
 }
 
+function pipelineProcessPanelMarkup(payload) {
+  const flow =
+    payload?.pipeline_flow && typeof payload.pipeline_flow === "object"
+      ? payload.pipeline_flow
+      : null;
+  if (!flow) return "";
+  const card = renderRagPipelineWaterfall(flow, {
+    serverDurationMs: Number(payload.duration_ms) || 0,
+    embedded: true,
+  });
+  if (!card) return "";
+  const decisions = Array.isArray(flow.decisions)
+    ? flow.decisions.length
+    : 0;
+  return `<div class="rag-process is-complete" id="rag-process">
+    <div class="rag-process-control">
+      <button type="button" class="rag-process-toggle" id="rag-process-toggle"
+        aria-expanded="false" aria-controls="rag-process-body" title="展開後端處理流程">
+        <span class="rag-process-toggle-label-collapsed">展開後端處理流程</span>
+        <span class="rag-process-toggle-label-expanded">收合後端處理流程</span>
+        ${icon("chevronDown", 11)}
+      </button>
+      <span class="rag-process-summary" id="rag-process-summary">完成 · ${decisions} 決策</span>
+    </div>
+    <div class="rag-process-body" id="rag-process-body" hidden>${card}</div>
+  </div>`;
+}
+
 function createProcessController(answerCard) {
   const panel = answerCard.querySelector("#rag-process");
   const list = panel?.querySelector("#rag-process-list");
@@ -511,23 +538,19 @@ function createProcessController(answerCard) {
       ok && payload?.pipeline_flow && typeof payload.pipeline_flow === "object"
         ? payload.pipeline_flow
         : null;
-    const decisionCount = Array.isArray(flow?.decisions)
-      ? flow.decisions.length
-      : 0;
     if (summary) {
       summary.textContent = ok
-        ? `完成 · ${stepCount} 步${
-            flow ? ` · ${decisionCount} 決策` : ""
-          } · ${elapsed}`
+        ? `完成 · ${stepCount} 步 · ${elapsed}`
         : `失敗 · ${stepCount} 步`;
     }
-    if (list && flow) {
-      const chart = renderRagPipelineStageChart(flow, {
+    if (flow) {
+      const card = renderRagPipelineWaterfall(flow, {
         serverDurationMs: Number(payload.duration_ms) || 0,
+        embedded: true,
       });
-      if (chart) {
-        list.classList.add("is-waterfall");
-        list.innerHTML = chart;
+      const body = panel.querySelector("#rag-process-body");
+      if (card && body) {
+        body.innerHTML = card;
       }
     }
     panel.classList.add("is-complete");
@@ -1282,18 +1305,6 @@ function renderAnswerBody(payload, actionsHtml = "") {
       </div>`
     : "";
 
-  const pipelineFlow =
-    payload.pipeline_flow && typeof payload.pipeline_flow === "object"
-      ? payload.pipeline_flow
-      : null;
-  const pipelineSection =
-    !partial && pipelineFlow
-      ? renderRagPipelineWaterfall(pipelineFlow, {
-          serverDurationMs: Number(payload.duration_ms) || 0,
-          embedded: true,
-        })
-      : "";
-
   const answerText = String(payload.answer || "").trim();
   const answerContent =
     answerText ||
@@ -1346,8 +1357,7 @@ function renderAnswerBody(payload, actionsHtml = "") {
       }
       ${testRunBlock}
       ${matchedChips}
-      ${citationSection}
-      ${pipelineSection}`;
+      ${citationSection}`;
 }
 
 function renderAnswer(question, payload, processHtml = "") {
@@ -1376,6 +1386,7 @@ function renderAnswer(question, payload, processHtml = "") {
     .filter(Boolean)
     .join(" · ");
   const structuredAnswer = payload.answer_source === "structured";
+  const processSection = processHtml || pipelineProcessPanelMarkup(payload);
   const modelChip =
     payload.answer_source === "llm" && llmModel
       ? `<span class="answer-model" title="${escapeHtml(modelTitle)}">${icon(
@@ -1397,7 +1408,7 @@ function renderAnswer(question, payload, processHtml = "") {
         <span>${Number(payload.duration_ms || 0)} ms</span>
         ${modelChip}
       </div>
-      ${processHtml}
+      ${processSection}
     </div>
     <div class="answer-body">${renderAnswerBody(
       payload,
@@ -3175,13 +3186,10 @@ export async function render(root) {
       if (!payload.pipeline_flow) {
         void hydratePipelineFlow(payload).then(() => {
           if (isStale() || !payload.pipeline_flow) return;
-          const body = answerElement.querySelector(".answer-body");
-          if (!body || body.querySelector(".rag-wf-card")) return;
-          const waterfall = renderRagPipelineWaterfall(payload.pipeline_flow, {
-            serverDurationMs: Number(payload.duration_ms) || 0,
-            embedded: true,
-          });
-          if (waterfall) body.insertAdjacentHTML("beforeend", waterfall);
+          const head = answerElement.querySelector(".answer-head");
+          if (!head || head.querySelector(".rag-wf-card")) return;
+          const panel = pipelineProcessPanelMarkup(payload);
+          if (panel) head.insertAdjacentHTML("beforeend", panel);
         });
       }
       if (payload.test_run?.run_id) {
