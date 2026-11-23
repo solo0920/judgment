@@ -2736,7 +2736,7 @@ LIMIT ${l} OFFSET ${p}`,warnings:d,meta:{store:n,filters:a,client_side:!0}}}asyn
               <strong>${r(n.label)}</strong>
               <small>${r(n.description||"")}</small>
             </span>
-            ${y?`<span class="badge badge-warn badge-mono processing-update-count" title="${r($)}">${g("refresh",10)}${c(f)}</span>`:Ft(n.status)}
+            ${y?`<span class="badge badge-warn badge-mono processing-update-count" title="${r($)}">${g(n.id==="judgment_import"?"download":"refresh",10)}${c(f)}</span>`:Ft(n.status)}
           </button>`}).join("")}
     </nav>
     <div class="status-sidebar-foot">

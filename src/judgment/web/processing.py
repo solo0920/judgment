@@ -5106,6 +5106,24 @@ def build_processing_snapshot(
             update_message = (
                 f"待建立 {index_pending_months:,} 個月份的新 embedding"
             )
+        legal_index_pending = str(legal_index.get("status") or "") in {
+            "stale",
+            "not_indexed",
+        }
+        if definition["id"] == "legal_index_versions" and legal_index_pending:
+            workflow_update_available = True
+            workflow_pending_count = 1
+            update_count = 1
+            update_origin = "Qdrant／PostgreSQL"
+            update_mechanism = (
+                "active 法規／命令索引與目前條文版本、數量比對"
+            )
+            reasons = "；".join(legal_index.get("reasons") or [])
+            update_message = (
+                f"法規／命令索引需要重建：{reasons}"
+                if reasons
+                else "法規／命令索引需要重建。"
+            )
         active_run_label = ""
         if active_runs:
             active_run = active_runs[0]

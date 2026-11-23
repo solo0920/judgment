@@ -1763,6 +1763,9 @@ def test_processing_snapshot_lists_workflows(processing_client: TestClient) -> N
     assert workflows["legal_index_versions"]["program"].startswith(
         "judgment-index-legal-articles"
     )
+    assert workflows["legal_index_versions"]["update_available"] is True
+    assert workflows["legal_index_versions"]["update_count"] == 1
+    assert "需要重建" in workflows["legal_index_versions"]["update_message"]
     assert workflows["law_download"]["program"].startswith("judgment-law-download")
     assert [
         item["key"] for item in workflows["law_download"]["index_timelines"]
