@@ -765,7 +765,8 @@ def test_static_console_is_served(web_client) -> None:
     feedback_js = web_client.get("/assets/js/pages/feedback.js")
     assert feedback_js.status_code == 200
     assert "createFeedbackController" in feedback_js.text
-    assert "預期行為" in feedback_js.text
+    assert "人工建議 Agent 修正的方向 prompt" in feedback_js.text
+    assert "審查備註（僅管理者可見）" in feedback_js.text
     assert "ragFeedbackUpdate" in feedback_js.text
     assert "rag-feedback-choice-pill" in feedback_js.text
     assert 'type="radio" name="status"' in feedback_js.text

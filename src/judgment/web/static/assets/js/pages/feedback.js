@@ -287,18 +287,20 @@ function renderDetail(detail) {
             <span>可行動 / 轉 regression</span>
           </label>
         </div>
-        <label class="rag-feedback-triage-wide">預期行為（會進代理 JSONL，不含原始留言）
-          <textarea class="input" name="expected_behavior" rows="3" maxlength="4000">${escapeHtml(detail.expected_behavior || "")}</textarea>
+        <label class="rag-feedback-triage-wide">人工建議 Agent 修正的方向 prompt（會進 Agent JSONL，不含原始留言）
+          <textarea class="input" name="expected_behavior" rows="3" maxlength="4000"
+            placeholder="例：近二年查詢必須顯示實際日期範圍，且只引用該範圍內的判決；查無資料時明確說明，不要生成判決清單。">${escapeHtml(detail.expected_behavior || "")}</textarea>
         </label>
         <label class="rag-feedback-triage-wide">審查備註（僅管理者可見）
-          <textarea class="input" name="review_comment" rows="3" maxlength="4000">${escapeHtml(detail.review_comment || "")}</textarea>
+          <textarea class="input" name="review_comment" rows="3" maxlength="4000"
+            placeholder="例：已確認是引用條號錯誤；交由 #123 修正，完成後回填 PR。">${escapeHtml(detail.review_comment || "")}</textarea>
         </label>
         <div class="rag-feedback-triage-actions">
           <button class="btn btn-primary btn-sm" type="submit">${icon("check", 13)}<span>儲存 triage</span></button>
           <button class="btn btn-secondary btn-sm" type="button"
             data-feedback-action="promote" data-feedback-id="${detail.id}"
             ${detail.linked_question_id || !detail.actionable || !String(detail.expected_behavior || "").trim() ? "disabled" : ""}
-            title="${detail.linked_question_id ? "已建立題庫 draft" : "需先標記可行動並填寫預期行為"}">
+            title="${detail.linked_question_id ? "已建立題庫 draft" : "需先標記可行動並填寫人工建議 Agent 修正方向的 prompt"}">
             ${icon("plus", 13)}<span>${detail.linked_question_id ? `已建立題庫 draft #${detail.linked_question_id}` : "建立題庫 draft"}</span>
           </button>
         </div>

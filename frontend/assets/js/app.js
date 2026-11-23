@@ -3706,18 +3706,20 @@ ${Me}`)}return de.status==="error"&&E(de.message||"\u7248\u672C\u6AA2\u67E5\u593
             <span>\u53EF\u884C\u52D5 / \u8F49 regression</span>
           </label>
         </div>
-        <label class="rag-feedback-triage-wide">\u9810\u671F\u884C\u70BA\uFF08\u6703\u9032\u4EE3\u7406 JSONL\uFF0C\u4E0D\u542B\u539F\u59CB\u7559\u8A00\uFF09
-          <textarea class="input" name="expected_behavior" rows="3" maxlength="4000">${r(e.expected_behavior||"")}</textarea>
+        <label class="rag-feedback-triage-wide">\u4EBA\u5DE5\u5EFA\u8B70 Agent \u4FEE\u6B63\u7684\u65B9\u5411 prompt\uFF08\u6703\u9032 Agent JSONL\uFF0C\u4E0D\u542B\u539F\u59CB\u7559\u8A00\uFF09
+          <textarea class="input" name="expected_behavior" rows="3" maxlength="4000"
+            placeholder="\u4F8B\uFF1A\u8FD1\u4E8C\u5E74\u67E5\u8A62\u5FC5\u9808\u986F\u793A\u5BE6\u969B\u65E5\u671F\u7BC4\u570D\uFF0C\u4E14\u53EA\u5F15\u7528\u8A72\u7BC4\u570D\u5167\u7684\u5224\u6C7A\uFF1B\u67E5\u7121\u8CC7\u6599\u6642\u660E\u78BA\u8AAA\u660E\uFF0C\u4E0D\u8981\u751F\u6210\u5224\u6C7A\u6E05\u55AE\u3002">${r(e.expected_behavior||"")}</textarea>
         </label>
         <label class="rag-feedback-triage-wide">\u5BE9\u67E5\u5099\u8A3B\uFF08\u50C5\u7BA1\u7406\u8005\u53EF\u898B\uFF09
-          <textarea class="input" name="review_comment" rows="3" maxlength="4000">${r(e.review_comment||"")}</textarea>
+          <textarea class="input" name="review_comment" rows="3" maxlength="4000"
+            placeholder="\u4F8B\uFF1A\u5DF2\u78BA\u8A8D\u662F\u5F15\u7528\u689D\u865F\u932F\u8AA4\uFF1B\u4EA4\u7531 #123 \u4FEE\u6B63\uFF0C\u5B8C\u6210\u5F8C\u56DE\u586B PR\u3002">${r(e.review_comment||"")}</textarea>
         </label>
         <div class="rag-feedback-triage-actions">
           <button class="btn btn-primary btn-sm" type="submit">${m("check",13)}<span>\u5132\u5B58 triage</span></button>
           <button class="btn btn-secondary btn-sm" type="button"
             data-feedback-action="promote" data-feedback-id="${e.id}"
             ${e.linked_question_id||!e.actionable||!String(e.expected_behavior||"").trim()?"disabled":""}
-            title="${e.linked_question_id?"\u5DF2\u5EFA\u7ACB\u984C\u5EAB draft":"\u9700\u5148\u6A19\u8A18\u53EF\u884C\u52D5\u4E26\u586B\u5BEB\u9810\u671F\u884C\u70BA"}">
+            title="${e.linked_question_id?"\u5DF2\u5EFA\u7ACB\u984C\u5EAB draft":"\u9700\u5148\u6A19\u8A18\u53EF\u884C\u52D5\u4E26\u586B\u5BEB\u4EBA\u5DE5\u5EFA\u8B70 Agent \u4FEE\u6B63\u65B9\u5411\u7684 prompt"}">
             ${m("plus",13)}<span>${e.linked_question_id?`\u5DF2\u5EFA\u7ACB\u984C\u5EAB draft #${e.linked_question_id}`:"\u5EFA\u7ACB\u984C\u5EAB draft"}</span>
           </button>
         </div>

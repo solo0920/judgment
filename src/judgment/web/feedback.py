@@ -998,7 +998,7 @@ def promote_feedback_to_question_bank(
             raise FeedbackError(
                 422,
                 "expected_behavior_required",
-                "請先填寫預期行為，才能建立題庫 draft。",
+                "請先填寫人工建議 Agent 修正方向的 prompt，才能建立題庫 draft。",
             )
         snapshot = row.snapshot or {}
         question = str(snapshot.get("question") or "").strip()
@@ -1082,7 +1082,7 @@ def promote_feedback_to_question_bank(
                 f"由 RAG 使用者回饋 #{int(feedback_id)} 建立；"
                 f"request_id={request_id}。"
                 f"原因：{', '.join(reasons) or '未分類'}。"
-                f"預期行為：{expected_behavior}。"
+                f"人工建議 Agent 修正方向 prompt：{expected_behavior}。"
                 "此題為 pending_review draft，需人工改寫與驗收；"
                 "未自動進入 holdout，也不含使用者原始留言。"
             ),
@@ -1193,7 +1193,7 @@ def update_feedback(
             text = str(updates.get("expected_behavior") or "").strip()
             if len(text) > COMMENT_MAX_LENGTH:
                 raise FeedbackError(
-                    422, "expected_behavior_too_long", "預期行為最多 4000 字。"
+                    422, "expected_behavior_too_long", "人工建議 Agent 修正方向的 prompt 最多 4000 字。"
                 )
             row.expected_behavior = text
         if "review_comment" in updates:

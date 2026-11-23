@@ -1207,7 +1207,7 @@ RAG 的資料流如下：
 9. 將法規／命令條文、判決片段與嚴格系統提示交給 Ollama LLM（快速預設 `gemma3:4b`，可改 `gemma3:27b`）。回答必須標註 `[1]`、`[2]` 等來源編號；若缺少有效引用、引用越界或模型回傳空回答，系統會先以嚴格提示重試一次；仍失敗則降級為只顯示檢索結果，不保留推測內容。
 10. 若問題與檢索資料無關，模型可明確回答「檢索到的資料不足以回答」；此類拒絕回答不要求引用編號，但不得憑空產生案號。
 
-回饋轉題庫：管理者在 `#/quality` 的「使用者回饋」將不滿意回饋標記為可行動並填寫 expected_behavior 後，可按「建立題庫 draft」。題目固定為 `pending_review`、`visibility=shared`、`source=user_feedback`；相同題目若已存在 holdout 會拒絕自動連結。代理匯出只包含已 triage 的 actionable 回饋，不含原始留言；可用 `uv run python scripts/export_rag_feedback.py --output .run/rag-feedback-agent.jsonl` 產生 JSONL，再用 `scripts/prepare_feedback_worktree.sh` 建立隔離 worktree 與 TASK.md。代理預設只準備、不自動執行；`--run` 是人工明示 opt-in，且仍只能開 PR、不得 merge／deploy。`.github/CODEOWNERS` 保護認證、路由／demo policy、CI、DB schema、備份與 tests；分支保護需啟用 Require review from Code Owners 才會真正阻擋。
+回饋轉題庫：管理者在 `#/quality` 的「使用者回饋」將不滿意回饋標記為可行動，並填寫「人工建議 Agent 修正的方向 prompt」（資料欄位 `expected_behavior`）後，可按「建立題庫 draft」。題目固定為 `pending_review`、`visibility=shared`、`source=user_feedback`；相同題目若已存在 holdout 會拒絕自動連結。代理匯出只包含已 triage 的 actionable 回饋，不含原始留言；可用 `uv run python scripts/export_rag_feedback.py --output .run/rag-feedback-agent.jsonl` 產生 JSONL，再用 `scripts/prepare_feedback_worktree.sh` 建立隔離 worktree 與 TASK.md。代理預設只準備、不自動執行；`--run` 是人工明示 opt-in，且仍只能開 PR、不得 merge／deploy。`.github/CODEOWNERS` 保護認證、路由／demo policy、CI、DB schema、備份與 tests；分支保護需啟用 Require review from Code Owners 才會真正阻擋。
 
 ```bash
 # 只統計候選判決，不呼叫 Ollama 或 Qdrant
