@@ -53,4 +53,9 @@ test("workflow intro keeps one action set and collapses execution details", () =
   assert.equal((html.match(/data-processing-action="check-updates"/g) || []).length, 1);
   assert.equal(html.includes("processing-workflow-details"), true);
   assert.equal(html.includes("processing-update-action"), false);
+  assert.equal(html.includes("<span>更新</span>"), true);
+  assert.ok(
+    html.indexOf('data-processing-action="check-updates"') <
+      html.indexOf('data-processing-action="run-workflow"'),
+  );
 });
