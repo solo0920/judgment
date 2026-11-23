@@ -20,6 +20,7 @@ from judgment.models import (
     DownloadUpdateRecord,
     JudgmentDocument,
     JudgmentIndexVersion,
+    JudgmentSnapshot,
     JudgmentVectorIndex,
     LawDatasetVersion,
     OllamaHost,
@@ -307,6 +308,57 @@ def test_snapshot_and_plan_report_real_archive_coverage(
     assert judgment_postgres["percent"] is None
     assert judgment_postgres["pending"]["count"] == 1
     assert judgment_postgres["actions"][0]["workflow_id"] == "judgment_import"
+
+
+def test_imported_update_snapshots_count_as_processed_archives(
+    tmp_path: Path, monkeypatch, session_factory
+) -> None:
+    monkeypatch.setenv(
+        "JUDGMENT_PROCESSING_STATE", str(tmp_path / "processing_state.json")
+    )
+    settings = _settings(tmp_path)
+    raw_dir = settings.judgment_data_dir / "raw_rar"
+    (raw_dir / "202601.rar").write_bytes(b"a" * 10)
+    update_name = "202602--(20261116Update).rar"
+    (raw_dir / update_name).write_bytes(b"b" * 20)
+    _add_judgment(session_factory, source_archive="202601.rar")
+    with session_factory() as session:
+        session.add(
+            JudgmentSnapshot(
+                issue_month="202602",
+                source_archive=update_name,
+                archive_sha256="b" * 64,
+                raw_row_count=30,
+                matched_count=20,
+                is_current=True,
+            )
+        )
+        session.commit()
+
+    snapshot = build_processing_snapshot(
+        settings=settings,
+        session_factory=session_factory,
+    )
+    local = snapshot["local_archives"]
+    assert local["total"] == 2
+    assert local["processed"] == 2
+    assert local["unprocessed"] == 0
+    assert local["unprocessed_bytes"] == 0
+    assert snapshot["capabilities"]["unprocessed_archives"] == 0
+    workflow = next(
+        item
+        for item in snapshot["workflows"]
+        if item["id"] == "judgment_import"
+    )
+    assert workflow["pending_count"] == 0
+    assert workflow["update_available"] is False
+
+    plan = build_processing_plan(
+        settings=settings,
+        session_factory=session_factory,
+    )
+    assert plan["local_archives"]["unprocessed"] == 0
+    assert plan["local_archives"]["pending"] == []
 
 
 def test_processing_sections_report_remote_updates_and_actions(

@@ -31,7 +31,7 @@
 
 ### User Story 2 - Header 與 Sidebar 更新提醒 (Priority: P1)
 
-Header 的「資料處理」導覽項目右下角顯示橘色 badge，數字為有更新的來源數（1–3）。Sidebar 的 `law_download`、`order_download`、`judgment_download` 在沒有執行中的 run、但有更新時，右側狀態 badge 顯示 refresh icon 加可更新數量的橘色 numeric badge，而不是「待命」；法院名稱正規化在 PostgreSQL 有 `court_normalized` 空值時顯示同一風格的 numeric badge。可更新 notice 必須標示偵測來源（線上來源或 PostgreSQL／本機）、偵測機制、檢查時間、訊息與數量，讓使用者能分辨是線上比對或本機資料庫計數。每個 workflow 面板必須顯示最近執行紀錄與版本檢查紀錄；法規／命令／判決面板提供「檢查更新」按鈕。
+Header 的「資料處理」導覽項目右下角顯示橘色 badge，數字為所有待處理項目的加總：有更新的來源數（1–3）、判決匯入待處理月份數、Qdrant 判決向量索引待補月份數，以及法規／命令索引待重建項目（0–1）。只有來源更新時仍顯示 1–3；多類別同時存在時 MUST 顯示加總值，tooltip MUST 分別列出各類別數量。Sidebar 的 `law_download`、`order_download`、`judgment_download` 在沒有執行中的 run、但有更新時，右側狀態 badge 顯示 refresh icon 加可更新數量的橘色 numeric badge，而不是「待命」；法院名稱正規化在 PostgreSQL 有 `court_normalized` 空值時顯示同一風格的 numeric badge。可更新 notice 必須標示偵測來源（線上來源或 PostgreSQL／本機）、偵測機制、檢查時間、訊息與數量，讓使用者能分辨是線上比對或本機資料庫計數。每個 workflow 面板必須顯示最近執行紀錄與版本檢查紀錄；法規／命令／判決面板提供「檢查更新」按鈕。
 
 **Acceptance Scenarios**:
 
@@ -66,7 +66,7 @@ Header 的「資料處理」導覽項目右下角顯示橘色 badge，數字為�
 - **FR-007**: `POST /api/updates/check` MUST 執行三類檢查並回傳最新狀態；同一時間只允許一個檢查，重疊時回傳目前狀態。
 - **FR-008**: `up.sh` MUST 在後端就緒後呼叫檢查；失敗只顯示警告，不阻止服務啟動；`JUDGMENT_SKIP_UPDATE_CHECK=1` 可略過。
 - **FR-009**: `/api/processing` 的 workflow entries MUST 包含 `update_available`、`update_status`、`update_count`、`update_origin`、`update_mechanism` 與 `update_message`，供 sidebar 顯示 refresh icon 加數量的橘色 numeric badge，並供 notice 標示線上來源或 PostgreSQL／本機、偵測機制、檢查時間與訊息。法規／命令的 mechanism MUST 明確標示以遠端 Content-Length 與本機 ZIP 大小比對；Last-Modified／ETag MAY 記錄於 update record，但 MUST NOT 宣稱用於更新判斷。法院名稱正規化的 count MUST 為 current 且 `court_normalized` 空值的筆數。
-- **FR-010**: Header「資料處理」導覽項目 MUST 顯示 1–3 的橘色更新 badge；無更新時隱藏。badge MUST 由 SSE `/api/events/stream?topic=updates` 推送更新，初次載入取得一次，SSE 斷線重連後由初始 payload 補齊；MUST NOT 使用固定 timer 或每 60 秒輪詢。`judgment:updates-changed` 事件 MAY 觸發一次重新取得。
+- **FR-010**: Header「資料處理」導覽項目 MUST 顯示所有待處理項目的橘色 numeric badge：`update_count`（來源更新數 1–3）＋ `import_pending_count`（判決匯入待處理月份數）＋ `index_pending_count`（Qdrant 判決向量索引待補月份數）＋ `legal_index_pending_count`（法規／命令索引待重建 0–1）。MUST NOT 只顯示類別數；tooltip MUST 列出各類別數量與來源。全部為 0 時 MUST 隱藏。badge MUST 由 SSE `/api/events/stream?topic=updates` 推送更新，初次載入取得一次，SSE 斷線重連後由初始 payload 補齊；MUST NOT 使用固定 timer 或每 60 秒輪詢。`judgment:updates-changed` 事件 MAY 觸發一次重新取得。
 - **FR-011**: 法規／命令下載成功或 no_change MUST 寫入更新紀錄 `update_available=false`，避免 sidebar 持續顯示更新。
 - **FR-012**: 判決下載流程結束 MUST 寫入更新紀錄；pending > 0 時保持 `update_available=true`，成功補齊時清除。
 - **FR-013**: 法規／命令 ZIP MUST 使用下載日期資料夾與原始檔名；同檔名不同內容 MUST 以 hash suffix 保留，不得覆寫。
@@ -87,7 +87,7 @@ Header 的「資料處理」導覽項目右下角顯示橘色 badge，數字為�
 - **SC-001**: `up.sh` 啟動後 120 秒內完成三類檢查，且檢查失敗不影響後端啟動。
 - **SC-002**: 法規 ZIP 大小變更時，`/api/updates/status` 的 `update_count` 增加，sidebar 顯示 refresh icon 加數量的橘色 numeric badge，notice 標示「線上來源」與 ZIP headers／本機大小的比對機制。
 - **SC-003**: 判決 pending 月份 > 0 時，judgment 更新狀態為 true；補齊後為 false。
-- **SC-004**: Header badge 在 1–3 個來源更新時顯示正確數字，無更新時隱藏。
+- **SC-004**: Header badge 在只有 1–3 個來源更新時顯示該來源數；同時有判決匯入、Qdrant 索引或法規／命令索引待處理時顯示加總，全部為 0 時隱藏。
 - **SC-005**: 同一天同檔名但不同內容的 ZIP 不會互相覆寫，且更新紀錄可追溯兩者路徑。
 - **SC-006**: 重新載入 processing 頁面時，執行中的流程顯示「執行中」而非「更新」。
 - **SC-007**: PostgreSQL 有 15 筆 current 且 `court_normalized` 空值的判決時，processing sidebar 的法院名稱正規化顯示 refresh icon 加 `15`，notice 標示「PostgreSQL／本機」與空值計數機制；正規化完成後 badge 與 notice 消失。

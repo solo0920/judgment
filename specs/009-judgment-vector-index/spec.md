@@ -312,7 +312,7 @@ E 待補月份（active collection 與各月份 latest archive 的覆蓋比對�
 - 全站左側「資料處理」導覽：顯示更新 badge。
 - 更新 badge 的 tooltip MUST 說明是「Qdrant 向量索引待補 N 個月」。
 
-後端 snapshot MUST 在 `capabilities.index_pending_months` 提供相同月份數。`/api/updates/status` MUST 從 processing snapshot cache 回傳 `index_pending_count`，讓全站 sidebar 在未開啟資料處理頁時也能顯示 badge；processing 頁載入新 snapshot 時 MUST 以 `judgment:processing-pending` 事件同步 `index_pending`。
+後端 snapshot MUST 在 `capabilities.index_pending_months` 提供相同月份數。`/api/updates/status` MUST 從 processing snapshot cache 回傳 `index_pending_count`，讓全站 sidebar 在未開啟資料處理頁時也能顯示 badge；processing 頁載入新 snapshot 時 MUST 以 `judgment:processing-pending` 事件同步 `index_pending`。全站「資料處理」導覽 badge 的數字 MUST 為來源更新數、`import_pending_count`、`index_pending_count` 與 `legal_index_pending_count` 的加總，不得只顯示有值的類別數。
 
 ### 7.5 目前處理列
 

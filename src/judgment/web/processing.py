@@ -29,6 +29,7 @@ from ..judgment_raw_parquet import (
 )
 from ..models import (
     JudgmentDocument,
+    JudgmentSnapshot,
     LawDatasetVersion,
     LawDocument,
     OllamaModelCapability,
@@ -163,6 +164,18 @@ def _cached_index_pending_count() -> Optional[int]:
         return None
 
 
+def _cached_legal_index_pending_count() -> Optional[int]:
+    """Read the last processing snapshot's legal-index rebuild count."""
+
+    try:
+        cache_path = _processing_snapshot_cache_path(default_state_path())
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        capabilities = payload.get("capabilities") or {}
+        return _safe_int(capabilities.get("legal_index_pending_count"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def apply_live_judgment_pending(
     update_state: Dict[str, Any], settings: Settings
 ) -> Dict[str, Any]:
@@ -175,6 +188,7 @@ def apply_live_judgment_pending(
 
     cached_import_pending = _cached_import_pending_count()
     cached_index_pending = _cached_index_pending_count()
+    cached_legal_index_pending = _cached_legal_index_pending_count()
     try:
         manifest = _judgment_download_manifest(settings)
         backfill = manifest.get("backfill") or {}
@@ -209,6 +223,10 @@ def apply_live_judgment_pending(
         update_state["import_pending_count"] = cached_import_pending
     if cached_index_pending is not None:
         update_state["index_pending_count"] = cached_index_pending
+    if cached_legal_index_pending is not None:
+        update_state["legal_index_pending_count"] = (
+            cached_legal_index_pending
+        )
     return update_state
 
 
@@ -1723,6 +1741,20 @@ def _processed_archive_names(session_factory, runs: Sequence[Dict[str, Any]]) ->
         names.update(str(value) for value in values if value)
     except Exception:
         logger.warning("failed to read processed archive names", exc_info=True)
+    try:
+        with session_factory() as session:
+            values = session.scalars(
+                select(JudgmentSnapshot.source_archive)
+                .where(JudgmentSnapshot.source_archive != "")
+                .distinct()
+            ).all()
+        # An imported update archive creates a snapshot even when every
+        # document in it is unchanged.  Those unchanged documents keep their
+        # older source_archive value, so snapshot source archives are required
+        # to avoid reporting the same update file as unimported forever.
+        names.update(str(value) for value in values if value)
+    except Exception:
+        logger.warning("failed to read imported snapshot names", exc_info=True)
     return names
 
 
@@ -5182,6 +5214,12 @@ def build_processing_snapshot(
         "active_update_id": active_update.get("id") if active_update else None,
         "index_backlog": backlog,
         "index_pending_months": index_pending_months,
+        "legal_index_pending_count": (
+            1
+            if str(legal_index.get("status") or "")
+            in {"stale", "not_indexed"}
+            else 0
+        ),
         "unprocessed_archives": int(local.get("unprocessed") or 0),
         "external_processes": len(external_processes),
         "external_index_running": external_index is not None,
