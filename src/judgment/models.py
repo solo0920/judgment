@@ -1032,6 +1032,7 @@ class RagFeedbackIssue(Base):
     )
     status = Column(String(24), nullable=False, default="open", index=True)
     severity = Column(String(16), nullable=False, default="medium")
+    version = Column(Integer, nullable=False, default=1)
     linked_pr_url = Column(Text, nullable=False, default="")
     created_by = Column(String(120), nullable=False, default="")
     created_at = Column(

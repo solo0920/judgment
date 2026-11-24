@@ -241,3 +241,42 @@ def test_daily_maintenance_failure_is_non_blocking() -> None:
         "rag_feedback_experiments": 0,
         "rag_holdout_rotations": 0,
     }
+
+
+def test_issue_version_migration_adds_safe_default() -> None:
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.pool import StaticPool
+
+    from judgment.db import _ensure_rag_feedback_issue_columns
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE rag_feedback_issues ("
+                "id INTEGER PRIMARY KEY, title TEXT NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO rag_feedback_issues (title) VALUES ('legacy')"
+            )
+        )
+    _ensure_rag_feedback_issue_columns(engine)
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("rag_feedback_issues")
+    }
+    assert "version" in columns
+    assert columns["version"]["nullable"] is False
+    with engine.connect() as connection:
+        value = connection.execute(
+            text("SELECT version FROM rag_feedback_issues")
+        ).scalar_one()
+    assert value == 1
+    engine.dispose()

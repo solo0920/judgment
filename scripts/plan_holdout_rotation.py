@@ -12,28 +12,35 @@ import argparse
 import json
 
 from judgment.config import Settings
-from judgment.db import build_engine, build_session_factory
+from judgment.db import (
+    apply_statement_timeout,
+    build_engine,
+    build_session_factory,
+)
 from judgment.web.holdout_rotation import plan_holdout_rotation
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--max-promotions", type=int, default=3)
     parser.add_argument("--max-retirements", type=int, default=3)
-    parser.add_argument("--min-shared", type=int, default=20)
     parser.add_argument("--min-holdout", type=int, default=20)
     args = parser.parse_args()
 
     settings = Settings.from_env()
-    engine = build_engine(settings.database_url)
+    database_url = (
+        settings.rag_holdout_rotation_database_url
+        or settings.database_url
+    )
+    engine = build_engine(database_url)
+    apply_statement_timeout(
+        engine, settings.rag_quality_report_statement_timeout_ms
+    )
     session_factory = build_session_factory(engine)
     try:
         result = plan_holdout_rotation(
             session_factory,
             actor="scheduler",
-            max_promotions=args.max_promotions,
             max_retirements=args.max_retirements,
-            min_shared=args.min_shared,
             min_holdout=args.min_holdout,
         )
         print(json.dumps(result, ensure_ascii=False, default=str))

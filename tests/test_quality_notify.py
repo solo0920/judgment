@@ -149,3 +149,13 @@ def test_slack_webhook_rejects_non_slack_hosts() -> None:
         quality_notify._send_slack("https://example.test/hook", "text")
     with pytest.raises(ValueError):
         quality_notify._send_slack("http://hooks.slack.com/services/x", "text")
+
+
+def test_slack_http_client_does_not_follow_redirects() -> None:
+    handler = quality_notify._NoRedirectHandler()
+    assert (
+        handler.redirect_request(
+            None, None, 302, "Found", {}, "https://example.test/steal"
+        )
+        is None
+    )

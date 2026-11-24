@@ -5,6 +5,9 @@
 #   0 8 1 * * /path/to/judgment/scripts/run_holdout_rotation.sh
 #
 # Proposals are never auto-applied; an admin must review them in the console.
+# Run this outside demo hours and data-import windows.  Set
+# RAG_HOLDOUT_ROTATION_DATABASE_URL to a role that can only read question-bank
+# data and write rag_holdout_rotations.  The script never uses an admin token.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

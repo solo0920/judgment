@@ -14,7 +14,11 @@ import ssl
 from email.message import EmailMessage
 from typing import Any, Dict, Mapping, Optional, Sequence
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import (
+    HTTPRedirectHandler,
+    Request,
+    build_opener,
+)
 
 from judgment.config import Settings
 
@@ -22,6 +26,11 @@ LOGGER = logging.getLogger(__name__)
 
 ALERT_LEVELS = {"info": 0, "warn": 1, "danger": 2}
 SLACK_HOSTS = frozenset({"hooks.slack.com", "hooks.slack-gov.com"})
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -78,7 +87,8 @@ def _send_slack(webhook_url: str, text: str) -> None:
         headers={"Content-Type": "application/json; charset=utf-8"},
         method="POST",
     )
-    with urlopen(request, timeout=10) as response:  # noqa: S310
+    opener = build_opener(_NoRedirectHandler)
+    with opener.open(request, timeout=10) as response:
         if getattr(response, "status", 200) >= 400:
             raise RuntimeError(f"Slack webhook 回應 {response.status}")
 

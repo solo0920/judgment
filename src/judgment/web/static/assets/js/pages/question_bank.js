@@ -408,16 +408,38 @@ function itemCardMarkup(item) {
 
 function rotationMarkup(state) {
   const rotations = Array.isArray(state.rotations) ? state.rotations : [];
+  const coverage = state.rotationCoverage || {};
+  const gaps = Array.isArray(coverage.gaps) ? coverage.gaps : [];
+  const dimensionLabels = {
+    question_type: "題型",
+    difficulty: "難度",
+    law: "法規",
+    tag: "標籤",
+    refusal: "拒答",
+  };
   return `<div class="qb-rotation">
     <div class="side-card-head">
-      <span class="side-card-title">${icon("refresh", 14)}Holdout 輪替</span>
+      <span class="side-card-title">${icon("refresh", 14)}Holdout 覆蓋與退休</span>
       <div class="qb-actions">
         <span class="qb-muted">待處理 ${formatNumber(rotations.length)} 筆</span>
-        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="rotation-plan">${icon("plus", 13)}<span>產生提案</span></button>
+        <button class="btn btn-secondary btn-sm" type="button" data-qb-action="rotation-plan">${icon("plus", 13)}<span>產生退休提案</span></button>
         <button class="btn btn-ghost btn-sm" type="button" data-qb-action="rotation-refresh">${icon("refresh", 13)}<span>重新整理</span></button>
       </div>
     </div>
-    <p class="qb-muted qb-rotation-note">提案只根據 benchmark 證據與閒置天數產生；套用需管理者確認。Promote 會把已核准 shared 題目移入 holdout；Retire 只標記 stale，不刪除題目或歷史結果。</p>
+    <p class="qb-muted qb-rotation-note">Holdout 只能由人工撰寫新題目補充，shared 題目不會自動晉升。下方缺口只用來安排人工出題；退休提案只針對有實際 benchmark 使用、且超過 180 天未使用的 holdout 題目，套用只標記 stale，不刪除題目。</p>
+    <div class="qb-rotation-coverage">
+      <span class="badge badge-neutral">Shared ${formatNumber(coverage.shared || 0)}</span>
+      <span class="badge badge-neutral">Holdout ${formatNumber(coverage.holdout || 0)}</span>
+      <span class="badge badge-neutral">未使用 holdout ${formatNumber(coverage.unused_holdout || 0)}</span>
+      ${gaps.length
+        ? gaps
+            .slice(0, 10)
+            .map(
+              (gap) => `<span class="chip">${escapeHtml(dimensionLabels[gap.dimension] || gap.dimension)} · ${escapeHtml(gap.key)} · shared ${formatNumber(gap.shared)} / holdout 0</span>`,
+            )
+            .join("")
+        : '<span class="qb-muted">目前沒有明顯的 holdout 覆蓋缺口。</span>'}
+    </div>
     ${
       rotations.length
         ? `<div class="qb-rotation-list">${rotations
@@ -425,20 +447,20 @@ function rotationMarkup(state) {
               (row) => `<div class="qb-rotation-row">
                 <div class="qb-rotation-main">
                   <div class="qb-rotation-head">
-                    <span class="badge ${row.direction === "promote" ? "badge-info" : "badge-warn"}">${row.direction === "promote" ? "PROMOTE → HOLDOUT" : "RETIRE · STALE"}</span>
+                    <span class="badge ${row.direction === "promote" ? "badge-danger" : "badge-warn"}">${row.direction === "promote" ? "PROMOTE · 已停用" : "RETIRE · STALE"}</span>
                     <span class="qb-muted">#${row.id} · 題目 #${row.item?.id ?? "—"} v${row.item?.version ?? "—"} · ${escapeHtml(TYPE_LABELS[row.item?.question_type] || row.item?.question_type || "")} · ${escapeHtml(DIFFICULTY_LABELS[row.item?.difficulty] || row.item?.difficulty || "")}</span>
                   </div>
                   <div class="qb-rotation-question">${escapeHtml(row.item?.question || "題目已不存在")}</div>
                   <div class="qb-muted qb-rotation-reason">${escapeHtml(row.reason || "")}</div>
                 </div>
                 <div class="qb-rotation-actions">
-                  <button class="btn btn-primary btn-sm" type="button" data-qb-action="rotation-apply" data-id="${row.id}" data-direction="${row.direction}">${icon("check", 13)}<span>套用</span></button>
+                  <button class="btn btn-primary btn-sm" type="button" data-qb-action="rotation-apply" data-id="${row.id}" ${row.direction === "promote" ? "disabled" : ""}>${icon("check", 13)}<span>標記 stale</span></button>
                   <button class="btn btn-ghost btn-sm" type="button" data-qb-action="rotation-reject" data-id="${row.id}">${icon("x", 13)}<span>拒絕</span></button>
                 </div>
               </div>`,
             )
             .join("")}</div>`
-        : emptyState("目前沒有待處理的輪替提案。")
+        : emptyState("目前沒有待處理的退休提案。")
     }
   </div>`;
 }
@@ -1227,6 +1249,7 @@ export function createQuestionBankController(
     reviewDetail: null,
     reviewFilter: "queue",
     rotations: [],
+    rotationCoverage: {},
   };
 
   const panel = (name) => root.querySelector(`#quality-panel-${panelNames[name]}`);
@@ -1478,6 +1501,7 @@ export function createQuestionBankController(
       state.total = Number(result.total || 0);
       state.stats = result.stats || state.stats;
       state.rotations = rotationResult.rotations || [];
+      state.rotationCoverage = rotationResult.coverage || {};
       finishPanelLoad(target);
       target.innerHTML = manageMarkup(state);
       notifyStats();
@@ -1968,7 +1992,6 @@ export function createQuestionBankController(
       button.disabled = true;
       try {
         const result = await api.planHoldoutRotations({
-          max_promotions: 3,
           max_retirements: 3,
         });
         toast(
@@ -1990,23 +2013,20 @@ export function createQuestionBankController(
       return;
     }
     if (action === "rotation-apply" || action === "rotation-reject") {
-      const direction = String(button.dataset.direction || "");
       const isApply = action === "rotation-apply";
       const promptText = isApply
-        ? direction === "promote"
-          ? "確定把這題從 shared 移入 holdout？題目不會刪除，但會從一般題庫隱藏。"
-          : "確定把這題標記為 stale？題目與歷史 benchmark 結果都會保留。"
-        : "拒絕這筆輪替提案？";
+        ? "確定把這題標記為 stale？題目與歷史 benchmark 結果都會保留。"
+        : "拒絕這筆退休提案？";
       if (!window.confirm(promptText)) return;
       const comment = window.prompt("審查備註（選填，僅管理者可見）", "") || "";
       button.disabled = true;
       try {
         if (isApply) {
           await api.applyHoldoutRotation(id, { review_comment: comment });
-          toast("已套用 Holdout 輪替。", "ok", 5000);
+          toast("已將 Holdout 題目標記 stale。", "ok", 5000);
         } else {
           await api.rejectHoldoutRotation(id, { review_comment: comment });
-          toast("已拒絕 Holdout 輪替提案。", "info");
+          toast("已拒絕 Holdout 退休提案。", "info");
         }
         await Promise.all([loadManage(), loadStats()]);
       } catch (error) {

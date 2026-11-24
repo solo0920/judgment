@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,6 +26,26 @@ def build_engine(
             kwargs["max_overflow"] = max(0, int(max_overflow))
         kwargs["pool_timeout"] = max(0.1, float(pool_timeout))
     return create_engine(database_url, **kwargs)
+
+
+def apply_statement_timeout(engine: Engine, timeout_ms: int) -> None:
+    """Bound scheduled-report queries on PostgreSQL.
+
+    SQLite ignores this helper.  The value is clamped to a positive integer
+    so it can be used safely in the SET statement.
+    """
+
+    if not str(engine.url).startswith("postgres"):
+        return
+    timeout = max(1000, min(300000, int(timeout_ms or 30000)))
+
+    @event.listens_for(engine, "connect")
+    def _set_statement_timeout(dbapi_connection, _record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute(f"SET statement_timeout = {timeout}")
+        finally:
+            cursor.close()
 
 
 def build_session_factory(engine: Engine) -> sessionmaker[Session]:
@@ -370,6 +390,27 @@ def _ensure_rag_feedback_triage_columns(engine: Engine) -> None:
         )
 
 
+def _ensure_rag_feedback_issue_columns(engine: Engine) -> None:
+    """Add optimistic-lock version to an existing feedback issue table."""
+
+    inspector = inspect(engine)
+    if "rag_feedback_issues" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("rag_feedback_issues")
+    }
+    if "version" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE rag_feedback_issues ADD COLUMN "
+                "version INTEGER NOT NULL DEFAULT 1"
+            )
+        )
+
+
 def _ensure_rag_interaction_review_columns(engine: Engine) -> None:
     """Add active-learning review fields to an existing rag_interactions."""
 
@@ -428,6 +469,7 @@ def _ensure_rag_interaction_review_columns(engine: Engine) -> None:
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_rag_feedback_triage_columns(engine)
+    _ensure_rag_feedback_issue_columns(engine)
     _ensure_rag_interaction_review_columns(engine)
     _ensure_judgment_court_normalized(engine)
     _ensure_judgment_versioning(engine)

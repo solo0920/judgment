@@ -6,6 +6,11 @@
 #
 # Configure Slack or email with RAG_QUALITY_REPORT_* environment variables.
 # The script never includes visitor comments or review notes.
+#
+# Run this outside demo hours and outside data-import windows.  Set
+# RAG_QUALITY_REPORT_DATABASE_URL to a read-only database role; the script
+# never uses JUDGMENT_ADMIN_TOKEN or the HTTP API.  Queries are bounded by
+# RAG_QUALITY_REPORT_STATEMENT_TIMEOUT_MS.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
