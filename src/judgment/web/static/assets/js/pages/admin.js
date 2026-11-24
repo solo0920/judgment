@@ -181,6 +181,10 @@ export async function render(root) {
           </span>
         </div>
 
+        <div class="report-section-head">
+          <span class="report-section-title">功能旗標</span>
+          <button class="btn btn-ghost btn-sm" type="button" id="demo-feature-all">全部勾選</button>
+        </div>
         <div class="demo-feature-list">
           ${FEATURES.map((feature) => toggleRow(feature, Boolean(features[feature]))).join("")}
         </div>
@@ -204,7 +208,19 @@ export async function render(root) {
         </div>
         <p class="demo-open-hint">
           「儲存設定」只保存功能旗標與期限，不會改變目前開關；「開啟展示」會依上方旗標立即對訪客開放。
+          總開關開啟不代表全部功能開啟；RAG 提問必須另外勾選 RAG。
         </p>
+        ${
+          active && !features.rag
+            ? `<div class="notice notice-warn" role="status">
+                <span class="notice-icon" aria-hidden="true">${icon("alert", 12)}</span>
+                <div class="notice-body">
+                  <strong>展示已開啟，但 RAG 未勾選</strong>
+                  <p>訪客首頁的提問框會保持鎖定。若要開放 RAG，請勾選 RAG、儲存設定，再重新開啟展示或等待下一個請求生效。</p>
+                </div>
+              </div>`
+            : ""
+        }
 
         <div class="demo-admin-section">
           <div class="report-section-head"><span class="report-section-title">最近切換紀錄</span></div>
@@ -220,6 +236,11 @@ export async function render(root) {
 
     const master = panel.querySelector("#demo-enabled");
     const featureInputs = [...panel.querySelectorAll("[data-demo-feature]")];
+    panel.querySelector("#demo-feature-all")?.addEventListener("click", () => {
+      featureInputs.forEach((input) => {
+        input.checked = true;
+      });
+    });
     const selectedFeatures = () =>
       Object.fromEntries(
         featureInputs.map((input) => [input.dataset.demoFeature, input.checked]),

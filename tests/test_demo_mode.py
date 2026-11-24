@@ -1272,6 +1272,8 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     admin = client.get("/assets/js/pages/admin.js")
     assert admin.status_code == 200
     assert "管理設定" in admin.text
+    assert "展示已開啟，但 RAG 未勾選" in admin.text
+    assert "demo-feature-all" in admin.text
     assert "儲存設定" in admin.text
     assert "開啟展示" in admin.text
     assert "立即關閉展示" in admin.text
@@ -1307,6 +1309,7 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert home_js.status_code == 200
     assert "ragLocked" in home_js.text
     assert "展示目前未開放，RAG 提問已鎖定" in home_js.text
+    assert "RAG 提問目前未開放展示" in home_js.text
 
     rag_js = client.get("/assets/js/pages/rag.js")
     assert rag_js.status_code == 200
