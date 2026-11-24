@@ -1321,6 +1321,7 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert "body.is-demo-visitor" in css.text
     assert ".home-ask.is-locked" in css.text
     assert ".auth-avatar-demo" in css.text
+    assert "color: var(--ink)" in css.text
 
 
 def test_admin_demo_put_cors_preflight_is_allowed(demo_client) -> None:
