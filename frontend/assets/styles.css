@@ -380,7 +380,7 @@ body.settings-open .toast-region {
   border: 1px solid var(--header-line);
   border-radius: 999px;
   background: var(--surface);
-  color: var(--header-ink);
+  color: var(--ink);
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
@@ -421,7 +421,7 @@ body.settings-open .toast-region {
   border: 1px solid var(--header-line);
   border-radius: 999px;
   background: var(--surface);
-  color: var(--header-ink);
+  color: var(--ink);
   font: inherit;
   cursor: pointer;
   box-shadow: var(--shadow-xs);
@@ -468,7 +468,7 @@ body.settings-open .toast-region {
 }
 
 .auth-user-role {
-  color: var(--header-muted);
+  color: var(--muted);
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -478,7 +478,7 @@ body.settings-open .toast-region {
   width: 13px;
   height: 13px;
   flex: none;
-  color: var(--header-muted);
+  color: var(--muted);
 }
 
 .auth-menu {
