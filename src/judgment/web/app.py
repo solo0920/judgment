@@ -348,8 +348,11 @@ class RagRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     conversation_id: str = Field(
         default="",
-        max_length=64,
-        pattern=r"^[A-Za-z0-9_-]*$",
+        max_length=36,
+        pattern=(
+            r"^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+            r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        ),
     )
 
 
@@ -441,9 +444,7 @@ class RagFeedbackEvaluateRequest(BaseModel):
 
 
 class RagHoldoutRotationPlanRequest(BaseModel):
-    max_promotions: int = Field(default=3, ge=1, le=10)
-    max_retirements: int = Field(default=3, ge=1, le=10)
-    min_shared: int = Field(default=20, ge=0, le=1000)
+    max_retirements: int = Field(default=3, ge=0, le=10)
     min_holdout: int = Field(default=20, ge=0, le=1000)
 
 
@@ -458,6 +459,7 @@ class RagFeedbackIssueBatchRequest(BaseModel):
     linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
     review_comment: str = Field(default="", max_length=4000)
     actionable: Optional[bool] = None
+    expected_version: Optional[int] = Field(default=None, ge=1)
 
 
 class RagFeedbackIssueUpdateRequest(BaseModel):
@@ -469,6 +471,7 @@ class RagFeedbackIssueUpdateRequest(BaseModel):
     ] = None
     severity: Optional[Literal["low", "medium", "high"]] = None
     linked_pr_url: Optional[str] = Field(default=None, max_length=1000)
+    expected_version: Optional[int] = Field(default=None, ge=1)
 
 
 _RAG_SHARE_TTL_HOURS = 24 * 7
@@ -5190,9 +5193,7 @@ def create_app(
             payload = plan_holdout_rotation(
                 app.state.session_factory,
                 actor=actor,
-                max_promotions=request.max_promotions,
                 max_retirements=request.max_retirements,
-                min_shared=request.min_shared,
                 min_holdout=request.min_holdout,
             )
         except FeedbackError as exc:
@@ -5258,6 +5259,7 @@ def create_app(
                 linked_pr_url=request.linked_pr_url,
                 review_comment=request.review_comment,
                 actionable=request.actionable,
+                expected_version=request.expected_version,
                 actor=actor,
                 settings=app.state.settings,
             )

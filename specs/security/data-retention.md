@@ -7,7 +7,7 @@
 
 | 資料 | 位置 | 保留期限 | 清理方式 |
 | --- | --- | --- | --- |
-| RAG server-side 回答快照 | PostgreSQL `rag_interactions` | 180 天（`RAG_INTERACTION_RETENTION_DAYS`） | 每日背景維護刪除 `expires_at` 到期資料 |
+| RAG server-side 回答快照 | PostgreSQL `rag_interactions`（同一對話以 `conversation_id` 分組） | 180 天（`RAG_INTERACTION_RETENTION_DAYS`） | 每日背景維護刪除 `expires_at` 到期資料 |
 | RAG 使用者回饋 | PostgreSQL `rag_feedback`（含 reasons／events） | 180 天；已結案自結案起再 180 天（`RAG_FEEDBACK_RETENTION_DAYS`） | 每日背景維護刪除 `expires_at` 到期資料 |
 | RAG 回饋問題群組 | PostgreSQL `rag_feedback_issues` | 無 feedback 且超過 180 天未更新時刪除 | 每日背景維護刪除孤兒 issue |
 | RAG 批次評估報告 | PostgreSQL `rag_feedback_evaluations` | 180 天 | 每日背景維護刪除過期報告 |
@@ -25,6 +25,8 @@
 - 資料庫刪除不會回溯刪除既有備份。備份可能包含刪除前的提問、回答與稽核事件，因此備份輪替期限就是這些資料在備份中的最大額外壽命。
 - 90 天備份輪替是營運政策，不是程式自動刪除；若未實際刪除舊備份，資料仍可能存在。
 - `rag_interactions` 只存顯示所需的去敏快照，不存判決全文、LLM prompt／messages／contexts、API key、絕對路徑或內部主機；`rag_feedback.snapshot` 在送出時複製一份，interaction 到期後仍可重現。
+- 多輪對話以隨機 UUID `conversation_id` 分組，管理者時間線只查同一 `(conversation_id, client_key_hash)`；此 ID 不是授權憑證。每個對話最多 50 輪、每個 client hash 每日最多 20 個新對話，超過時仍回答但不分組。
+- `conversation_id`、`turn_index`、`feedback_scope` 與 `rag_holdout_rotations` 都包含在完整 PostgreSQL `pg_dump`／`pg_restore` 備份；新欄位皆有預設值，舊資料升級不會重寫既有列。
 - `rag_feedback` 的唯一鍵是 `(request_id, client_key_hash)`；15 分鐘內修改會更新同一筆並增加 revision，不新增第二筆 active 回饋。
 - 回饋的 `expected_behavior` 由人工 triage 填寫；匯出給 OpenCode 的 JSONL 不含原始 `comment`，避免匿名留言成為間接提示注入管道。
 - `security_audit_events` 的 180 天期限用於追查登入與管理操作。

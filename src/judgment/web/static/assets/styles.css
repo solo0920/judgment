@@ -21541,3 +21541,11 @@ a.auth-menu-item {
     justify-content: flex-end;
   }
 }
+
+.qb-rotation-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}

@@ -1611,7 +1611,7 @@ export async function render(root) {
             <div class="rag-library-empty">讀取本機紀錄中…</div>
           </div>
           <div class="rag-library-foot" id="rag-storage-note">
-            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器保留提問與回答快照 180 天、使用者回饋 180 天或結案後 180 天、安全稽核事件 180 天；備份依 90 天輪替政策由維運刪除，程式不自動刪除備份。
+            歷史清單只存在此瀏覽器；送出問題時會傳送到伺服器產生答案。伺服器會以隨機對話識別碼分組保留同一段對話的提問與回答快照 180 天，使用者回饋保留 180 天或結案後 180 天，安全稽核事件保留 180 天；備份依 90 天輪替政策由維運刪除，程式不自動刪除備份。
           </div>
         </section>
       </aside>
@@ -1638,7 +1638,7 @@ export async function render(root) {
         <textarea class="ask-input" id="rag-question" name="question" rows="3"
           maxlength="500" placeholder="例如：金融消費者保護法如何處理金融消費爭議？"
           aria-describedby="rag-input-help"></textarea>
-        <p class="ask-privacy-note">請勿輸入個人資料；提問與回答快照保留 180 天、使用者回饋保留 180 天或結案後 180 天、安全稽核保留 180 天；備份依 90 天輪替政策管理。</p>
+        <p class="ask-privacy-note">請勿輸入個人資料；同一段對話的多輪提問與回答會以隨機對話識別碼分組保留 180 天，使用者回饋保留 180 天或結案後 180 天，安全稽核保留 180 天；備份依 90 天輪替政策管理。</p>
         <div class="ask-footer">
           <div class="ask-hints" id="rag-input-help">
             <span><kbd>Enter</kbd> 送出</span>
@@ -1734,10 +1734,17 @@ export async function render(root) {
   const newServerConversationId = () => {
     try {
       if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+      const bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, (value) =>
+        value.toString(16).padStart(2, "0"),
+      ).join("");
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     } catch (error) {
-      /* fall through */
+      return "";
     }
-    return `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   };
 
   const resizeInput = () => {
@@ -1926,7 +1933,7 @@ export async function render(root) {
         <textarea class="input rag-feedback-comment" id="rag-feedback-comment"
           name="comment" rows="4" maxlength="4000"
           placeholder="例如：引用條號錯誤、日期範圍不對、回答沒有回答到問題…"></textarea>
-        <p class="rag-feedback-privacy">請勿輸入個人資料。回饋與回答快照保留 180 天，或結案後 180 天；原始留言只供管理者檢視，不會直接放進自動改善代理的提示。</p>
+        <p class="rag-feedback-privacy">請勿輸入個人資料。回饋與同一段對話的提問／回答快照保留 180 天，或結案後 180 天；原始留言只供管理者檢視，不會直接放進自動改善代理的提示。</p>
         <div class="rag-feedback-error" data-rag-feedback-error hidden></div>
         <div class="judgment-dialog-actions">
           <button class="btn btn-secondary" type="button" data-rag-feedback-action="cancel">取消</button>

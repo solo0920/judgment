@@ -1,14 +1,19 @@
-"""Plan and apply audited benchmark/holdout rotations.
+"""Plan and apply audited holdout retirements.
 
-Planning is automatic; applying a plan is always an explicit admin action.
-Promotion only happens for accepted shared questions that have recent
-benchmark evidence.  Retirement only marks an unused holdout question stale
-and never deletes it.  Questions and review notes stay admin-only.
+Holdout questions are never promoted automatically from shared questions:
+a shared question has already been visible to the development workflow,
+benchmark reports, and agent exports, so it is no longer unseen evaluation
+data.  New holdout questions must be written and reviewed by a human.
+
+Planning only creates retirement proposals for holdout questions that have
+real benchmark usage and have been idle for a long time.  Applying a proposal
+is always an explicit admin action and only marks the question stale.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -17,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..models import (
     BenchmarkCaseResult,
+    BenchmarkRun,
     QuestionBankItem,
     RagHoldoutRotation,
 )
@@ -24,13 +30,12 @@ from .feedback import FeedbackError
 
 logger = logging.getLogger(__name__)
 
-ROTATION_DIRECTIONS = ("promote", "retire")
+ROTATION_DIRECTIONS = ("retire",)
 ROTATION_STATUSES = ("pending", "applied", "rejected", "expired")
-PROMOTE_MIN_AGE_DAYS = 30
-PROMOTE_EVIDENCE_DAYS = 90
-PROMOTE_MIN_CASES = 2
-PROMOTE_MIN_SCORE = 0.75
+RETIRE_MIN_AGE_DAYS = 180
+RETIRE_MIN_USES = 2
 RETIRE_IDLE_DAYS = 180
+COVERAGE_ITEM_LIMIT = 5000
 
 
 def _now() -> datetime:
@@ -50,16 +55,6 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
     return aware.isoformat() if aware else None
 
 
-def _average(values: Iterable[Any]) -> Optional[float]:
-    clean = []
-    for value in values:
-        try:
-            clean.append(float(value))
-        except (TypeError, ValueError):
-            continue
-    return round(sum(clean) / len(clean), 4) if clean else None
-
-
 def _item_signals(item: QuestionBankItem, now: datetime) -> Dict[str, Any]:
     created = _aware(item.created_at) or now
     return {
@@ -70,56 +65,15 @@ def _item_signals(item: QuestionBankItem, now: datetime) -> Dict[str, Any]:
     }
 
 
-def _benchmark_evidence(
-    session: Session,
-    item_ids: List[int],
-    *,
-    now: datetime,
+def _last_holdout_use(
+    session: Session, item_ids: List[int]
 ) -> Dict[int, Dict[str, Any]]:
     if not item_ids:
         return {}
     rows = session.execute(
         select(
             BenchmarkCaseResult.item_id,
-            BenchmarkCaseResult.metrics,
-            BenchmarkCaseResult.finished_at,
-        ).where(
-            BenchmarkCaseResult.item_id.in_(item_ids),
-            BenchmarkCaseResult.status == "success",
-            BenchmarkCaseResult.finished_at
-            >= now - timedelta(days=PROMOTE_EVIDENCE_DAYS),
-        )
-    ).all()
-    evidence: Dict[int, Dict[str, Any]] = {}
-    for item_id, metrics, finished_at in rows:
-        bucket = evidence.setdefault(
-            int(item_id),
-            {"cases": 0, "scores": [], "last_used_at": None},
-        )
-        bucket["cases"] += 1
-        scores = (metrics or {}).get("scores") or {}
-        deterministic = scores.get("deterministic")
-        if deterministic is not None:
-            bucket["scores"].append(deterministic)
-        finished = _aware(finished_at)
-        if finished is not None and (
-            bucket["last_used_at"] is None
-            or finished > bucket["last_used_at"]
-        ):
-            bucket["last_used_at"] = finished
-    for bucket in evidence.values():
-        bucket["average_score"] = _average(bucket.pop("scores"))
-    return evidence
-
-
-def _last_holdout_use(
-    session: Session, item_ids: List[int], *, now: datetime
-) -> Dict[int, Optional[datetime]]:
-    if not item_ids:
-        return {}
-    rows = session.execute(
-        select(
-            BenchmarkCaseResult.item_id,
+            func.count(),
             func.max(BenchmarkCaseResult.finished_at),
         )
         .where(
@@ -128,56 +82,155 @@ def _last_holdout_use(
         )
         .group_by(BenchmarkCaseResult.item_id)
     ).all()
-    return {int(item_id): _aware(last) for item_id, last in rows}
+    return {
+        int(item_id): {
+            "uses": int(uses or 0),
+            "last_used_at": _aware(last_used),
+        }
+        for item_id, uses, last_used in rows
+    }
+
+
+def _coverage(session: Session) -> Dict[str, Any]:
+    items = list(
+        session.scalars(
+            select(QuestionBankItem)
+            .where(QuestionBankItem.deleted_at.is_(None))
+            .order_by(QuestionBankItem.id.asc())
+            .limit(COVERAGE_ITEM_LIMIT)
+        ).all()
+    )
+    shared = [
+        item
+        for item in items
+        if item.visibility == "shared"
+        and item.status == "accepted"
+        and not item.stale
+    ]
+    holdout = [
+        item
+        for item in items
+        if item.visibility == "holdout"
+        and item.status == "accepted"
+        and not item.stale
+    ]
+
+    def _keys(item: QuestionBankItem, dimension: str) -> Iterable[str]:
+        if dimension == "question_type":
+            return [str(item.question_type or "unknown")]
+        if dimension == "difficulty":
+            return [str(item.difficulty or "unknown")]
+        if dimension == "law":
+            return [
+                str(value.get("law_name") or "").strip()
+                for value in (item.expected_laws or [])
+                if isinstance(value, dict) and value.get("law_name")
+            ]
+        if dimension == "tag":
+            return [str(value).strip() for value in (item.tags or []) if value]
+        return []
+
+    dimensions: Dict[str, Dict[str, Any]] = {}
+    gaps: List[Dict[str, Any]] = []
+    for dimension in ("question_type", "difficulty", "law", "tag"):
+        shared_counts = Counter(
+            key for item in shared for key in _keys(item, dimension)
+        )
+        holdout_counts = Counter(
+            key for item in holdout for key in _keys(item, dimension)
+        )
+        rows = []
+        for key, shared_count in shared_counts.most_common(50):
+            holdout_count = int(holdout_counts.get(key, 0))
+            rows.append(
+                {
+                    "key": key,
+                    "shared": int(shared_count),
+                    "holdout": holdout_count,
+                }
+            )
+            if holdout_count == 0:
+                gaps.append(
+                    {
+                        "dimension": dimension,
+                        "key": key,
+                        "shared": int(shared_count),
+                        "holdout": 0,
+                    }
+                )
+        dimensions[dimension] = rows
+
+    refusal_shared = sum(
+        1 for item in shared if item.question_type == "refusal"
+    )
+    refusal_holdout = sum(
+        1 for item in holdout if item.question_type == "refusal"
+    )
+    if refusal_shared and not refusal_holdout:
+        gaps.append(
+            {
+                "dimension": "refusal",
+                "key": "refusal",
+                "shared": refusal_shared,
+                "holdout": 0,
+            }
+        )
+    gaps.sort(key=lambda row: (-int(row["shared"]), row["dimension"], row["key"]))
+    usage = _last_holdout_use(session, [int(item.id) for item in holdout])
+    unused_holdout = sum(
+        1
+        for item in holdout
+        if int((usage.get(int(item.id)) or {}).get("uses") or 0)
+        < RETIRE_MIN_USES
+    )
+    return {
+        "shared": len(shared),
+        "holdout": len(holdout),
+        "unused_holdout": unused_holdout,
+        "dimensions": dimensions,
+        "refusal": {"shared": refusal_shared, "holdout": refusal_holdout},
+        "gaps": gaps[:20],
+        "note": "Holdout 只能由人工撰寫新題目補充；shared 題目不得自動晉升。",
+    }
 
 
 def plan_holdout_rotation(
     session_factory: sessionmaker[Session],
     *,
     actor: str,
-    max_promotions: int = 3,
     max_retirements: int = 3,
-    min_shared: int = 20,
     min_holdout: int = 20,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     now = _aware(now or _now()) or _now()
-    max_promotions = max(1, min(10, int(max_promotions)))
-    max_retirements = max(1, min(10, int(max_retirements)))
+    max_retirements = max(0, min(10, int(max_retirements)))
     with session_factory() as session:
-        expired = session.execute(
+        stale_pending = session.scalars(
             select(RagHoldoutRotation).where(
                 RagHoldoutRotation.status == "pending",
-                RagHoldoutRotation.created_at
-                < now - timedelta(days=30),
+                (
+                    (RagHoldoutRotation.created_at < now - timedelta(days=30))
+                    | (RagHoldoutRotation.direction == "promote")
+                ),
             )
-        ).scalars().all()
-        for row in expired:
+        ).all()
+        for row in stale_pending:
             row.status = "expired"
-            row.updated_at = now
-
-        shared_count = int(
-            session.scalar(
-                select(func.count())
-                .select_from(QuestionBankItem)
-                .where(
-                    QuestionBankItem.visibility == "shared",
-                    QuestionBankItem.status == "accepted",
-                    QuestionBankItem.stale.is_(False),
-                    QuestionBankItem.deleted_at.is_(None),
-                )
+            row.review_comment = (
+                row.review_comment
+                or "自動晉升已停用；holdout 需由人工撰寫新題目。"
             )
-            or 0
-        )
-        holdout_count = int(
+            row.updated_at = now
+        session.flush()
+
+        coverage = _coverage(session)
+        holdout_count = int(coverage["holdout"])
+        active_runs = int(
             session.scalar(
                 select(func.count())
-                .select_from(QuestionBankItem)
+                .select_from(BenchmarkRun)
                 .where(
-                    QuestionBankItem.visibility == "holdout",
-                    QuestionBankItem.status == "accepted",
-                    QuestionBankItem.stale.is_(False),
-                    QuestionBankItem.deleted_at.is_(None),
+                    BenchmarkRun.status.in_(("running", "stopping"))
                 )
             )
             or 0
@@ -187,76 +240,15 @@ def plan_holdout_rotation(
                 RagHoldoutRotation.status == "pending"
             )
         ).all()
-        pending_keys = {(int(row.item_id), row.direction) for row in pending}
-
-        promotion_slots = min(
-            max_promotions, max(0, shared_count - int(min_shared))
-        )
-        retirement_slots = min(
-            max_retirements, max(0, holdout_count - int(min_holdout))
+        pending_items = {int(row.item_id) for row in pending}
+        retirement_slots = (
+            0
+            if active_runs
+            else min(
+                max_retirements, max(0, holdout_count - int(min_holdout))
+            )
         )
         created: List[RagHoldoutRotation] = []
-        if promotion_slots:
-            candidates = list(
-                session.scalars(
-                    select(QuestionBankItem)
-                    .where(
-                        QuestionBankItem.visibility == "shared",
-                        QuestionBankItem.status == "accepted",
-                        QuestionBankItem.stale.is_(False),
-                        QuestionBankItem.deleted_at.is_(None),
-                        QuestionBankItem.created_at
-                        <= now - timedelta(days=PROMOTE_MIN_AGE_DAYS),
-                    )
-                    .order_by(QuestionBankItem.created_at.asc())
-                    .limit(200)
-                ).all()
-            )
-            evidence = _benchmark_evidence(
-                session, [int(item.id) for item in candidates], now=now
-            )
-            ranked = []
-            for item in candidates:
-                if (int(item.id), "promote") in pending_keys:
-                    continue
-                stats = evidence.get(int(item.id)) or {}
-                if (
-                    int(stats.get("cases") or 0) < PROMOTE_MIN_CASES
-                    or stats.get("average_score") is None
-                    or float(stats["average_score"]) < PROMOTE_MIN_SCORE
-                ):
-                    continue
-                ranked.append((float(stats["average_score"]), item, stats))
-            ranked.sort(key=lambda entry: (-entry[0], entry[1].id))
-            for score, item, stats in ranked[:promotion_slots]:
-                signals = _item_signals(item, now)
-                signals.update(
-                    {
-                        "benchmark_cases": int(stats["cases"]),
-                        "average_deterministic_score": score,
-                        "last_benchmark_at": _iso(stats.get("last_used_at")),
-                    }
-                )
-                reason = (
-                    f"Shared 題目近 {PROMOTE_EVIDENCE_DAYS} 天有 "
-                    f"{int(stats['cases'])} 次成功 benchmark，"
-                    f"平均 deterministic score {score:.2f}；"
-                    "提案移入 holdout 以輪替評測集。"
-                )
-                row = RagHoldoutRotation(
-                    item_id=int(item.id),
-                    item_version=int(item.version or 1),
-                    direction="promote",
-                    status="pending",
-                    reason=reason,
-                    signals=signals,
-                    created_by=str(actor or "")[:120],
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(row)
-                created.append(row)
-
         if retirement_slots:
             candidates = list(
                 session.scalars(
@@ -267,43 +259,47 @@ def plan_holdout_rotation(
                         QuestionBankItem.stale.is_(False),
                         QuestionBankItem.deleted_at.is_(None),
                         QuestionBankItem.created_at
-                        <= now - timedelta(days=RETIRE_IDLE_DAYS),
+                        <= now - timedelta(days=RETIRE_MIN_AGE_DAYS),
                     )
                     .order_by(QuestionBankItem.created_at.asc())
                     .limit(200)
                 ).all()
             )
-            last_used = _last_holdout_use(
-                session, [int(item.id) for item in candidates], now=now
+            usage = _last_holdout_use(
+                session, [int(item.id) for item in candidates]
             )
             idle = []
             for item in candidates:
-                if (int(item.id), "retire") in pending_keys:
+                stats = usage.get(int(item.id)) or {}
+                if int(stats.get("uses") or 0) < RETIRE_MIN_USES:
                     continue
-                used_at = last_used.get(int(item.id))
-                if used_at is not None and used_at >= now - timedelta(
+                last_used = stats.get("last_used_at")
+                if last_used is None or last_used >= now - timedelta(
                     days=RETIRE_IDLE_DAYS
                 ):
                     continue
-                idle.append(item)
-            for item in idle[:retirement_slots]:
+                if int(item.id) in pending_items:
+                    continue
+                idle.append((item, stats))
+            for item, stats in idle[:retirement_slots]:
                 signals = _item_signals(item, now)
                 signals.update(
                     {
-                        "last_benchmark_at": _iso(last_used.get(int(item.id))),
+                        "benchmark_uses": int(stats["uses"]),
+                        "last_benchmark_at": _iso(stats.get("last_used_at")),
                         "idle_days": RETIRE_IDLE_DAYS,
                     }
-                )
-                reason = (
-                    f"Holdout 題目超過 {RETIRE_IDLE_DAYS} 天未被 benchmark "
-                    "使用；提案標記 stale，不刪除題目與歷史結果。"
                 )
                 row = RagHoldoutRotation(
                     item_id=int(item.id),
                     item_version=int(item.version or 1),
                     direction="retire",
                     status="pending",
-                    reason=reason,
+                    reason=(
+                        f"Holdout 題目已有 {int(stats['uses'])} 次成功 "
+                        f"benchmark，且超過 {RETIRE_IDLE_DAYS} 天未使用；"
+                        "提案標記 stale，不刪除題目與歷史結果。"
+                    ),
                     signals=signals,
                     created_by=str(actor or "")[:120],
                     created_at=now,
@@ -317,12 +313,15 @@ def plan_holdout_rotation(
         return {
             "generated_at": _iso(now),
             "generated": len(created),
-            "shared_count": shared_count,
             "holdout_count": holdout_count,
-            "promotion_slots": promotion_slots,
             "retirement_slots": retirement_slots,
+            "active_benchmark_runs": active_runs,
+            "unused_holdout": coverage["unused_holdout"],
+            "coverage": coverage,
             "rotations": [
-                serialize_rotation(row, session.get(QuestionBankItem, row.item_id))
+                serialize_rotation(
+                    row, session.get(QuestionBankItem, row.item_id)
+                )
                 for row in created
             ],
         }
@@ -380,16 +379,21 @@ def list_holdout_rotations(
             query.order_by(RagHoldoutRotation.created_at.desc()).limit(limit)
         ).all()
         item_ids = [int(row.item_id) for row in rows]
-        items = {
-            int(item.id): item
-            for item in session.scalars(
-                select(QuestionBankItem).where(
-                    QuestionBankItem.id.in_(item_ids)
-                )
-            ).all()
-        } if item_ids else {}
+        items = (
+            {
+                int(item.id): item
+                for item in session.scalars(
+                    select(QuestionBankItem).where(
+                        QuestionBankItem.id.in_(item_ids)
+                    )
+                ).all()
+            }
+            if item_ids
+            else {}
+        )
         return {
             "status": status,
+            "coverage": _coverage(session),
             "rotations": [
                 serialize_rotation(row, items.get(int(row.item_id)))
                 for row in rows
@@ -406,7 +410,11 @@ def _review_rotation(
     review_comment: str,
 ) -> Dict[str, Any]:
     with session_factory() as session:
-        row = session.get(RagHoldoutRotation, int(rotation_id))
+        row = session.scalars(
+            select(RagHoldoutRotation)
+            .where(RagHoldoutRotation.id == int(rotation_id))
+            .with_for_update()
+        ).first()
         if row is None:
             raise FeedbackError(404, "rotation_not_found", "找不到這筆輪替提案。")
         if row.status != "pending":
@@ -416,36 +424,29 @@ def _review_rotation(
             raise FeedbackError(404, "rotation_item_not_found", "找不到題目。")
         now = _now()
         if status == "applied":
+            if row.direction != "retire":
+                raise FeedbackError(
+                    422,
+                    "holdout_manual_authoring_required",
+                    "Holdout 只能由人工撰寫新題目補充，不得自動晉升 shared 題目。",
+                )
             if int(item.version or 1) != int(row.item_version or 1):
                 raise FeedbackError(
                     409,
                     "rotation_item_changed",
                     "題目版本已變更，請重新產生輪替提案。",
                 )
-            if row.direction == "promote":
-                if item.visibility != "shared" or item.status != "accepted":
-                    raise FeedbackError(
-                        409,
-                        "rotation_item_not_shared",
-                        "題目已不是已核准的 shared 題目。",
-                    )
-                item.visibility = "holdout"
-                item.last_reviewed_at = now
-                item.updated_at = now
-            elif row.direction == "retire":
-                if item.visibility != "holdout":
-                    raise FeedbackError(
-                        409,
-                        "rotation_item_not_holdout",
-                        "題目已不是 holdout 題目。",
-                    )
-                item.stale = True
-                item.stale_reason = (
-                    f"holdout_rotation: 超過 {RETIRE_IDLE_DAYS} 天未使用"
+            if item.visibility != "holdout":
+                raise FeedbackError(
+                    409,
+                    "rotation_item_not_holdout",
+                    "題目已不是 holdout 題目。",
                 )
-                item.updated_at = now
-            else:  # pragma: no cover - guarded by CHECK-like validation
-                raise FeedbackError(422, "invalid_rotation_direction", "輪替方向不正確。")
+            item.stale = True
+            item.stale_reason = (
+                f"holdout_rotation: 超過 {RETIRE_IDLE_DAYS} 天未使用"
+            )
+            item.updated_at = now
         row.status = status
         row.reviewed_by = str(actor or "")[:120]
         row.reviewed_at = now

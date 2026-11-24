@@ -86,6 +86,8 @@ class Settings:
     demo_feedback_daily_limit: int = 1000
     rag_feedback_edit_seconds: int = 900
     rag_feedback_token_ttl_seconds: int = 7 * 24 * 60 * 60
+    rag_conversation_max_turns: int = 50
+    rag_conversation_daily_limit: int = 20
     rag_interaction_retention_days: int = 180
     rag_feedback_retention_days: int = 180
     rag_quality_report_slack_webhook: str = ""
@@ -96,6 +98,9 @@ class Settings:
     rag_quality_report_smtp_password: str = ""
     rag_quality_report_email_from: str = ""
     rag_quality_report_console_url: str = ""
+    rag_quality_report_database_url: str = ""
+    rag_holdout_rotation_database_url: str = ""
+    rag_quality_report_statement_timeout_ms: int = 30000
     rag_prompt_version: str = "rag-system-prompt-v1"
     feedback_secret: str = ""
     demo_query_timeout_seconds: float = 10.0
@@ -325,6 +330,12 @@ class Settings:
             rag_feedback_token_ttl_seconds=_env_int(
                 "RAG_FEEDBACK_TOKEN_TTL_SECONDS", 7 * 24 * 60 * 60
             ),
+            rag_conversation_max_turns=_env_int(
+                "RAG_CONVERSATION_MAX_TURNS", 50
+            ),
+            rag_conversation_daily_limit=_env_int(
+                "RAG_CONVERSATION_DAILY_LIMIT", 20
+            ),
             rag_interaction_retention_days=_env_int(
                 "RAG_INTERACTION_RETENTION_DAYS", 180
             ),
@@ -355,6 +366,15 @@ class Settings:
             rag_quality_report_console_url=os.getenv(
                 "RAG_QUALITY_REPORT_CONSOLE_URL", ""
             ).strip(),
+            rag_quality_report_database_url=os.getenv(
+                "RAG_QUALITY_REPORT_DATABASE_URL", ""
+            ).strip(),
+            rag_holdout_rotation_database_url=os.getenv(
+                "RAG_HOLDOUT_ROTATION_DATABASE_URL", ""
+            ).strip(),
+            rag_quality_report_statement_timeout_ms=_env_int(
+                "RAG_QUALITY_REPORT_STATEMENT_TIMEOUT_MS", 30000
+            ),
             rag_prompt_version=(
                 os.getenv("RAG_PROMPT_VERSION", "").strip()
                 or "rag-system-prompt-v1"

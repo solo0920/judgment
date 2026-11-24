@@ -17,7 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from judgment.config import Settings
-from judgment.db import build_engine, build_session_factory
+from judgment.db import (
+    apply_statement_timeout,
+    build_engine,
+    build_session_factory,
+)
 from judgment.web.feedback import build_quality_report
 from judgment.web.quality_notify import notify_quality_report
 
@@ -51,7 +55,13 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = Settings.from_env()
-    engine = build_engine(settings.database_url)
+    database_url = (
+        settings.rag_quality_report_database_url or settings.database_url
+    )
+    engine = build_engine(database_url)
+    apply_statement_timeout(
+        engine, settings.rag_quality_report_statement_timeout_ms
+    )
     session_factory = build_session_factory(engine)
     try:
         report = build_quality_report(

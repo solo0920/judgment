@@ -136,6 +136,10 @@ ISSUE_STATUSES: Dict[str, str] = {
 }
 
 FEEDBACK_SCOPES = ("turn", "conversation")
+CONVERSATION_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
+    r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
 REVIEW_STATUSES = ("new", "reviewed", "dismissed")
 REVIEW_STATUS_LABELS = {
     "new": "待審",
@@ -530,9 +534,12 @@ def record_interaction(
     """
 
     request_id = str(request_id or "").strip()
-    conversation_id = re.sub(
-        r"[^A-Za-z0-9_-]", "", str(conversation_id or "")
-    )[:64]
+    raw_conversation_id = str(conversation_id or "").strip()
+    conversation_id = (
+        raw_conversation_id.lower()
+        if CONVERSATION_ID_RE.fullmatch(raw_conversation_id)
+        else ""
+    )
     if not request_id or session_factory is None:
         return {}
     created_at = _aware(now or _utcnow()) or _utcnow()
@@ -567,18 +574,79 @@ def record_interaction(
                 )
                 session.add(row)
             turn_index = 0
+            if conversation_id and not client_hash:
+                conversation_id = ""
             if conversation_id:
-                previous_turn = session.scalar(
-                    select(func.max(RagInteraction.turn_index)).where(
+                foreign_client = session.scalar(
+                    select(func.count())
+                    .select_from(RagInteraction)
+                    .where(
                         RagInteraction.conversation_id == conversation_id,
-                        RagInteraction.request_id != request_id,
+                        RagInteraction.client_key_hash != client_hash,
                     )
                 )
-                turn_index = (
-                    int(previous_turn) + 1
-                    if previous_turn is not None
-                    else 0
-                )
+                if int(foreign_client or 0) > 0:
+                    conversation_id = ""
+                else:
+                    previous_turn = session.scalar(
+                        select(func.max(RagInteraction.turn_index)).where(
+                            RagInteraction.conversation_id
+                            == conversation_id,
+                            RagInteraction.client_key_hash
+                            == client_hash,
+                            RagInteraction.request_id != request_id,
+                        )
+                    )
+                    existing_turns = int(
+                        session.scalar(
+                            select(func.count())
+                            .select_from(RagInteraction)
+                            .where(
+                                RagInteraction.conversation_id
+                                == conversation_id,
+                                RagInteraction.client_key_hash
+                                == client_hash,
+                                RagInteraction.request_id != request_id,
+                            )
+                        )
+                        or 0
+                    )
+                    if existing_turns == 0:
+                        recent_conversations = int(
+                            session.scalar(
+                                select(
+                                    func.count(
+                                        func.distinct(
+                                            RagInteraction.conversation_id
+                                        )
+                                    )
+                                )
+                                .select_from(RagInteraction)
+                                .where(
+                                    RagInteraction.client_key_hash
+                                    == client_hash,
+                                    RagInteraction.conversation_id != "",
+                                    RagInteraction.created_at
+                                    >= created_at - timedelta(days=1),
+                                )
+                            )
+                            or 0
+                        )
+                        if recent_conversations >= max(
+                            1, int(settings.rag_conversation_daily_limit)
+                        ):
+                            conversation_id = ""
+                    if conversation_id:
+                        if existing_turns >= max(
+                            1, int(settings.rag_conversation_max_turns)
+                        ):
+                            conversation_id = ""
+                        else:
+                            turn_index = (
+                                int(previous_turn) + 1
+                                if previous_turn is not None
+                                else 0
+                            )
             snapshot["conversation_id"] = conversation_id
             snapshot["turn_index"] = turn_index
             row.conversation_id = conversation_id
@@ -1683,6 +1751,7 @@ def serialize_issue(
         "status": row.status or "open",
         "severity": row.severity or "medium",
         "linked_pr_url": row.linked_pr_url or "",
+        "version": int(row.version or 1),
         "created_by": row.created_by or "",
         "feedback_count": int(feedback_count or 0),
         "created_at": _iso(row.created_at),
@@ -1875,6 +1944,7 @@ def update_feedback_issue(
         "status",
         "severity",
         "linked_pr_url",
+        "expected_version",
     }
     unknown = sorted(set(updates) - allowed)
     if unknown:
@@ -1884,9 +1954,22 @@ def update_feedback_issue(
             f"不支援的問題群組欄位：{', '.join(unknown)}",
         )
     with session_factory() as session:
-        row = session.get(RagFeedbackIssue, int(issue_id))
+        row = session.scalars(
+            select(RagFeedbackIssue)
+            .where(RagFeedbackIssue.id == int(issue_id))
+            .with_for_update()
+        ).first()
         if row is None:
             raise FeedbackError(404, "issue_not_found", "找不到這個問題群組。")
+        expected_version = updates.get("expected_version")
+        if expected_version is not None and int(expected_version) != int(
+            row.version or 1
+        ):
+            raise FeedbackError(
+                409,
+                "issue_version_conflict",
+                "問題群組已被其他人更新，請重新載入後再試。",
+            )
         if "title" in updates:
             title = str(updates.get("title") or "").strip()
             if len(title) < 4 or len(title) > 300:
@@ -1921,6 +2004,7 @@ def update_feedback_issue(
             row.linked_pr_url = str(
                 updates.get("linked_pr_url") or ""
             ).strip()[:1000]
+        row.version = int(row.version or 1) + 1
         session.commit()
         session.refresh(row)
         count = int(
@@ -1942,6 +2026,9 @@ ISSUE_BATCH_ACTIONS = {
 }
 
 
+MAX_BATCH_FEEDBACK = 200
+
+
 def batch_update_feedback_issue(
     session_factory: sessionmaker[Session],
     issue_id: int,
@@ -1952,6 +2039,7 @@ def batch_update_feedback_issue(
     linked_pr_url: Optional[str] = None,
     review_comment: str = "",
     actionable: Optional[bool] = None,
+    expected_version: Optional[int] = None,
     actor: str,
     settings: Settings,
 ) -> Dict[str, Any]:
@@ -1978,10 +2066,42 @@ def batch_update_feedback_issue(
         for value in (feedback_ids or [])
         if str(value).strip().isdigit()
     }
+    if len(selected_ids) > MAX_BATCH_FEEDBACK:
+        raise FeedbackError(
+            422,
+            "batch_too_large",
+            f"一次最多批次 {MAX_BATCH_FEEDBACK} 筆回饋。",
+        )
     with session_factory() as session:
-        issue = session.get(RagFeedbackIssue, int(issue_id))
+        issue = session.scalars(
+            select(RagFeedbackIssue)
+            .where(RagFeedbackIssue.id == int(issue_id))
+            .with_for_update()
+        ).first()
         if issue is None:
             raise FeedbackError(404, "issue_not_found", "找不到這個問題群組。")
+        if expected_version is not None and int(expected_version) != int(
+            issue.version or 1
+        ):
+            raise FeedbackError(
+                409,
+                "issue_version_conflict",
+                "問題群組已被其他人更新，請重新載入後再試。",
+            )
+        total_rows = int(
+            session.scalar(
+                select(func.count())
+                .select_from(RagFeedback)
+                .where(RagFeedback.issue_id == issue.id)
+            )
+            or 0
+        )
+        if not selected_ids and total_rows > MAX_BATCH_FEEDBACK:
+            raise FeedbackError(
+                422,
+                "batch_too_large",
+                f"此問題群組有 {total_rows} 筆回饋，請先選取最多 {MAX_BATCH_FEEDBACK} 筆。",
+            )
         query = select(RagFeedback).where(RagFeedback.issue_id == issue.id)
         if selected_ids:
             query = query.where(RagFeedback.id.in_(selected_ids))
@@ -2002,7 +2122,20 @@ def batch_update_feedback_issue(
         effective_actionable = (
             True if actionable is None and action == "plan" else actionable
         )
+        changed_rows: List[RagFeedback] = []
         for row in rows:
+            changed = row.status != feedback_status
+            if (
+                effective_actionable is not None
+                and bool(row.actionable) != bool(effective_actionable)
+            ):
+                changed = True
+            if behavior and row.expected_behavior != behavior:
+                changed = True
+            if note and row.review_comment != note:
+                changed = True
+            if not changed:
+                continue
             before = row.status
             row.status = feedback_status
             if effective_actionable is not None:
@@ -2025,25 +2158,30 @@ def batch_update_feedback_issue(
                     comment=note[:COMMENT_MAX_LENGTH],
                 )
             )
-        issue.status = issue_status
-        issue.updated_at = now
-        if linked_pr_url is not None:
-            issue.linked_pr_url = str(linked_pr_url or "").strip()[:1000]
-        session.commit()
-        session.refresh(issue)
-        count = int(
-            session.scalar(
-                select(func.count())
-                .select_from(RagFeedback)
-                .where(RagFeedback.issue_id == issue.id)
-            )
-            or 0
+            changed_rows.append(row)
+        next_pr_url = (
+            str(linked_pr_url or "").strip()[:1000]
+            if linked_pr_url is not None
+            else issue.linked_pr_url
         )
+        issue_changed = (
+            issue.status != issue_status
+            or issue.linked_pr_url != next_pr_url
+        )
+        if changed_rows or issue_changed:
+            issue.status = issue_status
+            issue.linked_pr_url = next_pr_url
+            issue.updated_at = now
+            issue.version = int(issue.version or 1) + 1
+            session.commit()
+        session.refresh(issue)
+        count = total_rows
         payload = {
             "issue": serialize_issue(issue, feedback_count=count),
             "action": action,
-            "updated": len(rows),
-            "feedback_ids": [int(row.id) for row in rows],
+            "updated": len(changed_rows),
+            "skipped": len(rows) - len(changed_rows),
+            "feedback_ids": [int(row.id) for row in changed_rows],
         }
     return payload
 
@@ -2105,11 +2243,12 @@ def get_feedback(
             for event in events
         ]
         conversation = []
-        if row.conversation_id:
+        if row.conversation_id and row.client_key_hash:
             turns = session.scalars(
                 select(RagInteraction)
                 .where(
-                    RagInteraction.conversation_id == row.conversation_id
+                    RagInteraction.conversation_id == row.conversation_id,
+                    RagInteraction.client_key_hash == row.client_key_hash,
                 )
                 .order_by(
                     RagInteraction.turn_index.asc(),

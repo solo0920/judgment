@@ -1202,6 +1202,7 @@ export function createFeedbackController(container, { onStats } = {}) {
           status: String(data.get("status") || ""),
           severity: String(data.get("severity") || ""),
           linked_pr_url: String(data.get("linked_pr_url") || ""),
+          expected_version: Number(issueDetail?.issue?.version || 0) || null,
         });
         issueDetail = await api.ragFeedbackIssueDetail(issueId);
         await loadIssues();
@@ -1481,6 +1482,7 @@ export function createFeedbackController(container, { onStats } = {}) {
         const result = await api.ragFeedbackIssueBatch(issueId, {
           action,
           linked_pr_url: linkedPr || null,
+          expected_version: Number(issueDetail?.issue?.version || 0) || null,
         });
         issueDetail = await api.ragFeedbackIssueDetail(issueId);
         await Promise.all([loadIssues(), load()]);
@@ -1491,6 +1493,14 @@ export function createFeedbackController(container, { onStats } = {}) {
         );
       } catch (error) {
         toast(error.message || "批次操作失敗。", "danger");
+        if (error.status === 409) {
+          try {
+            issueDetail = await api.ragFeedbackIssueDetail(issueId);
+            render();
+          } catch (refreshError) {
+            /* keep the original conflict message */
+          }
+        }
       } finally {
         setBusy(issueBatch, false);
       }
