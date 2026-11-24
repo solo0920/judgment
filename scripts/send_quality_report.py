@@ -29,6 +29,11 @@ from judgment.web.quality_notify import notify_quality_report
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=7)
+    parser.add_argument(
+        "--send",
+        action="store_true",
+        help="Actually deliver. Without this flag the script is dry-run.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--only-alerts",
@@ -74,7 +79,7 @@ def main() -> int:
         result = notify_quality_report(
             report,
             settings,
-            dry_run=args.dry_run,
+            dry_run=args.dry_run or not args.send,
             only_alerts=args.only_alerts,
             alert_threshold=args.alert_threshold,
             channels=tuple(args.channel) or None,

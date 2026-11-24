@@ -53,6 +53,7 @@ def test_scheduler_uses_least_privilege_database_url_and_timeout() -> None:
     assert "--only-alerts" in shell
     assert "QUALITY_REPORT_SEND" in shell
     assert "--dry-run" in shell
+    assert "--send" in shell
 
 
 def test_new_notification_secrets_stay_blank_in_env_example() -> None:
