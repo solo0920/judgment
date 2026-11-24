@@ -363,6 +363,7 @@ body.settings-open .toast-region {
   align-items: center;
   gap: 14px;
   flex: none;
+  margin-left: auto;
 }
 
 .auth-slot {

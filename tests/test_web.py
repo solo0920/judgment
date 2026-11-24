@@ -512,6 +512,9 @@ def test_static_console_is_served(web_client) -> None:
     assert "Judgment RAG Console" in page.text
     assert "/assets/js/app.js" in page.text
     assert 'id="settings-trigger"' in page.text
+    css = web_client.get("/assets/styles.css")
+    assert css.status_code == 200
+    assert "margin-left: auto" in css.text
     assert 'aria-label="設定選項"' in page.text
     assert 'id="settings-sidebar"' in page.text
     assert 'id="settings-panel"' in page.text
