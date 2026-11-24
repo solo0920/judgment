@@ -788,6 +788,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "data-issue-form" in feedback_js.text
     assert "data-issue-batch" in feedback_js.text
     assert "rag-feedback-conversation" in feedback_js.text
+    assert "目前表單內容保留" in feedback_js.text
     assert "escapeHtml(turn.answer_preview" in feedback_js.text
     assert "建立並連結" in feedback_js.text
     assert "批次重跑評估" in feedback_js.text

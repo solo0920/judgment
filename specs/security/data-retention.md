@@ -26,6 +26,7 @@
 - 90 天備份輪替是營運政策，不是程式自動刪除；若未實際刪除舊備份，資料仍可能存在。
 - `rag_interactions` 只存顯示所需的去敏快照，不存判決全文、LLM prompt／messages／contexts、API key、絕對路徑或內部主機；`rag_feedback.snapshot` 在送出時複製一份，interaction 到期後仍可重現。
 - 多輪對話以隨機 UUID `conversation_id` 分組，管理者時間線只查同一 `(conversation_id, client_key_hash)`；此 ID 不是授權憑證。每個對話最多 50 輪、每個 client hash 每日最多 20 個新對話，超過時仍回答但不分組。
+- `client_key_hash` 使用與 feedback token 分離的 HMAC 子鑰；輪替 feedback secret 會讓舊分組失效。訪客更換網路或 IP 前綴改變時，對話可能被拆成兩段；這是安全取捨，不是資料損壞。
 - `conversation_id`、`turn_index`、`feedback_scope` 與 `rag_holdout_rotations` 都包含在完整 PostgreSQL `pg_dump`／`pg_restore` 備份；新欄位皆有預設值，舊資料升級不會重寫既有列。
 - `rag_feedback` 的唯一鍵是 `(request_id, client_key_hash)`；15 分鐘內修改會更新同一筆並增加 revision，不新增第二筆 active 回饋。
 - 回饋的 `expected_behavior` 由人工 triage 填寫；匯出給 OpenCode 的 JSONL 不含原始 `comment`，避免匿名留言成為間接提示注入管道。
