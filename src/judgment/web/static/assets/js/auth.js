@@ -5,6 +5,7 @@ import {
   getApiBaseSource,
   setAdminToken,
 } from "./api.js";
+import { demoActive } from "./demo.js";
 import { escapeHtml, toast } from "./utils.js";
 
 const GOOGLE_ICON = `
