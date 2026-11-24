@@ -1,4 +1,5 @@
 import { api, subscribeRefresh } from "../api.js";
+import { demoFeature } from "../demo.js";
 import { judgmentStatsCardsMarkup } from "../judgment-stats.js";
 import {
   downloadText,
@@ -10,6 +11,7 @@ import {
   icon,
   readLocalCache,
   safeUrl,
+  toast,
   writeLocalCache,
 } from "../utils.js";
 
@@ -112,9 +114,12 @@ function spanYears(judgments) {
 }
 
 function renderSectionTile(section) {
+  const locked = section.route === "rag" && !demoFeature("rag");
   return `<a class="home-tile tone-${escapeHtml(section.tone)}${
     section.wide ? " is-wide" : ""
-  }" href="#/${section.route}">
+  }${locked ? " is-locked" : ""}" href="#/${section.route}"${
+    locked ? ' aria-disabled="true"' : ""
+  }>
     <span class="home-tile-watermark" aria-hidden="true">${icon(section.icon, 148)}</span>
     <span class="home-tile-head">
       <span class="home-tile-icon">${icon(section.icon, 22)}</span>
@@ -128,7 +133,9 @@ function renderSectionTile(section) {
       <span class="home-tile-metric" data-home-tile-metric="${escapeHtml(
         section.metricKey,
       )}">${escapeHtml(section.metric)}</span>
-      <span class="home-tile-cta">探索 ${icon("arrowRight", 13)}</span>
+      <span class="home-tile-cta">${
+        locked ? `${icon("shield", 13)} 展示未開放` : `探索 ${icon("arrowRight", 13)}`
+      }</span>
     </span>
   </a>`;
 }
@@ -761,28 +768,31 @@ function sourceFallbackMarkup(message) {
 }
 
 function renderInitialMarkup() {
+  const ragLocked = !demoFeature("rag");
   const tiles = SECTIONS.map(renderSectionTile).join("");
-  return `<section class="page home-page" id="home-page">
+  return `<section class="page home-page${ragLocked ? " is-rag-locked" : ""}" id="home-page">
     <div class="home-hero">
       <div class="home-hero-copy">
         <span class="home-eyebrow">JUDICIAL OPEN DATA · FINANCIAL LAW RAG</span>
         <h1 class="home-title">讓金融法規，<span>回到判決與條文。</span></h1>
         <p class="home-lead">以金融法規清單、現行法規／命令條文與司法院判決全文為基礎。
           Qdrant 找出相似判決，LLM 依實際檢索內容生成附引用編號的回答；每個引用都能回到原始法規、命令或判決。</p>
-        <form class="home-ask" id="home-ask-form" autocomplete="off">
+        <form class="home-ask${ragLocked ? " is-locked" : ""}" id="home-ask-form" autocomplete="off">
           <label class="sr-only" for="home-question">輸入法律問題</label>
           <div class="home-ask-box">
             <textarea class="home-ask-input" id="home-question" name="question" rows="1"
-              maxlength="500" placeholder="問一個法律問題，例如：金融消費者保護法如何處理金融消費爭議？"
-              aria-describedby="home-ask-help"></textarea>
-            <button class="btn btn-primary home-ask-submit" type="submit">
-              ${icon("sparkles", 16)}<span>開始檢索</span>
+              maxlength="500" placeholder="${ragLocked ? "展示目前未開放，RAG 提問已鎖定" : "問一個法律問題，例如：金融消費者保護法如何處理金融消費爭議？"}"
+              aria-describedby="home-ask-help" ${ragLocked ? 'disabled aria-disabled="true"' : ""}></textarea>
+            <button class="btn btn-primary home-ask-submit" type="submit" ${ragLocked ? "disabled" : ""}>
+              ${icon(ragLocked ? "shield" : "sparkles", 16)}<span>${ragLocked ? "目前未開放" : "開始檢索"}</span>
             </button>
           </div>
           <div class="home-ask-help" id="home-ask-help">
-            <span><kbd>Enter</kbd> 送出</span>
+            ${ragLocked
+              ? `<span class="home-ask-lock-note">${icon("shield", 13)} 展示目前未開放；管理者請由右上角 Login。</span>`
+              : `<span><kbd>Enter</kbd> 送出</span>
             <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 換行</span>
-            <span>送出後在 RAG 提問中開啟</span>
+            <span>送出後在 RAG 提問中開啟</span>`}
           </div>
         </form>
         <div class="home-hero-meta">
@@ -995,6 +1005,7 @@ function applyError(root, message) {
 }
 
 export async function render(root, ctx) {
+  const ragLocked = !demoFeature("rag");
   let disposed = false;
   let loading = false;
   let pending = false;
@@ -1011,6 +1022,10 @@ export async function render(root, ctx) {
   const refreshButton = root.querySelector("#home-refresh");
 
   const submitQuestion = () => {
+    if (ragLocked) {
+      toast("展示目前未開放，RAG 提問已鎖定。", "warn", 4800);
+      return;
+    }
     const question = String(input?.value || "").trim().slice(0, 500);
     if (!question) {
       input?.focus();
@@ -1103,6 +1118,15 @@ export async function render(root, ctx) {
     }, wait);
   };
 
+  if (ragLocked) {
+    root.addEventListener("click", (event) => {
+      const ragLink = event.target.closest?.('a[href="#/rag"]');
+      if (!ragLink) return;
+      event.preventDefault();
+      toast("展示目前未開放，RAG 提問已鎖定。", "warn", 4800);
+    });
+  }
+
   root.addEventListener("click", (event) => {
     if (
       event.target.closest("#home-refresh") ||
@@ -1137,7 +1161,7 @@ export async function render(root, ctx) {
   );
 
   resizeInput();
-  input?.focus({ preventScroll: true });
+  if (!ragLocked) input?.focus({ preventScroll: true });
 
   const cachedSummary = readLocalCache(HOME_CACHE_KEY, 5 * 60 * 1000);
   if (cachedSummary) {
@@ -1149,7 +1173,7 @@ export async function render(root, ctx) {
     await loadSummary();
   }
 
-  if (!disposed) {
+  if (!disposed && demoFeature("rag")) {
     try {
       stopStream = subscribeRefresh(
         "processing",

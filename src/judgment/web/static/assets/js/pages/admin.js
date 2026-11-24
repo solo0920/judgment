@@ -173,7 +173,7 @@ export async function render(root) {
         <div class="demo-master-row">
           <div>
             <strong>總開關（儲存後生效）</strong>
-            <small>關閉時只保留首頁靜態頁與管理者登入；訪客 API 全部拒絕。功能旗標仍可先設定並儲存。</small>
+            <small>關閉時保留首頁與管理者 Login；RAG 與其他功能 API 拒絕訪客。功能旗標仍可先設定並儲存。</small>
           </div>
           <span class="demo-switch demo-switch-lg">
             <input type="checkbox" id="demo-enabled" aria-label="展示模式總開關" ${stored.enabled ? "checked" : ""} />

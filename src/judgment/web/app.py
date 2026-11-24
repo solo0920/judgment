@@ -855,6 +855,11 @@ def _demo_check(
     request.state.demo_state = state
     request.state.is_demo_visitor = True
     if not state.active:
+        # The public homepage stays available so visitors can read the project
+        # overview while RAG and the other demo features are closed.  A hard
+        # disable remains a full kill switch.
+        if feature == "home" and not state.hard_disabled:
+            return None
         return _demo_error(
             403,
             "展示目前未開放。",
@@ -984,10 +989,15 @@ def route_policy_guard(request: Request) -> None:
         if state is None:
             state = load_demo_state(request.app.state.session_factory, settings)
         feature = demo_feature_for(request.method, request.url.path)
-        if (
-            not state.active
-            or not feature
-            or (feature != "home" and not state.features.get(feature, False))
+        if not state.active:
+            if feature == "home" and not state.hard_disabled:
+                return
+            raise HTTPException(
+                status_code=403,
+                detail="展示模式未開放這個功能。",
+            )
+        if not feature or (
+            feature != "home" and not state.features.get(feature, False)
         ):
             raise HTTPException(
                 status_code=403,

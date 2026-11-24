@@ -48,44 +48,94 @@ function displayName(user) {
   return email ? email.split("@")[0] : "已登入";
 }
 
-function initial(user) {
-  return displayName(user).slice(0, 1).toUpperCase() || "A";
-}
-
 function closeMenu() {
   const menu = slot?.querySelector("#auth-menu");
-  const trigger = slot?.querySelector("#auth-user-trigger");
+  const trigger = slot?.querySelector(".auth-user-trigger");
   if (menu) menu.hidden = true;
   if (trigger) trigger.setAttribute("aria-expanded", "false");
 }
 
+function bindLoginFallback(link, enabled) {
+  if (enabled || !link) return;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    toast(
+      "Google 登入尚未設定，請先設定 GOOGLE_CLIENT_ID 與 GOOGLE_CLIENT_SECRET。",
+      "warn",
+      5200,
+    );
+  });
+}
+
+function renderDemoVisitor(state = {}) {
+  const enabled = Boolean(state.google_enabled);
+  slot.innerHTML = `
+    <div class="auth-user auth-demo">
+      <button type="button"
+              class="auth-user-trigger"
+              id="auth-demo-trigger"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-label="目前是 Demo 展示訪客，開啟帳號選單">
+        <span class="auth-avatar auth-avatar-demo" aria-hidden="true">D</span>
+        <span class="auth-user-copy">
+          <span class="auth-user-name">Demo</span>
+          <span class="auth-user-role">展示訪客</span>
+        </span>
+        <svg class="auth-chevron" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </button>
+      <div class="auth-menu" id="auth-menu" role="menu" hidden>
+        <div class="auth-menu-head">
+          <span class="auth-menu-name">Demo 展示訪客</span>
+          <span class="auth-menu-email">目前未登入</span>
+        </div>
+        <a class="auth-menu-item auth-menu-login${enabled ? "" : " is-disabled"}"
+           id="auth-demo-login"
+           href="${escapeHtml(loginHref())}"
+           role="menuitem"
+           ${enabled ? "" : 'aria-disabled="true"'}>
+          ${GOOGLE_ICON}
+          <span>以 Google 登入</span>
+        </a>
+      </div>
+    </div>`;
+  const trigger = slot.querySelector("#auth-demo-trigger");
+  const menu = slot.querySelector("#auth-menu");
+  trigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const opening = Boolean(menu?.hidden);
+    if (menu) menu.hidden = !opening;
+    trigger.setAttribute("aria-expanded", opening ? "true" : "false");
+  });
+  bindLoginFallback(slot.querySelector("#auth-demo-login"), enabled);
+}
+
 function renderLoggedOut(state = {}) {
   const enabled = Boolean(state.google_enabled);
+  if (demoActive()) {
+    renderDemoVisitor(state);
+    return;
+  }
   slot.innerHTML = `
     <a class="auth-login${enabled ? "" : " is-disabled"}"
        id="auth-login"
        href="${escapeHtml(loginHref())}"
-       aria-label="使用 Google 帳號登入"
+       aria-label="使用 Google 帳號登入（Login）"
        title="${enabled ? "使用 Google 帳號登入" : "Google 登入尚未設定"}"
        ${enabled ? "" : 'aria-disabled="true"'}>
       ${GOOGLE_ICON}
-      <span>登入</span>
+      <span>Login</span>
     </a>`;
-  if (!enabled) {
-    const link = slot.querySelector("#auth-login");
-    link?.addEventListener("click", (event) => {
-      event.preventDefault();
-      toast(
-        "Google 登入尚未設定，請先設定 GOOGLE_CLIENT_ID 與 GOOGLE_CLIENT_SECRET。",
-        "warn",
-        5200,
-      );
-    });
-  }
+  bindLoginFallback(slot.querySelector("#auth-login"), enabled);
 }
 
 function renderLoggedIn(user) {
-  const name = displayName(user);
+  const accountName = displayName(user);
+  const name = user?.admin ? "Admin" : accountName;
   const email = String(user?.email || "");
   const role = user?.admin ? "管理員" : "使用者";
   slot.innerHTML = `
@@ -97,7 +147,7 @@ function renderLoggedIn(user) {
               aria-expanded="false"
               aria-label="已登入：${escapeHtml(email || name)}，開啟帳號選單"
               title="${escapeHtml(email || name)}">
-        <span class="auth-avatar" aria-hidden="true">${escapeHtml(initial(user))}</span>
+        <span class="auth-avatar" aria-hidden="true">${escapeHtml(name.slice(0, 1).toUpperCase() || "A")}</span>
         <span class="auth-user-copy">
           <span class="auth-user-name">${escapeHtml(name)}</span>
           <span class="auth-user-role">${escapeHtml(role)}</span>
@@ -110,7 +160,7 @@ function renderLoggedIn(user) {
       </button>
       <div class="auth-menu" id="auth-menu" role="menu" hidden>
         <div class="auth-menu-head">
-          <span class="auth-menu-name">${escapeHtml(name)}</span>
+          <span class="auth-menu-name">${escapeHtml(accountName)}</span>
           <span class="auth-menu-email">${escapeHtml(email)}</span>
         </div>
         ${

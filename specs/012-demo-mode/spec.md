@@ -2,9 +2,9 @@
 
 **Status**: Implemented and deployed 2026-11-20；runtime 開關與到期狀態存在 `demo_settings`，本文件不記錄目前是開啟或關閉。
 
-**Version**: 1.6
+**Version**: 1.7
 
-**Last Updated**: 2026-11-21
+**Last Updated**: 2026-11-24
 
 **Applies To**: `judgment.ragdemo.win` 首頁、`#/rag`、`#/data`、`#/quality`、`#/performance`、`#/processing`、`#/status`、右上角帳號選單、`#/admin`、Google 登入、`/api/*` 訪客邊界。
 
@@ -44,7 +44,9 @@
 
 - `demo_settings` 第一次建立時 MUST 為 `enabled=false`、六個 feature flags 全 `true`。
 - 若設定列缺失、讀取失敗或格式錯誤，訪客 MUST 視同全部關閉。
-- 總開關關閉時，首頁 MUST 顯示靜態「展示目前未開放」；除 `PUBLIC_ALWAYS` 外，其他 API MUST 回 401／403。
+- 總開關關閉時，首頁 MUST 仍可瀏覽：`GET /api/home` MAY 回 200，但 MUST 經 `sanitize_infrastructure` 去敏；首頁 RAG 提問輸入與送出 MUST 停用，其他 feature API MUST 回 401／403。
+- 總開關關閉時，右上角 Login 與設定選項 MUST 保持可見且可用；不得以全頁封鎖取代首頁。
+- `JUDGMENT_DEMO_HARD_DISABLE=1` 時仍為完整 kill switch，`GET /api/home` MUST 回 403。
 
 ### FR-002 管理者登入
 
@@ -56,6 +58,10 @@
   - `GET /api/auth/me`
 - MUST NOT 使用 `/api/auth/*` 前綴放行。
 - 管理者登入後 MUST 看到完整站台，不受 demo master 限制。
+- 右上角帳號標籤 MUST 為：
+  - 未登入且 demo 關閉：`Login`，並保留 Google 圖示。
+  - 未登入且 demo 開啟：`Demo`，角色顯示「展示訪客」；帳號選單 MUST 仍提供 Google 登入。
+  - 已登入管理者：`Admin`，角色顯示「管理員」。
 
 ### FR-003 展示狀態
 
@@ -172,7 +178,7 @@ MVP 直接以既有唯讀端點加上 `DEMO_*` policy，不另建重複的 `/api
 - 訪客 MUST NOT 執行任何寫入、workflow、索引驗證／切換、模型設定、主機管理、測試、Benchmark 或題庫管理操作。
 - 上述執行／管理按鈕 MUST 以停用或 LOCK 狀態呈現，點擊不得送出請求；唯讀查詢、分頁、展開階段、切換唯讀分類與重新整理 MAY 保持可用。
 - admin-only 分類（系統測試、系統資料使用、Model Provider、題庫管理、RAG Benchmark）在訪客頁面 MUST 顯示鎖定說明，不得呼叫 admin-only API。
-- demo mode 關閉時，訪客 MUST 看到既有「展示目前未開放」狀態，不得顯示 cached 資料頁。
+- demo mode 關閉時，訪客 MUST 只看到首頁公開摘要；首頁 RAG 提問 MUST 停用並顯示「展示目前未開放，RAG 提問已鎖定」。其他功能頁 MUST 顯示「展示目前未開放」，不得顯示 cached 資料頁。
 
 ### FR-011 限流與成本
 
@@ -299,7 +305,8 @@ updated_at  TIMESTAMPTZ NOT NULL
 ## 6. 驗收
 
 - [ ] Migration 後 `enabled=false`，六 flags true；缺列／讀取失敗時全關。
-- [ ] 關閉時首頁靜態關閉頁；`/api/health` 與四條 auth 精確路徑可用；其他 API 拒絕。
+- [ ] 關閉時首頁仍可載入 `/api/home`（去敏），RAG 表單 disabled；`/api/health` 與四條 auth 精確路徑可用；其他 API 拒絕。
+- [ ] 關閉時右上角顯示 `Login`；demo 開啟且未登入顯示 `Demo`；管理者登入顯示 `Admin`。
 - [ ] 管理者登入後完整站台可用。
 - [ ] 開啟 2h／24h／7d；到期下一個請求即關閉。
 - [ ] 六 flags 分別控制；關閉顯示鎖定頁與 403。
