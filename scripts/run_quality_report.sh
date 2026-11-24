@@ -10,7 +10,8 @@
 # Run this outside demo hours and outside data-import windows.  Set
 # RAG_QUALITY_REPORT_DATABASE_URL to a read-only database role; the script
 # never uses JUDGMENT_ADMIN_TOKEN or the HTTP API.  Queries are bounded by
-# RAG_QUALITY_REPORT_STATEMENT_TIMEOUT_MS.
+# RAG_QUALITY_REPORT_STATEMENT_TIMEOUT_MS.  Delivery is dry-run by default;
+# set QUALITY_REPORT_SEND=1 only after the channels and recipients are verified.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,12 +49,21 @@ fi
 set +a
 
 STAMP="$(date -u +%Y-%m-%d)"
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) starting quality report" >> .run/quality_report.log
+SEND_MODE="${QUALITY_REPORT_SEND:-0}"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) starting quality report send=${SEND_MODE}" >> .run/quality_report.log
 set +e
-uv run python scripts/send_quality_report.py \
-  --days 7 \
-  --only-alerts \
-  --output ".run/quality-report-${STAMP}.md" >> .run/quality_report.log 2>&1
+if [[ "${SEND_MODE}" = "1" ]]; then
+  uv run python scripts/send_quality_report.py \
+    --days 7 \
+    --only-alerts \
+    --output ".run/quality-report-${STAMP}.md" >> .run/quality_report.log 2>&1
+else
+  uv run python scripts/send_quality_report.py \
+    --days 7 \
+    --only-alerts \
+    --dry-run \
+    --output ".run/quality-report-${STAMP}.md" >> .run/quality_report.log 2>&1
+fi
 code=$?
 set -e
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) finished exit=${code}" >> .run/quality_report.log
