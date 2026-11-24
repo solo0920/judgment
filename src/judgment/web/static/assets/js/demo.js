@@ -170,7 +170,7 @@ export function renderDemoClosed(root) {
       <div class="eyebrow">DEMO MODE</div>
       <h1 class="page-title">展示目前未開放</h1>
       <p class="page-subtitle">
-        此網站僅在面試展示期間暫時開放。若你是管理者，請由右上角登入。
+        此功能僅在面試展示期間開放。首頁仍可瀏覽；若你是管理者，請由右上角 Login。
       </p>
       <div class="demo-state-actions">
         <a class="btn btn-secondary" href="https://github.com/solo0920/judgment" target="_blank" rel="noopener noreferrer">查看專案</a>
@@ -201,7 +201,7 @@ export function demoAdminGuardMarkup() {
       <div class="demo-state-mark">${icon("shield", 22)}</div>
       <div class="eyebrow">ADMIN ONLY</div>
       <h1 class="page-title">需要管理者權限</h1>
-      <p class="page-subtitle">請由右上角以管理者 Google 帳號登入。</p>
+      <p class="page-subtitle">請由右上角 Login 以管理者 Google 帳號登入。</p>
     </div>
   </section>`;
 }

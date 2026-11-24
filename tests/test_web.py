@@ -4307,7 +4307,8 @@ def test_remote_admin_api_requires_configured_token(web_client) -> None:
     remote_client = ("203.0.113.9", 50000)
     with TestClient(app, client=remote_client) as remote:
         assert remote.get("/api/health").status_code == 200
-        assert remote.get("/api/home").status_code == 403
+        # The public homepage stays readable while the demo is closed.
+        assert remote.get("/api/home").status_code == 200
 
         denied = remote.get("/api/question-bank/stats")
         assert denied.status_code in {401, 403}
@@ -4610,7 +4611,7 @@ def test_route_policy_enforces_public_and_admin_boundaries(web_client) -> None:
         # HEAD is normalized to the GET policy; FastAPI reports 405 for the
         # unsupported method instead of falling through to auth denial.
         assert client.head("/api/health").status_code == 405
-        assert client.get("/api/home").status_code == 403
+        assert client.get("/api/home").status_code == 200
         assert client.get("/api/auth/me").status_code == 200
         assert client.post("/api/auth/logout").status_code == 200
 
@@ -4712,11 +4713,20 @@ def test_every_registered_route_keeps_public_or_denied_boundary(web_client) -> N
                     response.status_code,
                 )
             elif policy in {"DEMO_READ", "DEMO_QUERY", "DEMO_ACTION"}:
-                assert response.status_code == 403, (
-                    method,
-                    path,
-                    response.status_code,
-                )
+                if path == "/api/home":
+                    # The sanitized homepage summary stays readable while
+                    # the demo is closed; RAG and other features do not.
+                    assert response.status_code == 200, (
+                        method,
+                        path,
+                        response.status_code,
+                    )
+                else:
+                    assert response.status_code == 403, (
+                        method,
+                        path,
+                        response.status_code,
+                    )
             else:
                 assert response.status_code == 401, (
                     method,

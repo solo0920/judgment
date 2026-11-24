@@ -169,7 +169,9 @@ def test_demo_defaults_closed_and_admin_can_open(demo_client) -> None:
         "status": False,
     }
 
-    assert client.get("/api/home").status_code == 403
+    home = client.get("/api/home")
+    assert home.status_code == 200
+    assert "/Users/" not in json.dumps(home.json(), ensure_ascii=False)
     assert client.get("/api/status").status_code == 403
     assert client.get("/api/catalog").status_code == 403
     assert client.get("/api/admin/demo").status_code == 401
@@ -207,7 +209,7 @@ def test_demo_defaults_closed_and_admin_can_open(demo_client) -> None:
     assert closed_payload["effective"]["enabled"] is False
     assert closed_payload["stored"]["features"] == ALL_FEATURES
     assert client.get("/api/demo/status").json()["enabled"] is False
-    assert client.get("/api/home").status_code == 403
+    assert client.get("/api/home").status_code == 200
 
 
 def test_demo_feature_flags_only_open_selected_features(demo_client) -> None:
@@ -1290,6 +1292,20 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     auth_js = client.get("/assets/js/auth.js")
     assert auth_js.status_code == 200
     assert 'setAdminToken("")' in auth_js.text
+    assert "<span>Login</span>" in auth_js.text
+    assert "Demo" in auth_js.text
+    assert '"Admin"' in auth_js.text
+    assert "auth-demo" in auth_js.text
+
+    app_js = client.get("/assets/js/app.js")
+    assert app_js.status_code == 200
+    assert 'route !== "home"' in app_js.text
+    assert "renderDemoClosed" in app_js.text
+
+    home_js = client.get("/assets/js/pages/home.js")
+    assert home_js.status_code == 200
+    assert "ragLocked" in home_js.text
+    assert "展示目前未開放，RAG 提問已鎖定" in home_js.text
 
     rag_js = client.get("/assets/js/pages/rag.js")
     assert rag_js.status_code == 200
@@ -1302,6 +1318,8 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert ".demo-switch input:checked + span" in css.text
     assert ".btn-success" in css.text
     assert "body.is-demo-visitor" in css.text
+    assert ".home-ask.is-locked" in css.text
+    assert ".auth-avatar-demo" in css.text
 
 
 def test_admin_demo_put_cors_preflight_is_allowed(demo_client) -> None:

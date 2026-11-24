@@ -544,6 +544,23 @@ body.settings-open .toast-region {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
+.auth-menu-login {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.auth-menu-login.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auth-avatar-demo {
+  background: color-mix(in srgb, var(--info) 16%, var(--surface-2));
+  color: var(--info);
+}
+
 .auth-menu-item:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -554,8 +571,8 @@ body.settings-open .toast-region {
     display: none;
   }
 
-  .auth-login span {
-    display: none;
+  .auth-demo .auth-user-copy {
+    display: flex;
   }
 
   .auth-login {
@@ -21548,4 +21565,44 @@ a.auth-menu-item {
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
+}
+
+
+.home-ask.is-locked .home-ask-box {
+  border-color: var(--line);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.home-ask.is-locked .home-ask-input {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.home-ask.is-locked .home-ask-submit {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.home-ask-lock-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.home-tile.is-locked {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.home-tile.is-locked .home-tile-cta {
+  color: var(--warning);
+}
+
+
+.home-page.is-rag-locked a[href="#/rag"] {
+  cursor: not-allowed;
+  opacity: 0.65;
 }

@@ -145,11 +145,14 @@ async function renderRoute() {
       return;
     }
     if (!demoActive()) {
-      document.title = SITE_TITLE;
-      renderDemoClosed(main);
-      return;
-    }
-    if (!demoFeature(route)) {
+      // The homepage stays readable while the demo is closed; only RAG and
+      // the other demo features are locked.
+      if (route !== "home") {
+        document.title = SITE_TITLE;
+        renderDemoClosed(main);
+        return;
+      }
+    } else if (!demoFeature(route)) {
       document.title = SITE_TITLE;
       renderDemoLocked(main, route);
       return;
