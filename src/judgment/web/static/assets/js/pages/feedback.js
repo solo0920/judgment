@@ -1209,7 +1209,23 @@ export function createFeedbackController(container, { onStats } = {}) {
         render();
         toast("已更新問題群組。", "ok", 4200);
       } catch (error) {
-        toast(error.message || "問題群組更新失敗。", "danger");
+        if (error.status === 409) {
+          try {
+            const latest = await api.ragFeedbackIssueDetail(issueId);
+            if (issueDetail?.issue) {
+              issueDetail.issue.version = latest?.issue?.version;
+            }
+            toast(
+              "問題群組已被其他人更新，已載入最新版本號；請確認目前內容後再儲存。",
+              "warn",
+              7600,
+            );
+          } catch (refreshError) {
+            toast(error.message || "問題群組更新失敗。", "danger");
+          }
+        } else {
+          toast(error.message || "問題群組更新失敗。", "danger");
+        }
       } finally {
         setBusy(button, false);
       }
@@ -1495,8 +1511,15 @@ export function createFeedbackController(container, { onStats } = {}) {
         toast(error.message || "批次操作失敗。", "danger");
         if (error.status === 409) {
           try {
-            issueDetail = await api.ragFeedbackIssueDetail(issueId);
-            render();
+            const latest = await api.ragFeedbackIssueDetail(issueId);
+            if (issueDetail?.issue) {
+              issueDetail.issue.version = latest?.issue?.version;
+            }
+            toast(
+              "問題群組已被其他人更新，已載入最新版本號；目前表單內容保留，請確認後再試。",
+              "warn",
+              7600,
+            );
           } catch (refreshError) {
             /* keep the original conflict message */
           }

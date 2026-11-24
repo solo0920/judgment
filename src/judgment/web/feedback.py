@@ -269,8 +269,24 @@ def _secret(settings: Settings) -> str:
     )
 
 
+_CLIENT_KEY_CONTEXT = b"judgment-client-key-v1"
+
+
 def _client_hash(client_ip: str, settings: Settings) -> str:
-    return hashed_client_ip_key(client_ip, _secret(settings))
+    """Pseudonymize a client IP with a purpose-separated subkey.
+
+    The feedback-token HMAC key and the conversation-grouping key must not be
+    the same key.  Rotating the feedback secret still invalidates conversation
+    grouping, which is intentional: old pseudonyms must not silently link to
+    new ones.  The UI/docs must treat a network change as a new conversation.
+    """
+
+    key = hmac.new(
+        _secret(settings).encode("utf-8"),
+        _CLIENT_KEY_CONTEXT,
+        hashlib.sha256,
+    ).hexdigest()
+    return hashed_client_ip_key(client_ip, key)
 
 
 def _b64encode(value: bytes) -> str:

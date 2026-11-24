@@ -10,7 +10,9 @@ from sqlalchemy.pool import StaticPool
 
 from judgment.config import Settings
 from judgment.models import Base, RagInteraction
+from judgment.web.client_ip import hashed_client_ip_key
 from judgment.web.feedback import (
+    _client_hash,
     get_feedback,
     record_interaction,
     submit_feedback,
@@ -79,6 +81,16 @@ def _feedback(factory, info, request_id: str, client_ip: str) -> int:
         is_demo=False,
     )
     return int(payload["id"])
+
+
+def test_client_hash_uses_a_purpose_separated_key() -> None:
+    settings = _settings()
+    direct = hashed_client_ip_key(
+        "203.0.113.9", settings.feedback_secret
+    )
+    derived = _client_hash("203.0.113.9", settings)
+    assert derived != direct
+    assert derived == _client_hash("203.0.113.9", settings)
 
 
 def test_conversation_timeline_is_bound_to_the_same_client(session_factory) -> None:
