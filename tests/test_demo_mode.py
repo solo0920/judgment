@@ -1296,6 +1296,7 @@ def test_demo_ui_assets_are_served(demo_client) -> None:
     assert "Demo" in auth_js.text
     assert '"Admin"' in auth_js.text
     assert "auth-demo" in auth_js.text
+    assert 'import { demoActive } from "./demo.js"' in auth_js.text
 
     app_js = client.get("/assets/js/app.js")
     assert app_js.status_code == 200
