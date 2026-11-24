@@ -56,6 +56,7 @@ if [[ "${SEND_MODE}" = "1" ]]; then
   uv run python scripts/send_quality_report.py \
     --days 7 \
     --only-alerts \
+    --send \
     --output ".run/quality-report-${STAMP}.md" >> .run/quality_report.log 2>&1
 else
   uv run python scripts/send_quality_report.py \
