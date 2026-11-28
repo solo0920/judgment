@@ -2290,7 +2290,7 @@ LIMIT ${l} OFFSET ${m}`,warnings:d,meta:{store:n,filters:a,client_side:!0}}}asyn
       </button>
     </div>
     <table class="rag-model-table">
-      <thead><tr><th>\u6A21\u578B</th><th>\u4F7F\u7528\u4E2D</th><th>Default x570</th><th>Fallback</th></tr></thead>
+      <thead><tr><th>\u6A21\u578B</th><th>\u4F7F\u7528\u4E2D</th><th>Default x570</th><th>Fallback mbp</th></tr></thead>
       <tbody>${i}</tbody>
     </table>
   </div>`}function On({tone:e,title:t,text:s,modelSummary:a=[],refreshing:n=!1,expanded:i=!1}){let o=e==="ok"?"is-ok":e==="warn"?"is-warn":"is-info",l=e==="ok"?"check":e==="warn"?"alert":"info",d=e==="ok"?"badge-ok":e==="warn"?"badge-warn":"badge-info";return`<section class="rag-mode-card ${o}${i?" is-expanded":""}">

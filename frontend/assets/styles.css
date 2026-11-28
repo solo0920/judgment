@@ -4329,14 +4329,12 @@ button.chip:hover {
 }
 
 .rag-model-table .rag-model-state {
-  width: 5px;
-  height: 5px;
+  width: 7px;
+  height: 7px;
   background: var(--faint);
 }
 
 .rag-model-table .rag-model-state.is-ok {
-  width: 7px;
-  height: 7px;
   background: #00e676;
 }
 
