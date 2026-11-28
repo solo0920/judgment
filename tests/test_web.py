@@ -1119,9 +1119,19 @@ def test_status_endpoint_reports_real_services(web_client) -> None:
     ]
 
 
-def test_status_model_summary_labels_host_and_model(tmp_path: Path) -> None:
+def test_status_model_summary_labels_host_and_model(
+    tmp_path: Path, monkeypatch
+) -> None:
     from judgment.web.status import _model_summary
 
+    monkeypatch.setattr(
+        "judgment.web.status.provider_models_detail",
+        lambda url, api: {"status": "operational", "models": ["gemma3:4b"]},
+    )
+    monkeypatch.setattr(
+        "judgment.web.status.provider_model_available",
+        lambda url, model, api: True,
+    )
     settings = Settings(
         database_url="sqlite+pysqlite:///:memory:",
         law_data_dir=tmp_path,
@@ -1180,8 +1190,10 @@ def test_status_model_summary_labels_host_and_model(tmp_path: Path) -> None:
     rows = {row["kind"]: row for row in summary}
     assert rows["chat"]["active"]["label"] == "x570:gemma3:4b"
     assert rows["chat"]["fallback"]["label"] == "mbp:gemma3:4b"
+    assert rows["chat"]["fallback"]["status"] == "operational"
     assert rows["embedding"]["active"]["label"] == "x570:bge-m3"
     assert rows["embedding"]["fallback"]["label"] == "mbp:bge-m3"
+    assert rows["embedding"]["fallback"]["status"] == "operational"
     assert rows["rerank"]["active"]["label"] == "x570:bge-reranker-v2-m3"
     assert rows["rerank"]["fallback"]["label"] == "mbp:bge-reranker-v2-m3"
 

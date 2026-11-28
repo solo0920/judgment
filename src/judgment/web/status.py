@@ -725,6 +725,36 @@ def _model_entry(
     }
 
 
+def _fallback_model_status(
+    *,
+    url: str,
+    model: str,
+    api: str,
+    active_role: str,
+    active_url: str,
+) -> str:
+    """Return the real availability of a configured fallback model.
+
+    The active model is already probed by the caller.  The fallback is not,
+    so probe it here; status responses are cached, and this keeps the UI from
+    showing an available fallback as permanently grey.
+    """
+
+    url = str(url or "").strip().rstrip("/")
+    if not url:
+        return "not_configured"
+    if str(active_role or "") == "fallback":
+        return "operational"
+    if url == str(active_url or "").strip().rstrip("/"):
+        return "standby"
+    detail = provider_models_detail(url, api)
+    if detail["status"] == "operational" and provider_model_available(
+        url, model, api
+    ):
+        return "operational"
+    return "degraded"
+
+
 def _model_summary(
     settings: Settings,
     *,
@@ -739,14 +769,17 @@ def _model_summary(
         status=str(llm.get("status") or "unknown"),
         role=chat_role,
     )
+    chat_fallback_status = _fallback_model_status(
+        url=settings.llm_fallback_url,
+        model=settings.llm_fallback_model or settings.llm_model,
+        api=settings.llm_fallback_api,
+        active_role=chat_role,
+        active_url=str(llm.get("active_url") or settings.llm_url),
+    )
     chat_fallback = _model_entry(
         settings.llm_fallback_url,
         settings.llm_fallback_model or settings.llm_model,
-        status=(
-            str(llm.get("status") or "unknown")
-            if chat_role == "fallback"
-            else "standby"
-        ),
+        status=chat_fallback_status,
         role="fallback",
     )
 
@@ -757,14 +790,19 @@ def _model_summary(
         status=str(embedding.get("status") or "unknown"),
         role=embedding_role,
     )
+    embedding_fallback_status = _fallback_model_status(
+        url=settings.embedding_fallback_url,
+        model=settings.embedding_model,
+        api=settings.embedding_fallback_api,
+        active_role=embedding_role,
+        active_url=str(
+            embedding.get("active_url") or settings.embedding_url
+        ),
+    )
     embedding_fallback = _model_entry(
         settings.embedding_fallback_url,
         settings.embedding_model,
-        status=(
-            str(embedding.get("status") or "unknown")
-            if embedding_role == "fallback"
-            else "standby"
-        ),
+        status=embedding_fallback_status,
         role="fallback",
     )
 
