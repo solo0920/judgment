@@ -471,7 +471,9 @@ else
   echo "啟動後端（http://${HOST}:${PORT}）…"
   start_backend_detached
 
-  for _ in {1..60}; do
+  # Cold start can spend time on Qdrant, reranker and model probes.  Allow
+  # three minutes before declaring the backend failed.
+  for _ in {1..360}; do
     health="$(curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/health" 2>/dev/null || true)"
     if [[ "${health}" == *'"status":"ok"'* ]]; then
       break
