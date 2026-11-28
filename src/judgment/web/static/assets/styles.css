@@ -4335,7 +4335,12 @@ button.chip:hover {
 }
 
 .rag-model-table .rag-model-state.is-ok {
-  background: var(--success);
+  width: 7px;
+  height: 7px;
+  background: #00e676;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, #00e676 22%, transparent),
+    0 0 7px color-mix(in srgb, #00e676 60%, transparent);
 }
 
 .rag-model-table .rag-model-state.is-idle {
