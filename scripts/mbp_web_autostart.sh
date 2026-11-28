@@ -25,9 +25,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# Wait up to 180 seconds for OrbStack/Docker Desktop after login.
+# OrbStack may not auto-start at login.  Ask it to start, then wait up to
+# 300 seconds for the Docker socket.
+open -a OrbStack >/dev/null 2>&1 || true
 docker_ready=0
-for _ in $(seq 1 90); do
+for _ in $(seq 1 150); do
   if docker info >/dev/null 2>&1; then
     docker_ready=1
     break
@@ -35,7 +37,7 @@ for _ in $(seq 1 90); do
   sleep 2
 done
 if [[ "${docker_ready}" != "1" ]]; then
-  log "ERROR: Docker daemon not ready after 180 seconds"
+  log "ERROR: Docker daemon not ready after 300 seconds"
   exit 1
 fi
 

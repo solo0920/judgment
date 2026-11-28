@@ -246,6 +246,8 @@ cat >"${PLIST}" <<EOF
   <true/>
   <key>KeepAlive</key>
   <false/>
+  <key>StartInterval</key>
+  <integer>300</integer>
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>ProcessType</key>
