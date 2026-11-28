@@ -25,9 +25,13 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# OrbStack may not auto-start at login.  Ask it to start, then wait up to
-# 300 seconds for the Docker socket.
-open -a OrbStack >/dev/null 2>&1 || true
+# OrbStack may not auto-start at login.  Only request it when Docker is not
+# ready, and never activate its window: this wrapper also runs as a periodic
+# watchdog, so `open -a` would steal focus every interval.
+if ! docker info >/dev/null 2>&1; then
+  log "Docker not ready; requesting OrbStack start in background"
+  open -gja OrbStack >/dev/null 2>&1 || true
+fi
 docker_ready=0
 for _ in $(seq 1 150); do
   if docker info >/dev/null 2>&1; then
