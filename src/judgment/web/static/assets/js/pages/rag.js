@@ -1053,11 +1053,7 @@ function renderModelCell(entry, { fallback = false } = {}) {
   const down = !["operational", "standby"].includes(status);
   const note =
     fallback && !down ? "備援" : modelStateLabel(status);
-  const dotClass = down
-    ? "is-down"
-    : fallback
-      ? "is-idle"
-      : modelStateClass(status);
+  const dotClass = down ? "is-down" : modelStateClass(status);
   const title = [label, entry.url, note].filter(Boolean).join(" · ");
   return `<span class="rag-model-cell" title="${escapeHtml(title)}">
     <span class="rag-model-state ${dotClass}" aria-hidden="true"></span>

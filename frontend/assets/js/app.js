@@ -2271,7 +2271,7 @@ LIMIT ${l} OFFSET ${m}`,warnings:d,meta:{store:n,filters:a,client_side:!0}}}asyn
     <div class="chips">${e.map(a=>{let n=s.get(String(a));return n?.law_key?Bn(a,{lawKey:n.law_key,sourceType:n.source_type||""}):`<span class="chip">${r(a)}</span>`}).join("")}</div>`}function Pp(e){let t=String(e||"");return t==="operational"?"is-ok":t==="standby"?"is-idle":"is-down"}function Ip(e){let t=String(e||"");return t==="operational"?"":t==="standby"?"\u5099\u63F4":t==="disabled"?"\u505C\u7528":t==="not_configured"?"\u672A\u8A2D\u5B9A":"\u96E2\u7DDA"}function Al(e,{fallback:t=!1}={}){if(!e)return`<span class="rag-model-cell is-empty">
       <span class="rag-model-state is-idle" aria-hidden="true"></span>
       <span class="rag-model-name">\u672A\u8A2D\u5B9A</span>
-    </span>`;let s=String(e.label||"").trim()||[e.host,e.model].filter(Boolean).join(":"),a=String(e.status||""),n=!["operational","standby"].includes(a),i=t&&!n?"\u5099\u63F4":Ip(a),o=n?"is-down":t?"is-idle":Pp(a),l=[s,e.url,i].filter(Boolean).join(" \xB7 ");return`<span class="rag-model-cell" title="${r(l)}">
+    </span>`;let s=String(e.label||"").trim()||[e.host,e.model].filter(Boolean).join(":"),a=String(e.status||""),n=!["operational","standby"].includes(a),i=t&&!n?"\u5099\u63F4":Ip(a),o=n?"is-down":Pp(a),l=[s,e.url,i].filter(Boolean).join(" \xB7 ");return`<span class="rag-model-cell" title="${r(l)}">
     <span class="rag-model-state ${o}" aria-hidden="true"></span>
     <span class="rag-model-name">${r(s)}</span>
     ${i?`<span class="rag-model-note">${r(i)}</span>`:""}
