@@ -879,6 +879,7 @@ def test_static_console_is_served(web_client) -> None:
     assert "不會自動晉升" in question_bank_js.text
     assert "data-qb-action=\"rotation-apply\"" in question_bank_js.text
     assert ".rag-feedback-scope-options" in css.text
+    assert "#00e676" in css.text
     assert ".rag-feedback-review-row" in css.text
     assert ".rag-feedback-review-detail" in css.text
     assert "border: 1px solid var(--bar-color, var(--stage-color))" in css.text
