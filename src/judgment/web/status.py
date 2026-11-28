@@ -763,6 +763,17 @@ def _model_summary(
     rerank: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     chat_role = str(llm.get("active_role") or "primary")
+    chat_default_status = (
+        str(llm.get("status") or "unknown")
+        if chat_role != "fallback"
+        else "degraded"
+    )
+    chat_default = _model_entry(
+        settings.llm_url,
+        settings.llm_model,
+        status=chat_default_status,
+        role="primary",
+    )
     chat_active = _model_entry(
         llm.get("active_url") or settings.llm_url,
         llm.get("active_model") or settings.llm_model,
@@ -784,6 +795,17 @@ def _model_summary(
     )
 
     embedding_role = str(embedding.get("active_role") or "primary")
+    embedding_default_status = (
+        str(embedding.get("status") or "unknown")
+        if embedding_role != "fallback"
+        else "degraded"
+    )
+    embedding_default = _model_entry(
+        settings.embedding_url,
+        settings.embedding_model,
+        status=embedding_default_status,
+        role="primary",
+    )
     embedding_active = _model_entry(
         embedding.get("active_url") or settings.embedding_url,
         embedding.get("active_model") or settings.embedding_model,
@@ -815,6 +837,16 @@ def _model_summary(
         (item for item in rerank_providers if item.get("role") == "fallback"),
         None,
     )
+    rerank_default = _model_entry(
+        settings.rerank_url,
+        settings.rerank_model,
+        status=str(
+            (rerank_primary or {}).get("status")
+            or rerank.get("status")
+            or "unknown"
+        ),
+        role="primary",
+    )
     rerank_active = rerank.get("active") or rerank_primary
     rerank_active_entry = (
         _model_entry(
@@ -845,18 +877,21 @@ def _model_summary(
         {
             "kind": "chat",
             "label": "Chat",
+            "default": chat_default,
             "active": chat_active,
             "fallback": chat_fallback,
         },
         {
             "kind": "embedding",
             "label": "Embedding",
+            "default": embedding_default,
             "active": embedding_active,
             "fallback": embedding_fallback,
         },
         {
             "kind": "rerank",
             "label": "Rerank",
+            "default": rerank_default,
             "active": rerank_active_entry,
             "fallback": rerank_fallback_entry,
         },

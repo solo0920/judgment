@@ -1189,14 +1189,64 @@ def test_status_model_summary_labels_host_and_model(
         },
     )
     rows = {row["kind"]: row for row in summary}
+    assert rows["chat"]["default"]["label"] == "x570:gemma3:4b"
     assert rows["chat"]["active"]["label"] == "x570:gemma3:4b"
     assert rows["chat"]["fallback"]["label"] == "mbp:gemma3:4b"
     assert rows["chat"]["fallback"]["status"] == "operational"
+    assert rows["embedding"]["default"]["label"] == "x570:bge-m3"
     assert rows["embedding"]["active"]["label"] == "x570:bge-m3"
     assert rows["embedding"]["fallback"]["label"] == "mbp:bge-m3"
     assert rows["embedding"]["fallback"]["status"] == "operational"
+    assert rows["rerank"]["default"]["label"] == "x570:bge-reranker-v2-m3"
     assert rows["rerank"]["active"]["label"] == "x570:bge-reranker-v2-m3"
     assert rows["rerank"]["fallback"]["label"] == "mbp:bge-reranker-v2-m3"
+
+
+def test_status_model_summary_marks_default_down_when_fallback_is_active(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from judgment.web.status import _model_summary
+
+    monkeypatch.setattr(
+        "judgment.web.status.provider_models_detail",
+        lambda url, api: {"status": "operational", "models": ["gemma3:4b"]},
+    )
+    monkeypatch.setattr(
+        "judgment.web.status.provider_model_available",
+        lambda url, model, api: True,
+    )
+    settings = Settings(
+        database_url="sqlite+pysqlite:///:memory:",
+        law_data_dir=tmp_path,
+        law_api_url="",
+        order_api_url="",
+        embedding_url="http://x570:11437",
+        embedding_fallback_url="http://127.0.0.1:11437",
+        llm_url="http://x570:11436",
+        llm_fallback_url="http://127.0.0.1:11436",
+        llm_model="gemma3:4b",
+        llm_fallback_model="gemma3:4b",
+    )
+    summary = _model_summary(
+        settings,
+        embedding={
+            "status": "operational",
+            "active_role": "primary",
+            "active_url": settings.embedding_url,
+            "active_model": "bge-m3",
+        },
+        llm={
+            "status": "operational",
+            "active_role": "fallback",
+            "active_url": settings.llm_fallback_url,
+            "active_model": "gemma3:4b",
+        },
+        rerank={},
+    )
+    chat = next(row for row in summary if row["kind"] == "chat")
+    assert chat["default"]["status"] == "degraded"
+    assert chat["active"]["status"] == "operational"
+    assert chat["fallback"]["status"] == "operational"
 
 
 def test_llm_final_result_reports_dropped_context_indexes(

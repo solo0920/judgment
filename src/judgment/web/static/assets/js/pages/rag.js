@@ -1076,6 +1076,7 @@ function renderModelTable(summary, refreshing) {
       return `<tr>
         <td class="rag-model-kind">${escapeHtml(row.label || fallback.label)}</td>
         <td>${renderModelCell(row.active)}</td>
+        <td>${renderModelCell(row.default)}</td>
         <td>${renderModelCell(row.fallback, { fallback: true })}</td>
       </tr>`;
     })
@@ -1090,7 +1091,7 @@ function renderModelTable(summary, refreshing) {
       </button>
     </div>
     <table class="rag-model-table">
-      <thead><tr><th>模型</th><th>使用中</th><th>Fallback</th></tr></thead>
+      <thead><tr><th>模型</th><th>使用中</th><th>Default x570</th><th>Fallback</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
   </div>`;
